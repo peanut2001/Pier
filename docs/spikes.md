@@ -6,7 +6,7 @@
 
 | Spike | 状态 | 结论 |
 |---|---|---|
-| 1. Host 打包为 sidecar | ✅ Linux 已验证；macOS / Windows 仅完成交叉编译 | 采用 **`bun build --compile` 单文件 + pi 资源目录** |
+| 1. Host 打包为 sidecar | ✅ Linux 端到端验证；五个平台的原生冒烟测试已随 v0.0.1 通过 | 采用 **`bun build --compile` 单文件 + pi 资源目录** |
 | 2. Tauri `externalBin` 启动 sidecar | ⏳ 未开始（随 M2 桌面骨架进行） | Host 侧接口已就绪（见下） |
 | 3. Expo 中 WebSocket + `@noble/*` 性能 | ⏳ 未开始（需 Expo 开发构建与 iOS / Android 真机） | 放到 M3 开工前完成 |
 
@@ -44,7 +44,8 @@ pi 在 Bun 二进制中通过 `dirname(process.execPath)` 查找这些资源；�
 
 - 桌面端 sidecar 采用 Bun 单文件二进制，pi 资源作为同目录文件（或 Tauri resources + `PI_PACKAGE_DIR`）一起分发。
 - 备选方案（内置 Node 运行时 + JS bundle，或 Node SEA）暂不需要；若 M2 在 macOS / Windows 真机上验证失败，再启用备选。
-- 待在 M2 / M6 验证：macOS / Windows 上实际运行编译产物；Bun 二进制在 macOS 上的签名与公证；带原生依赖的扩展。
+- v0.0.1 发版时，在 GitHub Actions 原生 runner（linux-x64、linux-arm64、darwin-arm64、darwin-x64、windows-x64）上用 `scripts/smoke-sidecar.mjs` 验证了编译产物：启动、`pier.ready`、协议握手、通过二进制内的 pi SDK 创建会话、stdin 关闭后优雅退出。
+- 待在 M2 / M6 验证：macOS / Windows 上配合真实 `~/.pi/agent` 与真实模型运行；Bun 二进制在 macOS 上的签名与公证；带原生依赖的扩展。
 
 ## Spike 2：Tauri 启动 sidecar（待做）
 
