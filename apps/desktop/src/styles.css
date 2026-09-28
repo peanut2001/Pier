@@ -728,6 +728,58 @@ code {
 	right: 0;
 }
 
+.dropdown-menu.up {
+	top: auto;
+	bottom: calc(100% + 6px);
+}
+
+.dropdown-menu.policies {
+	width: 320px;
+}
+
+.dropdown-note {
+	padding: 6px 8px 4px;
+	font-size: 11px;
+	color: var(--text-faint);
+	border-top: 1px solid var(--border);
+	margin-top: 4px;
+}
+
+.policy-chip {
+	white-space: nowrap;
+}
+
+.policy-chip.auto {
+	color: var(--warning);
+	border-color: var(--warning);
+}
+
+.policy-item {
+	align-items: center;
+}
+
+.policy-item-text {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	min-width: 0;
+}
+
+.policy-item-desc {
+	font-size: 11px;
+	color: var(--text-muted);
+}
+
+.policy-item.auto .policy-item-title,
+.policy-item.auto .policy-item-desc {
+	color: var(--warning);
+}
+
+.policy-check {
+	flex: none;
+	color: var(--accent);
+}
+
 .dropdown-menu.models {
 	width: 360px;
 	right: 0;
@@ -744,6 +796,10 @@ code {
 	color: var(--text-faint);
 	padding: 6px 8px 2px;
 	text-transform: uppercase;
+}
+
+.dropdown-group-title.no-caps {
+	text-transform: none;
 }
 
 .dropdown-item {
@@ -1446,6 +1502,7 @@ code {
 
 .composer-actions {
 	display: flex;
+	align-items: center;
 	gap: 6px;
 }
 

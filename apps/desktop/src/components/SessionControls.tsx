@@ -1,7 +1,8 @@
 import type { ChatState } from "@pier/chat-state";
-import type { ForkPoint, ModelInfo, ThinkingLevel } from "@pier/protocol";
+import type { ApprovalPolicy, ForkPoint, ModelInfo, ThinkingLevel, WorkspaceInfo } from "@pier/protocol";
 import { useEffect, useRef, useState } from "react";
 import type { ChatController } from "../lib/chat-controller.ts";
+import { POLICY_LABEL, POLICY_SUMMARY } from "../lib/format.ts";
 import { useStore } from "../lib/store.tsx";
 import { Modal } from "./Modal.tsx";
 
@@ -133,6 +134,54 @@ export function ModelPicker({ chat, controller }: { chat: ChatState; controller:
 							})}
 						</div>
 					))}
+				</div>
+			) : null}
+		</div>
+	);
+}
+
+const POLICIES: ApprovalPolicy[] = ["ask", "smart", "auto"];
+
+/** Approval-policy (permission mode) picker shown in the composer. Applies to the whole workspace. */
+export function PolicyPicker({ workspace }: { workspace: WorkspaceInfo }) {
+	const store = useStore();
+	const [open, setOpen] = useState(false);
+	const ref = useOutsideClick(open, () => setOpen(false));
+	const current = workspace.policy;
+	return (
+		<div className="dropdown" ref={ref}>
+			<button
+				type="button"
+				className={`chip policy-chip ${current}`}
+				onClick={() => setOpen(!open)}
+				title="权限模式（对整个工作区生效）"
+			>
+				{POLICY_LABEL[current]} ▴
+			</button>
+			{open ? (
+				<div className="dropdown-menu up right policies">
+					<div className="dropdown-group-title no-caps">如何审批 Agent 的工具调用？</div>
+					{POLICIES.map((policy) => {
+						const selected = policy === current;
+						return (
+							<button
+								type="button"
+								key={policy}
+								className={`dropdown-item policy-item ${policy}${selected ? " selected" : ""}`}
+								onClick={() => {
+									setOpen(false);
+									if (!selected) void store.setPolicy(workspace.id, policy);
+								}}
+							>
+								<span className="policy-item-text">
+									<span className="policy-item-title">{POLICY_LABEL[policy]}</span>
+									<span className="policy-item-desc">{POLICY_SUMMARY[policy]}</span>
+								</span>
+								{selected ? <span className="policy-check">✓</span> : null}
+							</button>
+						);
+					})}
+					<div className="dropdown-note">对工作区「{workspace.name}」的所有会话立即生效</div>
 				</div>
 			) : null}
 		</div>

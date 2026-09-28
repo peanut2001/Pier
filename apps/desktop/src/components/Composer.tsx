@@ -1,7 +1,9 @@
 import type { ChatState } from "@pier/chat-state";
+import type { WorkspaceInfo } from "@pier/protocol";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ChatController } from "../lib/chat-controller.ts";
 import { type Draft, useStore } from "../lib/store.tsx";
+import { PolicyPicker } from "./SessionControls.tsx";
 
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 
@@ -17,7 +19,15 @@ function readImage(file: File): Promise<Draft["images"][number]> {
 	});
 }
 
-export function Composer({ chat, controller }: { chat: ChatState; controller: ChatController }) {
+export function Composer({
+	chat,
+	controller,
+	workspace,
+}: {
+	chat: ChatState;
+	controller: ChatController;
+	workspace?: WorkspaceInfo;
+}) {
 	const store = useStore();
 	const sessionId = chat.sessionId;
 	const [draft, setDraft] = useState<Draft>(() => store.draft(sessionId));
@@ -148,6 +158,7 @@ export function Composer({ chat, controller }: { chat: ChatState; controller: Ch
 				}}
 			/>
 			<div className="composer-actions">
+				{workspace ? <PolicyPicker workspace={workspace} /> : null}
 				{running ? (
 					<>
 						<button type="button" className="danger" onClick={() => void controller.abort()} title="Esc">

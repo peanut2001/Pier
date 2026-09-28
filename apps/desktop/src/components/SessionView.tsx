@@ -2,7 +2,7 @@ import { type ChatState, contentText, sessionUsage } from "@pier/chat-state";
 import type { SessionSummary } from "@pier/protocol";
 import { useState } from "react";
 import type { ChatController } from "../lib/chat-controller.ts";
-import { formatCost, formatTokens, POLICY_LABEL, RUN_STATE_LABEL, sessionTitle } from "../lib/format.ts";
+import { formatCost, formatTokens, RUN_STATE_LABEL, sessionTitle } from "../lib/format.ts";
 import { useAppState, useChatView, useStore } from "../lib/store.tsx";
 import { Composer } from "./Composer.tsx";
 import { PendingRequests } from "./PendingRequests.tsx";
@@ -192,7 +192,7 @@ export function SessionView({ session }: { session: SessionSummary }) {
 					<Title chat={chat} fallback={session} />
 					{workspace ? (
 						<span className="muted" title={workspace.path}>
-							{workspace.name} · 审批：{POLICY_LABEL[workspace.policy]}
+							{workspace.name}
 						</span>
 					) : null}
 				</div>
@@ -209,7 +209,7 @@ export function SessionView({ session }: { session: SessionSummary }) {
 				<PendingRequests requests={chat.pendingUi} respond={(id, r) => void controller.respond(id, r)} />
 				<Widgets chat={chat} placement="aboveEditor" />
 				<Queue chat={chat} />
-				<Composer key={chat.sessionId} chat={chat} controller={controller} />
+				<Composer key={chat.sessionId} chat={chat} controller={controller} workspace={workspace} />
 				<Widgets chat={chat} placement="belowEditor" />
 				<StatusBar chat={chat} />
 			</div>

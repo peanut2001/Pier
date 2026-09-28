@@ -51,6 +51,13 @@ export const POLICY_LABEL: Record<ApprovalPolicy, string> = {
 	auto: "自动放行",
 };
 
+/** One-line summaries for the compact permission-mode menu. */
+export const POLICY_SUMMARY: Record<ApprovalPolicy, string> = {
+	ask: "bash、写文件、编辑每次都先询问",
+	smart: "只读与工作区内修改直接放行，其余询问",
+	auto: "所有工具调用直接执行，不再询问",
+};
+
 export const POLICY_DESCRIPTION: Record<ApprovalPolicy, string> = {
 	ask: "bash、write、edit 每次都需要你批准。",
 	smart: "只读命令与工作区内的文件修改直接放行；其他命令、工作区外写入与危险操作需要批准。",
