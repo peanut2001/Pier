@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useAppState, useStore } from "../lib/store.tsx";
-import { IconAlert, IconInfo, IconLoader } from "./Icons.tsx";
+import { IconAlert, IconDownload, IconInfo, IconLoader } from "./Icons.tsx";
 import { CopyButton } from "./Markdown.tsx";
 import { Modal } from "./Modal.tsx";
 
@@ -60,6 +60,7 @@ export function LogsPanel({ onClose }: { onClose: () => void }) {
 	const store = useStore();
 	const host = useAppState((s) => s.host);
 	const hostInfo = useAppState((s) => s.hostInfo);
+	const update = useAppState((s) => s.update);
 	const [lines, setLines] = useState<string[]>([]);
 	const scroller = useRef<HTMLPreElement>(null);
 
@@ -103,11 +104,26 @@ export function LogsPanel({ onClose }: { onClose: () => void }) {
 			</pre>
 			<div className="modal-actions spread">
 				<CopyButton text={lines.join("\n")} label="复制日志" />
-				{store.bridgeKind === "tauri" ? (
-					<button type="button" onClick={() => store.restartHost()}>
-						重启 Host
-					</button>
-				) : null}
+				<span className="modal-actions-group">
+					{store.bridgeKind === "tauri" || update.state !== "unsupported" ? (
+						<button
+							type="button"
+							title={`Pier v${update.currentVersion}`}
+							onClick={() => {
+								onClose();
+								store.showUpdate(true);
+							}}
+						>
+							<IconDownload size={14} />
+							检查更新
+						</button>
+					) : null}
+					{store.bridgeKind === "tauri" ? (
+						<button type="button" onClick={() => store.restartHost()}>
+							重启 Host
+						</button>
+					) : null}
+				</span>
 			</div>
 		</Modal>
 	);

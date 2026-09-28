@@ -276,13 +276,13 @@
 	flex: 1;
 	min-width: 0;
 	justify-content: flex-start;
-	gap: 9px;
+	gap: 8px;
 	border-color: transparent;
 	background: transparent;
 	color: var(--text-muted);
 	font-size: 12px;
 	font-weight: 400;
-	padding: 7px 10px;
+	padding: 7px 8px;
 }
 
 .host-status:hover:not(:disabled) {
@@ -298,11 +298,11 @@
 	text-align: left;
 }
 
+/* Shown on hover only, leaving room for the status text next to the footer buttons. */
 .host-status-icon {
-	opacity: 0;
-	transition: opacity 0.15s;
+	display: none;
 }
 
 .host-status:hover .host-status-icon {
-	opacity: 1;
+	display: block;
 }

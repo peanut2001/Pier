@@ -1,0 +1,139 @@
+/* Software update dialog and its sidebar entry. */
+
+.update-headline {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	margin-bottom: 14px;
+}
+
+.update-badge {
+	display: inline-flex;
+	flex: none;
+	align-items: center;
+	justify-content: center;
+	width: 38px;
+	height: 38px;
+	border-radius: 11px;
+	background: var(--brand-gradient);
+	color: #fff;
+	box-shadow: 0 4px 16px var(--brand-glow);
+}
+
+.update-title {
+	font-size: 16px;
+	font-weight: 600;
+	letter-spacing: -0.01em;
+}
+
+.update-notes {
+	max-height: 280px;
+	overflow-y: auto;
+	margin-bottom: 14px;
+	padding: 4px 14px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	background: var(--bg-elevated);
+	font-size: 13px;
+}
+
+.update-notes h1,
+.update-notes h2,
+.update-notes h3 {
+	font-size: 13px;
+	margin: 12px 0 4px;
+}
+
+.update-state {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 6px 0 14px;
+}
+
+.update-state.ok {
+	color: var(--success);
+}
+
+.update-state.ok span {
+	color: var(--text);
+}
+
+.update-progress {
+	margin: 4px 0 12px;
+}
+
+.update-progress-track {
+	height: 6px;
+	margin-bottom: 8px;
+	overflow: hidden;
+	border-radius: 999px;
+	background: var(--bg-active);
+}
+
+.update-progress-bar {
+	height: 100%;
+	border-radius: inherit;
+	background: var(--brand-gradient);
+	transition: width 0.2s var(--ease);
+}
+
+.update-progress-bar.indeterminate {
+	width: 35%;
+	animation: update-indeterminate 1.2s ease-in-out infinite;
+}
+
+@keyframes update-indeterminate {
+	from {
+		transform: translateX(-100%);
+	}
+	to {
+		transform: translateX(290%);
+	}
+}
+
+.update-warning {
+	color: var(--warning);
+}
+
+.update-auto {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin: 14px 0 4px;
+	font-size: 13px;
+	cursor: pointer;
+}
+
+.update-actions,
+.modal-actions-group {
+	display: flex;
+	gap: 8px;
+}
+
+.sidebar-footer .update-button {
+	position: relative;
+}
+
+.sidebar-footer .update-button.on {
+	color: var(--accent-text);
+}
+
+.update-dot {
+	position: absolute;
+	top: 4px;
+	right: 4px;
+	width: 7px;
+	height: 7px;
+	border-radius: 999px;
+	background: var(--accent);
+	box-shadow: 0 0 0 2px var(--bg-app);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.update-progress-bar.indeterminate {
+		animation: none;
+		width: 100%;
+		opacity: 0.5;
+	}
+}

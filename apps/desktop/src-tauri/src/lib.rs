@@ -1,8 +1,10 @@
 mod host;
 mod tray;
+mod updater;
 
 use host::HostManager;
 use tauri::{AppHandle, Manager, RunEvent, WindowEvent};
+use updater::UpdateManager;
 
 pub(crate) fn show_main_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
@@ -27,17 +29,26 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             host::host_status,
             host::host_logs,
             host::host_restart,
+            updater::update_status,
+            updater::update_check,
+            updater::update_install,
+            updater::update_set_auto_check,
             quit_app
         ])
         .setup(|app| {
             let manager = HostManager::new(app.handle().clone());
             app.manage(manager.clone());
-            tray::create(app.handle())?;
+            let updates = UpdateManager::new(app.handle().clone());
+            app.manage(updates.clone());
+            let update_item = tray::create(app.handle())?;
+            updates.set_tray_item(update_item);
             manager.start();
+            updates.start_scheduler();
             Ok(())
         })
         .on_window_event(|window, event| {

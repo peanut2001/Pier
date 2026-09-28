@@ -21,7 +21,7 @@ import type {
 	WorkspaceInfo,
 } from "@pier/protocol";
 import { createContext, useContext, useSyncExternalStore } from "react";
-import type { Bridge, HostStatus } from "./bridge.ts";
+import type { Bridge, HostStatus, UpdateStatus } from "./bridge.ts";
 
 export const APP_VERSION = "0.2.0";
 
@@ -77,6 +77,9 @@ export interface AppState {
 	/** The model settings panel is open. */
 	showModels: boolean;
 	auth?: AuthFlowState;
+	update: UpdateStatus;
+	/** The update dialog is open (sidebar button or tray menu). */
+	updateOpen: boolean;
 }
 
 const PAIRING_RESULT_TEXT: Record<PairingResolution, string> = {
@@ -110,6 +113,8 @@ export class PierStore {
 	private authBacklog: EventFrame[] = [];
 	private openedAuthUrls = new Set<string>();
 	private authSeq = 0;
+	/** The update version already announced with a toast. */
+	private announcedUpdate: string | undefined;
 
 	constructor(private readonly bridge: Bridge) {
 		const saved = (() => {
@@ -137,6 +142,8 @@ export class PierStore {
 			devices: [],
 			pairingRequests: [],
 			showModels: false,
+			update: { state: "idle", currentVersion: APP_VERSION, autoCheck: true, downloaded: 0 },
+			updateOpen: false,
 		};
 	}
 
@@ -172,8 +179,13 @@ export class PierStore {
 	start(): () => void {
 		const off = this.bridge.onStatus((status) => this.onHostStatus(status));
 		void this.bridge.status().then((status) => this.onHostStatus(status));
+		const offUpdate = this.bridge.updates.onStatus((status) => this.onUpdateStatus(status));
+		const offOpen = this.bridge.updates.onOpen(() => this.showUpdate(true));
+		void this.bridge.updates.status().then((status) => this.onUpdateStatus(status));
 		return () => {
 			off();
+			offUpdate();
+			offOpen();
 			this.teardownClient();
 		};
 	}
@@ -751,6 +763,72 @@ export class PierStore {
 	saveDraft(sessionId: string, draft: Draft): void {
 		if (!draft.text && !draft.images.length) this.drafts.delete(sessionId);
 		else this.drafts.set(sessionId, draft);
+	}
+
+	// ---- updates -----------------------------------------------------------------------
+
+	private onUpdateStatus(status: UpdateStatus): void {
+		const announce =
+			status.state === "available" &&
+			status.version &&
+			status.version !== this.announcedUpdate &&
+			!this.state.updateOpen;
+		this.set({ update: status });
+		if (announce && status.version) {
+			this.announcedUpdate = status.version;
+			this.toast("info", `Pier v${status.version} 已发布，点击左下角的“更新”查看并安装`);
+		}
+	}
+
+	showUpdate(open: boolean): void {
+		if (open && this.state.update.version) this.announcedUpdate = this.state.update.version;
+		this.set({ updateOpen: open });
+	}
+
+	async checkForUpdates(): Promise<UpdateStatus> {
+		try {
+			const status = await this.bridge.updates.check();
+			this.set({ update: status });
+			return status;
+		} catch (error) {
+			this.toast("error", `检查更新失败：${errorText(error)}`);
+			return this.state.update;
+		}
+	}
+
+	/** Download, install, and relaunch. The updater reports failures through its status. */
+	async installUpdate(): Promise<void> {
+		try {
+			await this.bridge.updates.install();
+		} catch (error) {
+			if (this.state.update.state !== "error") this.toast("error", errorText(error));
+		}
+	}
+
+	async setUpdateAutoCheck(enabled: boolean): Promise<void> {
+		try {
+			this.set({ update: await this.bridge.updates.setAutoCheck(enabled) });
+		} catch (error) {
+			this.toast("error", `保存更新设置失败：${errorText(error)}`);
+		}
+	}
+
+	/** Sessions that are working or waiting for an answer; installing an update stops them. */
+	async busySessionCount(): Promise<number> {
+		const client = this.client;
+		if (!client) return 0;
+		const lists = await Promise.all(
+			this.state.workspaces.map((w) =>
+				client.request("session.list", { workspaceId: w.id }).then(
+					(r) => r.sessions,
+					() => this.state.sessions[w.id] ?? [],
+				),
+			),
+		);
+		return lists
+			.flat()
+			.filter((s) => s.state === "streaming" || s.state === "retrying" || s.state === "compacting" || s.pendingUi)
+			.length;
 	}
 
 	// ---- misc --------------------------------------------------------------------------

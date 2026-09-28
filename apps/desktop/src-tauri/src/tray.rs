@@ -2,18 +2,21 @@
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, Wry};
 
 use crate::host::HostManager;
+use crate::updater::UpdateManager;
 
 pub const TRAY_ID: &str = "main";
 
-pub fn create(app: &AppHandle) -> tauri::Result<()> {
+/// Builds the tray icon and returns the update menu item, whose label follows the update state.
+pub fn create(app: &AppHandle) -> tauri::Result<MenuItem<Wry>> {
     let show = MenuItem::with_id(app, "show", "显示 Pier", true, None::<&str>)?;
     let restart = MenuItem::with_id(app, "restart-host", "重启 Pier Host", true, None::<&str>)?;
+    let update = MenuItem::with_id(app, "update", "检查更新…", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
     let quit = MenuItem::with_id(app, "quit", "退出 Pier", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&show, &restart, &separator, &quit])?;
+    let menu = Menu::with_items(app, &[&show, &restart, &update, &separator, &quit])?;
 
     let mut builder = TrayIconBuilder::with_id(TRAY_ID)
         .tooltip("Pier")
@@ -25,6 +28,7 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
                 let manager = app.state::<HostManager>().inner().clone();
                 std::thread::spawn(move || manager.restart());
             }
+            "update" => app.state::<UpdateManager>().open(),
             "quit" => app.exit(0),
             _ => {}
         })
@@ -42,5 +46,5 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
         builder = builder.icon(icon.clone());
     }
     builder.build(app)?;
-    Ok(())
+    Ok(update)
 }

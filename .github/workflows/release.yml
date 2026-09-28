@@ -128,8 +128,9 @@ jobs:
         include:
           # 22.04 keeps the glibc / WebKitGTK baseline low for the Linux packages.
           - { platform: linux-x64, runner: ubuntu-22.04, bundles: "deb,appimage" }
-          - { platform: darwin-arm64, runner: macos-latest, bundles: dmg }
-          - { platform: darwin-x64, runner: macos-15-intel, bundles: dmg }
+          # `app` produces the signed updater archive (.app.tar.gz) next to the dmg.
+          - { platform: darwin-arm64, runner: macos-latest, bundles: "app,dmg" }
+          - { platform: darwin-x64, runner: macos-15-intel, bundles: "app,dmg" }
           - { platform: windows-x64, runner: windows-latest, bundles: nsis }
     env:
       NAME: pier-desktop-${{ github.ref_name }}-${{ matrix.platform }}
@@ -163,22 +164,41 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       # beforeBuildCommand builds the sidecar for this runner and the web UI.
+      # The updater key signs the update bundles (createUpdaterArtifacts in tauri.conf.json);
+      # its public half is plugins.updater.pubkey.
       - name: Build bundles
         working-directory: apps/desktop
-        run: pnpm tauri build --bundles ${{ matrix.bundles }}
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "::error::The TAURI_SIGNING_PRIVATE_KEY secret is required to sign update bundles"
+            exit 1
+          fi
+          pnpm tauri build --bundles ${{ matrix.bundles }}
 
       - name: Collect bundles
         run: |
           mkdir -p dist
           bundle=apps/desktop/src-tauri/target/release/bundle
           shopt -s nullglob
-          for file in "$bundle"/deb/*.deb "$bundle"/appimage/*.AppImage "$bundle"/dmg/*.dmg "$bundle"/nsis/*-setup.exe; do
-            ext="${file##*.}"
-            [ "$ext" = "exe" ] && ext="setup.exe"
-            cp "$file" "dist/${NAME}.${ext}"
-          done
+          # Installers, plus the updater bundles and their signatures (<bundle>.sig).
+          # collect <bundle suffix> <asset suffix> <files…>: keeps a trailing ".sig".
+          collect() {
+            local from=$1 to=$2 file
+            shift 2
+            for file in "$@"; do cp "$file" "dist/${NAME}.${to}${file##*"$from"}"; done
+          }
+          collect .deb deb "$bundle"/deb/*.deb "$bundle"/deb/*.deb.sig
+          collect .AppImage AppImage "$bundle"/appimage/*.AppImage "$bundle"/appimage/*.AppImage.sig
+          collect .dmg dmg "$bundle"/dmg/*.dmg
+          collect .app.tar.gz app.tar.gz "$bundle"/macos/*.app.tar.gz "$bundle"/macos/*.app.tar.gz.sig
+          collect -setup.exe setup.exe "$bundle"/nsis/*-setup.exe "$bundle"/nsis/*-setup.exe.sig
           ls -la dist
           [ -n "$(ls dist)" ] || { echo "::error::No bundles produced"; exit 1; }
+          # Every platform must ship a signed update bundle.
+          ls dist/*.sig >/dev/null 2>&1 || { echo "::error::No updater signatures produced"; exit 1; }
 
       - uses: actions/upload-artifact@v5
         with:
@@ -186,9 +206,55 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
+  # latest.json for the in-app updater (also built on dry runs to validate the signatures).
+  updater-manifest:
+    name: updater manifest
+    needs: [verify, desktop]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - uses: actions/download-artifact@v5
+        with:
+          path: desktop
+          pattern: pier-desktop-*
+          merge-multiple: true
+
+      - name: Build latest.json
+        run: |
+          version="${{ needs.verify.outputs.version }}"
+          awk -v heading="## v${version}" '
+            index($0, heading) == 1 { found = 1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md > notes.md
+          if [ ! -s notes.md ]; then
+            if [ "${GITHUB_EVENT_NAME}" = "push" ]; then
+              echo "::error::No CHANGELOG.md section for v${version}"
+              exit 1
+            fi
+            echo "Dry run of ${GITHUB_REF_NAME}" > notes.md
+          fi
+          mkdir -p manifest
+          node apps/desktop/scripts/updater-manifest.mjs \
+            --assets desktop --version "${version}" --tag "${GITHUB_REF_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" --notes notes.md --out manifest/latest.json
+          cat manifest/latest.json
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: updater-manifest
+          path: manifest/latest.json
+          if-no-files-found: error
+
   publish:
     name: publish GitHub release
-    needs: [verify, sidecar, desktop]
+    needs: [verify, sidecar, desktop, updater-manifest]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:

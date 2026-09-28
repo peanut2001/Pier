@@ -31,6 +31,44 @@ export interface Bridge {
 	pickDirectory(): Promise<string | null>;
 	openExternal(url: string): Promise<void>;
 	quit(): Promise<void>;
+	updates: UpdateBridge;
+}
+
+export type UpdateState =
+	| "unsupported"
+	| "idle"
+	| "checking"
+	| "upToDate"
+	| "available"
+	| "downloading"
+	| "installing"
+	| "error";
+
+/** Mirrors `UpdateStatus` in `src-tauri/src/updater.rs`. */
+export interface UpdateStatus {
+	state: UpdateState;
+	currentVersion: string;
+	autoCheck: boolean;
+	/** The available (or still pending, after a failed install) update. */
+	version?: string | null;
+	notes?: string | null;
+	date?: string | null;
+	downloaded: number;
+	total?: number | null;
+	error?: string | null;
+	/** Unix time (ms) of the last successful check. */
+	lastChecked?: number | null;
+}
+
+export interface UpdateBridge {
+	status(): Promise<UpdateStatus>;
+	onStatus(listener: (status: UpdateStatus) => void): () => void;
+	/** The tray menu asks for the update dialog. */
+	onOpen(listener: () => void): () => void;
+	check(): Promise<UpdateStatus>;
+	/** Download, install, and relaunch. Rejects with the reason when it fails. */
+	install(): Promise<void>;
+	setAutoCheck(enabled: boolean): Promise<UpdateStatus>;
 }
 
 export const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -69,6 +107,14 @@ function tauriBridge(): Bridge {
 			await openUrl(url);
 		},
 		quit: async () => (await core).invoke("quit_app"),
+		updates: {
+			status: async () => (await core).invoke<UpdateStatus>("update_status"),
+			onStatus: (listener) => listen<UpdateStatus>("pier://update-status", listener),
+			onOpen: (listener) => listen<null>("pier://update-open", () => listener()),
+			check: async () => (await core).invoke<UpdateStatus>("update_check"),
+			install: async () => (await core).invoke("update_install"),
+			setAutoCheck: async (enabled) => (await core).invoke<UpdateStatus>("update_set_auto_check", { enabled }),
+		},
 	};
 }
 
@@ -96,6 +142,71 @@ function browserBridge(): Bridge {
 			window.open(target, "_blank", "noopener,noreferrer");
 		},
 		quit: async () => window.close(),
+		updates: params.get("updates") === "demo" ? demoUpdates() : unsupportedUpdates,
+	};
+}
+
+const unsupported: UpdateStatus = {
+	state: "unsupported",
+	currentVersion: "dev",
+	autoCheck: false,
+	downloaded: 0,
+};
+
+const unsupportedUpdates: UpdateBridge = {
+	status: async () => unsupported,
+	onStatus: () => () => {},
+	onOpen: () => () => {},
+	check: async () => unsupported,
+	install: async () => {
+		throw new Error("浏览器模式不支持自动更新");
+	},
+	setAutoCheck: async () => unsupported,
+};
+
+/** `?updates=demo`: a fake update feed for working on the update UI in a browser. */
+function demoUpdates(): UpdateBridge {
+	const listeners = new Set<(status: UpdateStatus) => void>();
+	let status: UpdateStatus = { state: "idle", currentVersion: "0.1.0", autoCheck: true, downloaded: 0 };
+	const set = (patch: Partial<UpdateStatus>) => {
+		status = { ...status, ...patch };
+		for (const listener of listeners) listener(status);
+		return status;
+	};
+	const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+	return {
+		status: async () => status,
+		onStatus: (listener) => {
+			listeners.add(listener);
+			return () => listeners.delete(listener);
+		},
+		onOpen: () => () => {},
+		check: async () => {
+			set({ state: "checking" });
+			await sleep(800);
+			return set({
+				state: "available",
+				version: "9.9.9",
+				date: new Date().toISOString(),
+				notes:
+					"### Added\n\n- **Auto update** for the desktop app.\n- Faster session loading.\n\n### Fixed\n\n- Reconnects after sleep.",
+				error: null,
+				lastChecked: Date.now(),
+			});
+		},
+		install: async () => {
+			const total = 48 * 1024 * 1024;
+			for (let downloaded = 0; downloaded <= total; downloaded += total / 20) {
+				set({ state: "downloading", downloaded, total });
+				await sleep(120);
+			}
+			set({ state: "installing" });
+			await sleep(1000);
+			const error = "安装更新失败：浏览器演示模式不会真正安装";
+			set({ state: "error", error });
+			throw new Error(error);
+		},
+		setAutoCheck: async (enabled) => set({ autoCheck: enabled }),
 	};
 }
 

@@ -12,6 +12,16 @@ All notable changes to Pier are documented here. Versions follow [Semantic Versi
   - choose the default model for new sessions, and remove stored credentials.
   Credentials go to pi's `auth.json` and custom endpoints to `models.json` (only the edited entry changes; a file with comments is backed up first), so the terminal `pi` sees the same configuration.
 - **Protocol 1.2** (backwards compatible): local-only `provider.list` / `login` / `loginRespond` / `loginCancel` / `logout` / `saveCustom` / `removeCustom` / `probeModels` and `model.setDefault`, the `provider.changed` host event, and `auth.*` sign-in events sent only to the connection that started the sign-in.
+- **Desktop auto-update** (Tauri updater): Pier checks the latest GitHub release shortly after launch and every 6 hours (can be turned off), shows a badge and a toast when a new version is out, and installs it from a "软件更新" dialog (the sidebar badge, the tray menu, or "检查更新" in the Pier Host panel) with release notes and download progress.
+  - Updates are signed with Pier's updater key and verified before installing; a tampered or unsigned bundle is rejected.
+  - Installing stops the Pier Host first (the dialog warns about sessions that are still running or waiting for approval), then relaunches Pier; if installing fails, the host starts again.
+  - Supported for the AppImage and deb on Linux, the app bundle on macOS, and the NSIS installer on Windows. Development builds show that they cannot update.
+  - Releases now also publish the updater bundles (`.app.tar.gz` on macOS), their `.sig` signatures, and `latest.json`.
+
+### Known limitations
+
+- Pier v0.2.0 and earlier have no updater, so install the first release with auto-update manually once; later releases arrive through auto-update.
+- Auto-update has been verified end to end with the Linux AppImage; the macOS and Windows paths are not yet verified on real machines.
 
 ## v0.2.0 — 2026-09-29
 

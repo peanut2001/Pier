@@ -393,6 +393,31 @@ impl HostManager {
 
     /// Stop the host for good (app exit). Blocks up to the shutdown grace period.
     pub fn shutdown(&self) {
+        self.stop(None);
+    }
+
+    /// Stop the host while an update is installed, reporting `reason` to the UI.
+    /// The host stays down until [`Self::resume`] (install failed) or the app restarts.
+    pub fn suspend(&self, reason: &str) {
+        self.push_log(format!("[pier] {reason}"));
+        self.stop(Some(reason.to_string()));
+    }
+
+    /// Start the host again after [`Self::suspend`].
+    pub fn resume(&self) {
+        {
+            let mut inner = self.lock();
+            if !inner.shutting_down {
+                return;
+            }
+            inner.shutting_down = false;
+            inner.fast_failures = 0;
+            inner.status.error = None;
+        }
+        self.start();
+    }
+
+    fn stop(&self, reason: Option<String>) {
         let (child, stdin) = {
             let mut inner = self.lock();
             if inner.shutting_down {
@@ -400,9 +425,19 @@ impl HostManager {
             }
             inner.shutting_down = true;
             inner.status.state = HostState::Stopped;
+            inner.status.url = None;
+            inner.status.token = None;
+            inner.status.pid = None;
             inner.status.generation += 1;
+            if reason.is_some() {
+                inner.status.error = reason.clone();
+            }
             (inner.child.take(), inner.stdin.take())
         };
+        // On app exit the UI is going away; only report a suspension.
+        if reason.is_some() {
+            self.emit_status();
+        }
         stop_child(child, stdin);
     }
 }

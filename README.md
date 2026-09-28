@@ -59,6 +59,8 @@ pnpm --filter @pier/desktop build             # 打包安装包（deb / AppImage
 
 桌面端启动时会拉起内置的 Pier Host（`--watch-stdin`），关闭窗口只会隐藏到托盘，Agent 继续运行；从托盘或界面左下角“退出”才会停止 Host。可用 `PIER_DIR` 隔离 Pier 状态目录，用 `PIER_HOST_BIN` 指定其他 Host 可执行文件。
 
+**自动更新**：打包后的桌面端（Linux AppImage / deb、macOS、Windows NSIS）启动约 20 秒后以及之后每 6 小时检查一次 GitHub 上最新正式版的 `latest.json`（可在“软件更新”中关闭）。发现新版本时会弹出提示，左下角出现带提示点的更新按钮；在“软件更新”对话框（点击该按钮、托盘菜单“检查更新…”，或 Pier Host 日志面板中的“检查更新”）中查看发布说明并“更新并重启”：下载更新包、用内置公钥校验签名、停止 Pier Host、安装，然后自动重启。开发构建（`tauri dev`）不支持自动更新。`PIER_UPDATER_ENDPOINT=<https 地址>` 可让打包版本改读其他清单（签名仍按内置公钥校验）；浏览器界面调试时在地址后加 `&updates=demo` 可使用模拟的更新流程。自动检查的开关保存在应用配置目录的 `updater.json` 中。
+
 只调界面时可以不启动 Tauri：用假模型（faux）起一个 Host，再在浏览器里打开 Vite 开发服务器：
 
 ```bash
@@ -108,6 +110,8 @@ Pier 自身状态保存在 `~/.pier`（可用 `PIER_DIR` 覆盖）：`config.jso
 
 1. 更新所有版本号，并在 `CHANGELOG.md` 中新增 `## v<版本>` 小节；合并到 `main`。
 2. 在 `main` 的该提交上打 tag 并推送：`git tag -a v<版本> -m "Pier v<版本>" && git push origin v<版本>`。
-3. `.github/workflows/release.yml` 会校验 tag、版本号以及该提交是否在 `main` 上，然后运行完整检查；接着在各平台原生 runner 上构建并冒烟测试 sidecar（`packages/host/scripts/smoke-sidecar.mjs`），同时在各平台 runner 上用 `tauri build` 打包桌面端安装包（deb / AppImage / dmg / NSIS，未签名），最后创建 GitHub Release，附带 sidecar 压缩包、桌面端安装包和 `SHA256SUMS.txt`，发布说明取自 CHANGELOG。版本号带 `-` 后缀（如 `0.1.0-rc.1`）时标记为 prerelease。
+3. `.github/workflows/release.yml` 会校验 tag、版本号以及该提交是否在 `main` 上，然后运行完整检查；接着在各平台原生 runner 上构建并冒烟测试 sidecar（`packages/host/scripts/smoke-sidecar.mjs`），同时在各平台 runner 上用 `tauri build` 打包桌面端安装包（deb / AppImage / dmg / NSIS，未签名），最后创建 GitHub Release，附带 sidecar 压缩包、桌面端安装包、更新包及其签名、`latest.json` 和 `SHA256SUMS.txt`，发布说明取自 CHANGELOG。版本号带 `-` 后缀（如 `0.1.0-rc.1`）时标记为 prerelease。
 
 打 tag 之前可以先在 `main` 上手动触发一次试运行：`gh workflow run release.yml --ref main`。它会构建并冒烟测试全部产物（上传为 workflow artifacts），但跳过 tag 校验和发布。
+
+**更新签名**：`tauri.conf.json` 开启了 `createUpdaterArtifacts`，桌面端打包时会用仓库 secrets `TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 为更新包（AppImage、deb、macOS `.app.tar.gz`、NSIS 安装包）生成 `.sig`；缺少 secret 时打包直接失败。`updater-manifest` job 用 `apps/desktop/scripts/updater-manifest.mjs` 把这些签名汇总成 `latest.json`（发布说明同样取自 CHANGELOG），随 Release 一起发布；已安装的应用通过 `releases/latest/download/latest.json` 获取更新，因此 prerelease 不会推送给用户。对应的公钥写在 `tauri.conf.json` 的 `plugins.updater.pubkey` 中。私钥一旦丢失，已安装的版本将无法再校验新版本，只能让用户手动重装；轮换密钥时，要先用旧私钥签名发布一个内置新公钥的版本，之后的版本再改用新私钥签名。

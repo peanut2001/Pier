@@ -233,7 +233,7 @@ Pier/
 - [x] Tauri 应用骨架、sidecar 生命周期管理（启动、就绪、崩溃重启、日志、优雅退出）、托盘、单实例。
 - [x] `packages/chat-state` reducer；聊天视图、会话列表、工作区管理、审批对话框、模型切换。
 - [ ] macOS / Windows 真机验证安装包（sidecar 路径、资源目录、Origin）。
-- 未纳入 M2、留到后续：开机自启、自动更新（M6）、桌面通知（M4）、会话搜索（M4）。
+- 未纳入 M2、留到后续：开机自启、桌面通知（M4）、会话搜索（M4）。自动更新已提前完成（见 M6）。
 - 验收：不打开终端即可在桌面端完成日常 pi 编码任务；关闭窗口后 Agent 继续运行。
 
 ### M3 手机端 MVP（局域网）
@@ -260,7 +260,8 @@ Pier/
 
 ### M6 发布
 
-- [ ] 桌面：macOS 签名与公证、Windows 签名、Linux AppImage / deb；Tauri updater 发布通道。
+- [x] 桌面：Tauri updater 发布通道（签名的更新包 + GitHub Release 上的 `latest.json`，应用内检查、下载、校验、安装并重启；Linux AppImage 已端到端验证）。
+- [ ] 桌面：macOS 签名与公证、Windows 签名；macOS / Windows 上的自动更新真机验证。
 - [ ] 手机：EAS Build、TestFlight / 内部测试轨道。
 - [ ] 用户文档：安装、配对、安全建议。
 

@@ -4,6 +4,7 @@ import { POLICY_DESCRIPTION, POLICY_LABEL, relativeTime, sessionTitle } from "..
 import { useAppState, useStore } from "../lib/store.tsx";
 import {
 	IconChevronRight,
+	IconDownload,
 	IconFolder,
 	IconFolderPlus,
 	IconLogs,
@@ -16,6 +17,7 @@ import {
 	Logo,
 } from "./Icons.tsx";
 import { Modal } from "./Modal.tsx";
+import { updatePending } from "./UpdatePanel.tsx";
 
 const SESSION_PAGE = 30;
 
@@ -175,6 +177,8 @@ export function Sidebar({ onShowLogs, onShowRemote }: { onShowLogs: () => void; 
 	const remote = useAppState((s) => s.remote);
 	const connectedDevices = useAppState((s) => s.devices.filter((d) => d.connected).length);
 	const noModels = useAppState((s) => s.providers?.availableCount === 0);
+	const update = useAppState((s) => s.update);
+	const updateReady = updatePending(update);
 	const addWorkspace = useAddWorkspace();
 	const [settingsFor, setSettingsFor] = useState<string | undefined>();
 	const settingsWorkspace = workspaces.find((w) => w.id === settingsFor);
@@ -265,6 +269,23 @@ export function Sidebar({ onShowLogs, onShowRemote }: { onShowLogs: () => void; 
 						<IconSmartphone size={15} />
 						{remote?.running ? <span className="remote-count">{connectedDevices}</span> : null}
 					</button>
+					{updateReady ? (
+						<button
+							type="button"
+							className="ghost icon update-button on"
+							onClick={() => store.showUpdate(true)}
+							title={
+								update.state === "downloading"
+									? "正在下载更新…"
+									: update.state === "installing"
+										? "正在安装更新…"
+										: `Pier v${update.version ?? ""} 可以更新`
+							}
+						>
+							<IconDownload size={15} />
+							<span className="update-dot" />
+						</button>
+					) : null}
 					{store.bridgeKind === "tauri" ? (
 						<button type="button" className="ghost icon" onClick={() => store.quit()} title="退出 Pier（停止 Host）">
 							<IconPower size={15} />

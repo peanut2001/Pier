@@ -6,6 +6,7 @@ import { ModelsPanel } from "./components/ModelsPanel.tsx";
 import { PairingRequestDialog, RemotePanel } from "./components/RemotePanel.tsx";
 import { SessionView } from "./components/SessionView.tsx";
 import { Sidebar } from "./components/Sidebar.tsx";
+import { UpdatePanel } from "./components/UpdatePanel.tsx";
 import { useAppState, useStore } from "./lib/store.tsx";
 
 function Toasts() {
@@ -55,8 +56,10 @@ function Main() {
 }
 
 export function App() {
+	const store = useStore();
 	const [showLogs, setShowLogs] = useState(false);
 	const [showRemote, setShowRemote] = useState(false);
+	const showUpdate = useAppState((s) => s.updateOpen);
 	return (
 		<div className="app">
 			<Sidebar onShowLogs={() => setShowLogs(true)} onShowRemote={() => setShowRemote(true)} />
@@ -68,6 +71,7 @@ export function App() {
 			{showLogs ? <LogsPanel onClose={() => setShowLogs(false)} /> : null}
 			{showRemote ? <RemotePanel onClose={() => setShowRemote(false)} /> : null}
 			<ModelsPanel />
+			{showUpdate ? <UpdatePanel onClose={() => store.showUpdate(false)} /> : null}
 			<PairingRequestDialog />
 		</div>
 	);

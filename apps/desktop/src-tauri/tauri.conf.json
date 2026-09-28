@@ -38,6 +38,14 @@
 		"shortDescription": "Pi-powered agent desktop",
 		"icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
 		"externalBin": ["binaries/pier-host"],
-		"resources": { "pi-assets/": "pi-assets/" }
+		"resources": { "pi-assets/": "pi-assets/" },
+		"createUpdaterArtifacts": true
+	},
+	"plugins": {
+		"updater": {
+			"pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IENERjQwOEEyOThFMUJERkYKUldUL3ZlR1lvZ2owemVUKy9XcjVDbk9GMWFCOEx1MERTdHF3RjdUOTJSSU10U2lKT0JRbEZrK2QK",
+			"endpoints": ["https://github.com/yiranxiaohui/Pier/releases/latest/download/latest.json"],
+			"windows": { "installMode": "passive" }
+		}
 	}
 }
