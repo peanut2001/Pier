@@ -1,0 +1,6 @@
+/target/
+/gen/schemas
+# Produced by `pnpm --filter @pier/desktop sidecar` (scripts/prepare-sidecar.mjs).
+/binaries/
+/pi-assets/
+/.sidecar-staging/

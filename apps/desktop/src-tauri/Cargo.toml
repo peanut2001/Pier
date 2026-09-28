@@ -1,0 +1,29 @@
+[package]
+name = "pier-desktop"
+version = "0.0.1"
+description = "Pier desktop shell: runs the Pier Host sidecar and hosts the UI"
+edition = "2021"
+rust-version = "1.80"
+publish = false
+
+[lib]
+name = "pier_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7", features = [] }
+
+[dependencies]
+tauri = { version = "2.12", features = ["tray-icon"] }
+tauri-plugin-dialog = "2.8"
+tauri-plugin-opener = "2.6"
+tauri-plugin-single-instance = "2.5"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

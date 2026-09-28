@@ -78,3 +78,61 @@ jobs:
       - name: Smoke test (native target only)
         if: matrix.target == 'bun-linux-x64'
         run: node packages/host/scripts/smoke-sidecar.mjs packages/host/bin/pier-host
+
+  desktop:
+    name: desktop shell (${{ matrix.os }})
+    needs: check
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          # pnpm is enabled through Corepack in the next step; setup-node's automatic
+          # package-manager cache would otherwise look for pnpm before it exists.
+          package-manager-cache: false
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+
+      - name: Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev
+
+      - name: Enable pnpm via Corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # tauri-build requires the externalBin and resources to exist.
+      - name: Prepare sidecar
+        run: pnpm --filter @pier/desktop sidecar
+
+      - name: Build web UI
+        run: pnpm --filter @pier/desktop build:web
+
+      - name: cargo fmt
+        working-directory: apps/desktop/src-tauri
+        run: cargo fmt --check
+
+      - name: cargo clippy
+        working-directory: apps/desktop/src-tauri
+        run: cargo clippy --all-targets --locked -- -D warnings

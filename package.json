@@ -14,6 +14,8 @@
 		"test": "vitest run",
 		"host": "tsx packages/host/src/main.ts",
 		"pier-cli": "tsx packages/client/src/cli.ts",
+		"faux-host": "tsx packages/host/scripts/faux-host.ts",
+		"desktop": "pnpm --filter @pier/desktop dev",
 		"build:sidecar": "node packages/host/scripts/build-sidecar.mjs"
 	},
 	"devDependencies": {

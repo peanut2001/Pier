@@ -1,0 +1,18 @@
+{
+	"extends": "../../tsconfig.base.json",
+	"compilerOptions": {
+		"rootDir": ".",
+		"outDir": ".tsbuild",
+		"module": "esnext",
+		"moduleResolution": "bundler",
+		"lib": ["es2023", "dom", "dom.iterable"],
+		"jsx": "react-jsx",
+		"types": ["vite/client"]
+	},
+	"references": [
+		{ "path": "../../packages/protocol" },
+		{ "path": "../../packages/client" },
+		{ "path": "../../packages/chat-state" }
+	],
+	"include": ["src", "vite.config.ts"]
+}

@@ -4,7 +4,7 @@
 >
 > 本文档是项目的总体规划与里程碑，随开发进度持续更新。
 >
-> **当前进度（2026-09-28）**：M0 除 Spike 2 / 3 外已完成；M1 已完成，验收流程由 `packages/host/test/host.integration.test.ts` 自动覆盖，并已用真实模型通过 `pier-cli` 手动走通。下一步：Spike 2 与 M2 桌面端骨架。
+> **当前进度（2026-09-28）**：M0 除 Spike 3 外已完成；M1 已完成；M2 桌面端 MVP 已完成（Linux 上端到端验证，macOS / Windows 由 CI 编译检查，安装包待真机验证）。下一步：Spike 3 与 M3 手机端。
 
 ## 1. 目标与非目标
 
@@ -216,7 +216,7 @@ Pier/
 
 - [x] pnpm monorepo、Biome、Vitest、TypeScript 项目引用、GitHub Actions（lint / typecheck / test）。
 - [x] **Spike 1：Host 打包为 sidecar**（Linux 已端到端验证，macOS / Windows 已交叉编译，结论见 `docs/spikes.md`）。验证 pi SDK 能否用 `bun build --compile` 打成单文件，并能正常加载扩展、skills 与 `~/.pi/agent` 配置；失败则改为"内置 Node 运行时 + JS bundle"或 Node SEA。
-- [ ] **Spike 2**：Tauri 2 通过 `externalBin` 启动 sidecar，并通过 stdout 获取端口与本地 token。
+- [x] **Spike 2**：Tauri 2 通过 `externalBin` 启动 sidecar，并通过 stdout 获取端口与本地 token（Linux 已验证，结论见 `docs/spikes.md`）。
 - [ ] **Spike 3**：Expo 开发构建中 WebSocket + `@noble/*` 加解密性能验证（iOS / Android 各一台真机）。
 - 验收：三个 spike 的结论写入 `docs/spikes.md`，确定打包方案。
 
@@ -230,8 +230,10 @@ Pier/
 
 ### M2 桌面端 MVP
 
-- [ ] Tauri 应用骨架、sidecar 生命周期管理、托盘、单实例。
-- [ ] `packages/chat-state` reducer；聊天视图、会话列表、工作区管理、审批对话框、模型切换。
+- [x] Tauri 应用骨架、sidecar 生命周期管理（启动、就绪、崩溃重启、日志、优雅退出）、托盘、单实例。
+- [x] `packages/chat-state` reducer；聊天视图、会话列表、工作区管理、审批对话框、模型切换。
+- [ ] macOS / Windows 真机验证安装包（sidecar 路径、资源目录、Origin）。
+- 未纳入 M2、留到后续：开机自启、自动更新（M6）、桌面通知（M4）、会话搜索（M4）。
 - 验收：不打开终端即可在桌面端完成日常 pi 编码任务；关闭窗口后 Agent 继续运行。
 
 ### M3 手机端 MVP（局域网）
@@ -286,6 +288,7 @@ Pier/
 1. ~~按 M0 初始化 monorepo 与 CI。~~ ✅
 2. ~~执行 Spike 1（Host 打包）。~~ ✅ 采用 Bun 单文件 + pi 资源目录，见 `docs/spikes.md`。
 3. ~~起草 `docs/protocol.md`，与 M1 Host 实现同步推进。~~ ✅
-4. Spike 2：Tauri 2 通过 `externalBin` 启动 sidecar，并在 macOS / Windows 上运行编译产物。
-5. M2：`apps/desktop` 骨架与 `packages/chat-state` reducer。
+4. ~~Spike 2：Tauri 2 通过 `externalBin` 启动 sidecar。~~ ✅ Linux 已验证；macOS / Windows 安装包待真机确认。
+5. ~~M2：`apps/desktop` 骨架与 `packages/chat-state` reducer。~~ ✅
 6. Spike 3（M3 前）：Expo 真机加密性能。
+7. M3：`packages/crypto`、Host 远程监听与配对、桌面端配对二维码与设备管理、Expo 手机端。

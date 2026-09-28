@@ -111,9 +111,77 @@ jobs:
           path: dist/${{ env.NAME }}.*
           if-no-files-found: error
 
+  desktop:
+    name: desktop ${{ matrix.platform }}
+    needs: verify
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          # 22.04 keeps the glibc / WebKitGTK baseline low for the Linux packages.
+          - { platform: linux-x64, runner: ubuntu-22.04, bundles: "deb,appimage" }
+          - { platform: darwin-arm64, runner: macos-latest, bundles: dmg }
+          - { platform: darwin-x64, runner: macos-15-intel, bundles: dmg }
+          - { platform: windows-x64, runner: windows-latest, bundles: nsis }
+    env:
+      NAME: pier-desktop-${{ github.ref_name }}-${{ matrix.platform }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          # pnpm is enabled through Corepack in the next step; setup-node's automatic
+          # package-manager cache would otherwise look for pnpm before it exists.
+          package-manager-cache: false
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf
+
+      - name: Enable pnpm via Corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # beforeBuildCommand builds the sidecar for this runner and the web UI.
+      - name: Build bundles
+        working-directory: apps/desktop
+        run: pnpm tauri build --bundles ${{ matrix.bundles }}
+
+      - name: Collect bundles
+        run: |
+          mkdir -p dist
+          bundle=apps/desktop/src-tauri/target/release/bundle
+          shopt -s nullglob
+          for file in "$bundle"/deb/*.deb "$bundle"/appimage/*.AppImage "$bundle"/dmg/*.dmg "$bundle"/nsis/*-setup.exe; do
+            ext="${file##*.}"
+            [ "$ext" = "exe" ] && ext="setup.exe"
+            cp "$file" "dist/${NAME}.${ext}"
+          done
+          ls -la dist
+          [ -n "$(ls dist)" ] || { echo "::error::No bundles produced"; exit 1; }
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: ${{ env.NAME }}
+          path: dist/*
+          if-no-files-found: error
+
   publish:
     name: publish GitHub release
-    needs: [verify, sidecar]
+    needs: [verify, sidecar, desktop]
     runs-on: ubuntu-latest
     permissions:
       contents: write

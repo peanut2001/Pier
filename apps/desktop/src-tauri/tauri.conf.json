@@ -1,0 +1,43 @@
+{
+	"$schema": "https://schema.tauri.app/config/2",
+	"productName": "Pier",
+	"version": "../package.json",
+	"identifier": "dev.pier.desktop",
+	"build": {
+		"beforeDevCommand": "pnpm dev:web",
+		"devUrl": "http://localhost:1420",
+		"beforeBuildCommand": "pnpm sidecar && pnpm build:web",
+		"frontendDist": "../dist"
+	},
+	"app": {
+		"withGlobalTauri": false,
+		"windows": [
+			{
+				"label": "main",
+				"title": "Pier",
+				"width": 1280,
+				"height": 820,
+				"minWidth": 860,
+				"minHeight": 560
+			}
+		],
+		"security": {
+			"csp": {
+				"default-src": "'self'",
+				"connect-src": "'self' ipc: http://ipc.localhost ws://127.0.0.1:*",
+				"img-src": "'self' data: blob:",
+				"style-src": "'self' 'unsafe-inline'",
+				"font-src": "'self' data:"
+			}
+		}
+	},
+	"bundle": {
+		"active": true,
+		"targets": "all",
+		"category": "DeveloperTool",
+		"shortDescription": "Pi-powered agent desktop",
+		"icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
+		"externalBin": ["binaries/pier-host"],
+		"resources": { "pi-assets/": "pi-assets/" }
+	}
+}

@@ -1,0 +1,35 @@
+{
+	"name": "@pier/desktop",
+	"version": "0.0.1",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"dev": "node scripts/prepare-sidecar.mjs && tauri dev",
+		"dev:web": "vite",
+		"build": "tauri build",
+		"build:web": "vite build",
+		"sidecar": "node scripts/prepare-sidecar.mjs",
+		"tauri": "tauri"
+	},
+	"dependencies": {
+		"@pier/chat-state": "workspace:*",
+		"@pier/client": "workspace:*",
+		"@pier/protocol": "workspace:*",
+		"@tauri-apps/api": "^2.12.0",
+		"@tauri-apps/plugin-dialog": "^2.8.0",
+		"@tauri-apps/plugin-opener": "^2.6.0",
+		"highlight.js": "^11.12.0",
+		"react": "^19.3.0",
+		"react-dom": "^19.3.0",
+		"react-markdown": "^10.1.0",
+		"rehype-highlight": "^7.0.2",
+		"remark-gfm": "^4.0.1"
+	},
+	"devDependencies": {
+		"@tauri-apps/cli": "^2.12.0",
+		"@types/react": "^19.3.0",
+		"@types/react-dom": "^19.3.0",
+		"@vitejs/plugin-react": "^6.1.1",
+		"vite": "^8.3.1"
+	}
+}

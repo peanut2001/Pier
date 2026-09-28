@@ -7,7 +7,7 @@
 | Spike | 状态 | 结论 |
 |---|---|---|
 | 1. Host 打包为 sidecar | ✅ Linux 端到端验证；五个平台的原生冒烟测试已随 v0.0.1 通过 | 采用 **`bun build --compile` 单文件 + pi 资源目录** |
-| 2. Tauri `externalBin` 启动 sidecar | ⏳ 未开始（随 M2 桌面骨架进行） | Host 侧接口已就绪（见下） |
+| 2. Tauri `externalBin` 启动 sidecar | ✅ Linux 端到端验证（开发构建与 `.deb` 安装布局）；macOS / Windows 由 CI 编译检查 | `externalBin` 负责打包，Rust 侧用 `std::process` 自行管理进程；pi 资源作为 Tauri resource，经 `PI_PACKAGE_DIR` 传给 sidecar |
 | 3. Expo 中 WebSocket + `@noble/*` 性能 | ⏳ 未开始（需 Expo 开发构建与 iOS / Android 真机） | 放到 M3 开工前完成 |
 
 ## Spike 1：Host 打包为 sidecar
@@ -47,17 +47,55 @@ pi 在 Bun 二进制中通过 `dirname(process.execPath)` 查找这些资源；�
 - v0.0.1 发版时，在 GitHub Actions 原生 runner（linux-x64、linux-arm64、darwin-arm64、darwin-x64、windows-x64）上用 `scripts/smoke-sidecar.mjs` 验证了编译产物：启动、`pier.ready`、协议握手、通过二进制内的 pi SDK 创建会话、stdin 关闭后优雅退出。
 - 待在 M2 / M6 验证：macOS / Windows 上配合真实 `~/.pi/agent` 与真实模型运行；Bun 二进制在 macOS 上的签名与公证；带原生依赖的扩展。
 
-## Spike 2：Tauri 启动 sidecar（待做）
+## Spike 2：Tauri 启动 sidecar
 
-Host 侧已提供的接口：
+> 记录日期：2026-09-28。环境：Ubuntu 26.04 x86_64，Tauri 2.12，WebKitGTK 2.52，Rust 1.98。
 
-- 启动后向 stdout 输出**唯一一行** JSON：`{"type":"pier.ready","url":"ws://127.0.0.1:<port>","port":…,"token":"…","pid":…,"version":"…","protocolVersion":"1.0"}`。日志只写 stderr。
-- `--port 0`（默认）自动选择空闲端口；`PIER_LOCAL_TOKEN` 可由 Rust 侧注入，否则每次启动随机生成。
-- `--watch-stdin`：stdin 关闭即退出，Tauri 进程意外退出时 sidecar 不会残留。
-- 默认允许的 WebSocket Origin：`tauri://localhost`、`http(s)://tauri.localhost`、`http://localhost:1420`；可用 `--origin` 追加。
-- Tauri `externalBin` 要求文件名带目标三元组后缀（如 `pier-host-aarch64-apple-darwin`），可通过 `build:sidecar --name pier-host-<triple> --target <bun-target>` 生成。
+### 做法
 
-待验证：`tauri-plugin-shell` 的 sidecar 启动与 stdout 读取、崩溃自动重启、资源目录与 `PI_PACKAGE_DIR` 的传递、关闭窗口后 Host 继续运行。
+- **打包**：`apps/desktop/scripts/prepare-sidecar.mjs` 按 Rust 目标三元组构建 `src-tauri/binaries/pier-host-<triple>`（Tauri `externalBin`），并把 pi 运行时资源放到 `src-tauri/pi-assets/`（Tauri `bundle.resources`）。开发构建和安装包中，Tauri 都会把 sidecar 放在主程序旁边并去掉三元组后缀。
+- **进程管理**：没有使用 `tauri-plugin-shell`，而是在 `src-tauri/src/host.rs` 中用 `std::process::Command` 直接启动 sidecar。原因：
+  1. 需要自己持有 stdin 管道：关闭 stdin 就是 Host 的优雅退出信号（`--watch-stdin`），应用被强杀时管道也会随之关闭；
+  2. 崩溃重启、就绪超时、日志环形缓冲都要自己控制，插件只多一层事件转发；
+  3. 不必给 WebView 开放任何 shell 权限，前端只能调用 `host_status` / `host_logs` / `host_restart` 三个命令。
+- **握手**：读取 stdout 的 `pier.ready` 行获得端口与本地 token（由 Host 随机生成，不经环境变量传递），通过 `pier://host-status` 事件推给 WebView；WebView 用 `@pier/client` 直接连 `ws://127.0.0.1:<port>`。CSP 放行 `ws://127.0.0.1:*`；Origin 为 `tauri://localhost`（Windows 为 `http://tauri.localhost`，开发时为 `http://localhost:1420`），都在 Host 默认白名单内。
+- **pi 资源**：Rust 侧把 `resource_dir()/pi-assets` 作为 `PI_PACKAGE_DIR` 传给 sidecar。未设置时 pi 版本号会退化为 `0.0.0`（已复现），设置后为 `0.87.1`。
+
+### 验证结果（Linux，Xvfb 下运行真实应用）
+
+| 项目 | 结果 |
+|---|---|
+| 启动 | 应用启动约 0.5 s 后 Host 就绪，UI 显示“已连接 · pi 0.87.1” |
+| 崩溃恢复 | `kill -9` sidecar → 约 1 s 后自动重启（新端口），UI 自动切换到新连接；连续快速失败 5 次后停止重试并提示手动重启 |
+| 退出 | 界面“退出”/托盘“退出 Pier” → `RunEvent::Exit` → 关闭 stdin，Host 优雅退出并删除 `run/host.json` |
+| 外壳被强杀 | `kill -9` 主进程 → stdin 管道关闭，Host 随即退出，无残留进程 |
+| `SIGTERM` | 主进程与 Host 均退出 |
+| 单实例 | 第二次启动把焦点交给已运行的实例并以 0 退出，只保留一个 Host |
+| 关闭窗口 | 窗口隐藏到托盘，Host 与运行中的 Agent 不受影响 |
+| `.deb` 安装布局 | 通过，见下方“打包验证” |
+
+### 打包验证
+
+`pnpm --filter @pier/desktop build --bundles deb` 生成 `Pier_0.0.1_amd64.deb`（43.7 MiB，依赖 `libwebkit2gtk-4.1-0`、`libgtk-3-0`、`libayatana-appindicator3-1`）。安装布局：
+
+```
+usr/bin/pier-desktop            主程序
+usr/bin/pier-host               sidecar（externalBin，已去掉三元组后缀）
+usr/lib/Pier/pi-assets/         pi 运行时资源（resource_dir()/pi-assets → PI_PACKAGE_DIR）
+usr/share/applications/Pier.desktop
+```
+
+从解包目录运行：sidecar 的 `PI_PACKAGE_DIR` 正确指向 `usr/lib/Pier/pi-assets`，WebView 以生产 Origin `tauri://localhost` 和 CSP 连上 Host。用真实模型（`~/.pi/agent` 中的默认模型）完成了一次任务：流式输出、`cat *.txt` 被智能策略的只读白名单直接放行、上下文与 token 统计正常。Markdown 中的链接通过 `tauri-plugin-opener` 交给系统默认浏览器打开。
+
+其他发现：
+
+- WebKitGTK 会接受 fontconfig 为**第一个**字体族返回的替代字体（`ui-monospace`、`SF Mono` 都被映射成 Noto Sans CJK），导致代码块不是等宽字体。Linux 上改用通用族 `monospace`。
+- 开发时可以用 `PIER_HOST_BIN` 让桌面端运行别的 Host（例如包装 `pnpm faux-host` 的脚本，它输出同样的 `pier.ready` 行并支持 `--watch-stdin`），便于在真实外壳里调界面。
+
+### 待验证
+
+- macOS / Windows 真机：CI 只做编译与 clippy 检查；`.dmg` / NSIS 安装包在发版流水线中构建，需要在真机上确认 sidecar 路径、资源目录与 Origin。
+- macOS 签名与公证（M6）：sidecar 作为 `externalBin` 需要一并签名。
 
 ## Spike 3：Expo 加密性能（待做）
 

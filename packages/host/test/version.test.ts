@@ -11,7 +11,13 @@ describe("release versions", () => {
 
 	it("uses one version for the repository and every package", () => {
 		expect(version).toMatch(/^\d+\.\d+\.\d+(-[\w.]+)?$/);
-		for (const pkg of ["packages/protocol", "packages/client", "packages/host"]) {
+		for (const pkg of [
+			"packages/protocol",
+			"packages/client",
+			"packages/chat-state",
+			"packages/host",
+			"apps/desktop",
+		]) {
 			expect(versionOf(`${pkg}/package.json`), pkg).toBe(version);
 		}
 	});
@@ -20,6 +26,18 @@ describe("release versions", () => {
 		expect(PIER_HOST_VERSION).toBe(version);
 		const cli = readFileSync(join(root, "packages/client/src/cli.ts"), "utf8");
 		expect(/PIER_CLI_VERSION = "([^"]+)"/.exec(cli)?.[1]).toBe(version);
+	});
+
+	it("uses the same version for the desktop shell", () => {
+		const cargo = readFileSync(join(root, "apps/desktop/src-tauri/Cargo.toml"), "utf8");
+		expect(/^version = "([^"]+)"/m.exec(cargo)?.[1]).toBe(version);
+		// tauri.conf.json takes its version from apps/desktop/package.json.
+		const tauri = JSON.parse(readFileSync(join(root, "apps/desktop/src-tauri/tauri.conf.json"), "utf8")) as {
+			version: string;
+		};
+		expect(tauri.version).toBe("../package.json");
+		const store = readFileSync(join(root, "apps/desktop/src/lib/store.tsx"), "utf8");
+		expect(/APP_VERSION = "([^"]+)"/.exec(store)?.[1]).toBe(version);
 	});
 
 	it("has a changelog entry for the current version", () => {

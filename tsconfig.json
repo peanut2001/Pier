@@ -1,4 +1,10 @@
 {
 	"files": [],
-	"references": [{ "path": "packages/protocol" }, { "path": "packages/client" }, { "path": "packages/host" }]
+	"references": [
+		{ "path": "packages/protocol" },
+		{ "path": "packages/client" },
+		{ "path": "packages/chat-state" },
+		{ "path": "packages/host" },
+		{ "path": "apps/desktop" }
+	]
 }

@@ -1,0 +1,72 @@
+#!/usr/bin/env node
+/**
+ * Build the Pier Host sidecar for the desktop app.
+ *
+ *   src-tauri/binaries/pier-host-<target-triple>[.exe]   Tauri `externalBin`
+ *   src-tauri/pi-assets/                                 pi runtime assets (Tauri resource)
+ *
+ * At runtime the shell points `PI_PACKAGE_DIR` at the bundled `pi-assets` directory.
+ *
+ * Usage: node scripts/prepare-sidecar.mjs [--target <rust-target-triple>]
+ * The triple defaults to $TAURI_ENV_TARGET_TRIPLE, then to the host triple from `rustc -vV`.
+ */
+import { execFileSync } from "node:child_process";
+import { mkdirSync, readdirSync, renameSync, rmSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { parseArgs } from "node:util";
+
+const here = dirname(fileURLToPath(import.meta.url));
+const appRoot = resolve(here, "..");
+const repoRoot = resolve(appRoot, "../..");
+const tauriDir = join(appRoot, "src-tauri");
+
+const BUN_TARGETS = {
+	"x86_64-unknown-linux-gnu": "bun-linux-x64",
+	"aarch64-unknown-linux-gnu": "bun-linux-arm64",
+	"x86_64-apple-darwin": "bun-darwin-x64",
+	"aarch64-apple-darwin": "bun-darwin-arm64",
+	"x86_64-pc-windows-msvc": "bun-windows-x64",
+};
+
+const { values } = parseArgs({
+	args: process.argv.slice(2).filter((arg) => arg !== "--"),
+	options: { target: { type: "string" } },
+});
+
+function hostTriple() {
+	const output = execFileSync("rustc", ["-vV"], { encoding: "utf8" });
+	const line = output.split("\n").find((l) => l.startsWith("host:"));
+	if (!line) throw new Error("Could not determine the Rust host triple from `rustc -vV`");
+	return line.slice("host:".length).trim();
+}
+
+const triple = values.target ?? process.env.TAURI_ENV_TARGET_TRIPLE ?? hostTriple();
+const bunTarget = BUN_TARGETS[triple];
+if (!bunTarget) throw new Error(`Unsupported target triple ${triple}; known: ${Object.keys(BUN_TARGETS).join(", ")}`);
+const windows = triple.includes("windows");
+const exeName = `pier-host${windows ? ".exe" : ""}`;
+
+// Stage next to the outputs so the final moves are same-filesystem renames.
+const staging = join(tauriDir, ".sidecar-staging");
+rmSync(staging, { recursive: true, force: true });
+try {
+	execFileSync(
+		process.execPath,
+		[join(repoRoot, "packages/host/scripts/build-sidecar.mjs"), "--outdir", staging, "--target", bunTarget],
+		{ stdio: "inherit" },
+	);
+
+	const binaries = join(tauriDir, "binaries");
+	const assets = join(tauriDir, "pi-assets");
+	rmSync(binaries, { recursive: true, force: true });
+	rmSync(assets, { recursive: true, force: true });
+	mkdirSync(binaries, { recursive: true });
+	mkdirSync(assets, { recursive: true });
+
+	renameSync(join(staging, exeName), join(binaries, `pier-host-${triple}${windows ? ".exe" : ""}`));
+	for (const entry of readdirSync(staging)) renameSync(join(staging, entry), join(assets, entry));
+	console.log(`Prepared sidecar pier-host-${triple} and pi assets in ${tauriDir}`);
+} finally {
+	rmSync(staging, { recursive: true, force: true });
+}

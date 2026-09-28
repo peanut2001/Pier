@@ -9,13 +9,15 @@ Pi-powered agent desktop app with a native mobile companion that connects to you
 
 ## 当前状态
 
-M0（脚手架、CI、Spike 1）与 M1（Host 核心）已完成：
+M0（除 Spike 3）、M1（Host 核心）与 M2（桌面端 MVP）已完成：
 
 | 包 | 说明 |
 |---|---|
 | `packages/protocol` | 协议 schema（zod）、类型、`PROTOCOL_VERSION` |
 | `packages/host` | Pier Host：工作区配置、会话池、pi SDK 适配层、UI 桥接、`pier-approval` 审批扩展、EventLog、本地 WebSocket Gateway、sidecar 入口 |
 | `packages/client` | 通用客户端（握手、请求关联、自动重连、按 seq 恢复）与调试 CLI `pier-cli` |
+| `packages/chat-state` | 快照 + 事件 → 聊天视图状态的纯逻辑 reducer（桌面端与手机端共用） |
+| `apps/desktop` | Tauri 2 桌面应用：管理 Host sidecar（启动、崩溃重启、日志）、托盘常驻、单实例；React 界面含工作区与会话管理、流式聊天、工具卡片（终端输出、diff、文件预览）、审批、模型与思考等级切换、压缩、分叉 |
 
 ## 开发
 
@@ -43,6 +45,28 @@ pnpm pier-cli
 > /drop             # 模拟断线，验证重连补发
 > /help
 ```
+
+### 桌面端
+
+除 Node 与 pnpm 外还需要 Rust（stable）、Bun，以及 Tauri 的[系统依赖](https://v2.tauri.app/start/prerequisites/)（Linux 上为 `libwebkit2gtk-4.1-dev`、`libayatana-appindicator3-dev`、`librsvg2-dev` 等）。
+
+```bash
+pnpm desktop                                  # 构建 sidecar，然后 tauri dev（热更新前端）
+pnpm --filter @pier/desktop build             # 打包安装包（deb / AppImage / dmg / NSIS，取决于平台）
+```
+
+桌面端启动时会拉起内置的 Pier Host（`--watch-stdin`），关闭窗口只会隐藏到托盘，Agent 继续运行；从托盘或界面左下角“退出”才会停止 Host。可用 `PIER_DIR` 隔离 Pier 状态目录，用 `PIER_HOST_BIN` 指定其他 Host 可执行文件。
+
+只调界面时可以不启动 Tauri：用假模型（faux）起一个 Host，再在浏览器里打开 Vite 开发服务器：
+
+```bash
+pnpm faux-host                                # 输出 url 与 token，状态放在临时目录
+pnpm --filter @pier/desktop dev:web           # http://localhost:1420/?url=<url>&token=<token>
+```
+
+发送包含“演示”的消息会运行一段脚本化任务（bash、write、edit 与一次需要审批的命令）。
+
+### Sidecar
 
 构建单文件 sidecar（输出到 `packages/host/bin/`，包含 pi 运行时资源）：
 
