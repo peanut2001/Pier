@@ -25,6 +25,9 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 24
+          # pnpm is enabled through Corepack in the next step; setup-node's automatic
+          # package-manager cache would otherwise look for pnpm before it exists.
+          package-manager-cache: false
 
       - name: Enable pnpm via Corepack
         run: corepack enable
@@ -75,6 +78,9 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 24
+          # pnpm is enabled through Corepack in the next step; setup-node's automatic
+          # package-manager cache would otherwise look for pnpm before it exists.
+          package-manager-cache: false
 
       - uses: oven-sh/setup-bun@v2
 
