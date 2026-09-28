@@ -3,6 +3,8 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  # Dry run from a branch: builds and smoke-tests every asset but does not publish.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -36,6 +38,11 @@ jobs:
         id: version
         run: |
           version=$(node -p "require('./package.json').version")
+          if [ "${GITHUB_EVENT_NAME}" != "push" ]; then
+            echo "Dry run on ${GITHUB_REF_NAME}: skipping tag checks"
+            echo "version=${version}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
             echo "::error::Tag ${GITHUB_REF_NAME} does not match package.json version ${version}"
             exit 1
@@ -182,6 +189,7 @@ jobs:
   publish:
     name: publish GitHub release
     needs: [verify, sidecar, desktop]
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: write

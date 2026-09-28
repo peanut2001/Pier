@@ -4,7 +4,7 @@ import { createContext, useContext, useSyncExternalStore } from "react";
 import type { Bridge, HostStatus } from "./bridge.ts";
 import { ChatController, type ChatView } from "./chat-controller.ts";
 
-export const APP_VERSION = "0.0.1";
+export const APP_VERSION = "0.1.0";
 
 /** Subscriptions kept alive for recently viewed sessions (so approvals elsewhere stay visible). */
 const MAX_LIVE_CHATS = 8;
