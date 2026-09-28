@@ -1,0 +1,251 @@
+/* Toasts, modals, forms inside dialogs and the host log panel. */
+
+.toasts {
+	position: fixed;
+	right: 20px;
+	bottom: 20px;
+	z-index: 50;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	max-width: 420px;
+}
+
+.toast {
+	display: flex;
+	align-items: flex-start;
+	gap: 10px;
+	padding: 11px 10px 11px 14px;
+	border-radius: 12px;
+	background: var(--bg-raised);
+	border: 1px solid var(--border-strong);
+	box-shadow: var(--shadow-lg);
+	font-size: 13px;
+	animation: toast-in 0.25s var(--ease);
+}
+
+.toast-icon {
+	padding-top: 2px;
+	color: var(--info);
+}
+
+.toast.error .toast-icon {
+	color: var(--danger);
+}
+
+.toast.warning .toast-icon {
+	color: var(--warning);
+}
+
+.toast-text {
+	flex: 1;
+	padding-top: 1px;
+	word-break: break-word;
+}
+
+.toast .ghost.icon {
+	width: 22px;
+	height: 22px;
+}
+
+/* ---- modal ----------------------------------------------------------------------- */
+
+.modal-backdrop {
+	position: fixed;
+	inset: 0;
+	z-index: 40;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: rgba(5, 6, 10, 0.55);
+	backdrop-filter: blur(6px);
+	-webkit-backdrop-filter: blur(6px);
+	animation: fade-in 0.15s var(--ease);
+}
+
+.modal {
+	display: flex;
+	flex-direction: column;
+	width: min(560px, calc(100vw - 48px));
+	max-height: calc(100vh - 64px);
+	background: var(--bg-raised);
+	border: 1px solid var(--border-strong);
+	border-radius: 16px;
+	box-shadow: var(--shadow-lg);
+	animation: pop-in 0.18s var(--ease);
+}
+
+.modal.wide {
+	width: min(960px, calc(100vw - 48px));
+}
+
+.modal-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	padding: 18px 16px 12px 22px;
+}
+
+.modal-header h3 {
+	margin: 0;
+	font-size: 16px;
+	font-weight: 600;
+	letter-spacing: -0.01em;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.modal-header .ghost.icon {
+	width: 30px;
+	height: 30px;
+	border-radius: 8px;
+}
+
+.modal-body {
+	padding: 0 22px 20px;
+	overflow-y: auto;
+}
+
+.modal-body > p.muted:first-child {
+	margin-top: 0;
+	line-height: 1.7;
+}
+
+.modal-actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+	margin-top: 18px;
+}
+
+.modal-actions.spread {
+	justify-content: space-between;
+}
+
+.field {
+	margin-bottom: 18px;
+}
+
+.field-label {
+	margin-bottom: 8px;
+	font-size: 12px;
+	font-weight: 600;
+	color: var(--text-muted);
+}
+
+.path {
+	display: block;
+	padding: 8px 12px;
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	background: var(--bg-active);
+	word-break: break-all;
+}
+
+.policy-option {
+	display: flex;
+	gap: 12px;
+	align-items: flex-start;
+	margin-bottom: 8px;
+	padding: 12px 14px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	font-size: 13px;
+	cursor: pointer;
+	transition:
+		border-color 0.15s var(--ease),
+		background 0.15s var(--ease);
+}
+
+.policy-option:hover {
+	border-color: var(--border-strong);
+	background: var(--bg-hover);
+}
+
+.policy-option.selected,
+.policy-option.selected:hover {
+	border-color: var(--accent);
+	background: var(--accent-soft);
+}
+
+.policy-option input {
+	margin-top: 4px;
+}
+
+.policy-title {
+	font-weight: 600;
+	margin-bottom: 2px;
+}
+
+.fork-list {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	margin-top: 12px;
+}
+
+.fork-item {
+	display: block;
+	max-height: 96px;
+	overflow: hidden;
+	padding: 10px 14px;
+	border-color: var(--border);
+	border-radius: var(--radius);
+	text-align: left;
+	font-weight: 400;
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
+.fork-item:hover:not(:disabled) {
+	border-color: var(--accent);
+	background: var(--accent-soft);
+}
+
+.host-facts {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin-bottom: 12px;
+	font-size: 12px;
+	color: var(--text-muted);
+}
+
+.host-facts > span {
+	display: inline-flex;
+	align-items: center;
+	gap: 7px;
+	padding: 3px 10px;
+	border-radius: 999px;
+	background: var(--bg-active);
+}
+
+.host-facts > span.mono {
+	font-size: 11.5px;
+}
+
+.logs {
+	height: 55vh;
+	margin: 0;
+	padding: 12px 14px;
+	overflow: auto;
+	border-radius: var(--radius);
+	border: 1px solid var(--border);
+	background: var(--bg-code);
+	color: #c9ced6;
+	font-family: var(--mono);
+	font-size: 11.5px;
+	line-height: 1.6;
+	white-space: pre-wrap;
+	word-break: break-all;
+}
+
+.modal-actions .copy-button,
+.row-actions .copy-button {
+	padding: 6px 12px;
+	border: 1px solid var(--border-strong);
+	color: var(--text);
+	font-size: 13px;
+}

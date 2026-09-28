@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
 import { useStore } from "../lib/store.tsx";
+import { IconCheck, IconCopy } from "./Icons.tsx";
 
 function textOf(node: ReactNode): string {
 	if (typeof node === "string" || typeof node === "number") return String(node);
@@ -13,12 +14,13 @@ function textOf(node: ReactNode): string {
 	return "";
 }
 
-export function CopyButton({ text, label = "复制" }: { text: string; label?: string }) {
+export function CopyButton({ text, label = "复制", iconOnly }: { text: string; label?: string; iconOnly?: boolean }) {
 	const [copied, setCopied] = useState(false);
 	return (
 		<button
 			type="button"
-			className="copy-button"
+			className={`copy-button${iconOnly ? " icon-only" : ""}${copied ? " copied" : ""}`}
+			title={iconOnly ? label : undefined}
 			onClick={() => {
 				void navigator.clipboard.writeText(text).then(() => {
 					setCopied(true);
@@ -26,16 +28,31 @@ export function CopyButton({ text, label = "复制" }: { text: string; label?: s
 				});
 			}}
 		>
-			{copied ? "已复制" : label}
+			{copied ? <IconCheck size={13} /> : <IconCopy size={13} />}
+			{iconOnly ? null : <span>{copied ? "已复制" : label}</span>}
 		</button>
 	);
 }
 
+function languageOf(node: ReactNode): string | undefined {
+	const child = Array.isArray(node) ? node[0] : node;
+	if (child && typeof child === "object" && "props" in child) {
+		const className = (child as { props: { className?: unknown } }).props.className;
+		const match = typeof className === "string" ? /language-([\w+#-]+)/.exec(className) : null;
+		return match?.[1];
+	}
+	return undefined;
+}
+
 function Pre(props: ComponentProps<"pre">) {
 	const text = textOf(props.children);
+	const language = languageOf(props.children);
 	return (
 		<div className="code-block">
-			<CopyButton text={text.replace(/\n$/, "")} />
+			<div className="code-block-header">
+				<span className="code-lang">{language ?? "code"}</span>
+				<CopyButton text={text.replace(/\n$/, "")} />
+			</div>
 			<pre {...props} />
 		</div>
 	);

@@ -3,6 +3,19 @@ import type { ApprovalPolicy, ForkPoint, ModelInfo, ThinkingLevel, WorkspaceInfo
 import { useEffect, useRef, useState } from "react";
 import { POLICY_LABEL, POLICY_SUMMARY } from "../lib/format.ts";
 import { useStore } from "../lib/store.tsx";
+import {
+	IconCheck,
+	IconChevronDown,
+	IconChevronUp,
+	IconGitBranch,
+	IconMinimize,
+	IconMore,
+	IconSearch,
+	IconShield,
+	IconShieldAlert,
+	IconSparkles,
+	IconX,
+} from "./Icons.tsx";
 import { Modal } from "./Modal.tsx";
 
 const THINKING_LEVELS: Array<{ value: ThinkingLevel; label: string }> = [
@@ -67,9 +80,10 @@ export function ModelPicker({ chat, controller }: { chat: ChatState; controller:
 	return (
 		<div className="dropdown" ref={ref}>
 			<button type="button" className="chip model-chip" onClick={() => setOpen(!open)} title="切换模型与思考等级">
+				<IconSparkles size={14} className="model-chip-icon" />
 				<span className="model-chip-name">{current ? current.name || current.id : "未选择模型"}</span>
 				{reasoning ? <span className="model-chip-thinking">{thinkingLabel(chat.thinkingLevel)}</span> : null}
-				<span className="model-chip-caret">▾</span>
+				<IconChevronDown size={14} className="model-chip-caret" />
 			</button>
 			{open ? (
 				<div className="dropdown-menu models">
@@ -96,13 +110,16 @@ export function ModelPicker({ chat, controller }: { chat: ChatState; controller:
 							</div>
 						</div>
 					) : null}
-					<input
-						// biome-ignore lint/a11y/noAutofocus: the menu was just opened to search.
-						autoFocus
-						placeholder="搜索模型"
-						value={filter}
-						onChange={(e) => setFilter(e.target.value)}
-					/>
+					<div className="dropdown-search">
+						<IconSearch size={14} />
+						<input
+							// biome-ignore lint/a11y/noAutofocus: the menu was just opened to search.
+							autoFocus
+							placeholder="搜索模型"
+							value={filter}
+							onChange={(e) => setFilter(e.target.value)}
+						/>
+					</div>
 					{error ? <div className="dropdown-empty error">{error}</div> : null}
 					{!models && !error ? <div className="dropdown-empty">加载中…</div> : null}
 					{models && !visible.length ? (
@@ -123,11 +140,14 @@ export function ModelPicker({ chat, controller }: { chat: ChatState; controller:
 											if (!selected) void controller.setModel(model.provider, model.id);
 										}}
 									>
-										<span>{model.name || model.id}</span>
-										<span className="muted">
-											{model.reasoning ? "推理 · " : ""}
-											{model.id}
+										<span className="model-item-text">
+											<span className="model-item-name">
+												{model.name || model.id}
+												{model.reasoning ? <span className="mini-tag">推理</span> : null}
+											</span>
+											<span className="muted">{model.id}</span>
 										</span>
+										{selected ? <IconCheck size={15} className="policy-check" /> : null}
 									</button>
 								);
 							})}
@@ -155,7 +175,9 @@ export function PolicyPicker({ workspace }: { workspace: WorkspaceInfo }) {
 				onClick={() => setOpen(!open)}
 				title="权限模式（对整个工作区生效）"
 			>
-				{POLICY_LABEL[current]} ▴
+				{current === "auto" ? <IconShieldAlert size={14} /> : <IconShield size={14} />}
+				{POLICY_LABEL[current]}
+				<IconChevronUp size={13} className="chip-caret" />
 			</button>
 			{open ? (
 				<div className="dropdown-menu up right policies">
@@ -176,7 +198,7 @@ export function PolicyPicker({ workspace }: { workspace: WorkspaceInfo }) {
 									<span className="policy-item-title">{POLICY_LABEL[policy]}</span>
 									<span className="policy-item-desc">{POLICY_SUMMARY[policy]}</span>
 								</span>
-								{selected ? <span className="policy-check">✓</span> : null}
+								{selected ? <IconCheck size={15} className="policy-check" /> : null}
 							</button>
 						);
 					})}
@@ -269,8 +291,8 @@ export function SessionMenu({ chat, controller }: { chat: ChatState; controller:
 	return (
 		<>
 			<div className="dropdown" ref={ref}>
-				<button type="button" className="chip" onClick={() => setOpen(!open)} title="更多操作">
-					⋯
+				<button type="button" className="chip icon-chip" onClick={() => setOpen(!open)} title="更多操作">
+					<IconMore size={16} />
 				</button>
 				{open ? (
 					<div className="dropdown-menu right">
@@ -283,7 +305,10 @@ export function SessionMenu({ chat, controller }: { chat: ChatState; controller:
 								setDialog("compact");
 							}}
 						>
-							压缩上下文…
+							<span className="menu-label">
+								<IconMinimize size={14} />
+								压缩上下文…
+							</span>
 						</button>
 						<button
 							type="button"
@@ -293,7 +318,10 @@ export function SessionMenu({ chat, controller }: { chat: ChatState; controller:
 								setDialog("fork");
 							}}
 						>
-							从历史消息分叉…
+							<span className="menu-label">
+								<IconGitBranch size={14} />
+								从历史消息分叉…
+							</span>
 						</button>
 						<button
 							type="button"
@@ -311,7 +339,10 @@ export function SessionMenu({ chat, controller }: { chat: ChatState; controller:
 								void store.closeSession(session, running);
 							}}
 						>
-							{confirmClose ? "Agent 仍在运行：再次点击以中止并关闭" : "关闭会话"}
+							<span className="menu-label">
+								<IconX size={14} />
+								{confirmClose ? "Agent 仍在运行：再次点击以中止并关闭" : "关闭会话"}
+							</span>
 						</button>
 					</div>
 				) : null}

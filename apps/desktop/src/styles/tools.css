@@ -1,0 +1,251 @@
+/* Tool cards, terminal output, previews and diffs. Code surfaces stay dark in both themes. */
+
+.tool-card {
+	margin: 10px 0;
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	background: var(--bg-elevated);
+	overflow: hidden;
+	font-size: 14px;
+	line-height: 1.5;
+	transition: border-color 0.15s var(--ease);
+}
+
+.tool-card:hover {
+	border-color: var(--border-strong);
+}
+
+.tool-card.awaiting,
+.tool-card.awaiting:hover {
+	border-color: var(--warning-line);
+	box-shadow: 0 0 0 3px var(--warning-soft);
+}
+
+.tool-card.status-error {
+	border-color: var(--danger-line);
+}
+
+.tool-header {
+	display: flex;
+	align-items: center;
+	justify-content: flex-start;
+	gap: 10px;
+	width: 100%;
+	min-height: 40px;
+	padding: 6px 12px 6px 8px;
+	border: none;
+	border-radius: 0;
+	background: transparent;
+	text-align: left;
+	font-size: 13px;
+	font-weight: 400;
+}
+
+.tool-header:hover:not(:disabled) {
+	background: var(--bg-hover);
+}
+
+.tool-header.static {
+	cursor: default;
+}
+
+.tool-icon {
+	display: grid;
+	place-items: center;
+	width: 26px;
+	height: 26px;
+	flex: none;
+	border-radius: 7px;
+	background: var(--bg-active);
+	color: var(--text-muted);
+}
+
+.status-running .tool-icon,
+.status-generating .tool-icon {
+	background: var(--accent-soft);
+	color: var(--accent-text);
+}
+
+.status-error .tool-icon {
+	background: var(--danger-soft);
+	color: var(--danger);
+}
+
+.tool-card.awaiting .tool-icon {
+	background: var(--warning-soft);
+	color: var(--warning);
+}
+
+.tool-name {
+	font-weight: 600;
+	flex-shrink: 0;
+}
+
+.tool-summary {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-family: var(--mono);
+	font-size: 12px;
+	color: var(--text-muted);
+}
+
+.tool-status {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	flex-shrink: 0;
+	padding: 1px 8px 1px 6px;
+	border-radius: 999px;
+	font-size: 11px;
+	font-weight: 500;
+	background: var(--bg-active);
+	color: var(--text-muted);
+}
+
+.tool-status.running,
+.tool-status.generating {
+	background: var(--accent-soft);
+	color: var(--accent-text);
+}
+
+.tool-status.done {
+	background: var(--success-soft);
+	color: var(--success);
+}
+
+.tool-status.error {
+	background: var(--danger-soft);
+	color: var(--danger);
+}
+
+.tool-status.awaiting {
+	background: var(--warning-soft);
+	color: var(--warning);
+}
+
+.tool-body {
+	position: relative;
+	border-top: 1px solid var(--border);
+	background: var(--bg-code);
+	animation: fade-in 0.15s var(--ease);
+}
+
+.tool-actions {
+	position: absolute;
+	top: 6px;
+	right: 8px;
+	z-index: 1;
+	opacity: 0;
+	transition: opacity 0.15s;
+}
+
+.tool-body:hover .tool-actions {
+	opacity: 1;
+}
+
+.tool-actions .copy-button {
+	background: rgba(30, 33, 40, 0.9);
+	color: #b8bcc6;
+	border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.tool-actions .copy-button:hover:not(:disabled) {
+	background: rgba(45, 49, 58, 0.95);
+	color: #fff;
+}
+
+.tool-command,
+.tool-output,
+.tool-preview,
+.diff {
+	margin: 0;
+	padding: 10px 14px;
+	overflow-x: auto;
+	font-family: var(--mono);
+	font-size: 12px;
+	line-height: 1.6;
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
+.tool-command {
+	color: #e6e8eb;
+	background: var(--bg-code);
+}
+
+.tool-command .prompt {
+	color: #4fd1c5;
+	user-select: none;
+}
+
+.tool-output {
+	max-height: 320px;
+	overflow-y: auto;
+	color: #b9bec8;
+	background: var(--bg-code);
+	border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.tool-command + .tool-output {
+	padding-top: 4px;
+	border-top: none;
+}
+
+.tool-body > .tool-output:first-child {
+	border-top: none;
+}
+
+.tool-output.error {
+	color: var(--del-text);
+}
+
+.tool-preview {
+	max-height: 360px;
+	overflow-y: auto;
+	color: #e6e8eb;
+	background: var(--bg-code);
+	white-space: pre;
+}
+
+.tool-meta {
+	padding: 6px 14px;
+	font-size: 11.5px;
+	color: #8a8f9c;
+	background: rgba(255, 255, 255, 0.03);
+	border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.diff {
+	padding: 8px 0;
+	max-height: 480px;
+	overflow-y: auto;
+	white-space: pre;
+	color: #b9bec8;
+	background: var(--bg-code);
+}
+
+.diff-line {
+	min-width: max-content;
+	padding: 0 14px;
+	border-left: 3px solid transparent;
+}
+
+.diff-line.add {
+	background: var(--add);
+	border-left-color: #3fb950;
+	color: var(--add-text);
+}
+
+.diff-line.del {
+	background: var(--del);
+	border-left-color: #f85149;
+	color: var(--del-text);
+}
+
+/* Shell commands run with `!` in the composer reuse the card look. */
+.message.bash {
+	animation: rise-in 0.22s var(--ease);
+}

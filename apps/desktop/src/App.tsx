@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Welcome, WorkspaceHome } from "./components/Home.tsx";
 import { HostBanner, LogsPanel } from "./components/HostPanels.tsx";
+import { IconAlert, IconInfo, IconMessage, IconX } from "./components/Icons.tsx";
 import { PairingRequestDialog, RemotePanel } from "./components/RemotePanel.tsx";
 import { SessionView } from "./components/SessionView.tsx";
 import { Sidebar } from "./components/Sidebar.tsx";
@@ -14,9 +15,12 @@ function Toasts() {
 		<div className="toasts">
 			{toasts.map((toast) => (
 				<div key={toast.id} className={`toast ${toast.level}`}>
-					<span>{toast.message}</span>
-					<button type="button" className="ghost icon" onClick={() => store.dismissToast(toast.id)}>
-						×
+					<span className="toast-icon">
+						{toast.level === "info" ? <IconInfo size={16} /> : <IconAlert size={16} />}
+					</span>
+					<span className="toast-text">{toast.message}</span>
+					<button type="button" className="ghost icon" title="关闭" onClick={() => store.dismissToast(toast.id)}>
+						<IconX size={14} />
 					</button>
 				</div>
 			))}
@@ -37,7 +41,16 @@ function Main() {
 	if (!workspacesLoaded) return <div className="placeholder center" />;
 	if (!workspaces.length) return <Welcome />;
 	if (selectedWorkspaceId) return <WorkspaceHome workspaceId={selectedWorkspaceId} />;
-	return <div className="placeholder center">选择左侧的工作区或会话</div>;
+	return (
+		<div className="placeholder center">
+			<div className="empty-state">
+				<div className="empty-icon">
+					<IconMessage size={24} />
+				</div>
+				<div>选择左侧的工作区或会话</div>
+			</div>
+		</div>
+	);
 }
 
 export function App() {

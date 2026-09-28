@@ -2,6 +2,7 @@ import type { ChatController, ChatState } from "@pier/chat-state";
 import type { WorkspaceInfo } from "@pier/protocol";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { type Draft, useStore } from "../lib/store.tsx";
+import { IconArrowUp, IconImage, IconStop, IconX } from "./Icons.tsx";
 import { PolicyPicker } from "./SessionControls.tsx";
 
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
@@ -31,6 +32,7 @@ export function Composer({
 	const sessionId = chat.sessionId;
 	const [draft, setDraft] = useState<Draft>(() => store.draft(sessionId));
 	const textarea = useRef<HTMLTextAreaElement>(null);
+	const fileInput = useRef<HTMLInputElement>(null);
 	const [sending, setSending] = useState(false);
 	const [dragging, setDragging] = useState(false);
 
@@ -119,7 +121,7 @@ export function Composer({
 								title="移除"
 								onClick={() => setDraft((d) => ({ ...d, images: d.images.filter((_, j) => j !== i) }))}
 							>
-								×
+								<IconX size={11} />
 							</button>
 						</div>
 					))}
@@ -134,8 +136,8 @@ export function Composer({
 					closed
 						? "会话已关闭"
 						: running
-							? "Agent 运行中：Enter 引导当前任务，Alt+Enter 排队到完成后，Esc 停止"
-							: "输入任务…（Enter 发送，Shift+Enter 换行，可粘贴图片）"
+							? "补充指示以引导当前任务，Esc 停止…"
+							: "描述你的任务…（Enter 发送，Shift+Enter 换行）"
 				}
 				onChange={(e) => setDraft((d) => ({ ...d, text: e.target.value }))}
 				onPaste={(e) => {
@@ -156,25 +158,74 @@ export function Composer({
 					}
 				}}
 			/>
-			<div className="composer-actions">
-				{workspace ? <PolicyPicker workspace={workspace} /> : null}
-				{running ? (
-					<>
-						<button type="button" className="danger" onClick={() => void controller.abort()} title="Esc">
-							停止
-						</button>
-						<button type="button" disabled={!canSend} onClick={() => void send("followUp")} title="Alt+Enter">
-							排队
-						</button>
-						<button type="button" className="primary" disabled={!canSend} onClick={() => void send("steer")}>
-							引导
-						</button>
-					</>
-				) : (
-					<button type="button" className="primary" disabled={!canSend} onClick={() => void send("auto")}>
-						发送
+			<div className="composer-toolbar">
+				<div className="composer-toolbar-left">
+					<button
+						type="button"
+						className="ghost icon composer-attach"
+						title="添加图片（也可以粘贴或拖入）"
+						disabled={closed}
+						onClick={() => fileInput.current?.click()}
+					>
+						<IconImage size={16} />
 					</button>
-				)}
+					<input
+						ref={fileInput}
+						type="file"
+						accept="image/*"
+						multiple
+						hidden
+						onChange={(e) => {
+							const files = [...(e.target.files ?? [])];
+							e.target.value = "";
+							void addFiles(files);
+						}}
+					/>
+					{workspace ? <PolicyPicker workspace={workspace} /> : null}
+				</div>
+				<div className="composer-actions">
+					{running ? (
+						<>
+							<span className="composer-hint">Enter 引导 · Alt+Enter 排队</span>
+							<button
+								type="button"
+								className="subtle"
+								disabled={!canSend}
+								onClick={() => void send("followUp")}
+								title="Alt+Enter"
+							>
+								排队
+							</button>
+							<button
+								type="button"
+								className="subtle accent"
+								disabled={!canSend}
+								onClick={() => void send("steer")}
+								title="Enter"
+							>
+								引导
+							</button>
+							<button
+								type="button"
+								className="round-button stop"
+								onClick={() => void controller.abort()}
+								title="停止（Esc）"
+							>
+								<IconStop size={14} />
+							</button>
+						</>
+					) : (
+						<button
+							type="button"
+							className="round-button send"
+							disabled={!canSend}
+							onClick={() => void send("auto")}
+							title="发送（Enter）"
+						>
+							<IconArrowUp size={17} />
+						</button>
+					)}
+				</div>
 			</div>
 		</div>
 	);

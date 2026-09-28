@@ -3,6 +3,22 @@ import type { UiRequest } from "@pier/protocol";
 import hljs from "highlight.js/lib/common";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { formatBytes, languageForPath } from "../lib/format.ts";
+import {
+	IconAlert,
+	IconCheck,
+	IconChevronRight,
+	IconClock,
+	IconFile,
+	IconFilePen,
+	IconFilePlus,
+	IconList,
+	IconLoader,
+	IconSearch,
+	IconShieldAlert,
+	IconTerminal,
+	IconWrench,
+	IconX,
+} from "./Icons.tsx";
 import { CopyButton } from "./Markdown.tsx";
 
 const STATUS_LABEL: Record<ToolBlock["status"], string> = {
@@ -24,6 +40,34 @@ const TOOL_LABEL: Record<string, string> = {
 	find: "查找",
 	ls: "列目录",
 };
+
+const TOOL_ICON: Record<string, typeof IconTerminal> = {
+	bash: IconTerminal,
+	powershell: IconTerminal,
+	read: IconFile,
+	write: IconFilePlus,
+	edit: IconFilePen,
+	grep: IconSearch,
+	find: IconSearch,
+	ls: IconList,
+};
+
+function StatusIcon({ status, awaiting }: { status: ToolBlock["status"]; awaiting: boolean }) {
+	if (awaiting) return <IconShieldAlert size={12} />;
+	switch (status) {
+		case "generating":
+		case "running":
+			return <IconLoader size={12} className="spin" />;
+		case "pending":
+			return <IconClock size={12} />;
+		case "done":
+			return <IconCheck size={12} />;
+		case "error":
+			return <IconAlert size={12} />;
+		default:
+			return <IconX size={12} />;
+	}
+}
 
 function Highlighted({ code, language }: { code: string; language?: string | undefined }) {
 	const html = useMemo(() => {
@@ -164,18 +208,23 @@ export const ToolCard = memo(function ToolCard({
 	const { call, status } = block;
 	const summary = summarizeToolCall(call.name, call.arguments);
 	const label = TOOL_LABEL[call.name] ?? call.name;
+	const Icon = TOOL_ICON[call.name] ?? IconWrench;
 	const copyText = call.name === "bash" ? String((call.arguments as { command?: unknown }).command ?? "") : summary;
 	return (
 		<div className={`tool-card status-${status}${approval ? " awaiting" : ""}`}>
 			<button type="button" className="tool-header" onClick={() => setOpen(!open)}>
-				<span className={`chevron${open ? " open" : ""}`}>›</span>
+				<span className="tool-icon">
+					<Icon size={14} />
+				</span>
 				<span className="tool-name">{label}</span>
 				<span className="tool-summary" title={summary}>
 					{summary || (status === "generating" ? `${call.partialJson?.length ?? 0} 字节…` : "")}
 				</span>
 				<span className={`tool-status ${approval ? "awaiting" : status}`}>
+					<StatusIcon status={status} awaiting={!!approval} />
 					{approval ? "等待审批" : STATUS_LABEL[status]}
 				</span>
+				<IconChevronRight size={14} className={`chevron${open ? " open" : ""}`} />
 			</button>
 			{open ? (
 				<div className="tool-body">

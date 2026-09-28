@@ -1,0 +1,509 @@
+/* Base elements, buttons, inputs, utilities, app layout and keyframes. */
+
+* {
+	box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+	height: 100%;
+	margin: 0;
+	overflow: hidden;
+}
+
+::selection {
+	background: var(--accent-ring);
+}
+
+button,
+input,
+textarea,
+select {
+	font: inherit;
+	color: inherit;
+}
+
+:focus-visible {
+	outline: 2px solid var(--accent-ring);
+	outline-offset: 1px;
+}
+
+* {
+	scrollbar-width: thin;
+	scrollbar-color: var(--border-strong) transparent;
+}
+
+::-webkit-scrollbar {
+	width: 10px;
+	height: 10px;
+}
+
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+	background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+	background-color: var(--border-strong);
+	border-radius: 999px;
+	border: 3px solid transparent;
+	background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+	background-color: var(--text-faint);
+}
+
+.icon-svg {
+	flex: none;
+	display: block;
+}
+
+/* ---- buttons --------------------------------------------------------------------- */
+
+button {
+	cursor: pointer;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	border: 1px solid var(--border-strong);
+	background: var(--bg-elevated);
+	border-radius: 8px;
+	padding: 6px 12px;
+	font-size: 13px;
+	font-weight: 500;
+	line-height: 1.4;
+	white-space: nowrap;
+	transition:
+		background 0.15s var(--ease),
+		border-color 0.15s var(--ease),
+		color 0.15s var(--ease),
+		box-shadow 0.15s var(--ease),
+		transform 0.1s var(--ease),
+		opacity 0.15s;
+}
+
+button:hover:not(:disabled) {
+	background: var(--bg-hover);
+}
+
+button:active:not(:disabled) {
+	transform: translateY(0.5px);
+}
+
+button:disabled {
+	opacity: 0.45;
+	cursor: default;
+}
+
+button.primary {
+	background: var(--brand-gradient);
+	border-color: transparent;
+	color: #fff;
+	box-shadow:
+		0 1px 2px rgba(0, 0, 0, 0.2),
+		inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+
+button.primary:hover:not(:disabled) {
+	background: var(--brand-gradient-hover);
+	box-shadow:
+		0 4px 16px var(--brand-glow),
+		inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+button.danger {
+	border-color: var(--danger-line);
+	color: var(--danger);
+	background: transparent;
+}
+
+button.danger:hover:not(:disabled) {
+	background: var(--danger-soft);
+	border-color: var(--danger);
+}
+
+button.ghost {
+	border-color: transparent;
+	background: transparent;
+	color: var(--text-muted);
+}
+
+button.ghost:hover:not(:disabled) {
+	background: var(--bg-hover);
+	color: var(--text);
+}
+
+button.subtle {
+	border-color: transparent;
+	background: var(--bg-active);
+	color: var(--text);
+}
+
+button.subtle:hover:not(:disabled) {
+	border-color: var(--border-strong);
+}
+
+button.subtle.accent {
+	background: var(--accent-soft);
+	color: var(--accent-text);
+}
+
+button.icon {
+	padding: 0;
+	width: 26px;
+	height: 26px;
+	border-radius: 7px;
+}
+
+button.large {
+	padding: 10px 20px;
+	font-size: 14px;
+	border-radius: var(--radius);
+	gap: 8px;
+}
+
+.button-text {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	min-width: 0;
+}
+
+/* ---- inputs ---------------------------------------------------------------------- */
+
+input,
+textarea,
+select {
+	background: var(--bg-input);
+	border: 1px solid var(--border-strong);
+	border-radius: 8px;
+	padding: 7px 11px;
+	outline: none;
+	transition:
+		border-color 0.15s var(--ease),
+		box-shadow 0.15s var(--ease);
+}
+
+input::placeholder,
+textarea::placeholder {
+	color: var(--text-faint);
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+	border-color: var(--accent);
+	box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+	outline: none;
+}
+
+input[type="radio"],
+input[type="checkbox"] {
+	accent-color: var(--accent);
+	box-shadow: none;
+}
+
+textarea {
+	resize: vertical;
+	width: 100%;
+	line-height: 1.55;
+}
+
+code {
+	font-family: var(--mono);
+	font-size: 0.9em;
+}
+
+/* ---- utilities ------------------------------------------------------------------- */
+
+.muted {
+	color: var(--text-muted);
+}
+
+.small {
+	font-size: 12px;
+}
+
+.mono {
+	font-family: var(--mono);
+}
+
+.error-text {
+	color: var(--danger);
+}
+
+.warning-text {
+	color: var(--warning);
+}
+
+.spin {
+	animation: spin 0.9s linear infinite;
+}
+
+.shimmer {
+	background: linear-gradient(90deg, var(--text-muted) 0%, var(--text) 45%, var(--text-muted) 90%);
+	background-size: 200% 100%;
+	-webkit-background-clip: text;
+	background-clip: text;
+	color: transparent;
+	animation: shimmer 1.8s linear infinite;
+}
+
+.pill {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	font-size: 11.5px;
+	font-weight: 500;
+	padding: 2px 9px;
+	border-radius: 999px;
+	background: var(--bg-active);
+	color: var(--text-muted);
+	white-space: nowrap;
+	flex: none;
+}
+
+.pill.policy-pill.smart {
+	background: var(--accent-soft);
+	color: var(--accent-text);
+}
+
+.pill.policy-pill.ask {
+	background: var(--info-soft);
+	color: var(--info);
+}
+
+.pill.policy-pill.auto {
+	background: var(--warning-soft);
+	color: var(--warning);
+}
+
+.status-dot {
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	background: var(--text-faint);
+	flex: none;
+}
+
+.status-dot.ok {
+	background: var(--success);
+	box-shadow: 0 0 0 3px var(--success-soft);
+}
+
+.status-dot.wait {
+	background: var(--warning);
+	animation: pulse 1.4s ease-in-out infinite;
+}
+
+.status-dot.bad {
+	background: var(--danger);
+	box-shadow: 0 0 0 3px var(--danger-soft);
+}
+
+.logo {
+	display: block;
+	border-radius: 7px;
+	flex: none;
+	user-select: none;
+}
+
+/* ---- app layout ------------------------------------------------------------------ */
+
+.app {
+	display: grid;
+	grid-template-columns: 264px 1fr;
+	height: 100%;
+	background: var(--bg-app);
+}
+
+.main {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+	min-height: 0;
+	position: relative;
+	margin: 8px 8px 8px 0;
+	background: var(--bg);
+	border-radius: var(--radius-lg);
+	box-shadow: var(--panel-shadow);
+	overflow: hidden;
+}
+
+.placeholder {
+	color: var(--text-muted);
+	padding: 40px 0;
+	text-align: center;
+}
+
+.placeholder h2 {
+	color: var(--text);
+	font-weight: 600;
+	font-size: 20px;
+	letter-spacing: -0.01em;
+	margin: 0 0 8px;
+}
+
+.placeholder.center {
+	flex: 1;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.empty-state {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 12px;
+}
+
+.empty-icon {
+	display: grid;
+	place-items: center;
+	width: 52px;
+	height: 52px;
+	border-radius: 16px;
+	background: var(--bg-elevated);
+	border: 1px solid var(--border);
+	color: var(--text-muted);
+}
+
+/* ---- banners --------------------------------------------------------------------- */
+
+.banner {
+	padding: 9px 18px;
+	font-size: 13px;
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	border-bottom: 1px solid var(--border);
+}
+
+.banner.info {
+	background: var(--info-soft);
+	color: var(--info);
+}
+
+.banner.warning {
+	background: var(--warning-soft);
+	color: var(--warning);
+}
+
+.banner.error {
+	background: var(--danger-soft);
+	color: var(--danger);
+}
+
+.banner-actions {
+	margin-left: auto;
+	display: flex;
+	gap: 6px;
+}
+
+.banner-actions button {
+	font-size: 12px;
+	padding: 3px 10px;
+}
+
+/* ---- keyframes ------------------------------------------------------------------- */
+
+@keyframes pulse {
+	0%,
+	100% {
+		opacity: 1;
+	}
+	50% {
+		opacity: 0.35;
+	}
+}
+
+@keyframes bounce {
+	0%,
+	80%,
+	100% {
+		transform: translateY(0);
+		opacity: 0.4;
+	}
+	40% {
+		transform: translateY(-4px);
+		opacity: 1;
+	}
+}
+
+@keyframes spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+@keyframes shimmer {
+	from {
+		background-position: 100% 0;
+	}
+	to {
+		background-position: -100% 0;
+	}
+}
+
+@keyframes pop-in {
+	from {
+		opacity: 0;
+		transform: scale(0.97) translateY(-2px);
+	}
+	to {
+		opacity: 1;
+		transform: none;
+	}
+}
+
+@keyframes fade-in {
+	from {
+		opacity: 0;
+	}
+	to {
+		opacity: 1;
+	}
+}
+
+@keyframes rise-in {
+	from {
+		opacity: 0;
+		transform: translateY(6px);
+	}
+	to {
+		opacity: 1;
+		transform: none;
+	}
+}
+
+@keyframes toast-in {
+	from {
+		opacity: 0;
+		transform: translateY(8px) scale(0.98);
+	}
+	to {
+		opacity: 1;
+		transform: none;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		/* biome-ignore lint/complexity/noImportantStyles: must override per-component animations. */
+		animation-duration: 0.01ms !important;
+		/* biome-ignore lint/complexity/noImportantStyles: must override per-component animations. */
+		animation-iteration-count: 1 !important;
+		/* biome-ignore lint/complexity/noImportantStyles: must override per-component transitions. */
+		transition-duration: 0.01ms !important;
+	}
+}

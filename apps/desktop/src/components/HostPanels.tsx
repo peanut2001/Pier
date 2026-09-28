@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useAppState, useStore } from "../lib/store.tsx";
+import { IconAlert, IconInfo, IconLoader } from "./Icons.tsx";
 import { CopyButton } from "./Markdown.tsx";
 import { Modal } from "./Modal.tsx";
 
@@ -33,6 +34,13 @@ export function HostBanner({ onShowLogs }: { onShowLogs: () => void }) {
 	const canRestart = store.bridgeKind === "tauri" && (host.state === "failed" || host.state === "ready");
 	return (
 		<div className={`banner host-banner ${level}`}>
+			{level === "info" ? (
+				<IconLoader size={15} className="spin" />
+			) : level === "warning" ? (
+				<IconInfo size={15} />
+			) : (
+				<IconAlert size={15} />
+			)}
 			<span>{text}</span>
 			<span className="banner-actions">
 				{canRestart && level !== "info" ? (
@@ -75,13 +83,20 @@ export function LogsPanel({ onClose }: { onClose: () => void }) {
 	return (
 		<Modal title="Pier Host" onClose={onClose} wide>
 			<div className="host-facts">
-				<span>状态：{host.state}</span>
-				{host.version ? <span>Host v{host.version}</span> : null}
-				{hostInfo ? <span>pi {hostInfo.piVersion}</span> : null}
-				{host.pid ? <span>pid {host.pid}</span> : null}
-				{host.url ? <span>{host.url}</span> : null}
-				{host.restarts ? <span>自动重启 {host.restarts} 次</span> : null}
-				{hostInfo ? <span title="模型、凭据与会话复用 pi 的配置">配置目录 {hostInfo.agentDir}</span> : null}
+				<span className={`fact state-${host.state}`}>
+					<span className={`status-dot ${host.state === "ready" ? "ok" : host.state === "failed" ? "bad" : "wait"}`} />
+					{host.state}
+				</span>
+				{host.version ? <span className="fact">Host v{host.version}</span> : null}
+				{hostInfo ? <span className="fact">pi {hostInfo.piVersion}</span> : null}
+				{host.pid ? <span className="fact">pid {host.pid}</span> : null}
+				{host.url ? <span className="fact mono">{host.url}</span> : null}
+				{host.restarts ? <span className="fact">自动重启 {host.restarts} 次</span> : null}
+				{hostInfo ? (
+					<span className="fact mono" title="模型、凭据与会话复用 pi 的配置">
+						{hostInfo.agentDir}
+					</span>
+				) : null}
 			</div>
 			<pre className="logs" ref={scroller}>
 				{lines.join("\n") || "（暂无日志）"}

@@ -2,6 +2,18 @@ import type { ApprovalPolicy, SessionSummary, WorkspaceInfo } from "@pier/protoc
 import { useState } from "react";
 import { POLICY_DESCRIPTION, POLICY_LABEL, relativeTime, sessionTitle } from "../lib/format.ts";
 import { useAppState, useStore } from "../lib/store.tsx";
+import {
+	IconChevronRight,
+	IconFolder,
+	IconFolderPlus,
+	IconLogs,
+	IconMessagePlus,
+	IconPlus,
+	IconPower,
+	IconSettings,
+	IconSmartphone,
+	Logo,
+} from "./Icons.tsx";
 import { Modal } from "./Modal.tsx";
 
 const SESSION_PAGE = 30;
@@ -44,7 +56,7 @@ function WorkspaceGroup({ workspace, onSettings }: { workspace: WorkspaceInfo; o
 					onClick={() => store.toggleExpanded(workspace.id)}
 					title={expanded ? "收起" : "展开"}
 				>
-					›
+					<IconChevronRight size={14} />
 				</button>
 				<button
 					type="button"
@@ -52,13 +64,14 @@ function WorkspaceGroup({ workspace, onSettings }: { workspace: WorkspaceInfo; o
 					title={workspace.path}
 					onClick={() => store.selectWorkspace(workspace.id)}
 				>
-					{workspace.name}
+					<IconFolder size={15} className="workspace-icon" />
+					<span className="workspace-label">{workspace.name}</span>
 					{workspace.policy !== "smart" ? (
 						<span className={`policy-tag ${workspace.policy}`}>{POLICY_LABEL[workspace.policy]}</span>
 					) : null}
 				</button>
 				<button type="button" className="ghost icon" title="工作区设置" onClick={onSettings}>
-					⚙
+					<IconSettings size={14} />
 				</button>
 				<button
 					type="button"
@@ -66,7 +79,7 @@ function WorkspaceGroup({ workspace, onSettings }: { workspace: WorkspaceInfo; o
 					title="新建会话"
 					onClick={() => void store.createSession(workspace.id)}
 				>
-					＋
+					<IconPlus size={15} />
 				</button>
 			</div>
 			{expanded ? (
@@ -144,7 +157,7 @@ export function WorkspaceSettings({ workspace, onClose }: { workspace: Workspace
 				>
 					{confirmRemove ? "再次点击确认移除（不会删除任何文件）" : "从 Pier 移除工作区"}
 				</button>
-				<button type="button" onClick={onClose}>
+				<button type="button" className="primary" onClick={onClose}>
 					完成
 				</button>
 			</div>
@@ -163,6 +176,8 @@ export function Sidebar({ onShowLogs, onShowRemote }: { onShowLogs: () => void; 
 	const addWorkspace = useAddWorkspace();
 	const [settingsFor, setSettingsFor] = useState<string | undefined>();
 	const settingsWorkspace = workspaces.find((w) => w.id === settingsFor);
+	const selectedWorkspaceId = useAppState((s) => s.selectedWorkspaceId);
+	const targetWorkspace = workspaces.find((w) => w.id === selectedWorkspaceId) ?? workspaces[0];
 
 	const online = host.state === "ready" && connection === "open";
 	const statusText = online
@@ -180,13 +195,27 @@ export function Sidebar({ onShowLogs, onShowRemote }: { onShowLogs: () => void; 
 	return (
 		<aside className="sidebar">
 			<div className="brand">
+				<Logo size={26} />
 				<span className="brand-name">Pier</span>
-				<span className={`status-dot ${online ? "ok" : host.state === "failed" ? "bad" : "wait"}`} />
+			</div>
+			<div className="sidebar-actions">
+				<button
+					type="button"
+					className="new-session-button"
+					disabled={!online || !targetWorkspace}
+					title={targetWorkspace ? `在「${targetWorkspace.name}」中新建会话` : "请先添加工作区"}
+					onClick={() => {
+						if (targetWorkspace) void store.createSession(targetWorkspace.id);
+					}}
+				>
+					<IconMessagePlus size={16} />
+					<span>新建会话</span>
+				</button>
 			</div>
 			<div className="sidebar-section-title">
 				<span>工作区</span>
 				<button type="button" className="ghost icon" title="添加工作区" onClick={() => void addWorkspace()}>
-					＋
+					<IconPlus size={14} />
 				</button>
 			</div>
 			<div className="workspace-list">
@@ -195,27 +224,38 @@ export function Sidebar({ onShowLogs, onShowRemote }: { onShowLogs: () => void; 
 				))}
 				{online && !workspaces.length ? (
 					<button type="button" className="add-first" onClick={() => void addWorkspace()}>
-						＋ 添加第一个工作区
+						<IconFolderPlus size={16} />
+						添加第一个工作区
 					</button>
 				) : null}
 			</div>
 			<div className="sidebar-footer">
-				<button type="button" className="ghost" onClick={onShowLogs} title={hostInfo?.agentDir ?? ""}>
-					{statusText}
+				<button
+					type="button"
+					className="host-status"
+					onClick={onShowLogs}
+					title={hostInfo?.agentDir ? `配置目录 ${hostInfo.agentDir} · 点击查看日志` : "查看 Host 日志"}
+				>
+					<span className={`status-dot ${online ? "ok" : host.state === "failed" ? "bad" : "wait"}`} />
+					<span className="host-status-text">{statusText}</span>
+					<IconLogs size={14} className="host-status-icon" />
 				</button>
 				<span className="sidebar-footer-actions">
 					<button
 						type="button"
-						className="ghost"
+						className={`ghost icon remote-button${remote?.running ? " on" : ""}`}
 						onClick={onShowRemote}
 						disabled={!online}
-						title={remote?.running ? `远程访问已开启 · ${connectedDevices} 台设备在线` : "手机配对与远程访问（未开启）"}
+						title={
+							remote?.running ? `手机远程访问已开启 · ${connectedDevices} 台设备在线` : "手机配对与远程访问（未开启）"
+						}
 					>
-						手机{remote?.running ? <span className="remote-count"> · {connectedDevices}</span> : null}
+						<IconSmartphone size={15} />
+						{remote?.running ? <span className="remote-count">{connectedDevices}</span> : null}
 					</button>
 					{store.bridgeKind === "tauri" ? (
-						<button type="button" className="ghost" onClick={() => store.quit()} title="退出 Pier（停止 Host）">
-							退出
+						<button type="button" className="ghost icon" onClick={() => store.quit()} title="退出 Pier（停止 Host）">
+							<IconPower size={15} />
 						</button>
 					) : null}
 				</span>

@@ -1,30 +1,61 @@
 import { POLICY_LABEL, relativeTime, sessionTitle } from "../lib/format.ts";
 import { useAppState, useStore } from "../lib/store.tsx";
+import {
+	IconChevronRight,
+	IconFolder,
+	IconFolderPlus,
+	IconMessage,
+	IconMessagePlus,
+	IconShield,
+	IconSparkles,
+	Logo,
+} from "./Icons.tsx";
 import { useAddWorkspace } from "./Sidebar.tsx";
+
+const STEPS = [
+	{ icon: IconFolder, title: "添加工作区", text: "选择一个项目目录，Agent 只在其中读写文件、运行命令。" },
+	{ icon: IconSparkles, title: "描述任务", text: "新建会话，用自然语言告诉 Agent 你想做什么。" },
+	{ icon: IconShield, title: "审批操作", text: "执行命令或修改工作区外的文件前，Pier 会先征求你的同意。" },
+];
 
 export function Welcome() {
 	const addWorkspace = useAddWorkspace();
 	const hostInfo = useAppState((s) => s.hostInfo);
 	return (
 		<div className="home">
-			<h1>欢迎使用 Pier</h1>
-			<p>
-				Pier 在桌面上运行 pi Agent：它能在你指定的项目目录里读写文件、运行命令。关闭窗口后 Agent
-				会继续在后台运行，之后也可以从手机连接。
-			</p>
-			<ol>
-				<li>添加一个项目目录作为工作区；</li>
-				<li>新建会话，描述你的任务；</li>
-				<li>需要执行命令或修改工作区外的文件时，Pier 会请你批准。</li>
-			</ol>
-			<button type="button" className="primary large" onClick={() => void addWorkspace()}>
-				添加工作区
-			</button>
-			{hostInfo ? (
-				<p className="muted small">
-					模型与凭据复用 pi 的配置（{hostInfo.agentDir}）。如果还没有可用模型，请先在终端运行 <code>pi</code> 完成登录。
-				</p>
-			) : null}
+			<div className="home-inner">
+				<div className="hero">
+					<Logo size={56} />
+					<h1>欢迎使用 Pier</h1>
+					<p className="hero-text">
+						Pier 在桌面上运行 pi Agent。关闭窗口后 Agent 会继续在后台运行，之后也可以从手机连接。
+					</p>
+				</div>
+				<div className="steps">
+					{STEPS.map((step, i) => (
+						<div key={step.title} className="step-card">
+							<div className="step-icon">
+								<step.icon size={18} />
+							</div>
+							<div className="step-index">0{i + 1}</div>
+							<div className="step-title">{step.title}</div>
+							<div className="step-text">{step.text}</div>
+						</div>
+					))}
+				</div>
+				<div className="hero-actions">
+					<button type="button" className="primary large" onClick={() => void addWorkspace()}>
+						<IconFolderPlus size={17} />
+						添加工作区
+					</button>
+				</div>
+				{hostInfo ? (
+					<p className="muted small hero-note">
+						模型与凭据复用 pi 的配置（<code>{hostInfo.agentDir}</code>）。如果还没有可用模型，请先在终端运行{" "}
+						<code>pi</code> 完成登录。
+					</p>
+				) : null}
+			</div>
 		</div>
 	);
 }
@@ -36,26 +67,61 @@ export function WorkspaceHome({ workspaceId }: { workspaceId: string }) {
 	if (!workspace) return null;
 	return (
 		<div className="home">
-			<h1>{workspace.name}</h1>
-			<p className="muted">
-				<code>{workspace.path}</code> · 审批策略：{POLICY_LABEL[workspace.policy]}
-			</p>
-			<button type="button" className="primary large" onClick={() => void store.createSession(workspace.id)}>
-				新建会话
-			</button>
-			{sessions?.length ? (
-				<div className="recent">
-					<h3>最近的会话</h3>
-					{sessions.slice(0, 10).map((session) => (
-						<button type="button" key={session.id} className="recent-row" onClick={() => store.selectSession(session)}>
-							<span>{sessionTitle(session)}</span>
-							<span className="muted">
-								{session.messageCount} 条消息 · {relativeTime(session.modifiedAt)}
+			<div className="home-inner">
+				<div className="workspace-hero">
+					<div className="workspace-hero-icon">
+						<IconFolder size={26} />
+					</div>
+					<div className="workspace-hero-text">
+						<h1>{workspace.name}</h1>
+						<div className="workspace-meta">
+							<code title={workspace.path}>{workspace.path}</code>
+							<span className={`pill policy-pill ${workspace.policy}`}>
+								<IconShield size={12} />
+								{POLICY_LABEL[workspace.policy]}
 							</span>
-						</button>
-					))}
+						</div>
+					</div>
+					<button type="button" className="primary large" onClick={() => void store.createSession(workspace.id)}>
+						<IconMessagePlus size={17} />
+						新建会话
+					</button>
 				</div>
-			) : null}
+				<div className="recent">
+					<div className="section-heading">
+						<h3>最近的会话</h3>
+						{sessions?.length ? <span className="muted small">共 {sessions.length} 个</span> : null}
+					</div>
+					{!sessions ? <div className="recent-empty">加载中…</div> : null}
+					{sessions && !sessions.length ? (
+						<div className="recent-empty">
+							<IconMessage size={22} />
+							<span>还没有会话，点击「新建会话」开始第一个任务。</span>
+						</div>
+					) : null}
+					{sessions?.length ? (
+						<div className="recent-list">
+							{sessions.slice(0, 10).map((session) => (
+								<button
+									type="button"
+									key={session.id}
+									className="recent-row"
+									onClick={() => store.selectSession(session)}
+								>
+									<span className="recent-icon">
+										<IconMessage size={15} />
+									</span>
+									<span className="recent-title">{sessionTitle(session)}</span>
+									<span className="recent-meta">
+										{session.messageCount} 条消息 · {relativeTime(session.modifiedAt)}
+									</span>
+									<IconChevronRight size={15} className="recent-chevron" />
+								</button>
+							))}
+						</div>
+					) : null}
+				</div>
+			</div>
 		</div>
 	);
 }

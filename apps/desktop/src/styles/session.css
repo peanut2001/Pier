@@ -1,0 +1,384 @@
+/* Session header, chips and dropdown menus. */
+
+.session-view {
+	display: flex;
+	flex-direction: column;
+	flex: 1;
+	min-height: 0;
+}
+
+.session-header {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	min-height: 56px;
+	padding: 8px 14px 8px 22px;
+	border-bottom: 1px solid var(--border);
+	background: var(--bg);
+	z-index: 5;
+}
+
+.session-heading {
+	flex: 1;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 1px;
+}
+
+.session-crumb {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	max-width: 100%;
+	font-size: 11.5px;
+	color: var(--text-faint);
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+}
+
+.session-title {
+	display: block;
+	max-width: 100%;
+	border: none;
+	background: transparent;
+	padding: 0;
+	font-weight: 600;
+	font-size: 14.5px;
+	text-align: left;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.session-title:hover:not(:disabled) {
+	background: transparent;
+	color: var(--accent-text);
+}
+
+.title-form {
+	width: 100%;
+}
+
+.title-form input {
+	width: 100%;
+	max-width: 480px;
+	padding: 3px 8px;
+	font-weight: 600;
+}
+
+.session-tools {
+	display: flex;
+	gap: 6px;
+	align-items: center;
+}
+
+.chip {
+	max-width: 240px;
+	padding: 5px 11px;
+	border-radius: 999px;
+	font-size: 12.5px;
+	background: transparent;
+	border-color: var(--border-strong);
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.icon-chip {
+	width: 32px;
+	height: 32px;
+	padding: 0;
+	color: var(--text-muted);
+}
+
+.model-chip {
+	gap: 7px;
+	max-width: 300px;
+	height: 32px;
+	padding: 0 10px 0 11px;
+}
+
+.model-chip-icon {
+	color: var(--accent-text);
+}
+
+.model-chip-name {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.model-chip-thinking {
+	flex: none;
+	color: var(--text-muted);
+	padding-left: 7px;
+	border-left: 1px solid var(--border-strong);
+}
+
+.model-chip-caret,
+.chip-caret {
+	flex: none;
+	color: var(--text-faint);
+}
+
+.thinking-section {
+	padding: 0 2px 8px;
+	margin-bottom: 8px;
+	border-bottom: 1px solid var(--border);
+}
+
+.thinking-levels {
+	display: flex;
+	gap: 2px;
+	padding: 3px;
+	border-radius: 10px;
+	background: var(--bg-active);
+}
+
+.thinking-level {
+	flex: 1;
+	min-width: 0;
+	border: none;
+	background: transparent;
+	font-size: 12px;
+	padding: 5px 0;
+	border-radius: 7px;
+	color: var(--text-muted);
+}
+
+.thinking-level:hover:not(:disabled) {
+	background: transparent;
+	color: var(--text);
+}
+
+.thinking-level.selected,
+.thinking-level.selected:hover:not(:disabled) {
+	background: var(--bg-raised);
+	color: var(--text);
+	box-shadow:
+		var(--shadow-sm),
+		0 0 0 1px var(--border);
+}
+
+/* ---- dropdowns ------------------------------------------------------------------- */
+
+.dropdown {
+	position: relative;
+}
+
+.dropdown-menu {
+	position: absolute;
+	top: calc(100% + 6px);
+	left: 0;
+	z-index: 30;
+	min-width: 220px;
+	max-height: 440px;
+	overflow-y: auto;
+	padding: 6px;
+	background: var(--bg-raised);
+	border: 1px solid var(--border-strong);
+	border-radius: 12px;
+	box-shadow: var(--shadow-lg);
+	animation: pop-in 0.14s var(--ease);
+	transform-origin: top left;
+}
+
+.dropdown-menu.right {
+	left: auto;
+	right: 0;
+	transform-origin: top right;
+}
+
+.dropdown-menu.up {
+	top: auto;
+	bottom: calc(100% + 8px);
+	transform-origin: bottom left;
+}
+
+/* The policy picker sits at the left of the composer toolbar, so open it rightwards. */
+.dropdown-menu.up.policies {
+	left: 0;
+	right: auto;
+	width: 320px;
+}
+
+.dropdown-menu.models {
+	width: 380px;
+	left: auto;
+	right: 0;
+	transform-origin: top right;
+}
+
+.dropdown-note {
+	padding: 8px 8px 4px;
+	margin-top: 4px;
+	font-size: 11.5px;
+	color: var(--text-faint);
+	border-top: 1px solid var(--border);
+}
+
+.dropdown-search {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 0 10px;
+	margin-bottom: 4px;
+	border-radius: 8px;
+	background: var(--bg-active);
+	color: var(--text-faint);
+}
+
+.dropdown-search:focus-within {
+	box-shadow: 0 0 0 2px var(--accent-ring);
+}
+
+.dropdown-search input,
+.dropdown-search input:focus {
+	flex: 1;
+	min-width: 0;
+	border: none;
+	background: transparent;
+	box-shadow: none;
+	padding: 7px 0;
+}
+
+.dropdown-group-title {
+	padding: 8px 8px 4px;
+	font-size: 11px;
+	font-weight: 600;
+	letter-spacing: 0.04em;
+	color: var(--text-faint);
+	text-transform: uppercase;
+}
+
+.dropdown-group-title.no-caps {
+	text-transform: none;
+	letter-spacing: 0;
+	font-size: 12px;
+}
+
+.dropdown-item {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	width: 100%;
+	text-align: left;
+	border: none;
+	background: transparent;
+	padding: 7px 9px;
+	border-radius: 8px;
+	font-weight: 400;
+	white-space: normal;
+}
+
+.dropdown-item:hover:not(:disabled) {
+	background: var(--bg-hover);
+}
+
+.dropdown-item.selected,
+.dropdown-item.selected:hover:not(:disabled) {
+	background: var(--accent-soft);
+}
+
+.dropdown-item.danger {
+	color: var(--danger);
+}
+
+.dropdown-item .muted {
+	font-size: 11.5px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.menu-label {
+	display: inline-flex;
+	align-items: center;
+	gap: 9px;
+}
+
+.menu-label .icon-svg {
+	color: var(--text-muted);
+}
+
+.dropdown-item.danger .menu-label .icon-svg {
+	color: var(--danger);
+}
+
+.model-item-text {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+	gap: 1px;
+}
+
+.model-item-name {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font-weight: 500;
+}
+
+.mini-tag {
+	font-size: 10.5px;
+	font-weight: 500;
+	padding: 0 6px;
+	border-radius: 999px;
+	background: var(--bg-active);
+	color: var(--text-muted);
+}
+
+.dropdown-empty {
+	padding: 10px 8px;
+	color: var(--text-muted);
+	font-size: 12px;
+}
+
+.policy-chip {
+	gap: 6px;
+	height: 30px;
+	padding: 0 10px;
+	white-space: nowrap;
+	border-color: transparent;
+	background: var(--bg-active);
+	color: var(--text-muted);
+}
+
+.policy-chip:hover:not(:disabled) {
+	color: var(--text);
+}
+
+.policy-chip.auto,
+.policy-chip.auto:hover:not(:disabled) {
+	color: var(--warning);
+	background: var(--warning-soft);
+}
+
+.policy-item-text {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	min-width: 0;
+}
+
+.policy-item-title {
+	font-weight: 500;
+}
+
+.policy-item-desc {
+	font-size: 11.5px;
+	color: var(--text-muted);
+}
+
+.policy-item.auto .policy-item-title,
+.policy-item.auto .policy-item-desc {
+	color: var(--warning);
+}
+
+.policy-check {
+	flex: none;
+	color: var(--accent-text);
+}

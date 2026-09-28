@@ -1,5 +1,6 @@
 import type { UiRequest, UiResponse } from "@pier/protocol";
 import { useEffect, useState } from "react";
+import { IconCheck, IconClock, IconInfo, IconShieldAlert, IconX } from "./Icons.tsx";
 
 function useCountdown(expiresAt: string | undefined): string | undefined {
 	const [now, setNow] = useState(Date.now());
@@ -26,9 +27,21 @@ function ApprovalCard({ request, respond }: { request: UiRequest; respond: (r: U
 	return (
 		<div className={`ui-card approval${high ? " high" : ""}`}>
 			<div className="ui-card-title">
-				<span className={`severity ${approval.severity}`}>{high ? "高风险" : "需要批准"}</span>
-				<span className="tool-name">{approval.toolName}</span>
-				{countdown ? <span className="countdown">{countdown} 后自动拒绝</span> : null}
+				<span className="ui-card-icon">
+					<IconShieldAlert size={16} />
+				</span>
+				<span className="ui-card-heading">
+					<span className="ui-card-heading-main">
+						Agent 请求执行 <span className="tool-name">{approval.toolName}</span>
+					</span>
+					<span className={`severity ${approval.severity}`}>{high ? "高风险" : "需要批准"}</span>
+				</span>
+				{countdown ? (
+					<span className="countdown">
+						<IconClock size={12} />
+						{countdown} 后自动拒绝
+					</span>
+				) : null}
 			</div>
 			<pre className="approval-summary">{approval.summary}</pre>
 			<div className="ui-card-reason">{approval.reason}</div>
@@ -60,6 +73,7 @@ function ApprovalCard({ request, respond }: { request: UiRequest; respond: (r: U
 			) : (
 				<div className="ui-card-actions">
 					<button type="button" className="primary" onClick={() => respond({ decision: "allow_once" })}>
+						<IconCheck size={15} />
 						允许一次
 					</button>
 					{approval.sessionAllowable ? (
@@ -68,10 +82,13 @@ function ApprovalCard({ request, respond }: { request: UiRequest; respond: (r: U
 							onClick={() => respond({ decision: "allow_session" })}
 							title={approval.sessionScope ?? ""}
 						>
-							本会话内允许{approval.sessionScope ? `：${approval.sessionScope}` : ""}
+							<span className="button-text">
+								本会话内允许{approval.sessionScope ? `：${approval.sessionScope}` : ""}
+							</span>
 						</button>
 					) : null}
 					<button type="button" className="danger" onClick={() => setDenying(true)}>
+						<IconX size={15} />
 						拒绝…
 					</button>
 				</div>
@@ -86,11 +103,19 @@ function DialogCard({ request, respond }: { request: UiRequest; respond: (r: UiR
 	return (
 		<div className="ui-card">
 			<div className="ui-card-title">
+				<span className="ui-card-icon info">
+					<IconInfo size={16} />
+				</span>
 				<span className="severity normal">
 					{request.kind === "confirm" ? "确认" : request.kind === "select" ? "选择" : "输入"}
 				</span>
 				<span>{request.title}</span>
-				{countdown ? <span className="countdown">{countdown} 后超时</span> : null}
+				{countdown ? (
+					<span className="countdown">
+						<IconClock size={12} />
+						{countdown} 后超时
+					</span>
+				) : null}
 			</div>
 			{request.message ? <div className="ui-card-message">{request.message}</div> : null}
 			{request.kind === "confirm" ? (

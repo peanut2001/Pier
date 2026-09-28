@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { encode } from "uqr";
 import { relativeTime } from "../lib/format.ts";
 import { useAppState, useStore } from "../lib/store.tsx";
+import { IconPencil } from "./Icons.tsx";
 import { CopyButton } from "./Markdown.tsx";
 import { Modal } from "./Modal.tsx";
 
@@ -147,7 +148,7 @@ function DeviceRow({ device }: { device: DeviceInfo }) {
 								setEditing(true);
 							}}
 						>
-							✎
+							<IconPencil size={13} />
 						</button>
 					</div>
 				)}

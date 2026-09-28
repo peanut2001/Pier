@@ -1,0 +1,188 @@
+import type { ReactNode, SVGProps } from "react";
+
+type IconProps = Omit<SVGProps<SVGSVGElement>, "children"> & { size?: number };
+
+/** Minimal stroke icon set (Lucide-style geometry) so the UI does not rely on text glyphs. */
+function make(paths: ReactNode) {
+	return function Icon({ size = 16, className, ...rest }: IconProps) {
+		return (
+			<svg
+				width={size}
+				height={size}
+				viewBox="0 0 24 24"
+				fill="none"
+				stroke="currentColor"
+				strokeWidth={1.9}
+				strokeLinecap="round"
+				strokeLinejoin="round"
+				aria-hidden="true"
+				className={`icon-svg${className ? ` ${className}` : ""}`}
+				{...rest}
+			>
+				{paths}
+			</svg>
+		);
+	};
+}
+
+export const IconPlus = make(<path d="M12 5v14M5 12h14" />);
+export const IconX = make(<path d="M18 6 6 18M6 6l12 12" />);
+export const IconCheck = make(<path d="M20 6 9 17l-5-5" />);
+export const IconChevronRight = make(<path d="m9 18 6-6-6-6" />);
+export const IconChevronDown = make(<path d="m6 9 6 6 6-6" />);
+export const IconChevronUp = make(<path d="m18 15-6-6-6 6" />);
+export const IconArrowUp = make(<path d="M12 19V5M5 12l7-7 7 7" />);
+export const IconArrowDown = make(<path d="M12 5v14M19 12l-7 7-7-7" />);
+export const IconMore = make(
+	<>
+		<circle cx="12" cy="12" r="1" />
+		<circle cx="19" cy="12" r="1" />
+		<circle cx="5" cy="12" r="1" />
+	</>,
+);
+export const IconSettings = make(
+	<>
+		<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+		<circle cx="12" cy="12" r="3" />
+	</>,
+);
+export const IconFolder = make(
+	<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />,
+);
+export const IconFolderPlus = make(
+	<>
+		<path d="M12 10v6M9 13h6" />
+		<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
+	</>,
+);
+export const IconMessage = make(<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" />);
+export const IconMessagePlus = make(
+	<>
+		<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" />
+		<path d="M8 12h8M12 8v8" />
+	</>,
+);
+export const IconTerminal = make(<path d="m4 17 6-6-6-6M12 19h8" />);
+export const IconFile = make(
+	<>
+		<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+		<path d="M14 2v4a2 2 0 0 0 2 2h4" />
+	</>,
+);
+export const IconFilePen = make(
+	<>
+		<path d="M12.5 22H18a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v9.5" />
+		<path d="M14 2v4a2 2 0 0 0 2 2h4" />
+		<path d="M13.38 12.62a2.12 2.12 0 1 1 3 3L11 21l-4 1 1-4Z" />
+	</>,
+);
+export const IconFilePlus = make(
+	<>
+		<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+		<path d="M14 2v4a2 2 0 0 0 2 2h4M9 15h6M12 12v6" />
+	</>,
+);
+export const IconSearch = make(
+	<>
+		<circle cx="11" cy="11" r="8" />
+		<path d="m21 21-4.3-4.3" />
+	</>,
+);
+export const IconList = make(<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />);
+export const IconWrench = make(
+	<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />,
+);
+export const IconShield = make(
+	<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" />,
+);
+export const IconShieldAlert = make(
+	<>
+		<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" />
+		<path d="M12 8v4M12 16h.01" />
+	</>,
+);
+export const IconZap = make(
+	<path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z" />,
+);
+export const IconSparkles = make(
+	<>
+		<path d="M9.94 15.5A2 2 0 0 0 8.5 14.06l-6.14-1.58a.5.5 0 0 1 0-.96L8.5 9.94A2 2 0 0 0 9.94 8.5l1.58-6.14a.5.5 0 0 1 .96 0L14.06 8.5A2 2 0 0 0 15.5 9.94l6.14 1.58a.5.5 0 0 1 0 .96L15.5 14.06a2 2 0 0 0-1.44 1.44l-1.58 6.14a.5.5 0 0 1-.96 0z" />
+		<path d="M20 3v4M22 5h-4" />
+	</>,
+);
+export const IconBrain = make(
+	<>
+		<path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z" />
+		<path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z" />
+		<path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4" />
+	</>,
+);
+export const IconCopy = make(
+	<>
+		<rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
+		<path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+	</>,
+);
+export const IconStop = make(<rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none" />);
+export const IconClock = make(
+	<>
+		<circle cx="12" cy="12" r="10" />
+		<path d="M12 6v6l4 2" />
+	</>,
+);
+export const IconAlert = make(
+	<>
+		<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" />
+		<path d="M12 9v4M12 17h.01" />
+	</>,
+);
+export const IconInfo = make(
+	<>
+		<circle cx="12" cy="12" r="10" />
+		<path d="M12 16v-4M12 8h.01" />
+	</>,
+);
+export const IconPower = make(<path d="M12 2v10M18.4 6.6a9 9 0 1 1-12.77.04" />);
+export const IconLogs = make(<path d="M13 12h8M13 18h8M13 6h8M3 12h1M3 18h1M3 6h1M8 12h1M8 18h1M8 6h1" />);
+export const IconGitBranch = make(
+	<>
+		<path d="M6 3v12" />
+		<circle cx="18" cy="6" r="3" />
+		<circle cx="6" cy="18" r="3" />
+		<path d="M18 9a9 9 0 0 1-9 9" />
+	</>,
+);
+export const IconMinimize = make(
+	<path d="M8 3v3a2 2 0 0 1-2 2H3M21 8h-3a2 2 0 0 1-2-2V3M3 16h3a2 2 0 0 1 2 2v3M16 21v-3a2 2 0 0 1 2-2h3" />,
+);
+export const IconLayers = make(
+	<>
+		<path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z" />
+		<path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65M22 12.65l-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65" />
+	</>,
+);
+export const IconImage = make(
+	<>
+		<rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
+		<circle cx="9" cy="9" r="2" />
+		<path d="m21 15-3.09-3.09a2 2 0 0 0-2.82 0L6 21" />
+	</>,
+);
+export const IconSmartphone = make(
+	<>
+		<rect width="14" height="20" x="5" y="2" rx="2" ry="2" />
+		<path d="M12 18h.01" />
+	</>,
+);
+export const IconPencil = make(
+	<>
+		<path d="M21.17 6.81a1 1 0 0 0-3.99-3.99L3.84 16.17a2 2 0 0 0-.5.83l-1.32 4.35a.5.5 0 0 0 .62.62l4.35-1.32a2 2 0 0 0 .83-.5z" />
+		<path d="m15 5 4 4" />
+	</>,
+);
+export const IconLoader = make(<path d="M21 12a9 9 0 1 1-6.22-8.56" />);
+
+/** App logo: the bundled favicon (blue→teal pier mark). */
+export function Logo({ size = 28 }: { size?: number }) {
+	return <img className="logo" src="/favicon.png" width={size} height={size} alt="" draggable={false} />;
+}

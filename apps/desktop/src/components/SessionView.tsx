@@ -5,6 +5,7 @@ import { useState } from "react";
 import { formatCost, formatTokens, RUN_STATE_LABEL, sessionTitle } from "../lib/format.ts";
 import { useAppState, useChatView, useStore } from "../lib/store.tsx";
 import { Composer } from "./Composer.tsx";
+import { IconAlert, IconFolder, IconInfo, IconLoader, IconX } from "./Icons.tsx";
 import { PendingRequests } from "./PendingRequests.tsx";
 import { ModelPicker, SessionMenu } from "./SessionControls.tsx";
 import { Transcript } from "./Transcript.tsx";
@@ -67,15 +68,25 @@ function Banners({ chat }: { chat: ChatState }) {
 		<>
 			{chat.retry ? (
 				<div className="banner warning">
+					<IconLoader size={15} className="spin" />
 					正在重试（{chat.retry.attempt}/{chat.retry.maxAttempts}）：{chat.retry.errorMessage}
 				</div>
 			) : null}
-			{chat.compacting ? <div className="banner info">正在压缩上下文…</div> : null}
+			{chat.compacting ? (
+				<div className="banner info">
+					<IconLoader size={15} className="spin" />
+					正在压缩上下文…
+				</div>
+			) : null}
 			{chat.errorMessage && chat.runState === "idle" ? (
-				<div className="banner error">上一次运行出错：{chat.errorMessage}</div>
+				<div className="banner error">
+					<IconAlert size={15} />
+					<span>上一次运行出错：{chat.errorMessage}</span>
+				</div>
 			) : null}
 			{chat.closed ? (
 				<div className="banner warning">
+					<IconInfo size={15} />
 					{chat.closed === "host_shutdown" ? "Pier Host 已停止，会话已关闭。" : "会话已关闭。"}
 				</div>
 			) : null}
@@ -89,6 +100,7 @@ function Notices({ chat, controller }: { chat: ChatState; controller: ChatContro
 		<div className="notices">
 			{chat.notices.slice(-3).map((notice) => (
 				<div key={notice.id} className={`notice ${notice.level}`}>
+					{notice.level === "info" ? <IconInfo size={14} /> : <IconAlert size={14} />}
 					<span>
 						{notice.kind === "extension"
 							? `扩展出错（${notice.source ?? "未知"}）：`
@@ -97,8 +109,8 @@ function Notices({ chat, controller }: { chat: ChatState; controller: ChatContro
 								: ""}
 						{notice.message}
 					</span>
-					<button type="button" className="ghost icon" onClick={() => controller.dismissNotice(notice.id)}>
-						×
+					<button type="button" className="ghost icon" title="关闭" onClick={() => controller.dismissNotice(notice.id)}>
+						<IconX size={13} />
 					</button>
 				</div>
 			))}
@@ -150,9 +162,17 @@ function StatusBar({ chat }: { chat: ChatState }) {
 		contextWindow && usage.lastContext ? Math.round((usage.lastContext / contextWindow) * 100) : undefined;
 	return (
 		<div className="status-bar">
-			<span className={`run-state ${chat.runState}`}>{RUN_STATE_LABEL[chat.runState]}</span>
+			<span className={`run-state ${chat.runState}`}>
+				<span className="run-dot" />
+				{RUN_STATE_LABEL[chat.runState]}
+			</span>
 			{usage.lastContext ? (
-				<span title="最近一次请求的上下文大小">
+				<span className="context-usage" title="最近一次请求的上下文大小">
+					{percent !== undefined ? (
+						<span className={`context-meter${percent >= 80 ? " high" : percent >= 50 ? " mid" : ""}`}>
+							<span style={{ width: `${Math.min(100, Math.max(2, percent))}%` }} />
+						</span>
+					) : null}
 					上下文 {formatTokens(usage.lastContext)}
 					{contextWindow ? ` / ${formatTokens(contextWindow)}` : ""}
 					{percent !== undefined ? `（${percent}%）` : ""}
@@ -191,7 +211,8 @@ export function SessionView({ session }: { session: SessionSummary }) {
 				<div className="session-heading">
 					<Title chat={chat} fallback={session} />
 					{workspace ? (
-						<span className="muted" title={workspace.path}>
+						<span className="session-crumb" title={workspace.path}>
+							<IconFolder size={12} />
 							{workspace.name}
 						</span>
 					) : null}

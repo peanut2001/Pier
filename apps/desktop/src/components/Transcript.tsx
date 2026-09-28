@@ -2,6 +2,7 @@ import { type AssistantBlock, buildTranscript, type ChatState, type TranscriptIt
 import type { UiRequest } from "@pier/protocol";
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { clockTime, formatTokens } from "../lib/format.ts";
+import { IconArrowDown, IconBrain, IconChevronRight, IconLayers, IconSparkles, IconTerminal } from "./Icons.tsx";
 import { CopyButton, Markdown } from "./Markdown.tsx";
 import { ToolCard } from "./ToolCard.tsx";
 
@@ -11,9 +12,10 @@ function Thinking({ text, redacted, live }: { text: string; redacted: boolean; l
 	return (
 		<div className={`thinking${expanded ? " open" : ""}`}>
 			<button type="button" className="thinking-toggle" onClick={() => setOpen(!expanded)}>
-				<span className={`chevron${expanded ? " open" : ""}`}>›</span>
-				{live ? "思考中…" : "思考过程"}
+				<IconBrain size={14} className={live ? "thinking-live" : undefined} />
+				<span className={live ? "shimmer" : undefined}>{live ? "思考中…" : "思考过程"}</span>
 				{redacted ? "（已被隐藏）" : ""}
+				<IconChevronRight size={13} className={`chevron${expanded ? " open" : ""}`} />
 			</button>
 			{expanded && text ? <div className="thinking-text">{text}</div> : null}
 		</div>
@@ -65,7 +67,7 @@ const AssistantMessageView = memo(
 				{message.stopReason === "aborted" ? <div className="message-note">已中止</div> : null}
 				{!streaming && text ? (
 					<div className="message-footer">
-						<CopyButton text={text} />
+						<CopyButton text={text} iconOnly label="复制回复" />
 						{message.model ? <span>{message.model}</span> : null}
 						{message.usage?.output ? <span>{formatTokens(message.usage.output)} tokens</span> : null}
 						{message.timestamp ? <span>{clockTime(message.timestamp)}</span> : null}
@@ -107,12 +109,21 @@ const ItemView = memo(function ItemView({
 			return <AssistantMessageView item={item} approvals={approvals} />;
 		case "bash":
 			return (
-				<div className="message bash">
-					<pre className="tool-command">
-						<span className="prompt">!</span> {item.message.command}
-					</pre>
-					<pre className="tool-output">{item.message.output}</pre>
-					{item.message.exitCode ? <div className="message-note">退出码 {item.message.exitCode}</div> : null}
+				<div className="message bash tool-card">
+					<div className="tool-header static">
+						<span className="tool-icon">
+							<IconTerminal size={14} />
+						</span>
+						<span className="tool-name">终端</span>
+						<span className="tool-summary">{item.message.command}</span>
+						{item.message.exitCode ? <span className="tool-status error">退出码 {item.message.exitCode}</span> : null}
+					</div>
+					<div className="tool-body">
+						<pre className="tool-command">
+							<span className="prompt">!</span> {item.message.command}
+						</pre>
+						<pre className="tool-output">{item.message.output}</pre>
+					</div>
 				</div>
 			);
 		case "custom":
@@ -125,14 +136,20 @@ const ItemView = memo(function ItemView({
 		case "compaction":
 			return (
 				<details className="divider-block">
-					<summary>上下文已压缩（此前约 {formatTokens(item.message.tokensBefore)} tokens）</summary>
+					<summary>
+						<IconLayers size={14} />
+						上下文已压缩（此前约 {formatTokens(item.message.tokensBefore)} tokens）
+					</summary>
 					<Markdown text={item.message.summary} />
 				</details>
 			);
 		case "branchSummary":
 			return (
 				<details className="divider-block">
-					<summary>分支摘要</summary>
+					<summary>
+						<IconLayers size={14} />
+						分支摘要
+					</summary>
 					<Markdown text={item.message.summary} />
 				</details>
 			);
@@ -198,7 +215,10 @@ export function Transcript({ chat }: { chat: ChatState }) {
 			<div className="transcript-inner">
 				{!chat.loaded ? <div className="placeholder">正在加载会话…</div> : null}
 				{chat.loaded && items.length === 0 ? (
-					<div className="placeholder">
+					<div className="placeholder new-chat">
+						<div className="new-chat-icon">
+							<IconSparkles size={26} />
+						</div>
 						<h2>开始新的对话</h2>
 						<p>在下方输入任务，Agent 将在该工作区中读写文件、运行命令。高风险操作会先请求你批准。</p>
 					</div>
@@ -225,7 +245,8 @@ export function Transcript({ chat }: { chat: ChatState }) {
 						setShowJump(false);
 					}}
 				>
-					↓ 回到底部
+					<IconArrowDown size={14} />
+					回到底部
 				</button>
 			) : null}
 		</div>

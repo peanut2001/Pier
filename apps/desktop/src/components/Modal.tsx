@@ -1,4 +1,5 @@
 import { type ReactNode, useEffect } from "react";
+import { IconX } from "./Icons.tsx";
 
 export function Modal({
 	title,
@@ -28,7 +29,7 @@ export function Modal({
 				<div className="modal-header">
 					<h3>{title}</h3>
 					<button type="button" className="ghost icon" onClick={onClose} title="关闭">
-						×
+						<IconX size={16} />
 					</button>
 				</div>
 				<div className="modal-body">{children}</div>
