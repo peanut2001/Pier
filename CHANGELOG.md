@@ -2,7 +2,7 @@
 
 All notable changes to Pier are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, minor versions may contain breaking changes.
 
-## Unreleased
+## v0.2.0 — 2026-09-29
 
 The mobile app and LAN remote access (milestone M3): pair a phone with the desktop by scanning a QR code, then watch and drive agents, answer approvals, and steer or abort runs from the phone over an end-to-end encrypted connection.
 
@@ -24,6 +24,7 @@ The mobile app and LAN remote access (milestone M3): pair a phone with the deskt
 
 - The shared `ChatController` moved from the desktop app into `@pier/chat-state`.
 - React is pinned to 19.2.3 across the workspace (the version Expo SDK 57 uses).
+- **Desktop**: the model and thinking-level pickers are merged into one control in the session header, and the composer has a permission-mode (approval policy) picker that applies to the whole workspace.
 - **Desktop UI refresh**: a more modern look across the app, in both dark and light themes.
   - New design tokens with the icon's blue-to-teal brand gradient, softer surfaces, rounded corners, and a floating main panel next to the sidebar.
   - SVG icons replace text glyphs throughout: sidebar, tool cards, menus, banners, toasts, and dialogs.
@@ -33,8 +34,16 @@ The mobile app and LAN remote access (milestone M3): pair a phone with the deskt
   - Approval cards, dropdowns, and modals are restyled with icons, blurred backdrops, and short enter animations. Animations respect `prefers-reduced-motion`.
   - The welcome screen and workspace home were redesigned with step cards, a workspace header, and a recent-sessions list.
 
+### Release assets
+
+- Desktop app: `pier-desktop-v0.2.0-linux-x64.deb` and `.AppImage`, `pier-desktop-v0.2.0-darwin-arm64.dmg`, `pier-desktop-v0.2.0-darwin-x64.dmg`, and `pier-desktop-v0.2.0-windows-x64.setup.exe`. Each bundle includes the Pier Host sidecar and pi's runtime assets.
+- Standalone host: `pier-host-v0.2.0-<os>-<arch>` archives for linux-x64, linux-arm64, darwin-arm64, darwin-x64, and windows-x64.
+- `SHA256SUMS.txt` lists the checksums of all assets.
+- The mobile app is not attached as a release asset yet; run it from source with Expo (see the README).
+
 ### Known limitations
 
+- The desktop bundles are still not code-signed; see the v0.1.0 notes for the macOS and Windows workarounds.
 - The mobile app has been verified with its web build and the Hermes bundles for Android and iOS, but not yet on real phones; there are no store builds yet.
 - The phone only reaches the desktop directly (same network or tailnet). Relay access and push notifications arrive in M5.
 
