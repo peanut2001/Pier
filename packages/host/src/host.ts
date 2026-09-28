@@ -7,6 +7,7 @@ import {
 	type HostInfo,
 	isMethodName,
 	isProtocolCompatible,
+	LOCAL_ONLY_EVENTS,
 	LOCAL_ONLY_METHODS,
 	type MethodName,
 	MethodParamsSchemas,
@@ -24,12 +25,14 @@ import {
 	badFrameResponse,
 	Connection,
 	type ConnectionKind,
+	type RemoteDevice,
 	type RequestHandler,
 	type Transport,
 } from "./connection.ts";
 import type { ManagedSession } from "./managed-session.ts";
 import { configPath, defaultPierDir, locksDir } from "./paths.ts";
 import { PI_VERSION, PiEnvironment, type PiEnvironmentOptions, toModelInfo } from "./pi/environment.ts";
+import { RemoteAccess, type RemoteAccessOptions } from "./remote/remote-access.ts";
 import { SessionPool } from "./session-pool.ts";
 
 export const PIER_HOST_VERSION = "0.1.0";
@@ -47,6 +50,54 @@ export interface PierHostOptions {
 	idleTimeoutMs?: number;
 	eventLogCapacity?: number;
 	sweepIntervalMs?: number;
+	/** Remote access overrides (tests, CLI flags). Saved settings live in config.json. */
+	remote?: RemoteAccessOptions;
+	/** Diagnostic log sink (stderr in the sidecar). */
+	log?: (message: string) => void;
+}
+
+/** Remote methods recorded in the audit log. */
+const AUDITED_METHODS = new Set<MethodName>([
+	"session.create",
+	"session.open",
+	"session.close",
+	"session.fork",
+	"session.rename",
+	"session.prompt",
+	"session.steer",
+	"session.followUp",
+	"session.abort",
+	"session.compact",
+	"model.set",
+	"thinking.set",
+	"ui.respond",
+]);
+
+function auditDetail(method: MethodName, params: Record<string, unknown>): Record<string, unknown> | undefined {
+	switch (method) {
+		case "session.prompt":
+		case "session.steer":
+		case "session.followUp":
+			return {
+				textLength: typeof params.text === "string" ? params.text.length : 0,
+				images: Array.isArray(params.images) ? params.images.length : 0,
+			};
+		case "ui.respond": {
+			const response = (params.response ?? {}) as Record<string, unknown>;
+			return {
+				requestId: params.requestId,
+				...(response.decision ? { decision: response.decision } : {}),
+				...(response.confirmed !== undefined ? { confirmed: response.confirmed } : {}),
+				...(response.cancelled ? { cancelled: true } : {}),
+			};
+		}
+		case "model.set":
+			return { provider: params.provider, modelId: params.modelId };
+		case "thinking.set":
+			return { level: params.level };
+		default:
+			return undefined;
+	}
 }
 
 interface HandlerContext {
@@ -78,6 +129,7 @@ export class PierHost implements RequestHandler {
 	readonly config: ConfigStore;
 	readonly env: PiEnvironment;
 	readonly pool: SessionPool;
+	readonly remote: RemoteAccess;
 	private readonly connections = new Set<Connection>();
 	private readonly localToken: string;
 	private readonly handlers: Handlers;
@@ -101,11 +153,35 @@ export class PierHost implements RequestHandler {
 			...(options.eventLogCapacity === undefined ? {} : { eventLogCapacity: options.eventLogCapacity }),
 			...(options.sweepIntervalMs === undefined ? {} : { sweepIntervalMs: options.sweepIntervalMs }),
 			onSessionReplaced: (session) => this.broadcast({ type: "session.listChanged", workspaceId: session.workspaceId }),
+			onSessionActivity: (session) => {
+				const summary = session.summary();
+				this.broadcast({
+					type: "session.activity",
+					workspaceId: summary.workspaceId,
+					sessionId: summary.id,
+					state: summary.state,
+					pendingUi: summary.pendingUi ?? 0,
+				});
+			},
 			onSessionClosed: (session) => {
 				for (const connection of this.connections) connection.subscriptions.delete(session);
 				this.broadcast({ type: "session.listChanged", workspaceId: session.workspaceId });
 			},
 		});
+		const log = options.log ?? (() => {});
+		this.remote = new RemoteAccess(
+			this.pierDir,
+			this.config,
+			{
+				hostId: () => this.config.hostId,
+				hostName: () => this.config.hostName,
+				connect: (transport, device) => this.connect(transport, "remote", device),
+				broadcastLocal: (event) => this.broadcast(event),
+				remoteConnections: () => [...this.connections].filter((c) => c.kind === "remote"),
+				log,
+			},
+			options.remote,
+		);
 		this.handlers = this.createHandlers();
 	}
 
@@ -113,6 +189,7 @@ export class PierHost implements RequestHandler {
 		const env = options.env instanceof PiEnvironment ? options.env : await PiEnvironment.create(options.env ?? {});
 		const host = new PierHost(options, env);
 		host.pool.startSweeper();
+		await host.remote.apply();
 		return host;
 	}
 
@@ -133,8 +210,8 @@ export class PierHost implements RequestHandler {
 	}
 
 	/** Attach a new transport. Feed incoming text frames to `connection.receive()`. */
-	connect(transport: Transport, kind: ConnectionKind): Connection {
-		const connection = new Connection(kind, transport, this);
+	connect(transport: Transport, kind: ConnectionKind, device?: RemoteDevice): Connection {
+		const connection = new Connection(kind, transport, this, device);
 		this.connections.add(connection);
 		const timer = setTimeout(() => {
 			if (!connection.authenticated) connection.close(4401, "host.hello timeout");
@@ -149,11 +226,14 @@ export class PierHost implements RequestHandler {
 		connection.subscriptions.clear();
 	}
 
-	/** Send a host-scoped event to every authenticated connection. */
+	/** Send a host-scoped event to every authenticated connection (local-only events only to local ones). */
 	broadcast(event: PierHostEvent): void {
 		const frame: EventFrame = { type: "evt", event };
+		const localOnly = LOCAL_ONLY_EVENTS.has(event.type);
 		for (const connection of this.connections) {
-			if (connection.authenticated) connection.send(frame);
+			if (!connection.authenticated) continue;
+			if (localOnly && connection.kind !== "local") continue;
+			connection.send(frame);
 		}
 	}
 
@@ -182,6 +262,17 @@ export class PierHost implements RequestHandler {
 			const parsed = schema.safeParse(frame.params);
 			if (!parsed.success) {
 				throw new PierProtocolError("BAD_REQUEST", `Invalid params for ${method}`, parsed.error.issues);
+			}
+			if (connection.device && AUDITED_METHODS.has(method)) {
+				const params = (parsed.data ?? {}) as Record<string, unknown>;
+				const detail = auditDetail(method, params);
+				this.remote.record({
+					event: method,
+					deviceId: connection.device.id,
+					deviceName: connection.device.name,
+					...(typeof params.sessionId === "string" ? { sessionId: params.sessionId } : {}),
+					...(detail ? { detail } : {}),
+				});
 			}
 			const handler = this.handlers[method] as (ctx: HandlerContext, params: unknown) => unknown;
 			const result = await handler({ connection, after: (fn) => after.push(fn) }, parsed.data);
@@ -218,17 +309,24 @@ export class PierHost implements RequestHandler {
 						{ hostVersion: PROTOCOL_VERSION },
 					);
 				}
+				const device = ctx.connection.device;
 				if (ctx.connection.kind === "local") {
 					if (!params.token || !tokensEqual(params.token, this.localToken)) {
 						throw new PierProtocolError("UNAUTHENTICATED", "Invalid local token");
 					}
-				} else {
-					throw new PierProtocolError("UNSUPPORTED", "Remote connections are not available yet");
+				} else if (!device || !this.remote.isRegistered(device.id)) {
+					// The secure channel authenticated the device; it may have been revoked since.
+					throw new PierProtocolError("UNAUTHENTICATED", "This device is no longer paired");
 				}
 				ctx.connection.authenticated = true;
 				ctx.connection.client = params.client;
 				ctx.connection.setCoalesceWindow(params.coalesceMs ?? 0);
-				return { protocolVersion: PROTOCOL_VERSION, host: this.info(), connectionId: ctx.connection.connectionId };
+				return {
+					protocolVersion: PROTOCOL_VERSION,
+					host: this.info(),
+					connectionId: ctx.connection.connectionId,
+					...(device ? { device: { id: device.id, name: device.name } } : {}),
+				};
 			},
 			"host.info": () => this.info(),
 
@@ -339,15 +437,15 @@ export class PierHost implements RequestHandler {
 					.respondUi(params.requestId, params.response, ctx.connection.connectionId),
 			}),
 
-			"device.list": () => {
-				throw new PierProtocolError("UNSUPPORTED", "Device management arrives with remote access (M3)");
-			},
-			"device.revoke": () => {
-				throw new PierProtocolError("UNSUPPORTED", "Device management arrives with remote access (M3)");
-			},
-			"pairing.start": () => {
-				throw new PierProtocolError("UNSUPPORTED", "Pairing arrives with remote access (M3)");
-			},
+			"device.list": () => ({ devices: this.remote.listDevices() }),
+			"device.revoke": (_ctx, params) => ({ revoked: this.remote.revoke(params.deviceId) }),
+			"device.rename": (_ctx, params) => ({ device: this.remote.rename(params.deviceId, params.name) }),
+			"pairing.start": () => this.remote.startPairing(),
+			"pairing.cancel": () => ({ cancelled: this.remote.cancelPairing() }),
+			"pairing.respond": (_ctx, params) => ({ accepted: this.remote.respondPairing(params.requestId, params.accept) }),
+
+			"remote.status": () => this.remote.status(),
+			"remote.configure": (_ctx, params) => this.remote.configure(params),
 		};
 	}
 
@@ -355,6 +453,7 @@ export class PierHost implements RequestHandler {
 		if (this.shuttingDown) return;
 		this.shuttingDown = true;
 		this.broadcast({ type: "host.notice", level: "warning", message: "Pier host is shutting down" });
+		await this.remote.shutdown();
 		await this.pool.disposeAll();
 		for (const connection of [...this.connections]) connection.close(1001, "Host shutting down");
 	}

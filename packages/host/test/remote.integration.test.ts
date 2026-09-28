@@ -1,0 +1,345 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import {
+	CLOSE_DEVICE_REVOKED,
+	createSecureSocketFactory,
+	type PairingOutcome,
+	PierClient,
+	pairWithHost,
+	type WebSocketFactory,
+	type WebSocketLike,
+} from "@pier/client";
+import {
+	ChannelError,
+	ConnectInitiator,
+	generateKeyPair,
+	type KeyPair,
+	keyFingerprint,
+	parsePairingUri,
+} from "@pier/crypto";
+import {
+	type EventFrame,
+	type PairingRequest,
+	PierProtocolError,
+	type RemoteAccessStatus,
+	type UiRequest,
+	type WorkspaceInfo,
+} from "@pier/protocol";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { fauxAssistantMessage, fauxToolCall, Recorder, startTestHost, type TestHost } from "./helpers.ts";
+
+const posixShell = process.platform !== "win32";
+
+const REMOTE = { enabled: true, port: 0, bindHost: "127.0.0.1", mdns: false } as const;
+
+/** Global WebSocket factory that records every raw frame sent and received (a "packet capture"). */
+function capturingFactory(wire: string[]): WebSocketFactory {
+	return (url) => {
+		const socket = new WebSocket(url) as unknown as WebSocketLike & {
+			addEventListener(type: string, fn: (e: { data: unknown }) => void): void;
+		};
+		const send = socket.send.bind(socket);
+		socket.send = (data: string) => {
+			wire.push(data);
+			send(data);
+		};
+		socket.addEventListener("message", (e) => wire.push(String(e.data)));
+		return socket;
+	};
+}
+
+async function expectCode(promise: Promise<unknown>, code: string): Promise<void> {
+	try {
+		await promise;
+	} catch (error) {
+		expect((error as { code?: string }).code).toBe(code);
+		return;
+	}
+	throw new Error(`Expected ${code}`);
+}
+
+describe("remote access", () => {
+	let t: TestHost;
+	let desktop: PierClient;
+	let desktopEvents: Recorder;
+	let workspace: WorkspaceInfo;
+	const phoneKeys: KeyPair = generateKeyPair();
+
+	beforeEach(async () => {
+		t = await startTestHost({
+			remote: { ...REMOTE, approvalTimeoutMs: 2000 },
+		});
+		desktop = await t.connect();
+		desktopEvents = new Recorder();
+		desktop.onEvent(desktopEvents.handler);
+		workspace = (await desktop.request("workspace.add", { path: t.workspaceDir })).workspace;
+	});
+	afterEach(() => t.close());
+
+	async function pair(
+		keys: KeyPair = phoneKeys,
+		decide: (request: PairingRequest) => boolean | undefined = () => true,
+		uri?: string,
+	): Promise<PairingOutcome> {
+		const pairingUri = uri ?? (await desktop.request("pairing.start")).uri;
+		const from = desktopEvents.mark();
+		const outcome = pairWithHost({
+			info: parsePairingUri(pairingUri),
+			deviceKeyPair: keys,
+			device: { name: "Test Phone", platform: "android", appVersion: "0.2.0" },
+		});
+		let settled = false;
+		void outcome
+			.finally(() => {
+				settled = true;
+			})
+			.catch(() => undefined);
+		// Answer the confirmation dialog the desktop shows (unless this attempt already failed).
+		void desktopEvents
+			.waitForType("pairing.request", from)
+			.then((frame) => {
+				if (settled) return;
+				const request = frame.event.request as PairingRequest;
+				const accept = decide(request);
+				if (accept !== undefined) return desktop.request("pairing.respond", { requestId: request.id, accept });
+			})
+			.catch(() => undefined);
+		return outcome;
+	}
+
+	function phoneClient(outcome: PairingOutcome, keys: KeyPair = phoneKeys, wire?: string[]): PierClient {
+		return new PierClient({
+			url: "pier-secure://host",
+			client: { name: "pier-mobile", version: "0.2.0", platform: "android" },
+			coalesceMs: 50,
+			reconnect: { initialDelayMs: 20, maxDelayMs: 60 },
+			createWebSocket: createSecureSocketFactory({
+				addresses: outcome.addresses,
+				hostPublicKey: outcome.hostPublicKey,
+				deviceKeyPair: keys,
+				...(wire ? { createWebSocket: capturingFactory(wire) } : {}),
+			}),
+		});
+	}
+
+	it("reports status and a pairing code that points at the listener", async () => {
+		const status = await desktop.request("remote.status");
+		expect(status).toMatchObject({ enabled: true, running: true, pairingActive: false, mdns: false });
+		expect(status.addresses).toEqual([`127.0.0.1:${status.port}`]);
+		const identity = t.host.remote.identity.publicKey;
+		expect(status.hostFingerprint).toBe(keyFingerprint(identity));
+
+		const from = desktopEvents.mark();
+		const started = await desktop.request("pairing.start");
+		const info = parsePairingUri(started.uri);
+		expect(info.addresses).toEqual(status.addresses);
+		expect(Buffer.from(info.hostPublicKey).equals(Buffer.from(identity))).toBe(true);
+		expect(info.hostId).toBe(t.host.info().hostId);
+		const changed = await desktopEvents.waitForType("remote.changed", from);
+		expect((changed.event.status as RemoteAccessStatus).pairingActive).toBe(true);
+		expect(await desktop.request("pairing.cancel")).toEqual({ cancelled: true });
+		expect((await desktop.request("remote.status")).pairingActive).toBe(false);
+	});
+
+	it("pairs after desktop confirmation, then drives a session end to end over the encrypted channel", async () => {
+		let seenRequest: PairingRequest | undefined;
+		const outcome = await pair(phoneKeys, (request) => {
+			seenRequest = request;
+			return true;
+		});
+		expect(seenRequest).toMatchObject({
+			device: { name: "Test Phone", platform: "android" },
+			fingerprint: keyFingerprint(phoneKeys.publicKey),
+			address: "127.0.0.1",
+		});
+		expect(outcome).toMatchObject({ hostId: t.host.info().hostId, hostName: t.host.info().hostName });
+		const devices = (await desktop.request("device.list")).devices;
+		expect(devices).toEqual([
+			expect.objectContaining({ id: outcome.deviceId, name: "Test Phone", connected: false, appVersion: "0.2.0" }),
+		]);
+
+		const wire: string[] = [];
+		const phone = phoneClient(outcome, phoneKeys, wire);
+		const hello = await phone.connect();
+		expect(hello.device).toEqual({ id: outcome.deviceId, name: "Test Phone" });
+		expect((await desktop.request("device.list")).devices[0]?.connected).toBe(true);
+
+		// Remote devices see workspaces but cannot manage them, nor pairing or devices.
+		expect((await phone.request("workspace.list")).workspaces.map((w) => w.id)).toEqual([workspace.id]);
+		for (const call of [
+			phone.request("workspace.add", { path: t.workspaceDir }),
+			phone.request("device.list"),
+			phone.request("pairing.start"),
+			phone.request("remote.configure", { enabled: false }),
+		]) {
+			await expectCode(call, "FORBIDDEN");
+		}
+
+		t.faux.setResponses([fauxAssistantMessage("streamed to the phone: TOP-SECRET-OUTPUT")]);
+		const { session } = await phone.request("session.create", { workspaceId: workspace.id });
+		const rec = new Recorder();
+		await phone.subscribe(session.id, rec.handler, { workspaceId: workspace.id });
+		await rec.waitForType("session.snapshot");
+		await phone.request("session.prompt", { sessionId: session.id, text: "remote prompt TOP-SECRET-INPUT" });
+		await rec.waitForType("agent_settled");
+		expect(rec.text()).toBe("streamed to the phone: TOP-SECRET-OUTPUT");
+
+		// Packet capture: after the handshake only ciphertext crosses the wire.
+		expect(wire.length).toBeGreaterThan(5);
+		const joined = wire.join("\n");
+		for (const secret of ["TOP-SECRET", "session.prompt", "host.hello", "workspace", "Test Phone"]) {
+			expect(joined).not.toContain(secret);
+		}
+		expect(wire.slice(2).every((frame) => JSON.parse(frame).t === "enc")).toBe(true);
+
+		// Pairing events never reach remote devices.
+		const phoneEvents: string[] = [];
+		phone.onEvent((frame: EventFrame) => phoneEvents.push(frame.event.type));
+		await desktop.request("pairing.start");
+		await desktop.request("pairing.cancel");
+		await phone.request("host.info");
+		expect(phoneEvents.filter((type) => type.startsWith("remote.") || type.startsWith("pairing."))).toEqual([]);
+
+		// The audit log records what the device did, without prompt text.
+		const audit = readFileSync(join(t.root, "pier", "audit.log"), "utf8");
+		expect(audit).toContain('"event":"pair.accepted"');
+		expect(audit).toContain('"event":"connect"');
+		expect(audit).toMatch(/"event":"session.prompt".*"textLength":30/);
+		expect(audit).not.toContain("TOP-SECRET");
+		phone.close();
+	});
+
+	it.skipIf(!posixShell)("lets the phone answer approvals", async () => {
+		const outcome = await pair();
+		const phone = phoneClient(outcome);
+		await phone.connect();
+		t.faux.setResponses([
+			fauxAssistantMessage(fauxToolCall("bash", { command: "touch from-phone.txt" }), { stopReason: "toolUse" }),
+			fauxAssistantMessage("done"),
+		]);
+		const hostEvents = new Recorder();
+		phone.onEvent((frame) => {
+			if (!frame.sessionId) hostEvents.handler(frame);
+		});
+		const { session } = await phone.request("session.create", { workspaceId: workspace.id });
+		const rec = new Recorder();
+		await phone.subscribe(session.id, rec.handler, { workspaceId: workspace.id });
+		await phone.request("session.prompt", { sessionId: session.id, text: "make a file" });
+		const request = (await rec.waitForType("ui.request")).event.request as UiRequest;
+		expect(request.kind).toBe("approval");
+
+		// Session lists and activity events tell other screens that an answer is needed.
+		const activity = await hostEvents.waitFor((f) => f.event.type === "session.activity" && f.event.pendingUi === 1);
+		expect(activity.event).toMatchObject({ sessionId: session.id, workspaceId: workspace.id, state: "streaming" });
+		const listed = (await phone.request("session.list", { workspaceId: workspace.id })).sessions;
+		expect(listed.find((s) => s.id === session.id)).toMatchObject({ pendingUi: 1, state: "streaming" });
+		await phone.request("ui.respond", {
+			sessionId: session.id,
+			requestId: request.id,
+			response: { decision: "allow_once" },
+		});
+		await rec.waitForType("agent_settled");
+		await hostEvents.waitFor((f) => f.event.type === "session.activity" && f.event.state === "idle");
+		expect(
+			(await phone.request("session.list", { workspaceId: workspace.id })).sessions.find((s) => s.id === session.id),
+		).toMatchObject({ pendingUi: 0, state: "idle" });
+		expect(readFileSync(join(t.root, "pier", "audit.log"), "utf8")).toContain('"decision":"allow_once"');
+		phone.close();
+	});
+
+	it("disconnects a revoked device immediately and refuses it afterwards", async () => {
+		const outcome = await pair();
+		const phone = phoneClient(outcome);
+		await phone.connect();
+		const errors: Error[] = [];
+		phone.onError((e) => errors.push(e));
+		const closed = new Promise<void>((resolve) => phone.onState((s) => s === "closed" && resolve()));
+
+		expect(await desktop.request("device.revoke", { deviceId: outcome.deviceId })).toEqual({ revoked: true });
+		await closed;
+		expect(phone.terminalClose?.code).toBe(CLOSE_DEVICE_REVOKED);
+		expect(errors.some((e) => e instanceof PierProtocolError)).toBe(true);
+		expect((await desktop.request("device.list")).devices).toEqual([]);
+
+		// A fresh connection attempt is refused during the handshake.
+		const again = phoneClient(outcome);
+		await expect(again.connect()).rejects.toMatchObject({ code: "UNAUTHENTICATED" });
+		expect(again.terminalClose).toEqual({ code: CLOSE_DEVICE_REVOKED, reason: "UNKNOWN_DEVICE" });
+	});
+
+	it("refuses unpaired devices during the IK handshake", async () => {
+		const status = await desktop.request("remote.status");
+		const socket = new WebSocket(`ws://${status.addresses[0]}`);
+		const initiator = new ConnectInitiator({
+			deviceKeyPair: generateKeyPair(),
+			hostPublicKey: t.host.remote.identity.publicKey,
+		});
+		const reply = await new Promise<{ data: string; code: number }>((resolve) => {
+			let data = "";
+			socket.onopen = () => socket.send(initiator.start());
+			socket.onmessage = (e) => {
+				data = String(e.data);
+			};
+			socket.onclose = (e) => resolve({ data, code: e.code });
+		});
+		expect(reply.code).toBe(4403);
+		expect(() => initiator.receive(reply.data)).toThrowError(expect.objectContaining({ code: "UNKNOWN_DEVICE" }));
+	});
+
+	it("rejects wrong, reused and declined pairing codes", async () => {
+		const { uri } = await desktop.request("pairing.start");
+		const wrong = uri.replace(/code=[^&]+/, "code=wrong-code");
+		await expect(pair(generateKeyPair(), () => undefined, wrong)).rejects.toMatchObject({ code: "PAIRING_INVALID" });
+
+		// The real code still works once, then it is used up.
+		await pair(generateKeyPair(), () => true, uri);
+		await expect(pair(generateKeyPair(), () => true, uri)).rejects.toMatchObject({ code: "PAIRING_INVALID" });
+
+		const from = desktopEvents.mark();
+		await expect(pair(generateKeyPair(), () => false)).rejects.toBeInstanceOf(ChannelError);
+		const resolved = await desktopEvents.waitForType("pairing.resolved", from);
+		expect(resolved.event.resolution).toBe("rejected");
+		expect((await desktop.request("device.list")).devices).toHaveLength(1);
+	});
+
+	it("expires an unanswered pairing request", async () => {
+		await expect(pair(generateKeyPair(), () => undefined)).rejects.toMatchObject({ code: "PAIRING_TIMEOUT" });
+		expect((await desktop.request("device.list")).devices).toHaveLength(0);
+	});
+
+	it("invalidates the pairing code after repeated wrong guesses", async () => {
+		const { uri } = await desktop.request("pairing.start");
+		const wrong = uri.replace(/code=[^&]+/, "code=guess");
+		for (let i = 0; i < 5; i++) {
+			await expect(pair(generateKeyPair(), () => undefined, wrong)).rejects.toMatchObject({
+				code: "PAIRING_INVALID",
+			});
+		}
+		expect((await desktop.request("remote.status")).pairingActive).toBe(false);
+		await expect(pair(generateKeyPair(), () => true, uri)).rejects.toMatchObject({ code: "PAIRING_INVALID" });
+	});
+
+	it("renames devices and turns remote access off and on, persisting the setting", async () => {
+		const outcome = await pair();
+		const renamed = await desktop.request("device.rename", { deviceId: outcome.deviceId, name: "Work phone" });
+		expect(renamed.device.name).toBe("Work phone");
+
+		const phone = phoneClient(outcome);
+		await phone.connect();
+		const reconnecting = new Promise<void>((resolve) => phone.onState((s) => s === "reconnecting" && resolve()));
+		const off = await desktop.request("remote.configure", { enabled: false });
+		expect(off).toMatchObject({ enabled: false, running: false, addresses: [] });
+		await reconnecting;
+		const config = JSON.parse(readFileSync(join(t.root, "pier", "config.json"), "utf8"));
+		expect(config.remote).toEqual({ enabled: false, port: 7433 });
+		await expectCode(desktop.request("pairing.start"), "CONFLICT");
+
+		// Turning it back on (the test pins port 0 → a new random port) lets new clients in again.
+		const on = await desktop.request("remote.configure", { enabled: true });
+		expect(on.running).toBe(true);
+		phone.close();
+		const back = phoneClient({ ...outcome, addresses: on.addresses });
+		expect((await back.connect()).device?.name).toBe("Work phone");
+		back.close();
+	});
+});

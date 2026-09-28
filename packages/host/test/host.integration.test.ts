@@ -108,10 +108,11 @@ describe("authentication and handshake", () => {
 		expect(res).toMatchObject({ ok: true });
 	});
 
-	it("reports host info and not-yet-supported device methods", async () => {
+	it("reports host info and refuses pairing while remote access is off", async () => {
 		const client = await t.connect();
 		expect(client.host).toMatchObject({ protocolVersion: PROTOCOL_VERSION, version: PIER_HOST_VERSION });
-		await expectError(client.request("pairing.start"), "UNSUPPORTED");
+		expect(await client.request("remote.status")).toMatchObject({ enabled: false, running: false, addresses: [] });
+		await expectError(client.request("pairing.start"), "CONFLICT");
 		await expectError(client.request("session.prompt", { sessionId: "nope", text: "x" }), "NOT_FOUND");
 		await expectError(client.request("workspace.add", { path: "relative/path" }), "BAD_REQUEST");
 	});

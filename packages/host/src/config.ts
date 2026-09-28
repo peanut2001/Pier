@@ -13,12 +13,23 @@ const WorkspaceSchema = z.object({
 	addedAt: z.string(),
 });
 
+/** Default TCP port of the remote (LAN) listener. */
+export const DEFAULT_REMOTE_PORT = 7433;
+
+const RemoteConfigSchema = z.object({
+	enabled: z.boolean(),
+	port: z.number().int().min(1).max(65535),
+});
+export type RemoteConfig = z.infer<typeof RemoteConfigSchema>;
+
 export const PierConfigSchema = z.object({
 	version: z.literal(1),
 	hostId: z.string().min(1),
 	hostName: z.string().min(1),
 	defaultPolicy: ApprovalPolicySchema,
 	workspaces: z.array(WorkspaceSchema),
+	/** Added in 0.2; absent in older files means remote access off. */
+	remote: RemoteConfigSchema.optional(),
 });
 
 export type PierConfig = z.infer<typeof PierConfigSchema>;
@@ -82,6 +93,16 @@ export class ConfigStore {
 
 	get defaultPolicy(): ApprovalPolicy {
 		return this.config.defaultPolicy;
+	}
+
+	get remote(): RemoteConfig {
+		return { enabled: false, port: DEFAULT_REMOTE_PORT, ...this.config.remote };
+	}
+
+	setRemote(patch: Partial<RemoteConfig>): RemoteConfig {
+		this.config.remote = { ...this.remote, ...patch };
+		this.save();
+		return this.remote;
 	}
 
 	listWorkspaces(): WorkspaceInfo[] {

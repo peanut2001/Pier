@@ -11,7 +11,10 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { parseArgs } from "node:util";
 import type {
+	DeviceInfo,
 	EventFrame,
+	PairingRequest,
+	RemoteAccessStatus,
 	SessionSnapshot,
 	SessionSummary,
 	ThinkingLevel,
@@ -46,6 +49,11 @@ const HELP = `Commands:
   /yes, /no                  answer a pending confirm
   /answer <text>             answer a pending select/input/editor
   /cancel                    cancel the oldest pending UI request
+  /remote [on|off|port <n>]  show or change remote access (LAN) settings
+  /pair                      show a pairing link for the mobile app (see /pair yes|no)
+  /pair yes|no               allow or decline the device waiting for confirmation
+  /devices                   list paired devices
+  /revoke <n|id>             revoke a paired device (disconnects it immediately)
   /drop                      simulate a network drop (tests reconnect + resume)
   /quit                      exit
 Anything else is sent as a prompt (as a follow-up while the agent is running).`;
@@ -96,6 +104,8 @@ class Cli {
 	private readonly pendingUi = new Map<string, UiRequest>();
 	private streaming = false;
 	private midLine = false;
+	private devices: DeviceInfo[] = [];
+	private readonly pairingRequests = new Map<string, PairingRequest>();
 
 	constructor(
 		private readonly client: PierClient,
@@ -122,8 +132,20 @@ class Cli {
 			this.line(`Workspace: ${this.workspace.name} ${dim(this.workspace.path)} [${this.workspace.policy}]`);
 		else this.line(`No workspaces yet. Add one with ${bold("/ws add <path>")}.`);
 		this.client.onEvent((frame) => {
-			if (!frame.sessionId && frame.event.type === "host.notice") {
-				this.line(yellow(`[host] ${String(frame.event.message)}`));
+			if (frame.sessionId) return;
+			const event = frame.event;
+			if (event.type === "host.notice") this.line(yellow(`[host] ${String(event.message)}`));
+			else if (event.type === "pairing.request") {
+				const request = event.request as PairingRequest;
+				this.pairingRequests.set(request.id, request);
+				this.line(
+					yellow(
+						`[pairing] ${bold(request.device.name)} (${request.device.platform ?? "?"}, fingerprint ${request.fingerprint}${request.address ? `, from ${request.address}` : ""}) wants to connect. Answer with /pair yes or /pair no.`,
+					),
+				);
+			} else if (event.type === "pairing.resolved") {
+				this.pairingRequests.delete(String(event.requestId));
+				this.line(dim(`[pairing ${String(event.resolution)}]`));
 			}
 		});
 		this.client.onState((state) => {
@@ -464,6 +486,56 @@ class Cli {
 			case "cancel":
 				await this.respond(this.oldestPending(), { cancelled: true });
 				break;
+			case "remote": {
+				const [sub, value] = rest;
+				let status: RemoteAccessStatus;
+				if (sub === "on" || sub === "off")
+					status = await this.client.request("remote.configure", { enabled: sub === "on" });
+				else if (sub === "port") status = await this.client.request("remote.configure", { port: Number(value) });
+				else status = await this.client.request("remote.status");
+				this.line(
+					`Remote access ${status.enabled ? green("on") : "off"}${status.running ? `, listening on port ${status.port}` : ""}${status.error ? red(` (${status.error})`) : ""}`,
+				);
+				if (status.addresses.length) this.line(dim(`Addresses: ${status.addresses.join(", ")}`));
+				this.line(dim(`Host fingerprint: ${status.hostFingerprint}`));
+				break;
+			}
+			case "pair": {
+				if (arg === "yes" || arg === "no") {
+					const request = [...this.pairingRequests.values()][0];
+					if (!request) throw new Error("No device is waiting for confirmation");
+					this.pairingRequests.delete(request.id);
+					const { accepted } = await this.client.request("pairing.respond", {
+						requestId: request.id,
+						accept: arg === "yes",
+					});
+					if (!accepted) this.line(yellow("The request is no longer pending."));
+					break;
+				}
+				const { uri, expiresAt } = await this.client.request("pairing.start");
+				this.line(`Pairing link (valid until ${new Date(expiresAt).toLocaleTimeString()}, single use):`);
+				this.line(uri);
+				this.line(dim("Paste it into the mobile app (Add computer → paste link), then confirm here with /pair yes."));
+				break;
+			}
+			case "devices": {
+				this.devices = (await this.client.request("device.list")).devices;
+				if (!this.devices.length) this.line("No paired devices.");
+				this.devices.forEach((d, i) => {
+					this.line(
+						`${i + 1}. ${bold(d.name)} ${dim(`${d.platform ?? ""} ${d.fingerprint} ${d.id}`)} ${d.connected ? green("online") : dim(d.lastSeenAt ? `last seen ${d.lastSeenAt}` : "")}`,
+					);
+				});
+				break;
+			}
+			case "revoke": {
+				if (!this.devices.length) this.devices = (await this.client.request("device.list")).devices;
+				const device = this.pick(this.devices, arg);
+				const { revoked } = await this.client.request("device.revoke", { deviceId: device.id });
+				this.line(revoked ? `Revoked ${bold(device.name)}.` : "Device was already gone.");
+				this.devices = this.devices.filter((d) => d.id !== device.id);
+				break;
+			}
 			case "drop":
 				this.client.dropConnection();
 				break;

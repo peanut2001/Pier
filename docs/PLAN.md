@@ -4,7 +4,7 @@
 >
 > 本文档是项目的总体规划与里程碑，随开发进度持续更新。
 >
-> **当前进度（2026-09-28）**：M0 除 Spike 3 外已完成；M1 已完成；M2 桌面端 MVP 已完成（Linux 上端到端验证，macOS / Windows 由 CI 编译检查，安装包待真机验证）。下一步：Spike 3 与 M3 手机端。
+> **当前进度（2026-09-28）**：M0–M2 已完成；M3 手机端 MVP（局域网）的代码已完成：加密通道、Host 远程访问与配对、桌面配对与设备管理、Expo App，并在 Linux 上用编译后的 sidecar 与 Web 版 App 端到端验证。待办：iOS / Android 真机验证（含 Spike 3 真机数据）、macOS / Windows 安装包真机验证。下一步：M4 体验完善。
 
 ## 1. 目标与非目标
 
@@ -82,7 +82,7 @@
 Pier/
 ├─ apps/
 │  ├─ desktop/            # Tauri 2：src-tauri (Rust) + src (React)
-│  ├─ mobile/             # Expo App
+│  ├─ mobile/             # Expo App（SDK 57，expo-router）
 │  └─ relay/              # M5：中继 + 推送代理
 ├─ packages/
 │  ├─ host/               # Pier Host（pi SDK、Gateway、EventLog、UI 桥接）
@@ -217,7 +217,7 @@ Pier/
 - [x] pnpm monorepo、Biome、Vitest、TypeScript 项目引用、GitHub Actions（lint / typecheck / test）。
 - [x] **Spike 1：Host 打包为 sidecar**（Linux 已端到端验证，macOS / Windows 已交叉编译，结论见 `docs/spikes.md`）。验证 pi SDK 能否用 `bun build --compile` 打成单文件，并能正常加载扩展、skills 与 `~/.pi/agent` 配置；失败则改为"内置 Node 运行时 + JS bundle"或 Node SEA。
 - [x] **Spike 2**：Tauri 2 通过 `externalBin` 启动 sidecar，并通过 stdout 获取端口与本地 token（Linux 已验证，结论见 `docs/spikes.md`）。
-- [ ] **Spike 3**：Expo 开发构建中 WebSocket + `@noble/*` 加解密性能验证（iOS / Android 各一台真机）。
+- [ ] **Spike 3**：Expo 开发构建中 WebSocket + `@noble/*` 加解密性能验证（iOS / Android 各一台真机）。桌面运行时基准、Hermes 打包与 Web 端到端已完成（见 `docs/spikes.md`）；App 内置测试页，真机数据待补。
 - 验收：三个 spike 的结论写入 `docs/spikes.md`，确定打包方案。
 
 ### M1 Host 核心
@@ -238,11 +238,12 @@ Pier/
 
 ### M3 手机端 MVP（局域网）
 
-- [ ] `packages/crypto`：Noise XX / IK、帧加密；`docs/security.md`。
-- [ ] Host：远程监听、mDNS、配对、设备登记与吊销。
-- [ ] 桌面：配对二维码、设备管理页。
-- [ ] Expo：扫码配对、会话列表、聊天、审批、重连补发。
-- 验收：同一局域网内手机扫码配对后，可查看并驱动桌面会话、审批命令；桌面吊销后手机立即断开；抓包只能看到密文。
+- [x] `packages/crypto`：Noise XX / IK（通过 cacophony 测试向量）、帧加密、配对链接；`docs/security.md`。
+- [x] Host：远程监听（默认关闭，端口 7433）、mDNS、配对（一次性配对码 + 桌面确认）、设备登记与吊销、审计日志；协议 1.1（`remote.*`、`pairing.*`、`device.*`、`session.activity`）。
+- [x] 桌面：远程访问开关、配对二维码、配对确认框、设备管理页（改名、吊销、在线状态）。
+- [x] Expo（SDK 57）：扫码 / 粘贴链接 / `pier://` 深链接配对、多台电脑、会话列表（运行中 / 待批准标记）、聊天（流式、工具卡片、diff）、审批与对话框、steer / follow-up / 中止、附图、模型与思考等级、压缩、重连补发、吊销提示、加密性能测试页。
+- [ ] iOS / Android 真机验证（扫码、本地网络权限、前后台切换）；EAS 开发构建。
+- 验收：同一局域网内手机扫码配对后，可查看并驱动桌面会话、审批命令；桌面吊销后手机立即断开；抓包只能看到密文。（除真机外均已由集成测试与 Web 版 App 端到端验证。）
 
 ### M4 体验完善
 
@@ -290,5 +291,6 @@ Pier/
 3. ~~起草 `docs/protocol.md`，与 M1 Host 实现同步推进。~~ ✅
 4. ~~Spike 2：Tauri 2 通过 `externalBin` 启动 sidecar。~~ ✅ Linux 已验证；macOS / Windows 安装包待真机确认。
 5. ~~M2：`apps/desktop` 骨架与 `packages/chat-state` reducer。~~ ✅
-6. Spike 3（M3 前）：Expo 真机加密性能。
-7. M3：`packages/crypto`、Host 远程监听与配对、桌面端配对二维码与设备管理、Expo 手机端。
+6. Spike 3：Expo 真机加密性能。🟡 桌面运行时与 Hermes 打包已验证，真机数据待补（App“设置 → 加密性能测试”）。
+7. ~~M3：`packages/crypto`、Host 远程监听与配对、桌面端配对二维码与设备管理、Expo 手机端。~~ ✅ 真机验证待补。
+8. M4：图片输入完善、会话搜索与分页、桌面通知与手机前台通知、长会话性能。

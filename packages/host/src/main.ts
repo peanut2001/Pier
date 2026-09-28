@@ -25,6 +25,12 @@ Options:
   --agent-dir <dir>   pi agent directory (default: pi's own resolution, ~/.pi/agent)
   --origin <origin>   Additional allowed WebSocket Origin (repeatable)
   --no-runtime-file   Do not write <pier-dir>/run/host.json for local tools
+  --no-remote         Keep remote access (LAN) off for this run, whatever the saved setting
+  --remote-port <n>   Use this port for remote access in this run (default: saved, 7433)
+  --remote-address <host:port>
+                      Address to put into pairing codes instead of the detected LAN
+                      addresses (repeatable; e.g. a Tailscale name or a forwarded port)
+  --no-mdns           Do not advertise _pier._tcp over mDNS
   --watch-stdin       Exit when stdin closes (sidecar mode: exit with the parent)
   -h, --help          Show this help
 
@@ -44,6 +50,10 @@ async function main(): Promise<void> {
 			"agent-dir": { type: "string" },
 			origin: { type: "string", multiple: true },
 			"no-runtime-file": { type: "boolean" },
+			"no-remote": { type: "boolean" },
+			"remote-port": { type: "string" },
+			"remote-address": { type: "string", multiple: true },
+			"no-mdns": { type: "boolean" },
 			"watch-stdin": { type: "boolean" },
 			help: { type: "boolean", short: "h" },
 		},
@@ -58,11 +68,22 @@ async function main(): Promise<void> {
 	if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error(`Invalid --port ${values.port}`);
 	const pierDir = values["pier-dir"] ?? defaultPierDir();
 	const token = process.env.PIER_LOCAL_TOKEN || randomBytes(32).toString("base64url");
+	const remotePort = values["remote-port"] === undefined ? undefined : Number(values["remote-port"]);
+	if (remotePort !== undefined && (!Number.isInteger(remotePort) || remotePort < 0 || remotePort > 65535)) {
+		throw new Error(`Invalid --remote-port ${values["remote-port"]}`);
+	}
 
 	const host = await PierHost.create({
 		pierDir,
 		localToken: token,
 		env: values["agent-dir"] ? { agentDir: values["agent-dir"] } : {},
+		log,
+		remote: {
+			...(values["no-remote"] ? { enabled: false } : {}),
+			...(remotePort !== undefined ? { port: remotePort } : {}),
+			...(values["remote-address"]?.length ? { advertiseAddresses: values["remote-address"] } : {}),
+			...(values["no-mdns"] ? { mdns: false } : {}),
+		},
 	});
 	const gateway = await startLocalGateway(host, {
 		port,

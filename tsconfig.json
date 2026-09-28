@@ -2,9 +2,11 @@
 	"files": [],
 	"references": [
 		{ "path": "packages/protocol" },
+		{ "path": "packages/crypto" },
 		{ "path": "packages/client" },
 		{ "path": "packages/chat-state" },
 		{ "path": "packages/host" },
-		{ "path": "apps/desktop" }
+		{ "path": "apps/desktop" },
+		{ "path": "apps/mobile" }
 	]
 }

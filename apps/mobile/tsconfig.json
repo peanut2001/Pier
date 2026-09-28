@@ -1,0 +1,20 @@
+{
+	"extends": "../../tsconfig.base.json",
+	"compilerOptions": {
+		"rootDir": ".",
+		"outDir": ".tsbuild",
+		"module": "preserve",
+		"moduleResolution": "bundler",
+		"customConditions": ["react-native"],
+		"lib": ["es2023", "dom"],
+		"jsx": "react-jsx",
+		"types": []
+	},
+	"references": [
+		{ "path": "../../packages/protocol" },
+		{ "path": "../../packages/crypto" },
+		{ "path": "../../packages/client" },
+		{ "path": "../../packages/chat-state" }
+	],
+	"include": ["app", "src", "index.ts"]
+}

@@ -152,12 +152,14 @@ export function WorkspaceSettings({ workspace, onClose }: { workspace: Workspace
 	);
 }
 
-export function Sidebar({ onShowLogs }: { onShowLogs: () => void }) {
+export function Sidebar({ onShowLogs, onShowRemote }: { onShowLogs: () => void; onShowRemote: () => void }) {
 	const store = useStore();
 	const workspaces = useAppState((s) => s.workspaces);
 	const host = useAppState((s) => s.host);
 	const connection = useAppState((s) => s.connection);
 	const hostInfo = useAppState((s) => s.hostInfo);
+	const remote = useAppState((s) => s.remote);
+	const connectedDevices = useAppState((s) => s.devices.filter((d) => d.connected).length);
 	const addWorkspace = useAddWorkspace();
 	const [settingsFor, setSettingsFor] = useState<string | undefined>();
 	const settingsWorkspace = workspaces.find((w) => w.id === settingsFor);
@@ -201,11 +203,22 @@ export function Sidebar({ onShowLogs }: { onShowLogs: () => void }) {
 				<button type="button" className="ghost" onClick={onShowLogs} title={hostInfo?.agentDir ?? ""}>
 					{statusText}
 				</button>
-				{store.bridgeKind === "tauri" ? (
-					<button type="button" className="ghost" onClick={() => store.quit()} title="退出 Pier（停止 Host）">
-						退出
+				<span className="sidebar-footer-actions">
+					<button
+						type="button"
+						className="ghost"
+						onClick={onShowRemote}
+						disabled={!online}
+						title={remote?.running ? `远程访问已开启 · ${connectedDevices} 台设备在线` : "手机配对与远程访问（未开启）"}
+					>
+						手机{remote?.running ? <span className="remote-count"> · {connectedDevices}</span> : null}
 					</button>
-				) : null}
+					{store.bridgeKind === "tauri" ? (
+						<button type="button" className="ghost" onClick={() => store.quit()} title="退出 Pier（停止 Host）">
+							退出
+						</button>
+					) : null}
+				</span>
 			</div>
 			{settingsWorkspace ? (
 				<WorkspaceSettings workspace={settingsWorkspace} onClose={() => setSettingsFor(undefined)} />

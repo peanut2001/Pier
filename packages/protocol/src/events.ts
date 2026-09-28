@@ -1,5 +1,8 @@
 import type {
 	ModelInfo,
+	PairingRequest,
+	PairingResolution,
+	RemoteAccessStatus,
 	SessionRunState,
 	SessionSnapshot,
 	SessionSummary,
@@ -75,7 +78,28 @@ export type PierSessionEvent =
 export type PierHostEvent =
 	| { type: "host.notice"; level: "info" | "warning" | "error"; message: string; sessionId?: string }
 	| { type: "workspace.changed" }
-	| { type: "session.listChanged"; workspaceId: string };
+	| { type: "session.listChanged"; workspaceId: string }
+	/** An active session's run state or number of pending UI requests changed (1.1). */
+	| {
+			type: "session.activity";
+			workspaceId: string;
+			sessionId: string;
+			state: SessionRunState;
+			pendingUi: number;
+	  }
+	// The following are only sent to local (desktop) connections.
+	| { type: "remote.changed"; status: RemoteAccessStatus }
+	| { type: "device.changed" }
+	| { type: "pairing.request"; request: PairingRequest }
+	| { type: "pairing.resolved"; requestId: string; resolution: PairingResolution; deviceId?: string };
+
+/** Host events delivered only to local connections. */
+export const LOCAL_ONLY_EVENTS: ReadonlySet<string> = new Set([
+	"remote.changed",
+	"device.changed",
+	"pairing.request",
+	"pairing.resolved",
+]);
 
 export type PierEvent = PierSessionEvent | PierHostEvent;
 export type PierEventType = PierEvent["type"];

@@ -136,3 +136,37 @@ jobs:
       - name: cargo clippy
         working-directory: apps/desktop/src-tauri
         run: cargo clippy --all-targets --locked -- -D warnings
+
+  mobile:
+    name: mobile bundle (${{ matrix.platform }})
+    needs: check
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [android, ios]
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          # pnpm is enabled through Corepack in the next step; setup-node's automatic
+          # package-manager cache would otherwise look for pnpm before it exists.
+          package-manager-cache: false
+
+      - name: Enable pnpm via Corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check Expo SDK dependency versions
+        working-directory: apps/mobile
+        run: npx expo install --check
+
+      # Metro bundle + Hermes bytecode: catches resolution and syntax problems in the
+      # shared workspace packages without building the native app.
+      - name: Export JS bundle
+        working-directory: apps/mobile
+        run: npx expo export --platform ${{ matrix.platform }} --output-dir dist/${{ matrix.platform }}

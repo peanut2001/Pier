@@ -1,8 +1,18 @@
+import { ChatController, type ChatView } from "@pier/chat-state";
 import { type ClientState, PierClient } from "@pier/client";
-import type { ApprovalPolicy, EventFrame, HostInfo, SessionSummary, WorkspaceInfo } from "@pier/protocol";
+import type {
+	ApprovalPolicy,
+	DeviceInfo,
+	EventFrame,
+	HostInfo,
+	PairingRequest,
+	PairingResolution,
+	RemoteAccessStatus,
+	SessionSummary,
+	WorkspaceInfo,
+} from "@pier/protocol";
 import { createContext, useContext, useSyncExternalStore } from "react";
 import type { Bridge, HostStatus } from "./bridge.ts";
-import { ChatController, type ChatView } from "./chat-controller.ts";
 
 export const APP_VERSION = "0.1.0";
 
@@ -34,9 +44,24 @@ export interface AppState {
 	toasts: Toast[];
 	/** Bumped whenever a live chat changes, so the sidebar can show running / approval badges. */
 	chatsVersion: number;
+	remote?: RemoteAccessStatus;
+	devices: DeviceInfo[];
+	/** Devices waiting for the user to allow pairing. */
+	pairingRequests: PairingRequest[];
+	/** The pairing code currently shown, if any. */
+	pairing?: { uri: string; expiresAt: string; addresses: string[] };
 }
 
+const PAIRING_RESULT_TEXT: Record<PairingResolution, string> = {
+	accepted: "已配对",
+	rejected: "已拒绝配对",
+	expired: "配对请求已超时",
+	cancelled: "设备取消了配对",
+};
+
 const SELECTION_KEY = "pier.selection";
+/** Refresh-timer key for the device list (workspace ids are UUIDs, so no clash). */
+const DEVICES_KEY = "#devices";
 
 function errorText(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
@@ -77,6 +102,8 @@ export class PierStore {
 			...(saved.sessionId ? { selectedSessionId: saved.sessionId } : {}),
 			toasts: [],
 			chatsVersion: 0,
+			devices: [],
+			pairingRequests: [],
 		};
 	}
 
@@ -136,7 +163,12 @@ export class PierStore {
 		this.client = undefined;
 		this.clientKey = undefined;
 		this.wasOpen = false;
-		this.set((s) => ({ connection: "none", chatsVersion: s.chatsVersion + 1 }));
+		this.set((s) => ({
+			connection: "none",
+			chatsVersion: s.chatsVersion + 1,
+			pairingRequests: [],
+			pairing: undefined,
+		}));
 	}
 
 	private async connect(url: string, token: string | undefined, key: string): Promise<void> {
@@ -177,10 +209,33 @@ export class PierStore {
 		else if (event.type === "session.listChanged") this.scheduleRefresh(String(event.workspaceId));
 		else if (event.type === "host.notice") {
 			this.toast((event.level as Toast["level"]) ?? "info", String(event.message ?? ""));
+		} else if (event.type === "remote.changed") {
+			const remote = event.status as RemoteAccessStatus;
+			this.set(remote.pairingActive ? { remote } : { remote, pairing: undefined });
+		} else if (event.type === "device.changed") {
+			this.scheduleRefresh(DEVICES_KEY);
+		} else if (event.type === "pairing.request") {
+			const request = event.request as PairingRequest;
+			this.set((s) => ({
+				pairingRequests: [...s.pairingRequests.filter((r) => r.id !== request.id), request],
+				pairing: undefined,
+			}));
+		} else if (event.type === "pairing.resolved") {
+			const requestId = String(event.requestId);
+			const known = this.state.pairingRequests.find((r) => r.id === requestId);
+			this.set((s) => ({ pairingRequests: s.pairingRequests.filter((r) => r.id !== requestId) }));
+			const resolution = event.resolution as PairingResolution;
+			if (known) {
+				this.toast(
+					resolution === "accepted" ? "info" : "warning",
+					`${known.device.name}：${PAIRING_RESULT_TEXT[resolution] ?? resolution}`,
+				);
+			}
 		}
 	}
 
 	private async reloadAll(): Promise<void> {
+		void this.loadRemote();
 		await this.loadWorkspaces();
 		const { selectedSessionId, selectedWorkspaceId } = this.state;
 		if (selectedSessionId && selectedWorkspaceId) {
@@ -216,9 +271,66 @@ export class PierStore {
 			workspaceId,
 			setTimeout(() => {
 				this.refreshTimers.delete(workspaceId);
-				void this.refreshSessions(workspaceId);
+				if (workspaceId === DEVICES_KEY) void this.loadDevices();
+				else void this.refreshSessions(workspaceId);
 			}, 150),
 		);
+	}
+
+	// ---- remote access and devices -----------------------------------------------------
+
+	async loadRemote(): Promise<void> {
+		const client = this.client;
+		if (!client) return;
+		try {
+			const [remote, { devices }] = await Promise.all([client.request("remote.status"), client.request("device.list")]);
+			this.set({ remote, devices });
+		} catch (error) {
+			this.toast("error", `读取远程访问状态失败：${errorText(error)}`);
+		}
+	}
+
+	private async loadDevices(): Promise<void> {
+		const client = this.client;
+		if (!client) return;
+		try {
+			const { devices } = await client.request("device.list");
+			this.set({ devices });
+		} catch {
+			// Transient; the next device.changed or reconnect refreshes it.
+		}
+	}
+
+	async configureRemote(patch: { enabled?: boolean; port?: number }): Promise<RemoteAccessStatus | undefined> {
+		const remote = await this.call("修改远程访问设置", (c) => c.request("remote.configure", patch));
+		if (remote) this.set({ remote });
+		return remote;
+	}
+
+	async startPairing(): Promise<void> {
+		const pairing = await this.call("生成配对码", (c) => c.request("pairing.start"));
+		if (pairing) this.set({ pairing });
+	}
+
+	async cancelPairing(): Promise<void> {
+		this.set({ pairing: undefined });
+		await this.call("取消配对", (c) => c.request("pairing.cancel"));
+	}
+
+	async respondPairing(requestId: string, accept: boolean): Promise<void> {
+		this.set((s) => ({ pairingRequests: s.pairingRequests.filter((r) => r.id !== requestId) }));
+		const result = await this.call("回复配对请求", (c) => c.request("pairing.respond", { requestId, accept }));
+		if (result && !result.accepted) this.toast("warning", "配对请求已失效（设备已断开或超时）");
+	}
+
+	async revokeDevice(deviceId: string): Promise<void> {
+		const result = await this.call("移除设备", (c) => c.request("device.revoke", { deviceId }));
+		if (result) this.set((s) => ({ devices: s.devices.filter((d) => d.id !== deviceId) }));
+	}
+
+	async renameDevice(deviceId: string, name: string): Promise<void> {
+		const result = await this.call("重命名设备", (c) => c.request("device.rename", { deviceId, name }));
+		if (result) this.set((s) => ({ devices: s.devices.map((d) => (d.id === deviceId ? result.device : d)) }));
 	}
 
 	async refreshSessions(workspaceId: string): Promise<void> {

@@ -1,7 +1,6 @@
-import type { ChatState } from "@pier/chat-state";
+import type { ChatController, ChatState } from "@pier/chat-state";
 import type { WorkspaceInfo } from "@pier/protocol";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { ChatController } from "../lib/chat-controller.ts";
 import { type Draft, useStore } from "../lib/store.tsx";
 import { PolicyPicker } from "./SessionControls.tsx";
 

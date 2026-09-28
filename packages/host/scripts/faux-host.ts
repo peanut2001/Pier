@@ -9,6 +9,10 @@
  *
  * A prompt containing "demo" / "演示" runs a scripted coding task (bash, write, edit, and a
  * command that needs approval); any other prompt gets a streamed Markdown reply.
+ *
+ * `--remote [--remote-port <n>]` also turns on remote access (default port 7433) so the
+ * mobile app can pair with it; `--remote-address <host:port>` overrides the addresses
+ * put into pairing codes (e.g. `10.0.2.2:7433` for the Android emulator).
  * State lives in a temporary directory that is removed on exit.
  */
 import { writeFileSync } from "node:fs";
@@ -115,7 +119,27 @@ function respond(context: Context) {
 	}
 }
 
-const t = await startTestHost({ tokensPerSecond: Number(process.env.FAUX_TPS ?? 400) });
+function flag(name: string): string | undefined {
+	const index = process.argv.indexOf(name);
+	return index >= 0 ? process.argv[index + 1] : undefined;
+}
+
+const remote = process.argv.includes("--remote");
+const remoteAddress = flag("--remote-address");
+const t = await startTestHost({
+	tokensPerSecond: Number(process.env.FAUX_TPS ?? 400),
+	log: (message) => process.stderr.write(`[faux-host] ${message}\n`),
+	...(remote
+		? {
+				remote: {
+					enabled: true,
+					port: Number(flag("--remote-port") ?? 7433),
+					mdns: !process.argv.includes("--no-mdns"),
+					...(remoteAddress ? { advertiseAddresses: [remoteAddress] } : {}),
+				},
+			}
+		: {}),
+});
 writeFileSync(join(t.workspaceDir, "README.md"), "# Faux workspace\n");
 t.faux.setResponses(Array.from({ length: 10_000 }, () => (context: unknown) => respond(context as Context)));
 // Register the scratch workspace so the UI has something to show.

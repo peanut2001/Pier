@@ -2,10 +2,12 @@ import { z } from "zod";
 import {
 	ApprovalPolicySchema,
 	type ClientInfo,
+	type DeviceInfo,
 	type HostInfo,
 	ImageInputSchema,
 	type ModelInfo,
 	type QueueState,
+	type RemoteAccessStatus,
 	type SessionSnapshot,
 	type SessionSummary,
 	StreamingBehaviorSchema,
@@ -87,7 +89,16 @@ export const MethodParamsSchemas = {
 
 	"device.list": z.object({}).optional(),
 	"device.revoke": z.object({ deviceId: Id }),
+	"device.rename": z.object({ deviceId: Id, name: z.string().trim().min(1).max(100) }),
 	"pairing.start": z.object({}).optional(),
+	"pairing.cancel": z.object({}).optional(),
+	"pairing.respond": z.object({ requestId: Id, accept: z.boolean() }),
+
+	"remote.status": z.object({}).optional(),
+	"remote.configure": z.object({
+		enabled: z.boolean().optional(),
+		port: z.number().int().min(1024).max(65535).optional(),
+	}),
 } as const;
 
 export type MethodName = keyof typeof MethodParamsSchemas;
@@ -102,7 +113,12 @@ export function isMethodName(method: string): method is MethodName {
 export const LOCAL_ONLY_METHODS: ReadonlySet<MethodName> = new Set([
 	"device.list",
 	"device.revoke",
+	"device.rename",
 	"pairing.start",
+	"pairing.cancel",
+	"pairing.respond",
+	"remote.status",
+	"remote.configure",
 	"workspace.add",
 	"workspace.remove",
 	"workspace.setPolicy",
@@ -112,6 +128,8 @@ export interface HelloResult {
 	protocolVersion: string;
 	host: HostInfo;
 	connectionId: string;
+	/** For remote connections: the paired device this connection authenticated as. */
+	device?: { id: string; name: string };
 }
 
 export interface ForkPoint {
@@ -153,9 +171,14 @@ export interface MethodResults {
 	"model.set": { model: ModelInfo };
 	"thinking.set": { level: string };
 	"ui.respond": { accepted: boolean };
-	"device.list": { devices: unknown[] };
+	"device.list": { devices: DeviceInfo[] };
 	"device.revoke": { revoked: boolean };
-	"pairing.start": { uri: string; expiresAt: string };
+	"device.rename": { device: DeviceInfo };
+	"pairing.start": { uri: string; expiresAt: string; addresses: string[] };
+	"pairing.cancel": { cancelled: boolean };
+	"pairing.respond": { accepted: boolean };
+	"remote.status": RemoteAccessStatus;
+	"remote.configure": RemoteAccessStatus;
 }
 
 export type MethodParams<M extends MethodName> = z.input<(typeof MethodParamsSchemas)[M]>;

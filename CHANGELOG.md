@@ -2,6 +2,34 @@
 
 All notable changes to Pier are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, minor versions may contain breaking changes.
 
+## Unreleased
+
+The mobile app and LAN remote access (milestone M3): pair a phone with the desktop by scanning a QR code, then watch and drive agents, answer approvals, and steer or abort runs from the phone over an end-to-end encrypted connection.
+
+### Added
+
+- **Remote access** in the Pier Host (off by default): an encrypted listener on port 7433 (configurable) for the local network and Tailscale / WireGuard, plus mDNS advertising (`_pier._tcp`). See `docs/security.md`.
+  - `@pier/crypto`: Noise XX (pairing) and IK (reconnects) over X25519 / ChaCha20-Poly1305 / SHA-256 in pure JS, verified against the cacophony test vectors; encrypted channel frames; pairing links; a channel benchmark.
+  - Pairing uses a single-use code (valid for 5 minutes) in a QR code that also pins the host key, and requires confirmation on the desktop. Paired devices are stored in `~/.pier/devices.json`; revoking one disconnects it immediately.
+  - An audit log (`~/.pier/audit.log`) records what remote devices did (connections, pairing, prompts by length only, approvals).
+  - New host flags: `--no-remote`, `--remote-port`, `--remote-address`, `--no-mdns`.
+- **Protocol 1.1** (backwards compatible): `remote.status` / `remote.configure`, `pairing.start` / `cancel` / `respond`, `device.list` / `rename` / `revoke`, local-only host events for pairing and devices, a `session.activity` host event, and `pendingUi` counts in session summaries.
+- **`@pier/client`**: `SecureWebSocket` / `createSecureSocketFactory` (encrypted transport with address fallback), `pairWithHost`, terminal close codes (a revoked device stops reconnecting), `reconnectNow()`, and an optional heartbeat.
+- **Desktop app**: a "手机" panel to turn remote access on, show the pairing QR code, confirm pairing requests, and rename or revoke devices.
+- **Mobile app** (`apps/mobile`, Expo SDK 57): scan or paste a pairing link (or open a `pier://pair` link), multiple computers, session lists with running / needs-approval badges, streaming chat with tool cards and diffs, approvals and extension dialogs, steer / follow-up / abort, image attachments, model and thinking-level switching, compaction, automatic reconnect with replay, revocation handling, and a crypto benchmark (Spike 3).
+- `pier-cli`: `/remote`, `/pair`, `/devices`, `/revoke`.
+- `pnpm faux-host --remote` for mobile UI work without real credentials.
+
+### Changed
+
+- The shared `ChatController` moved from the desktop app into `@pier/chat-state`.
+- React is pinned to 19.2.3 across the workspace (the version Expo SDK 57 uses).
+
+### Known limitations
+
+- The mobile app has been verified with its web build and the Hermes bundles for Android and iOS, but not yet on real phones; there are no store builds yet.
+- The phone only reaches the desktop directly (same network or tailnet). Relay access and push notifications arrive in M5.
+
 ## v0.1.0 — 2026-09-28
 
 The desktop app (milestone M2): run pi coding agents from a native window, with approvals, tool output, and diffs, without opening a terminal. The Pier Host keeps running in the tray when the window is closed.

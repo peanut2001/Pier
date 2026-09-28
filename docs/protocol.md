@@ -1,4 +1,4 @@
-# Pier 协议 v1.0
+# Pier 协议 v1.1
 
 > 实现：`packages/protocol`（zod schema + TS 类型，Host 与所有客户端共享）。
 > 本文档描述线上格式与语义；字段的权威定义以 `packages/protocol/src` 为准。
@@ -6,7 +6,8 @@
 ## 1. 传输与帧
 
 - 传输：WebSocket，**文本帧**，每帧一个 JSON 对象。二进制帧会被拒绝（关闭码 1003）。
-- 本地连接：Host 仅监听 `127.0.0.1`；远程连接（M3）在 Noise 握手后改为加密帧 `{ "t": "enc", "n": <nonce>, "c": <ciphertext> }`，其明文即本文档的帧。
+- 本地连接：Host 仅监听 `127.0.0.1`，帧为明文。
+- 远程连接（开启远程访问后，默认端口 7433）：先完成 Noise 握手（配对用 XX，之后用 IK），之后每一帧都是加密帧 `{ "t": "enc", "n": <nonce>, "c": <ciphertext> }`，其明文即本文档的帧。握手、配对与吊销见 [`docs/security.md`](security.md)。
 - 帧类型：
 
 ```jsonc
@@ -35,9 +36,20 @@
 | `NOT_FOUND` | 工作区 / 会话 / 模型不存在，或会话未在活跃池中 |
 | `CONFLICT` | 目标状态不允许（会话运行中、会话文件被外部修改、被其他 Host 锁定等） |
 | `PROTOCOL_MISMATCH` | 主版本不一致；`data.hostVersion` 为 Host 的版本 |
-| `UNSUPPORTED` | 协议已定义但此 Host 尚未实现（M1 中的 `device.*`、`pairing.start`） |
+| `UNSUPPORTED` | 协议已定义但此 Host 尚未实现 |
 | `TIMEOUT` | 客户端本地超时（Host 不会返回此码） |
 | `INTERNAL` | 未预期的 Host 错误 |
+
+### 关闭码
+
+| 关闭码 | 含义 | 客户端应 |
+|---|---|---|
+| 1003 | 收到二进制帧 | 修复客户端 |
+| 1013 | 发送缓冲超过 16 MiB（客户端跟不上） | 重连并按 seq 恢复 |
+| 4400 | 远程：握手失败、配对失败，或收到无法解密的帧 | 按错误提示处理 |
+| 4401 | `host.hello` 失败或超时 | 不要自动重试（token / 版本错误） |
+| 4403 | 远程：设备未登记或已被吊销（握手时的 `error` 帧 code 为 `UNKNOWN_DEVICE`） | 停止重连，提示重新配对（`@pier/client` 默认把它视为终止） |
+| 4410 | 远程：桌面关闭了远程访问 | 稍后重连 |
 
 ## 2. 握手与版本
 
@@ -45,17 +57,18 @@
 
 ```jsonc
 { "type": "req", "id": "h", "method": "host.hello", "params": {
-  "protocolVersion": "1.0",
-  "client": { "name": "pier-desktop", "version": "0.0.1", "platform": "darwin" },
-  "token": "<本地 token>",       // 本地连接必填
+  "protocolVersion": "1.1",
+  "client": { "name": "pier-desktop", "version": "0.1.0", "platform": "darwin" },
+  "token": "<本地 token>",       // 本地连接必填；远程连接由加密通道认证，不需要
   "coalesceMs": 50               // 可选：合并流式增量的窗口（0–1000ms，默认 0）
 }}
-// → { protocolVersion, host: HostInfo, connectionId }
+// → { protocolVersion, host: HostInfo, connectionId, device?: { id, name } }   // device 仅远程连接
 ```
 
 - 版本号为 `<major>.<minor>`，`PROTOCOL_VERSION` 由 `@pier/protocol` 导出。主版本不同 → `PROTOCOL_MISMATCH`；次版本只做向后兼容的新增（新方法、新可选参数、新事件），客户端必须忽略未知事件类型和未知字段。
 - **本地 token**：Host 启动时生成（或取 `PIER_LOCAL_TOKEN`），通过 stdout 的 `pier.ready` 行交给 Tauri，并写入 `~/.pier/run/host.json`（0600）供本地调试工具使用。浏览器 WebSocket 无法设置请求头，所以 token 放在 `host.hello` 中而不是 URL 里（避免进入日志）。
-- **Origin 校验**：带 `Origin` 头的连接只允许 Tauri WebView 的来源（`tauri://localhost`、`http(s)://tauri.localhost`、开发时的 `http://localhost:1420`），其他网页在握手阶段即被拒绝（HTTP 403）。无 `Origin` 的连接（CLI）允许，但仍须 token。
+- **远程连接**：握手已经认证了设备，`host.hello` 只再确认设备仍已登记；设备已被吊销时返回 `UNAUTHENTICATED`。远程连接收不到仅限本地的 Host 事件（§4.3）。
+- **Origin 校验（本地连接）**：带 `Origin` 头的连接只允许 Tauri WebView 的来源（`tauri://localhost`、`http(s)://tauri.localhost`、开发时的 `http://localhost:1420`），其他网页在握手阶段即被拒绝（HTTP 403）。无 `Origin` 的连接（CLI）允许，但仍须 token。远程监听不检查 Origin（React Native 在 Android 上会自动附带），认证完全由加密通道完成。
 
 ## 3. 方法
 
@@ -81,7 +94,7 @@
 
 | 方法 | 参数 | 结果 |
 |---|---|---|
-| `session.list` | `{ workspaceId }` | `{ sessions: SessionSummary[] }`，按修改时间倒序；活跃会话 `active: true` 并带实时 `state` |
+| `session.list` | `{ workspaceId }` | `{ sessions: SessionSummary[] }`，按修改时间倒序；活跃会话 `active: true` 并带实时 `state` 与 `pendingUi`（待回答的对话框 / 审批数，1.1） |
 | `session.create` | `{ workspaceId, name? }` | `{ session }`（已进入活跃池） |
 | `session.open` | `{ workspaceId, sessionId }` 或 `{ workspaceId, path }` | `{ session }`；`path` 必须出现在该工作区的会话列表中 |
 | `session.close` | `{ sessionId, force? }` | `{ closed }`；运行中且未 `force` → `CONFLICT` |
@@ -112,12 +125,24 @@
 | `model.set` | `{ sessionId, provider, modelId, persist? }` | `{ model }`；`persist: true` 写入 pi 全局默认值 |
 | `thinking.set` | `{ sessionId, level, persist? }` | `{ level }`（按模型能力钳制后的实际等级） |
 
-### UI 与设备
+### UI
 
 | 方法 | 参数 | 结果 |
 |---|---|---|
 | `ui.respond` | `{ sessionId, requestId, response: UiResponse }` | `{ accepted }`；请求已被其他客户端回答 / 超时 / 取消时为 `false` |
-| `device.list` 🔒 / `device.revoke` 🔒 / `pairing.start` 🔒 | – | M1 中返回 `UNSUPPORTED`（M3 实现） |
+
+### 远程访问、配对与设备（1.1）
+
+| 方法 | 参数 | 结果 |
+|---|---|---|
+| `remote.status` 🔒 | – | `RemoteAccessStatus`：`{ enabled, port, running, addresses, hostFingerprint, mdns, pairingActive, error? }` |
+| `remote.configure` 🔒 | `{ enabled?, port?(1024–65535) }` | `RemoteAccessStatus`；写入 `config.json` 并立即启动 / 停止 / 换端口（换端口或关闭会断开远程连接） |
+| `pairing.start` 🔒 | – | `{ uri, expiresAt, addresses }`；`uri` 即二维码内容。远程访问未运行时 `CONFLICT`。再次调用会让旧配对码失效 |
+| `pairing.cancel` 🔒 | – | `{ cancelled }` |
+| `pairing.respond` 🔒 | `{ requestId, accept }` | `{ accepted }`；请求已超时或设备已断开时为 `false` |
+| `device.list` 🔒 | – | `{ devices: DeviceInfo[] }`：`{ id, name, platform?, model?, appVersion?, fingerprint, pairedAt, lastSeenAt?, connected }` |
+| `device.rename` 🔒 | `{ deviceId, name }` | `{ device }` |
+| `device.revoke` 🔒 | `{ deviceId }` | `{ revoked }`；该设备的连接立即以 4403 断开 |
 
 ## 4. 事件
 
@@ -149,7 +174,23 @@
 
 ### 4.3 Host 事件（无 sessionId / seq）
 
-`host.notice { level, message, sessionId? }`、`workspace.changed`、`session.listChanged { workspaceId }`。发给所有已认证连接。
+发给所有已认证连接：
+
+| 事件 | 字段 | 说明 |
+|---|---|---|
+| `host.notice` | `level, message, sessionId?` | |
+| `workspace.changed` | – | 工作区列表或策略变化 |
+| `session.listChanged` | `workspaceId` | 会话列表变化（新建、分叉、关闭、重命名…） |
+| `session.activity` | `workspaceId, sessionId, state, pendingUi` | 活跃会话的运行状态或待回答请求数变化（1.1）。列表页据此显示“运行中 / 待批准”，无需订阅每个会话 |
+
+仅发给本地（桌面）连接（`LOCAL_ONLY_EVENTS`）：
+
+| 事件 | 字段 | 说明 |
+|---|---|---|
+| `remote.changed` | `status: RemoteAccessStatus` | 远程访问启停、端口变化、配对码生效 / 失效 |
+| `device.changed` | – | 设备登记、吊销、改名，或连接状态变化；重新调用 `device.list` |
+| `pairing.request` | `request: { id, device, fingerprint, address?, createdAt, expiresAt }` | 设备出示了正确的配对码，等待用户用 `pairing.respond` 确认 |
+| `pairing.resolved` | `requestId, resolution: accepted\|rejected\|expired\|cancelled, deviceId?` | 配对请求结束（`cancelled`：设备在等待中断开） |
 
 ## 5. EventLog、订阅与断线恢复
 

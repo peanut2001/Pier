@@ -45,6 +45,8 @@ export interface SessionSummary {
 	/** Whether the host currently holds this session in its active pool. */
 	active: boolean;
 	state: SessionRunState;
+	/** Dialogs / approvals waiting for an answer (active sessions only). Added in 1.1. */
+	pendingUi?: number;
 }
 
 export interface ModelInfo {
@@ -154,3 +156,49 @@ export interface SessionSnapshot {
 	title?: string;
 	errorMessage?: string;
 }
+
+/** A remote device paired with this host (see `docs/security.md`). */
+export interface DeviceInfo {
+	id: string;
+	name: string;
+	platform?: string;
+	model?: string;
+	appVersion?: string;
+	/** Fingerprint of the device's static key, e.g. `K7QF-2M4A-XJ3D-9PLR`. */
+	fingerprint: string;
+	pairedAt: string;
+	lastSeenAt?: string;
+	/** Whether the device currently has an open connection. */
+	connected: boolean;
+}
+
+/** Remote access (LAN / Tailscale) listener state. */
+export interface RemoteAccessStatus {
+	enabled: boolean;
+	/** Configured port (the actual port while running). */
+	port: number;
+	running: boolean;
+	/** `host:port` candidates put into pairing codes. */
+	addresses: string[];
+	/** Fingerprint of the host's static key, shown to compare with the phone. */
+	hostFingerprint: string;
+	/** Whether the host is advertised over mDNS (`_pier._tcp`). */
+	mdns: boolean;
+	/** Why the listener is not running although enabled (e.g. port in use). */
+	error?: string;
+	/** Whether a pairing code is currently valid. */
+	pairingActive: boolean;
+}
+
+/** A device that presented a valid pairing code and waits for the desktop user's decision. */
+export interface PairingRequest {
+	id: string;
+	device: { name: string; platform?: string; model?: string; appVersion?: string };
+	fingerprint: string;
+	/** Remote network address of the device, for display. */
+	address?: string;
+	createdAt: string;
+	expiresAt: string;
+}
+
+export type PairingResolution = "accepted" | "rejected" | "expired" | "cancelled";

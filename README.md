@@ -5,19 +5,21 @@ Pi-powered agent desktop app with a native mobile companion that connects to you
 - 桌面端：Tauri 2，内置以 [pi](https://github.com/earendil-works/pi) SDK 为核心的 Pier Host
 - 手机端：Expo / React Native 原生 App，通过配对后的加密连接驱动桌面 Agent
 
-开发计划见 [docs/PLAN.md](docs/PLAN.md)，协议见 [docs/protocol.md](docs/protocol.md)，技术验证结论见 [docs/spikes.md](docs/spikes.md)。
+开发计划见 [docs/PLAN.md](docs/PLAN.md)，协议见 [docs/protocol.md](docs/protocol.md)，远程访问的安全设计见 [docs/security.md](docs/security.md)，技术验证结论见 [docs/spikes.md](docs/spikes.md)。
 
 ## 当前状态
 
-M0（除 Spike 3）、M1（Host 核心）与 M2（桌面端 MVP）已完成：
+M0–M2（Host 核心、桌面端 MVP）已完成；M3（手机端 MVP，局域网）的代码已完成，待 iOS / Android 真机验证：
 
 | 包 | 说明 |
 |---|---|
 | `packages/protocol` | 协议 schema（zod）、类型、`PROTOCOL_VERSION` |
 | `packages/host` | Pier Host：工作区配置、会话池、pi SDK 适配层、UI 桥接、`pier-approval` 审批扩展、EventLog、本地 WebSocket Gateway、sidecar 入口 |
-| `packages/client` | 通用客户端（握手、请求关联、自动重连、按 seq 恢复）与调试 CLI `pier-cli` |
-| `packages/chat-state` | 快照 + 事件 → 聊天视图状态的纯逻辑 reducer（桌面端与手机端共用） |
-| `apps/desktop` | Tauri 2 桌面应用：管理 Host sidecar（启动、崩溃重启、日志）、托盘常驻、单实例；React 界面含工作区与会话管理、流式聊天、工具卡片（终端输出、diff、文件预览）、审批、模型与思考等级切换、压缩、分叉 |
+| `packages/crypto` | Noise XX / IK（X25519、ChaCha20‑Poly1305、SHA‑256，纯 JS）、加密通道帧、配对链接、性能测试 |
+| `packages/client` | 通用客户端（握手、请求关联、自动重连、按 seq 恢复）、加密 WebSocket 与配对，以及调试 CLI `pier-cli` |
+| `packages/chat-state` | 快照 + 事件 → 聊天视图状态的纯逻辑 reducer 与会话控制器（桌面端与手机端共用） |
+| `apps/desktop` | Tauri 2 桌面应用：管理 Host sidecar（启动、崩溃重启、日志）、托盘常驻、单实例；React 界面含工作区与会话管理、流式聊天、工具卡片（终端输出、diff、文件预览）、审批、模型与思考等级切换、压缩、分叉，以及远程访问、配对二维码与设备管理 |
+| `apps/mobile` | Expo（SDK 57）手机 App：扫码配对、多台电脑、会话列表、流式聊天、工具卡片、审批、steer / follow-up / 中止、附图、模型切换、断线重连补发 |
 
 ## 开发
 
@@ -66,6 +68,26 @@ pnpm --filter @pier/desktop dev:web           # http://localhost:1420/?url=<url>
 
 发送包含“演示”的消息会运行一段脚本化任务（bash、write、edit 与一次需要审批的命令）。
 
+### 手机端
+
+手机 App 通过加密通道连接电脑上的 Host，需要先在桌面端“手机”面板中开启远程访问并扫码配对（原理见 [docs/security.md](docs/security.md)）。
+
+```bash
+pnpm --filter @pier/mobile start              # Metro 开发服务器
+pnpm --filter @pier/mobile android            # 本地构建并安装 Android 开发版（需要 Android SDK）
+pnpm --filter @pier/mobile ios                # 本地构建 iOS 开发版（需要 macOS 与 Xcode）
+cd apps/mobile && eas build --profile development   # 或用 EAS 云构建开发版
+```
+
+App 用到相机、安全存储等原生模块，推荐使用开发构建（development build），而不是 Expo Go。没有设备时可以用 Web 版调界面（安全存储回退为 localStorage，仅供开发）：
+
+```bash
+pnpm faux-host --remote                       # 假模型 Host，并在 7433 端口开启远程访问
+pnpm --filter @pier/mobile web                # 在浏览器中“添加电脑 → 粘贴配对链接”
+```
+
+配对链接可以从桌面“手机 → 显示配对二维码 → 复制配对链接”获得；只运行 faux-host 时，也可以用 `pnpm pier-cli --url <url> --token <token>` 输入 `/pair` 生成链接，再用 `/pair yes` 确认（`/remote`、`/devices`、`/revoke` 管理远程访问与设备）。Android 模拟器访问宿主机时，用 `pnpm faux-host --remote --remote-address 10.0.2.2:7433` 让二维码里带上模拟器可达的地址。
+
 ### Sidecar
 
 构建单文件 sidecar（输出到 `packages/host/bin/`，包含 pi 运行时资源）：
@@ -76,7 +98,9 @@ pnpm build:sidecar --target bun-darwin-arm64 # 交叉编译
 packages/host/bin/pier-host --help
 ```
 
-Pier 自身状态保存在 `~/.pier`（可用 `PIER_DIR` 覆盖）：`config.json`（工作区与审批策略）、`run/host.json`（运行中 Host 的端口与本地 token，权限 0600）、`locks/`（会话文件锁）。
+Pier 自身状态保存在 `~/.pier`（可用 `PIER_DIR` 覆盖）：`config.json`（工作区、审批策略与远程访问设置）、`run/host.json`（运行中 Host 的端口与本地 token，权限 0600）、`locks/`（会话文件锁）、`identity.json`（Host 的 X25519 私钥）、`devices.json`（已配对设备）、`audit.log`（远程设备的操作记录）。后三个文件权限均为 0600。
+
+远程访问相关的命令行参数：`--no-remote`（本次运行不开启远程访问）、`--remote-port <n>`、`--remote-address <host:port>`（写进配对二维码的地址，可重复，例如 Tailscale 域名）、`--no-mdns`。
 
 ## 发版
 

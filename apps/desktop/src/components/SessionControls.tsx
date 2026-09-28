@@ -1,7 +1,6 @@
-import type { ChatState } from "@pier/chat-state";
+import type { ChatController, ChatState } from "@pier/chat-state";
 import type { ApprovalPolicy, ForkPoint, ModelInfo, ThinkingLevel, WorkspaceInfo } from "@pier/protocol";
 import { useEffect, useRef, useState } from "react";
-import type { ChatController } from "../lib/chat-controller.ts";
 import { POLICY_LABEL, POLICY_SUMMARY } from "../lib/format.ts";
 import { useStore } from "../lib/store.tsx";
 import { Modal } from "./Modal.tsx";

@@ -51,6 +51,8 @@ export interface ManagedSessionOptions {
 	eventLogCapacity?: number;
 	/** Called after an extension command replaced the underlying pi session (new/fork/switch). */
 	onReplaced?: (session: ManagedSession, previousId: string) => void;
+	/** Called when the run state or the number of pending UI requests changes. */
+	onActivity?: (session: ManagedSession) => void;
 }
 
 /** pi events that indicate the session file may have been written by this host. */
@@ -89,7 +91,10 @@ export class ManagedSession {
 		this.log = new EventLog(options.eventLogCapacity ?? DEFAULT_EVENT_LOG_CAPACITY);
 		this.bridge = new UiBridge({
 			sessionId: () => this.id,
-			emit: (event) => this.emit(event),
+			emit: (event) => {
+				this.emit(event);
+				if (event.type === "ui.request" || event.type === "ui.resolved") this.options.onActivity?.(this);
+			},
 			...(options.uiTimeoutMs === undefined ? {} : { defaultTimeoutMs: options.uiTimeoutMs }),
 		});
 	}
@@ -240,6 +245,7 @@ export class ManagedSession {
 		if (next === this.runState) return;
 		this.runState = next;
 		this.emit({ type: "session.status", state: next });
+		this.options.onActivity?.(this);
 	}
 
 	/** Append an event to the log and fan it out to subscribers. */
@@ -311,6 +317,7 @@ export class ManagedSession {
 			...(header?.parentSession ? { parentSessionPath: header.parentSession } : {}),
 			active: true,
 			state: this.runState,
+			pendingUi: this.bridge.pendingRequests.length,
 		};
 	}
 

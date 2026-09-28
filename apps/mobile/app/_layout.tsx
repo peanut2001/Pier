@@ -1,0 +1,44 @@
+import { Stack } from "expo-router";
+import { StatusBar } from "expo-status-bar";
+import { useEffect } from "react";
+import { AppState } from "react-native";
+import { SafeAreaProvider } from "react-native-safe-area-context";
+import { ToastHost } from "../src/components/ui.tsx";
+import { MobileStore, StoreContext } from "../src/store.ts";
+import { usePalette } from "../src/theme.ts";
+
+const store = new MobileStore();
+
+export default function RootLayout() {
+	const p = usePalette();
+	useEffect(() => {
+		void store.init();
+		// iOS suspends sockets in the background; resume (with seq replay) right away on return.
+		const subscription = AppState.addEventListener("change", (state) => {
+			if (state === "active") store.onForeground();
+		});
+		return () => subscription.remove();
+	}, []);
+	return (
+		<SafeAreaProvider>
+			<StoreContext.Provider value={store}>
+				<StatusBar style="auto" />
+				<Stack
+					screenOptions={{
+						headerStyle: { backgroundColor: p.card },
+						headerTintColor: p.text,
+						headerTitleStyle: { color: p.text },
+						contentStyle: { backgroundColor: p.bg },
+					}}
+				>
+					<Stack.Screen name="index" options={{ title: "Pier" }} />
+					<Stack.Screen name="pair" options={{ title: "添加电脑", presentation: "modal" }} />
+					<Stack.Screen name="settings" options={{ title: "设置" }} />
+					<Stack.Screen name="host/[hostId]/index" options={{ title: "" }} />
+					<Stack.Screen name="host/[hostId]/session/[sessionId]" options={{ title: "" }} />
+				</Stack>
+				<ToastHost />
+			</StoreContext.Provider>
+		</SafeAreaProvider>
+	);
+}

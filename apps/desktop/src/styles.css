@@ -1718,3 +1718,118 @@ code {
 		opacity: 1;
 	}
 }
+
+/* ---- remote access, pairing, devices -------------------------------------------- */
+
+.mono {
+	font-family: var(--mono);
+}
+
+.banner.inline {
+	border-radius: var(--radius);
+	margin: 8px 0;
+}
+
+.port-row {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 8px;
+}
+
+.port-input {
+	width: 80px;
+}
+
+.pairing {
+	display: flex;
+	gap: 20px;
+	align-items: flex-start;
+}
+
+.qr-frame {
+	flex: none;
+	padding: 8px;
+	background: #fff;
+	border-radius: 10px;
+	line-height: 0;
+}
+
+.qr-frame.expired {
+	opacity: 0.2;
+}
+
+.pairing-help {
+	font-size: 13px;
+}
+
+.pairing-help ol {
+	margin: 0 0 10px;
+	padding-left: 20px;
+	line-height: 1.8;
+}
+
+.row-actions {
+	display: flex;
+	gap: 8px;
+	flex-wrap: wrap;
+}
+
+.device-list {
+	display: flex;
+	flex-direction: column;
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+}
+
+.device-row {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 10px 12px;
+}
+
+.device-row + .device-row {
+	border-top: 1px solid var(--border);
+}
+
+.device-main {
+	flex: 1;
+	min-width: 0;
+}
+
+.device-name {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	font-weight: 600;
+}
+
+.device-rename {
+	display: flex;
+	gap: 6px;
+}
+
+button.small-icon {
+	font-size: 12px;
+	padding: 0 4px;
+}
+
+.pairing-device {
+	font-size: 18px;
+	font-weight: 600;
+	margin-bottom: 4px;
+}
+
+.pairing-request .host-facts {
+	margin-top: 10px;
+}
+
+.sidebar-footer-actions {
+	display: flex;
+	gap: 2px;
+}
+
+.remote-count {
+	color: var(--accent);
+}

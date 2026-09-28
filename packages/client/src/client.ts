@@ -44,7 +44,19 @@ export interface PierClientOptions {
 	createWebSocket?: WebSocketFactory;
 	requestTimeoutMs?: number;
 	reconnect?: ReconnectOptions;
+	/**
+	 * Send `host.info` this often while open and drop the connection if it does not
+	 * answer within `heartbeatTimeoutMs`. Detects dead connections the OS has not
+	 * noticed (useful on mobile networks). Off by default.
+	 */
+	heartbeatMs?: number;
+	heartbeatTimeoutMs?: number;
+	/** WebSocket close codes after which the client stops reconnecting (default: 4403, device revoked). */
+	terminalCloseCodes?: number[];
 }
+
+/** Close code the host uses when a device is unknown or has been revoked. */
+export const CLOSE_DEVICE_REVOKED = 4403;
 
 export type SessionEventHandler = (frame: EventFrame) => void;
 
@@ -112,6 +124,8 @@ export class PierClient {
 	private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 	private openWaiters: Array<{ resolve: () => void; reject: (e: Error) => void }> = [];
 	private hello: HelloResult | undefined;
+	private heartbeatTimer: ReturnType<typeof setInterval> | undefined;
+	private closeInfo: { code?: number; reason?: string } | undefined;
 
 	private readonly stateEmitter = new Emitter<ClientState>();
 	private readonly eventEmitter = new Emitter<EventFrame>();
@@ -132,6 +146,16 @@ export class PierClient {
 
 	get connectionId(): string | undefined {
 		return this.hello?.connectionId;
+	}
+
+	/** Result of the last successful `host.hello`. */
+	get helloResult(): HelloResult | undefined {
+		return this.hello;
+	}
+
+	/** Close code and reason when the client stopped because of a terminal close (e.g. revoked). */
+	get terminalClose(): { code?: number; reason?: string } | undefined {
+		return this.closeInfo;
 	}
 
 	onState(listener: Listener<ClientState>): () => void {
@@ -187,6 +211,7 @@ export class PierClient {
 						this.hello = hello;
 						this.reconnectAttempt = 0;
 						this.setState("open");
+						this.startHeartbeat(socket);
 						for (const waiter of this.openWaiters.splice(0)) waiter.resolve();
 						await this.resubscribeAll();
 						resolve(hello);
@@ -198,17 +223,66 @@ export class PierClient {
 					});
 			};
 			socket.onmessage = (event) => this.handleMessage(event.data);
-			socket.onerror = () => {
-				if (!opened) reject(new Error(`Could not connect to ${this.options.url}`));
-			};
+			// A `close` event always follows `error`; the close handler rejects with the close code.
+			socket.onerror = () => {};
 			socket.onclose = (event) => {
 				if (this.socket !== socket) return;
 				this.socket = undefined;
+				this.stopHeartbeat();
 				this.failPending(new Error(`Connection closed${event.reason ? `: ${event.reason}` : ""}`));
-				if (!opened) reject(new Error(`Could not connect to ${this.options.url}`));
+				const terminal =
+					event.code !== undefined && (this.options.terminalCloseCodes ?? [CLOSE_DEVICE_REVOKED]).includes(event.code);
+				if (!opened || terminal) {
+					reject(
+						terminal
+							? new PierProtocolError("UNAUTHENTICATED", event.reason || "Connection refused by the host")
+							: new Error(`Could not connect to ${this.options.url}${event.reason ? `: ${event.reason}` : ""}`),
+					);
+				}
+				if (terminal) {
+					this.closeInfo = {
+						...(event.code !== undefined ? { code: event.code } : {}),
+						...(event.reason ? { reason: event.reason } : {}),
+					};
+					this.errorEmitter.emit(
+						new PierProtocolError("UNAUTHENTICATED", event.reason || "Connection refused by the host"),
+					);
+					this.close();
+					return;
+				}
 				this.scheduleReconnect();
 			};
 		});
+	}
+
+	private startHeartbeat(socket: WebSocketLike): void {
+		this.stopHeartbeat();
+		const interval = this.options.heartbeatMs;
+		if (!interval) return;
+		this.heartbeatTimer = setInterval(() => {
+			if (this.socket !== socket || this.stateValue !== "open") return;
+			this.sendRequest("host.info", undefined, this.options.heartbeatTimeoutMs ?? 10_000).catch(() => {
+				// No answer: assume the connection is dead and reconnect.
+				if (this.socket === socket) this.dropConnection();
+			});
+		}, interval);
+	}
+
+	private stopHeartbeat(): void {
+		if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+		this.heartbeatTimer = undefined;
+	}
+
+	/**
+	 * Reconnect immediately instead of waiting for the backoff timer (e.g. when a mobile
+	 * app returns to the foreground). No-op unless the client is reconnecting.
+	 */
+	reconnectNow(): void {
+		if (this.stateValue !== "reconnecting" || !this.reconnectTimer) return;
+		clearTimeout(this.reconnectTimer);
+		this.reconnectTimer = undefined;
+		this.reconnectAttempt = 0;
+		this.open().catch((error: Error) => this.errorEmitter.emit(error));
 	}
 
 	private scheduleReconnect(): void {
@@ -434,6 +508,7 @@ export class PierClient {
 	close(): void {
 		if (this.stateValue === "closed") return;
 		this.setState("closed");
+		this.stopHeartbeat();
 		if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
 		for (const waiter of this.openWaiters.splice(0)) waiter.reject(new Error("Client closed"));
 		const socket = this.socket;

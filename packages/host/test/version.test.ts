@@ -15,8 +15,10 @@ describe("release versions", () => {
 			"packages/protocol",
 			"packages/client",
 			"packages/chat-state",
+			"packages/crypto",
 			"packages/host",
 			"apps/desktop",
+			"apps/mobile",
 		]) {
 			expect(versionOf(`${pkg}/package.json`), pkg).toBe(version);
 		}
@@ -37,6 +39,13 @@ describe("release versions", () => {
 		};
 		expect(tauri.version).toBe("../package.json");
 		const store = readFileSync(join(root, "apps/desktop/src/lib/store.tsx"), "utf8");
+		expect(/APP_VERSION = "([^"]+)"/.exec(store)?.[1]).toBe(version);
+	});
+
+	it("uses the same version for the mobile app", () => {
+		const app = JSON.parse(readFileSync(join(root, "apps/mobile/app.json"), "utf8")) as { expo: { version: string } };
+		expect(app.expo.version).toBe(version);
+		const store = readFileSync(join(root, "apps/mobile/src/store.ts"), "utf8");
 		expect(/APP_VERSION = "([^"]+)"/.exec(store)?.[1]).toBe(version);
 	});
 

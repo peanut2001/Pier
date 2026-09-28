@@ -8,7 +8,7 @@
 |---|---|---|
 | 1. Host 打包为 sidecar | ✅ Linux 端到端验证；五个平台的原生冒烟测试已随 v0.0.1 通过 | 采用 **`bun build --compile` 单文件 + pi 资源目录** |
 | 2. Tauri `externalBin` 启动 sidecar | ✅ Linux 端到端验证（开发构建与 `.deb` 安装布局）；macOS / Windows 由 CI 编译检查 | `externalBin` 负责打包，Rust 侧用 `std::process` 自行管理进程；pi 资源作为 Tauri resource，经 `PI_PACKAGE_DIR` 传给 sidecar |
-| 3. Expo 中 WebSocket + `@noble/*` 性能 | ⏳ 未开始（需 Expo 开发构建与 iOS / Android 真机） | 放到 M3 开工前完成 |
+| 3. Expo 中 WebSocket + `@noble/*` 性能 | 🟡 桌面运行时已测、Hermes 打包与 Web 端到端已验证；iOS / Android 真机数据待补 | 纯 JS `@noble/*` + 文本帧足够（Node 上 1 KiB 帧 0.09 ms，1 MiB 帧约 25 MiB/s）；App 内置测试页，拿到真机后直接运行 |
 
 ## Spike 1：Host 打包为 sidecar
 
@@ -97,6 +97,39 @@ usr/share/applications/Pier.desktop
 - macOS / Windows 真机：CI 只做编译与 clippy 检查；`.dmg` / NSIS 安装包在发版流水线中构建，需要在真机上确认 sidecar 路径、资源目录与 Origin。
 - macOS 签名与公证（M6）：sidecar 作为 `externalBin` 需要一并签名。
 
-## Spike 3：Expo 加密性能（待做）
+## Spike 3：Expo 加密性能
 
-计划：在 Expo 开发构建中测量 `@noble/curves`（X25519）与 `@noble/ciphers`（ChaCha20-Poly1305）的握手耗时，以及 1 KB / 64 KB / 1 MB 帧的加解密吞吐；同时验证 React Native WebSocket 与 `@pier/client` 的兼容性（该客户端只依赖 WHATWG WebSocket API，并支持注入 `createWebSocket`）。iOS 与 Android 各一台真机。
+> 记录日期：2026-09-28。Expo SDK 57（React Native 0.86.3，Hermes），`@noble/curves` / `@noble/ciphers` / `@noble/hashes` 2.4。
+
+### 做法
+
+- 加密通道全部用纯 JS 实现（`packages/crypto`，见 `docs/security.md`）：Noise XX / IK、ChaCha20‑Poly1305、base64 文本帧。同一份代码在 Host（Node / Bun）、桌面 WebView 和手机（Hermes）上运行。
+- 基准测试 `runChannelBenchmark()` 走真实代码路径（IK 握手两端、`SecureTransport.seal` + `open`，含 JSON 与 base64 封装）。命令行：`pnpm --filter @pier/crypto bench`；手机：App“设置 → 加密性能测试”。
+- 加解密热路径优先用引擎自带的实现：`TextEncoder` / `TextDecoder`、`Uint8Array.fromBase64` / `toBase64`（Bun、新版浏览器）或 Node 的 `Buffer`，没有时回退到纯 JS（`@scure/base` 与自带的 UTF‑8 编解码，已测试）。Hermes 没有 `crypto.getRandomValues`，App 启动时用 `expo-crypto` 补上。
+
+### 结果（x86_64 Linux，16 线程）
+
+| 用例 | Node 24.21 | Bun 1.4.2 |
+|---|---|---|
+| X25519 生成密钥对 | 0.55 ms | 0.19 ms |
+| Noise IK 握手（两端合计） | 16.3 ms | 7.0 ms |
+| 1 KiB 帧 seal + open | 0.09 ms | 0.07 ms |
+| 64 KiB 帧 seal + open | 2.5 ms（25 MiB/s） | 2.1 ms（30 MiB/s） |
+| 1 MiB 帧 seal + open | 41 ms（25 MiB/s） | 33 ms（30 MiB/s） |
+
+瓶颈是 ChaCha20‑Poly1305 本身（纯 JS 单向约 100 MiB/s）。改用原生 base64 与 TextEncoder 之前，同一测试只有约 10 MiB/s。
+
+### 已验证
+
+- `expo export --platform android|ios` 成功生成 Hermes 字节码（`.hbc`）：workspace 包的 `.ts` 源码（含 `.ts` 扩展名导入）、zod、`@noble/*` 均能被 Metro 解析和编译。
+- Web 构建在无头 Chromium（390×844 手机视口）中端到端通过：粘贴配对链接 → 桌面确认 → 连接 → 新建会话 → 流式回复 → 手机上批准命令 → 任务完成；吊销后约 0.8 s 内手机显示“已被电脑移除”，重新配对后恢复；回复中途断开远程访问，重连后回复完整且只渲染一次。
+- `@pier/client` 只依赖 WHATWG WebSocket API，与 React Native 的 WebSocket 兼容；加密层以 `createWebSocket` 注入，重连与按 seq 恢复逻辑无需改动。
+
+### 待补（需要真机）
+
+- iOS 与 Android 真机上的基准数据（预期 Hermes 比 Node 慢 3–10 倍：握手约 50–150 ms、1 KiB 帧不到 1 ms，都在可接受范围内；大图片帧会慢一些）。
+- 真机上的扫码、局域网权限（iOS“本地网络”弹窗、Android 明文 `ws://`）、前后台切换后的重连。
+
+### 决定
+
+- 保持纯 JS 加密与 JSON 文本帧；不引入原生加密模块。若真机测得大帧过慢，再考虑二进制帧（省去 base64）或原生 ChaCha20。

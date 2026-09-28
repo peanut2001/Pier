@@ -18,3 +18,18 @@ export function runtimeFilePath(pierDir: string): string {
 export function locksDir(pierDir: string): string {
 	return join(pierDir, "locks");
 }
+
+/** Host static key for the remote secure channel. */
+export function identityPath(pierDir: string): string {
+	return join(pierDir, "identity.json");
+}
+
+/** Paired remote devices. */
+export function devicesPath(pierDir: string): string {
+	return join(pierDir, "devices.json");
+}
+
+/** Append-only log of actions taken by remote devices. */
+export function auditLogPath(pierDir: string): string {
+	return join(pierDir, "audit.log");
+}

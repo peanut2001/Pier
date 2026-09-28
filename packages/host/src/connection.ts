@@ -19,6 +19,14 @@ export interface Transport {
 
 export type ConnectionKind = "local" | "remote";
 
+/** The paired device behind a remote connection (authenticated by the secure channel). */
+export interface RemoteDevice {
+	id: string;
+	name: string;
+	/** Network address the device connected from. */
+	address?: string;
+}
+
 export interface RequestHandler {
 	handle(connection: Connection, raw: string): Promise<{ response: ResponseFrame; after: Array<() => void> }>;
 	disconnected(connection: Connection): void;
@@ -41,6 +49,8 @@ export class Connection implements SessionSubscriber {
 		readonly kind: ConnectionKind,
 		private readonly transport: Transport,
 		private readonly handler: RequestHandler,
+		/** Set for remote connections. */
+		readonly device?: RemoteDevice,
 	) {}
 
 	get isClosed(): boolean {

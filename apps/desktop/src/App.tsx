@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Welcome, WorkspaceHome } from "./components/Home.tsx";
 import { HostBanner, LogsPanel } from "./components/HostPanels.tsx";
+import { PairingRequestDialog, RemotePanel } from "./components/RemotePanel.tsx";
 import { SessionView } from "./components/SessionView.tsx";
 import { Sidebar } from "./components/Sidebar.tsx";
 import { useAppState, useStore } from "./lib/store.tsx";
@@ -41,15 +42,18 @@ function Main() {
 
 export function App() {
 	const [showLogs, setShowLogs] = useState(false);
+	const [showRemote, setShowRemote] = useState(false);
 	return (
 		<div className="app">
-			<Sidebar onShowLogs={() => setShowLogs(true)} />
+			<Sidebar onShowLogs={() => setShowLogs(true)} onShowRemote={() => setShowRemote(true)} />
 			<main className="main">
 				<HostBanner onShowLogs={() => setShowLogs(true)} />
 				<Main />
 			</main>
 			<Toasts />
 			{showLogs ? <LogsPanel onClose={() => setShowLogs(false)} /> : null}
+			{showRemote ? <RemotePanel onClose={() => setShowRemote(false)} /> : null}
+			<PairingRequestDialog />
 		</div>
 	);
 }

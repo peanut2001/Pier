@@ -1,13 +1,6 @@
-import {
-	applySnapshot,
-	type ChatState,
-	clearResync,
-	dismissNotice,
-	initialChatState,
-	reduceChat,
-} from "@pier/chat-state";
 import type { PierClient, Subscription } from "@pier/client";
 import type { EventFrame, ImageInput, SessionSummary, ThinkingLevel, UiResponse } from "@pier/protocol";
+import { applySnapshot, type ChatState, clearResync, dismissNotice, initialChatState, reduceChat } from "./reducer.ts";
 
 export interface ChatView {
 	chat: ChatState;

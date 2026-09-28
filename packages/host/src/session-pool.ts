@@ -17,6 +17,7 @@ export interface SessionPoolOptions {
 	sweepIntervalMs?: number;
 	onSessionReplaced?: (session: ManagedSession, previousId: string) => void;
 	onSessionClosed?: (session: ManagedSession) => void;
+	onSessionActivity?: (session: ManagedSession) => void;
 }
 
 /** Active session pool keyed by pi session id, loaded on demand and evicted when idle. */
@@ -66,6 +67,7 @@ export class SessionPool {
 				this.sessions.set(session.id, session);
 				this.options.onSessionReplaced?.(session, previousId);
 			},
+			onActivity: (session) => this.options.onSessionActivity?.(session),
 		};
 	}
 

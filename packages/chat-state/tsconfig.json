@@ -5,6 +5,6 @@
 		"outDir": "dist/types",
 		"types": []
 	},
-	"references": [{ "path": "../protocol" }],
+	"references": [{ "path": "../protocol" }, { "path": "../client" }],
 	"include": ["src", "test"]
 }
