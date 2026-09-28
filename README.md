@@ -53,3 +53,11 @@ packages/host/bin/pier-host --help
 ```
 
 Pier 自身状态保存在 `~/.pier`（可用 `PIER_DIR` 覆盖）：`config.json`（工作区与审批策略）、`run/host.json`（运行中 Host 的端口与本地 token，权限 0600）、`locks/`（会话文件锁）。
+
+## 发版
+
+版本号统一由根 `package.json` 与各包的 `version` 决定（`packages/host/test/version.test.ts` 会校验它们与 `PIER_HOST_VERSION`、`pier-cli` 版本及 `CHANGELOG.md` 一致）。
+
+1. 更新所有版本号，并在 `CHANGELOG.md` 中新增 `## v<版本>` 小节；合并到 `main`。
+2. 在 `main` 的该提交上打 tag 并推送：`git tag -a v<版本> -m "Pier v<版本>" && git push origin v<版本>`。
+3. `.github/workflows/release.yml` 会校验 tag、版本号以及该提交是否在 `main` 上，然后运行完整检查；接着在各平台原生 runner 上构建并冒烟测试 sidecar（`packages/host/scripts/smoke-sidecar.mjs`），最后创建 GitHub Release，附带各平台压缩包和 `SHA256SUMS.txt`，发布说明取自 CHANGELOG。版本号带 `-` 后缀（如 `0.1.0-rc.1`）时标记为 prerelease。

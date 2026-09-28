@@ -1,0 +1,149 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: verify tag · lint · typecheck · test
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - name: Enable pnpm via Corepack
+        run: corepack enable
+
+      - name: Check tag, version, and branch
+        id: version
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match package.json version ${version}"
+            exit 1
+          fi
+          git fetch origin main
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}" origin/main; then
+            echo "::error::Tagged commit ${GITHUB_SHA} is not on main"
+            exit 1
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+
+  sidecar:
+    name: sidecar ${{ matrix.platform }}
+    needs: verify
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { platform: linux-x64, runner: ubuntu-latest, target: bun-linux-x64 }
+          - { platform: linux-arm64, runner: ubuntu-24.04-arm, target: bun-linux-arm64 }
+          - { platform: darwin-arm64, runner: macos-latest, target: bun-darwin-arm64 }
+          - { platform: darwin-x64, runner: macos-15-intel, target: bun-darwin-x64 }
+          - { platform: windows-x64, runner: windows-latest, target: bun-windows-x64 }
+    env:
+      NAME: pier-host-${{ github.ref_name }}-${{ matrix.platform }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Enable pnpm via Corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build sidecar
+        run: pnpm build:sidecar --target ${{ matrix.target }} --outdir "dist/${NAME}"
+
+      - name: Smoke test the binary on its native runner
+        run: node packages/host/scripts/smoke-sidecar.mjs "dist/${NAME}/pier-host${{ runner.os == 'Windows' && '.exe' || '' }}" "${{ needs.verify.outputs.version }}"
+
+      - name: Package (tar.gz)
+        if: runner.os != 'Windows'
+        run: tar -czf "dist/${NAME}.tar.gz" -C dist "${NAME}"
+
+      - name: Package (zip)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path "dist/$env:NAME" -DestinationPath "dist/$env:NAME.zip"
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: ${{ env.NAME }}
+          path: dist/${{ env.NAME }}.*
+          if-no-files-found: error
+
+  publish:
+    name: publish GitHub release
+    needs: [verify, sidecar]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v5
+        with:
+          path: assets
+          merge-multiple: true
+
+      - name: Checksums and release notes
+        run: |
+          cd assets
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          cd ..
+          # The CHANGELOG section for this version becomes the release notes.
+          awk -v heading="## ${GITHUB_REF_NAME}" '
+            index($0, heading) == 1 { found = 1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md > notes.md
+          if [ ! -s notes.md ]; then
+            echo "::error::No CHANGELOG.md section for ${GITHUB_REF_NAME}"
+            exit 1
+          fi
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${{ needs.verify.outputs.version }}"
+          prerelease=""
+          case "$version" in *-*) prerelease="--prerelease" ;; esac
+          gh release create "${GITHUB_REF_NAME}" assets/* \
+            --title "Pier ${GITHUB_REF_NAME}" \
+            --notes-file notes.md \
+            --verify-tag $prerelease

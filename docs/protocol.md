@@ -46,7 +46,7 @@
 ```jsonc
 { "type": "req", "id": "h", "method": "host.hello", "params": {
   "protocolVersion": "1.0",
-  "client": { "name": "pier-desktop", "version": "0.1.0", "platform": "darwin" },
+  "client": { "name": "pier-desktop", "version": "0.0.1", "platform": "darwin" },
   "token": "<本地 token>",       // 本地连接必填
   "coalesceMs": 50               // 可选：合并流式增量的窗口（0–1000ms，默认 0）
 }}

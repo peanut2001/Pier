@@ -1,5 +1,6 @@
 {
 	"name": "pier",
+	"version": "0.0.1",
 	"private": true,
 	"type": "module",
 	"packageManager": "pnpm@12.6.0",

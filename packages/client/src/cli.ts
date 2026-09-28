@@ -21,6 +21,8 @@ import type {
 } from "@pier/protocol";
 import { PierClient } from "./client.ts";
 
+export const PIER_CLI_VERSION = "0.0.1";
+
 const HELP = `Commands:
   /ws                        list workspaces
   /ws add <path> [policy]    register a workspace (policy: ask|smart|auto)
@@ -489,7 +491,7 @@ async function main(): Promise<void> {
 	const client = new PierClient({
 		url,
 		...(token ? { token } : {}),
-		client: { name: "pier-cli", version: "0.1.0", platform: process.platform },
+		client: { name: "pier-cli", version: PIER_CLI_VERSION, platform: process.platform },
 	});
 	await client.connect();
 

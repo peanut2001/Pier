@@ -11,6 +11,7 @@ import {
 } from "@pier/protocol";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
+import { PIER_HOST_VERSION } from "../src/host.ts";
 import {
 	deferred,
 	fauxAssistantMessage,
@@ -109,7 +110,7 @@ describe("authentication and handshake", () => {
 
 	it("reports host info and not-yet-supported device methods", async () => {
 		const client = await t.connect();
-		expect(client.host).toMatchObject({ protocolVersion: PROTOCOL_VERSION, version: "0.1.0" });
+		expect(client.host).toMatchObject({ protocolVersion: PROTOCOL_VERSION, version: PIER_HOST_VERSION });
 		await expectError(client.request("pairing.start"), "UNSUPPORTED");
 		await expectError(client.request("session.prompt", { sessionId: "nope", text: "x" }), "NOT_FOUND");
 		await expectError(client.request("workspace.add", { path: "relative/path" }), "BAD_REQUEST");
