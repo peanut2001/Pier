@@ -35,6 +35,11 @@ function useOutsideClick(open: boolean, close: () => void) {
 	return ref;
 }
 
+function thinkingLabel(level: string): string {
+	return THINKING_LEVELS.find((l) => l.value === level)?.label ?? level;
+}
+
+/** Combined model + thinking-level picker: one chip, one popover. */
 export function ModelPicker({ chat, controller }: { chat: ChatState; controller: ChatController }) {
 	const [open, setOpen] = useState(false);
 	const [models, setModels] = useState<ModelInfo[] | undefined>();
@@ -42,6 +47,7 @@ export function ModelPicker({ chat, controller }: { chat: ChatState; controller:
 	const [filter, setFilter] = useState("");
 	const ref = useOutsideClick(open, () => setOpen(false));
 	const current = chat.model;
+	const reasoning = Boolean(current?.reasoning);
 
 	useEffect(() => {
 		if (!open) return;
@@ -60,11 +66,36 @@ export function ModelPicker({ chat, controller }: { chat: ChatState; controller:
 
 	return (
 		<div className="dropdown" ref={ref}>
-			<button type="button" className="chip" onClick={() => setOpen(!open)} title="切换模型">
-				{current ? current.name || current.id : "未选择模型"} ▾
+			<button type="button" className="chip model-chip" onClick={() => setOpen(!open)} title="切换模型与思考等级">
+				<span className="model-chip-name">{current ? current.name || current.id : "未选择模型"}</span>
+				{reasoning ? <span className="model-chip-thinking">{thinkingLabel(chat.thinkingLevel)}</span> : null}
+				<span className="model-chip-caret">▾</span>
 			</button>
 			{open ? (
 				<div className="dropdown-menu models">
+					{reasoning ? (
+						<div className="thinking-section">
+							<div className="dropdown-group-title">思考等级</div>
+							<div className="thinking-levels">
+								{THINKING_LEVELS.map((level) => {
+									const selected = chat.thinkingLevel === level.value;
+									return (
+										<button
+											type="button"
+											aria-pressed={selected}
+											key={level.value}
+											className={`thinking-level${selected ? " selected" : ""}`}
+											onClick={() => {
+												if (!selected) void controller.setThinking(level.value);
+											}}
+										>
+											{level.label}
+										</button>
+									);
+								})}
+							</div>
+						</div>
+					) : null}
 					<input
 						// biome-ignore lint/a11y/noAutofocus: the menu was just opened to search.
 						autoFocus
@@ -105,24 +136,6 @@ export function ModelPicker({ chat, controller }: { chat: ChatState; controller:
 				</div>
 			) : null}
 		</div>
-	);
-}
-
-export function ThinkingPicker({ chat, controller }: { chat: ChatState; controller: ChatController }) {
-	if (!chat.model?.reasoning) return null;
-	return (
-		<select
-			className="chip"
-			title="思考等级"
-			value={chat.thinkingLevel}
-			onChange={(e) => void controller.setThinking(e.target.value as ThinkingLevel)}
-		>
-			{THINKING_LEVELS.map((level) => (
-				<option key={level.value} value={level.value}>
-					思考：{level.label}
-				</option>
-			))}
-		</select>
 	);
 }
 

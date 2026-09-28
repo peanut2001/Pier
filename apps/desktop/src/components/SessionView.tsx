@@ -6,7 +6,7 @@ import { formatCost, formatTokens, POLICY_LABEL, RUN_STATE_LABEL, sessionTitle }
 import { useAppState, useChatView, useStore } from "../lib/store.tsx";
 import { Composer } from "./Composer.tsx";
 import { PendingRequests } from "./PendingRequests.tsx";
-import { ModelPicker, SessionMenu, ThinkingPicker } from "./SessionControls.tsx";
+import { ModelPicker, SessionMenu } from "./SessionControls.tsx";
 import { Transcript } from "./Transcript.tsx";
 
 function firstUserText(chat: ChatState): string {
@@ -198,7 +198,6 @@ export function SessionView({ session }: { session: SessionSummary }) {
 				</div>
 				<div className="session-tools">
 					<ModelPicker chat={chat} controller={controller} />
-					<ThinkingPicker chat={chat} controller={controller} />
 					<SessionMenu chat={chat} controller={controller} />
 				</div>
 			</header>

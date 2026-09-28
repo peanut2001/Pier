@@ -649,8 +649,59 @@ code {
 	text-overflow: ellipsis;
 }
 
-select.chip {
-	padding-right: 6px;
+.model-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	max-width: 280px;
+}
+
+.model-chip-name {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	min-width: 0;
+}
+
+.model-chip-thinking {
+	flex: none;
+	color: var(--text-muted);
+	padding-left: 6px;
+	border-left: 1px solid var(--border-strong);
+}
+
+.model-chip-caret {
+	flex: none;
+}
+
+.thinking-section {
+	padding-bottom: 6px;
+	margin-bottom: 6px;
+	border-bottom: 1px solid var(--border-strong);
+}
+
+.thinking-levels {
+	display: flex;
+	gap: 2px;
+	padding: 4px;
+	border-radius: 999px;
+	background: var(--bg);
+}
+
+.thinking-level {
+	flex: 1;
+	min-width: 0;
+	border: none;
+	background: transparent;
+	font-size: 12px;
+	padding: 4px 0;
+	border-radius: 999px;
+	white-space: nowrap;
+}
+
+.thinking-level.selected {
+	background: var(--accent-soft);
+	color: var(--text);
 }
 
 .dropdown {
