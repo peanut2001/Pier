@@ -170,3 +170,12 @@ jobs:
       - name: Export JS bundle
         working-directory: apps/mobile
         run: npx expo export --platform ${{ matrix.platform }} --output-dir dist/${{ matrix.platform }}
+
+      # The release APK depends on plugins/withAndroidRelease.js patching the generated Gradle
+      # project; prebuild fails here if an Expo upgrade changes the template it expects.
+      - name: Prebuild Android project
+        if: matrix.platform == 'android'
+        working-directory: apps/mobile
+        run: |
+          npx expo prebuild --platform android --no-install
+          grep -q "pier: release signing" android/app/build.gradle

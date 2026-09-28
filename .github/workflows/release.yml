@@ -206,6 +206,88 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
+  android:
+    name: mobile android
+    needs: verify
+    runs-on: ubuntu-latest
+    env:
+      NAME: pier-mobile-${{ github.ref_name }}-android
+      # SHA-256 of the Pier Android release certificate (key alias "pier"). Every APK must be signed
+      # with this key, otherwise installed apps cannot be upgraded in place.
+      ANDROID_CERT_SHA256: 0078f44ada161b2fa44b5bdfb97182aace34c9ec9d4e57362d9a62c168c2981d
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          # pnpm is enabled through Corepack in the next step; setup-node's automatic
+          # package-manager cache would otherwise look for pnpm before it exists.
+          package-manager-cache: false
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v5
+
+      - name: Enable pnpm via Corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Release keystore
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_RELEASE_KEYSTORE }}
+          PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE" ] || [ -z "$PASSWORD" ]; then
+            echo "::error::The ANDROID_RELEASE_KEYSTORE and ANDROID_RELEASE_KEYSTORE_PASSWORD secrets are required to sign the APK"
+            exit 1
+          fi
+          printf '%s' "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/pier-release.jks"
+
+      # android/ is generated from app.json; plugins/withAndroidRelease.js wires up release signing.
+      - name: Prebuild
+        working-directory: apps/mobile
+        run: npx expo prebuild --platform android --no-install
+
+      - name: Build APK
+        working-directory: apps/mobile/android
+        env:
+          ORG_GRADLE_PROJECT_pierUploadStoreFile: ${{ runner.temp }}/pier-release.jks
+          ORG_GRADLE_PROJECT_pierUploadStorePassword: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
+          ORG_GRADLE_PROJECT_pierUploadKeyAlias: pier
+          ORG_GRADLE_PROJECT_pierUploadKeyPassword: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
+        # Real devices (64- and 32-bit ARM) and x86_64 emulators; 32-bit x86 is left out.
+        run: ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a,armeabi-v7a,x86_64
+
+      - name: Verify signature
+        run: |
+          apk=apps/mobile/android/app/build/outputs/apk/release/app-release.apk
+          apksigner="$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)apksigner"
+          certs=$("$apksigner" verify --print-certs "$apk")
+          echo "$certs"
+          if ! echo "$certs" | grep -qi "certificate SHA-256 digest: ${ANDROID_CERT_SHA256}$"; then
+            echo "::error::The APK is not signed with the Pier release key"
+            exit 1
+          fi
+          mkdir -p dist
+          cp "$apk" "dist/${NAME}.apk"
+          ls -la dist
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: ${{ env.NAME }}
+          path: dist/${{ env.NAME }}.apk
+          if-no-files-found: error
+
+      - name: Remove keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/pier-release.jks"
+
   # latest.json for the in-app updater (also built on dry runs to validate the signatures).
   updater-manifest:
     name: updater manifest
@@ -254,7 +336,7 @@ jobs:
 
   publish:
     name: publish GitHub release
-    needs: [verify, sidecar, desktop, updater-manifest]
+    needs: [verify, sidecar, desktop, android, updater-manifest]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:

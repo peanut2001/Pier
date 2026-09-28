@@ -53,7 +53,8 @@
 						"usesCleartextTraffic": true
 					}
 				}
-			]
+			],
+			"./plugins/withAndroidRelease"
 		],
 		"experiments": {
 			"typedRoutes": false

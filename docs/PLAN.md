@@ -74,7 +74,7 @@
 | 桌面 | Tauri 2 + React + Vite + Tailwind；插件：shell（sidecar）、single-instance、autostart、updater、notification |
 | 手机 | Expo（最新 SDK）+ expo-router；expo-camera（扫码）、expo-secure-store（设备密钥）、expo-notifications、expo-image-picker、react-native-markdown-display |
 | 中继（M5） | 优先 Cloudflare Workers + Durable Objects（按 hostId 路由 WebSocket）；备选自托管 Node 服务 |
-| CI | GitHub Actions：lint / typecheck / test；Tauri 多平台构建；EAS Build |
+| CI | GitHub Actions：lint / typecheck / test；Tauri 多平台构建；Android APK（Gradle）；iOS 待接入 EAS Build |
 
 ## 4. 仓库结构（规划）
 
@@ -262,7 +262,8 @@ Pier/
 
 - [x] 桌面：Tauri updater 发布通道（签名的更新包 + GitHub Release 上的 `latest.json`，应用内检查、下载、校验、安装并重启；Linux AppImage 已端到端验证）。
 - [ ] 桌面：macOS 签名与公证、Windows 签名；macOS / Windows 上的自动更新真机验证。
-- [ ] 手机：EAS Build、TestFlight / 内部测试轨道。
+- [x] 手机：Android APK 随 GitHub Release 发布（GitHub Actions 上 `expo prebuild` + Gradle 构建，固定发布密钥签名，校验证书指纹）。
+- [ ] 手机：iOS 构建（EAS Build）、TestFlight / 内部测试轨道。
 - [ ] 用户文档：安装、配对、安全建议。
 
 ## 11. 风险与对策
