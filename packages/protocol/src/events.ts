@@ -1,4 +1,7 @@
 import type {
+	AuthNotice,
+	AuthPromptInfo,
+	DefaultModelRef,
 	ModelInfo,
 	PairingRequest,
 	PairingResolution,
@@ -91,7 +94,24 @@ export type PierHostEvent =
 	| { type: "remote.changed"; status: RemoteAccessStatus }
 	| { type: "device.changed" }
 	| { type: "pairing.request"; request: PairingRequest }
-	| { type: "pairing.resolved"; requestId: string; resolution: PairingResolution; deviceId?: string };
+	| { type: "pairing.resolved"; requestId: string; resolution: PairingResolution; deviceId?: string }
+	/** Providers, credentials, models.json or the default model changed (1.2). Sent to every connection. */
+	| { type: "provider.changed" }
+	// Sign-in progress (1.2), sent only to the connection that called `provider.login`.
+	| { type: "auth.prompt"; flowId: string; prompt: AuthPromptInfo }
+	/** A prompt was answered elsewhere (e.g. the browser callback arrived first) and should be closed. */
+	| { type: "auth.promptClosed"; flowId: string; promptId: string }
+	| { type: "auth.notice"; flowId: string; notice: AuthNotice }
+	| {
+			type: "auth.done";
+			flowId: string;
+			providerId: string;
+			ok: boolean;
+			cancelled?: boolean;
+			error?: string;
+			/** Set when the host picked a default model because none was usable. */
+			defaultModel?: DefaultModelRef;
+	  };
 
 /** Host events delivered only to local connections. */
 export const LOCAL_ONLY_EVENTS: ReadonlySet<string> = new Set([
@@ -99,6 +119,10 @@ export const LOCAL_ONLY_EVENTS: ReadonlySet<string> = new Set([
 	"device.changed",
 	"pairing.request",
 	"pairing.resolved",
+	"auth.prompt",
+	"auth.promptClosed",
+	"auth.notice",
+	"auth.done",
 ]);
 
 export type PierEvent = PierSessionEvent | PierHostEvent;

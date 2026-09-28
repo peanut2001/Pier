@@ -2,11 +2,20 @@ import { ChatController, type ChatView } from "@pier/chat-state";
 import { type ClientState, PierClient } from "@pier/client";
 import type {
 	ApprovalPolicy,
+	AuthMethod,
+	AuthNotice,
+	AuthPromptInfo,
+	CustomProvider,
+	CustomProviderApi,
+	DefaultModelRef,
 	DeviceInfo,
 	EventFrame,
 	HostInfo,
+	ModelInfo,
 	PairingRequest,
 	PairingResolution,
+	ProviderInfo,
+	ProviderListResult,
 	RemoteAccessStatus,
 	SessionSummary,
 	WorkspaceInfo,
@@ -30,6 +39,19 @@ export interface Draft {
 	images: Array<{ data: string; mimeType: string; name: string }>;
 }
 
+/** An interactive provider sign-in shown in the login dialog. */
+export interface AuthFlowState {
+	/** Undefined until `provider.login` answered. */
+	flowId?: string;
+	providerId: string;
+	providerName: string;
+	method: AuthMethod;
+	notices: AuthNotice[];
+	prompt?: AuthPromptInfo;
+	/** Set when the sign-in failed. */
+	error?: string;
+}
+
 export interface AppState {
 	host: HostStatus;
 	connection: ClientState | "none";
@@ -50,6 +72,11 @@ export interface AppState {
 	pairingRequests: PairingRequest[];
 	/** The pairing code currently shown, if any. */
 	pairing?: { uri: string; expiresAt: string; addresses: string[] };
+	/** Model providers and credentials (undefined until loaded). */
+	providers?: ProviderListResult;
+	/** The model settings panel is open. */
+	showModels: boolean;
+	auth?: AuthFlowState;
 }
 
 const PAIRING_RESULT_TEXT: Record<PairingResolution, string> = {
@@ -60,8 +87,9 @@ const PAIRING_RESULT_TEXT: Record<PairingResolution, string> = {
 };
 
 const SELECTION_KEY = "pier.selection";
-/** Refresh-timer key for the device list (workspace ids are UUIDs, so no clash). */
+/** Refresh-timer keys for the device and provider lists (workspace ids are UUIDs, so no clash). */
 const DEVICES_KEY = "#devices";
+const PROVIDERS_KEY = "#providers";
 
 function errorText(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
@@ -78,6 +106,10 @@ export class PierStore {
 	private nextToastId = 1;
 	private readonly refreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
 	private wasOpen = false;
+	/** Sign-in events that arrived before `provider.login` answered with their flow id. */
+	private authBacklog: EventFrame[] = [];
+	private openedAuthUrls = new Set<string>();
+	private authSeq = 0;
 
 	constructor(private readonly bridge: Bridge) {
 		const saved = (() => {
@@ -104,6 +136,7 @@ export class PierStore {
 			chatsVersion: 0,
 			devices: [],
 			pairingRequests: [],
+			showModels: false,
 		};
 	}
 
@@ -168,6 +201,7 @@ export class PierStore {
 			chatsVersion: s.chatsVersion + 1,
 			pairingRequests: [],
 			pairing: undefined,
+			auth: undefined,
 		}));
 	}
 
@@ -214,6 +248,10 @@ export class PierStore {
 			this.set(remote.pairingActive ? { remote } : { remote, pairing: undefined });
 		} else if (event.type === "device.changed") {
 			this.scheduleRefresh(DEVICES_KEY);
+		} else if (event.type === "provider.changed") {
+			this.scheduleRefresh(PROVIDERS_KEY);
+		} else if (event.type.startsWith("auth.")) {
+			this.onAuthEvent(frame);
 		} else if (event.type === "pairing.request") {
 			const request = event.request as PairingRequest;
 			this.set((s) => ({
@@ -236,6 +274,7 @@ export class PierStore {
 
 	private async reloadAll(): Promise<void> {
 		void this.loadRemote();
+		void this.loadProviders();
 		await this.loadWorkspaces();
 		const { selectedSessionId, selectedWorkspaceId } = this.state;
 		if (selectedSessionId && selectedWorkspaceId) {
@@ -272,6 +311,7 @@ export class PierStore {
 			setTimeout(() => {
 				this.refreshTimers.delete(workspaceId);
 				if (workspaceId === DEVICES_KEY) void this.loadDevices();
+				else if (workspaceId === PROVIDERS_KEY) void this.loadProviders();
 				else void this.refreshSessions(workspaceId);
 			}, 150),
 		);
@@ -331,6 +371,173 @@ export class PierStore {
 	async renameDevice(deviceId: string, name: string): Promise<void> {
 		const result = await this.call("重命名设备", (c) => c.request("device.rename", { deviceId, name }));
 		if (result) this.set((s) => ({ devices: s.devices.map((d) => (d.id === deviceId ? result.device : d)) }));
+	}
+
+	// ---- models and providers -----------------------------------------------------------
+
+	async loadProviders(): Promise<void> {
+		const client = this.client;
+		if (!client) return;
+		try {
+			const providers = await client.request("provider.list");
+			if (this.client === client) this.set({ providers });
+		} catch (error) {
+			if (this.state.showModels) this.toast("error", `读取模型配置失败：${errorText(error)}`);
+		}
+	}
+
+	openModels(): void {
+		this.set({ showModels: true });
+		void this.loadProviders();
+	}
+
+	closeModels(): void {
+		this.set({ showModels: false });
+	}
+
+	/** Models with usable credentials. */
+	async availableModels(): Promise<ModelInfo[]> {
+		const client = this.client;
+		if (!client) return [];
+		return (await client.request("model.list")).models;
+	}
+
+	async setDefaultModel(provider: string, modelId: string): Promise<void> {
+		const result = await this.call("设置默认模型", (c) => c.request("model.setDefault", { provider, modelId }));
+		if (result) void this.loadProviders();
+	}
+
+	async startLogin(provider: ProviderInfo, method: AuthMethod): Promise<void> {
+		const client = this.client;
+		if (!client) return;
+		if (this.state.auth?.flowId) void this.cancelLogin();
+		const seq = ++this.authSeq;
+		this.authBacklog = [];
+		this.set({ auth: { providerId: provider.id, providerName: provider.name, method, notices: [] } });
+		try {
+			const { flowId } = await client.request("provider.login", { providerId: provider.id, method });
+			if (seq !== this.authSeq || !this.state.auth || this.state.auth.flowId) {
+				// Closed (or replaced) while starting: stop the orphaned sign-in.
+				await client.request("provider.loginCancel", { flowId }).catch(() => undefined);
+				return;
+			}
+			this.set((s) => (s.auth ? { auth: { ...s.auth, flowId } } : {}));
+			const backlog = this.authBacklog.filter((f) => f.event.flowId === flowId);
+			this.authBacklog = [];
+			for (const frame of backlog) this.onAuthEvent(frame);
+		} catch (error) {
+			if (seq === this.authSeq) this.set((s) => (s.auth ? { auth: { ...s.auth, error: errorText(error) } } : {}));
+		}
+	}
+
+	private onAuthEvent(frame: EventFrame): void {
+		const event = frame.event;
+		const auth = this.state.auth;
+		if (!auth) return;
+		if (!auth.flowId) {
+			this.authBacklog.push(frame);
+			return;
+		}
+		if (event.flowId !== auth.flowId) return;
+		if (event.type === "auth.prompt") {
+			this.set({ auth: { ...auth, prompt: event.prompt as AuthPromptInfo } });
+		} else if (event.type === "auth.promptClosed") {
+			if (auth.prompt?.id === event.promptId) {
+				const { prompt: _p, ...rest } = auth;
+				this.set({ auth: rest });
+			}
+		} else if (event.type === "auth.notice") {
+			const notice = event.notice as AuthNotice;
+			if (notice.type === "auth_url" && !this.openedAuthUrls.has(notice.url)) {
+				this.openedAuthUrls.add(notice.url);
+				this.openExternal(notice.url);
+			}
+			this.set({ auth: { ...auth, notices: [...auth.notices, notice].slice(-20) } });
+		} else if (event.type === "auth.done") {
+			if (event.ok) {
+				const defaultModel = event.defaultModel as DefaultModelRef | undefined;
+				this.set({ auth: undefined });
+				this.toast(
+					"info",
+					`${auth.method === "oauth" ? "已登录" : "已保存 API Key："}${auth.providerName}${
+						defaultModel ? `，默认模型设为 ${defaultModel.modelId}` : ""
+					}`,
+				);
+			} else if (event.cancelled) {
+				this.set({ auth: undefined });
+			} else {
+				const { prompt: _p, ...rest } = auth;
+				this.set({ auth: { ...rest, error: String(event.error ?? "登录失败") } });
+			}
+			void this.loadProviders();
+		}
+	}
+
+	async answerAuthPrompt(value: string): Promise<void> {
+		const auth = this.state.auth;
+		if (!auth?.flowId || !auth.prompt) return;
+		const promptId = auth.prompt.id;
+		const { prompt: _p, ...rest } = auth;
+		this.set({ auth: rest });
+		await this.call("提交", (c) =>
+			c.request("provider.loginRespond", { flowId: auth.flowId as string, promptId, value }),
+		);
+	}
+
+	async cancelLogin(): Promise<void> {
+		const auth = this.state.auth;
+		this.authSeq++;
+		this.set({ auth: undefined });
+		if (auth?.flowId && !auth.error) {
+			const client = this.client;
+			await client?.request("provider.loginCancel", { flowId: auth.flowId }).catch(() => undefined);
+		}
+	}
+
+	async logoutProvider(provider: ProviderInfo): Promise<void> {
+		const result = await this.call("移除凭据", (c) => c.request("provider.logout", { providerId: provider.id }));
+		if (result) {
+			this.toast("info", result.removed ? `已移除 ${provider.name} 的凭据` : `${provider.name} 没有保存的凭据`);
+			void this.loadProviders();
+		}
+	}
+
+	/** Save a custom endpoint. Throws so the form can show the error next to the fields. */
+	async saveCustomProvider(provider: CustomProvider, apiKey: string | undefined, create: boolean): Promise<void> {
+		const client = this.client;
+		if (!client) throw new Error("尚未连接到 Pier Host");
+		const result = await client.request("provider.saveCustom", {
+			provider,
+			...(apiKey ? { apiKey } : {}),
+			create,
+		});
+		this.toast(
+			"info",
+			`已保存 ${result.provider.name}${result.defaultModel ? `，默认模型设为 ${result.defaultModel.modelId}` : ""}`,
+		);
+		await this.loadProviders();
+	}
+
+	async removeCustomProvider(provider: ProviderInfo): Promise<void> {
+		const result = await this.call("删除服务商", (c) =>
+			c.request("provider.removeCustom", { providerId: provider.id }),
+		);
+		if (result?.removed) {
+			this.toast("info", `已删除 ${provider.name}`);
+			void this.loadProviders();
+		}
+	}
+
+	/** Models offered by an endpoint. Throws with the host's message. */
+	async probeModels(params: {
+		api: CustomProviderApi;
+		baseUrl: string;
+		apiKey?: string;
+		providerId?: string;
+	}): Promise<Array<{ id: string; name?: string }>> {
+		const client = this.client;
+		if (!client) throw new Error("尚未连接到 Pier Host");
+		return (await client.request("provider.probeModels", params, { timeoutMs: 30_000 })).models;
 	}
 
 	async refreshSessions(workspaceId: string): Promise<void> {

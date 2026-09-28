@@ -12,6 +12,7 @@ import {
 	IconPower,
 	IconSettings,
 	IconSmartphone,
+	IconSparkles,
 	Logo,
 } from "./Icons.tsx";
 import { Modal } from "./Modal.tsx";
@@ -173,6 +174,7 @@ export function Sidebar({ onShowLogs, onShowRemote }: { onShowLogs: () => void; 
 	const hostInfo = useAppState((s) => s.hostInfo);
 	const remote = useAppState((s) => s.remote);
 	const connectedDevices = useAppState((s) => s.devices.filter((d) => d.connected).length);
+	const noModels = useAppState((s) => s.providers?.availableCount === 0);
 	const addWorkspace = useAddWorkspace();
 	const [settingsFor, setSettingsFor] = useState<string | undefined>();
 	const settingsWorkspace = workspaces.find((w) => w.id === settingsFor);
@@ -241,6 +243,16 @@ export function Sidebar({ onShowLogs, onShowRemote }: { onShowLogs: () => void; 
 					<IconLogs size={14} className="host-status-icon" />
 				</button>
 				<span className="sidebar-footer-actions">
+					<button
+						type="button"
+						className={`ghost icon models-button${noModels ? " warn" : ""}`}
+						onClick={() => store.openModels()}
+						disabled={!online}
+						title={noModels ? "模型与服务商（还没有可用模型）" : "模型与服务商"}
+					>
+						<IconSparkles size={15} />
+						{noModels ? <span className="warn-dot" /> : null}
+					</button>
 					<button
 						type="button"
 						className={`ghost icon remote-button${remote?.running ? " on" : ""}`}

@@ -2,6 +2,17 @@
 
 All notable changes to Pier are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, minor versions may contain breaking changes.
 
+## Unreleased
+
+### Added
+
+- **Model configuration in Pier**: set up models without installing the pi CLI. The desktop app has a "模型与服务商" panel (sidebar, model picker, and a prompt on the home screens when no model is usable) to:
+  - sign in to any provider pi ships, with an API key or an account (OAuth, device codes, and pasted authorization codes are supported);
+  - add, edit, and remove OpenAI-, Anthropic-, or Gemini-compatible custom endpoints (proxies, gateways, Ollama / LM Studio / vLLM), including fetching the endpoint's model list;
+  - choose the default model for new sessions, and remove stored credentials.
+  Credentials go to pi's `auth.json` and custom endpoints to `models.json` (only the edited entry changes; a file with comments is backed up first), so the terminal `pi` sees the same configuration.
+- **Protocol 1.2** (backwards compatible): local-only `provider.list` / `login` / `loginRespond` / `loginCancel` / `logout` / `saveCustom` / `removeCustom` / `probeModels` and `model.setDefault`, the `provider.changed` host event, and `auth.*` sign-in events sent only to the connection that started the sign-in.
+
 ## v0.2.0 — 2026-09-29
 
 The mobile app and LAN remote access (milestone M3): pair a phone with the desktop by scanning a QR code, then watch and drive agents, answer approvals, and steer or abort runs from the phone over an end-to-end encrypted connection.

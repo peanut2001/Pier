@@ -1,0 +1,357 @@
+/* Model settings: providers, sign-in, custom endpoints, and the "no models" call to action. */
+
+.section-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	margin-bottom: 8px;
+}
+
+.section-row .field-label {
+	margin-bottom: 0;
+}
+
+.models-error {
+	align-items: flex-start;
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
+.models-empty {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 11px 14px;
+	border: 1px solid var(--warning-line);
+	border-radius: var(--radius);
+	background: var(--warning-soft);
+	color: var(--warning);
+	font-size: 13px;
+}
+
+.default-model-row {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.default-model-row select {
+	max-width: 520px;
+}
+
+.provider-list {
+	display: flex;
+	flex-direction: column;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-lg);
+	background: var(--bg-elevated);
+	overflow: hidden;
+}
+
+.provider-row {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 10px 14px;
+	min-height: 52px;
+}
+
+.provider-row + .provider-row {
+	border-top: 1px solid var(--border);
+}
+
+.provider-main {
+	display: flex;
+	flex-direction: column;
+	flex: 1;
+	min-width: 0;
+}
+
+.provider-main .small {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.provider-name {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font-weight: 600;
+}
+
+.provider-row .row-actions {
+	flex: none;
+	flex-wrap: nowrap;
+}
+
+.provider-row .row-actions button {
+	padding: 4px 10px;
+	font-size: 12.5px;
+}
+
+button.provider-row.option-row {
+	justify-content: flex-start;
+	width: 100%;
+	border: none;
+	border-radius: 0;
+	background: transparent;
+	text-align: left;
+	white-space: normal;
+}
+
+button.provider-row.option-row:hover:not(:disabled) {
+	background: var(--accent-soft);
+}
+
+.provider-search {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 8px;
+	padding: 0 11px;
+	border: 1px solid var(--border-strong);
+	border-radius: 8px;
+	background: var(--bg-input);
+	color: var(--text-faint);
+}
+
+.provider-search:focus-within {
+	border-color: var(--accent);
+	box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.provider-search input,
+.provider-search input:focus {
+	flex: 1;
+	min-width: 0;
+	border: none;
+	background: transparent;
+	box-shadow: none;
+	padding: 7px 0;
+}
+
+button.show-all {
+	margin-top: 6px;
+	color: var(--accent-text);
+}
+
+button.link-button {
+	display: inline;
+	padding: 0 4px;
+	border: none;
+	background: none;
+	color: var(--accent-text);
+	font-size: inherit;
+	font-weight: 500;
+}
+
+button.link-button:hover:not(:disabled) {
+	background: none;
+	text-decoration: underline;
+}
+
+/* ---- sign-in ------------------------------------------------------------------------ */
+
+.login-view strong {
+	color: var(--text);
+}
+
+.auth-notice {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	margin-bottom: 12px;
+	padding: 12px 14px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	background: var(--bg-elevated);
+	font-size: 13px;
+	word-break: break-word;
+}
+
+.device-code {
+	font-size: 26px;
+	font-weight: 700;
+	letter-spacing: 0.12em;
+	color: var(--accent-text);
+	user-select: all;
+}
+
+.auth-prompt {
+	margin: 4px 0 12px;
+}
+
+.auth-prompt .field-label {
+	display: block;
+	white-space: pre-wrap;
+}
+
+.auth-input-row {
+	display: flex;
+	gap: 8px;
+}
+
+.auth-input-row input {
+	flex: 1;
+	min-width: 0;
+}
+
+.auth-waiting {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin: 8px 0;
+	font-size: 13px;
+}
+
+/* ---- custom endpoint form ------------------------------------------------------------ */
+
+.form-grid {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 12px 16px;
+}
+
+.form-field {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+}
+
+.form-field .field-label {
+	margin-bottom: 6px;
+}
+
+.form-field.wide {
+	grid-column: 1 / -1;
+}
+
+.custom-form > p.small {
+	margin: 8px 0 18px;
+}
+
+.probe-error {
+	margin-bottom: 8px;
+	word-break: break-word;
+}
+
+.probe-result {
+	margin-bottom: 10px;
+	padding: 10px 12px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	background: var(--bg-elevated);
+}
+
+.chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	max-height: 168px;
+	margin-top: 8px;
+	overflow-y: auto;
+}
+
+button.chip-button {
+	padding: 3px 9px;
+	border-radius: 999px;
+	font-family: var(--mono);
+	font-size: 11.5px;
+	font-weight: 400;
+}
+
+button.chip-button:hover:not(:disabled) {
+	border-color: var(--accent);
+	background: var(--accent-soft);
+}
+
+button.chip-button.added:disabled {
+	opacity: 1;
+	border-color: transparent;
+	background: var(--accent-soft);
+	color: var(--accent-text);
+}
+
+.model-rows {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.model-row {
+	display: grid;
+	grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) 96px 40px 40px 30px;
+	align-items: center;
+	gap: 8px;
+}
+
+.model-row.head {
+	padding: 0 2px;
+}
+
+.model-row input[type="checkbox"] {
+	justify-self: center;
+}
+
+.model-row .ghost.icon {
+	width: 28px;
+	height: 28px;
+}
+
+/* ---- entry points ------------------------------------------------------------------- */
+
+.no-models {
+	display: flex;
+	align-items: center;
+	gap: 14px;
+	margin: 0 0 24px;
+	padding: 14px 16px;
+	border: 1px solid var(--warning-line);
+	border-radius: var(--radius-lg);
+	background: var(--warning-soft);
+	text-align: left;
+}
+
+.no-models-icon {
+	display: grid;
+	flex: none;
+	place-items: center;
+	width: 36px;
+	height: 36px;
+	border-radius: 10px;
+	background: var(--bg-raised);
+	color: var(--warning);
+}
+
+.no-models-text {
+	flex: 1;
+	min-width: 0;
+}
+
+.no-models-title {
+	font-weight: 600;
+}
+
+.sidebar-footer .models-button {
+	position: relative;
+}
+
+.warn-dot {
+	position: absolute;
+	top: 5px;
+	right: 5px;
+	width: 7px;
+	height: 7px;
+	border-radius: 50%;
+	background: var(--warning);
+	box-shadow: 0 0 0 2px var(--bg-app);
+}
+
+.dropdown-item.manage-models {
+	margin-top: 4px;
+	border-top: 1px solid var(--border);
+	border-radius: 0 0 8px 8px;
+	color: var(--text-muted);
+}

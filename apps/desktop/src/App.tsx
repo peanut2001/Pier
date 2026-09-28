@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Welcome, WorkspaceHome } from "./components/Home.tsx";
 import { HostBanner, LogsPanel } from "./components/HostPanels.tsx";
 import { IconAlert, IconInfo, IconMessage, IconX } from "./components/Icons.tsx";
+import { ModelsPanel } from "./components/ModelsPanel.tsx";
 import { PairingRequestDialog, RemotePanel } from "./components/RemotePanel.tsx";
 import { SessionView } from "./components/SessionView.tsx";
 import { Sidebar } from "./components/Sidebar.tsx";
@@ -66,6 +67,7 @@ export function App() {
 			<Toasts />
 			{showLogs ? <LogsPanel onClose={() => setShowLogs(false)} /> : null}
 			{showRemote ? <RemotePanel onClose={() => setShowRemote(false)} /> : null}
+			<ModelsPanel />
 			<PairingRequestDialog />
 		</div>
 	);

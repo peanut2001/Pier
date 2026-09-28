@@ -11,6 +11,7 @@ import {
 	IconMinimize,
 	IconMore,
 	IconSearch,
+	IconSettings,
 	IconShield,
 	IconShieldAlert,
 	IconSparkles,
@@ -54,6 +55,7 @@ function thinkingLabel(level: string): string {
 
 /** Combined model + thinking-level picker: one chip, one popover. */
 export function ModelPicker({ chat, controller }: { chat: ChatState; controller: ChatController }) {
+	const store = useStore();
 	const [open, setOpen] = useState(false);
 	const [models, setModels] = useState<ModelInfo[] | undefined>();
 	const [error, setError] = useState<string | undefined>();
@@ -123,7 +125,7 @@ export function ModelPicker({ chat, controller }: { chat: ChatState; controller:
 					{error ? <div className="dropdown-empty error">{error}</div> : null}
 					{!models && !error ? <div className="dropdown-empty">加载中…</div> : null}
 					{models && !visible.length ? (
-						<div className="dropdown-empty">没有可用模型。请先用 pi 登录或配置模型。</div>
+						<div className="dropdown-empty">{models.length ? "没有匹配的模型。" : "还没有可用的模型。"}</div>
 					) : null}
 					{[...groups].map(([provider, list]) => (
 						<div key={provider} className="dropdown-group">
@@ -153,6 +155,19 @@ export function ModelPicker({ chat, controller }: { chat: ChatState; controller:
 							})}
 						</div>
 					))}
+					<button
+						type="button"
+						className="dropdown-item manage-models"
+						onClick={() => {
+							setOpen(false);
+							store.openModels();
+						}}
+					>
+						<span className="menu-label">
+							<IconSettings size={14} />
+							{models && !models.length ? "配置模型…" : "管理模型与服务商…"}
+						</span>
+					</button>
 				</div>
 			) : null}
 		</div>

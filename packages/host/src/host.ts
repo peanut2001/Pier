@@ -32,6 +32,7 @@ import {
 import type { ManagedSession } from "./managed-session.ts";
 import { configPath, defaultPierDir, locksDir } from "./paths.ts";
 import { PI_VERSION, PiEnvironment, type PiEnvironmentOptions, toModelInfo } from "./pi/environment.ts";
+import { ProviderManager } from "./pi/providers.ts";
 import { RemoteAccess, type RemoteAccessOptions } from "./remote/remote-access.ts";
 import { SessionPool } from "./session-pool.ts";
 
@@ -130,6 +131,7 @@ export class PierHost implements RequestHandler {
 	readonly env: PiEnvironment;
 	readonly pool: SessionPool;
 	readonly remote: RemoteAccess;
+	readonly providers: ProviderManager;
 	private readonly connections = new Set<Connection>();
 	private readonly localToken: string;
 	private readonly handlers: Handlers;
@@ -169,6 +171,10 @@ export class PierHost implements RequestHandler {
 			},
 		});
 		const log = options.log ?? (() => {});
+		this.providers = new ProviderManager(env, {
+			onChanged: () => this.broadcast({ type: "provider.changed" }),
+			log,
+		});
 		this.remote = new RemoteAccess(
 			this.pierDir,
 			this.config,
@@ -222,6 +228,7 @@ export class PierHost implements RequestHandler {
 
 	disconnected(connection: Connection): void {
 		this.connections.delete(connection);
+		this.providers.connectionClosed(connection.connectionId);
 		for (const session of connection.subscriptions) session.unsubscribe(connection.connectionId);
 		connection.subscriptions.clear();
 	}
@@ -430,6 +437,35 @@ export class PierHost implements RequestHandler {
 			"thinking.set": (_ctx, params) => ({
 				level: this.pool.require(params.sessionId).setThinking(params.level, params.persist ?? false),
 			}),
+			"model.setDefault": async (_ctx, params) => ({
+				defaultModel: await this.providers.setDefault(params.provider, params.modelId),
+			}),
+
+			"provider.list": () => this.providers.list(),
+			"provider.login": (ctx, params) => {
+				const { flowId, start } = this.providers.login(ctx.connection, params.providerId, params.method);
+				ctx.after(start);
+				return { flowId };
+			},
+			"provider.loginRespond": (ctx, params) => ({
+				accepted: this.providers.respond(
+					ctx.connection.connectionId,
+					params.flowId,
+					params.promptId,
+					params.value,
+					params.cancelled,
+				),
+			}),
+			"provider.loginCancel": (ctx, params) => ({
+				cancelled: this.providers.cancel(ctx.connection.connectionId, params.flowId),
+			}),
+			"provider.logout": async (_ctx, params) => ({ removed: await this.providers.logout(params.providerId) }),
+			"provider.saveCustom": (_ctx, params) =>
+				this.providers.saveCustom(params.provider, params.apiKey, params.create ?? false),
+			"provider.removeCustom": async (_ctx, params) => ({
+				removed: await this.providers.removeCustom(params.providerId),
+			}),
+			"provider.probeModels": async (_ctx, params) => ({ models: await this.providers.probeModels(params) }),
 
 			"ui.respond": (ctx, params) => ({
 				accepted: this.pool
@@ -453,6 +489,7 @@ export class PierHost implements RequestHandler {
 		if (this.shuttingDown) return;
 		this.shuttingDown = true;
 		this.broadcast({ type: "host.notice", level: "warning", message: "Pier host is shutting down" });
+		this.providers.shutdown();
 		await this.remote.shutdown();
 		await this.pool.disposeAll();
 		for (const connection of [...this.connections]) connection.close(1001, "Host shutting down");

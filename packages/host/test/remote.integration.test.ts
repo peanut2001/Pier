@@ -171,6 +171,8 @@ describe("remote access", () => {
 			phone.request("device.list"),
 			phone.request("pairing.start"),
 			phone.request("remote.configure", { enabled: false }),
+			phone.request("provider.list"),
+			phone.request("provider.login", { providerId: "openai", method: "api_key" }),
 		]) {
 			await expectCode(call, "FORBIDDEN");
 		}

@@ -1,4 +1,4 @@
-# Pier 协议 v1.1
+# Pier 协议 v1.2
 
 > 实现：`packages/protocol`（zod schema + TS 类型，Host 与所有客户端共享）。
 > 本文档描述线上格式与语义；字段的权威定义以 `packages/protocol/src` 为准。
@@ -57,7 +57,7 @@
 
 ```jsonc
 { "type": "req", "id": "h", "method": "host.hello", "params": {
-  "protocolVersion": "1.1",
+  "protocolVersion": "1.2",
   "client": { "name": "pier-desktop", "version": "0.1.0", "platform": "darwin" },
   "token": "<本地 token>",       // 本地连接必填；远程连接由加密通道认证，不需要
   "coalesceMs": 50               // 可选：合并流式增量的窗口（0–1000ms，默认 0）
@@ -124,6 +124,24 @@
 | `model.list` | `{ sessionId? }` | `{ models: ModelInfo[], current? }`（仅列出已配置凭据的模型） |
 | `model.set` | `{ sessionId, provider, modelId, persist? }` | `{ model }`；`persist: true` 写入 pi 全局默认值 |
 | `thinking.set` | `{ sessionId, level, persist? }` | `{ level }`（按模型能力钳制后的实际等级） |
+| `model.setDefault` 🔒 | `{ provider, modelId }` | `{ defaultModel }`；写入 pi 全局 settings，只影响新会话（1.2） |
+
+### 服务商与凭据（1.2）
+
+直接在 Pier 中配置模型，无需安装 pi CLI。凭据写入 pi 的 `auth.json`，自定义接口写入 `models.json`（都在 `agentDir` 中，与终端里的 pi 共用）。所有方法均为 🔒，结果中不包含任何密钥。
+
+| 方法 | 参数 | 结果 |
+|---|---|---|
+| `provider.list` 🔒 | – | `ProviderListResult`：`{ providers: ProviderInfo[], defaultModel?, defaultAvailable, availableCount, agentDir, error? }`。`ProviderInfo` 含登录方式（`apiKey` / `oauth`）、凭据状态与来源、模型数量，自定义接口另有 `custom`（不含密钥，只有 `hasConfiguredKey`） |
+| `provider.login` 🔒 | `{ providerId, method: "api_key"\|"oauth" }` | `{ flowId }`；随后本连接收到 `auth.*` 事件（见 §4.3）。同一连接再次调用会取消之前的登录 |
+| `provider.loginRespond` 🔒 | `{ flowId, promptId, value?, cancelled? }` | `{ accepted }`；回答 `auth.prompt`，`cancelled: true` 取消整个登录 |
+| `provider.loginCancel` 🔒 | `{ flowId }` | `{ cancelled }` |
+| `provider.logout` 🔒 | `{ providerId }` | `{ removed }`；只删除 `auth.json` 中保存的凭据，不影响环境变量和 `models.json` |
+| `provider.saveCustom` 🔒 | `{ provider: CustomProvider, apiKey?, create? }` | `{ provider, defaultModel? }`；`CustomProvider = { id, name?, api, baseUrl, models: { id, name?, reasoning?, images?, contextWindow?, maxTokens? }[] }`，`api` 为 `openai-completions`、`openai-responses`、`anthropic-messages`、`google-generative-ai` 之一。只改动表单涉及的字段，文件中的其他内容保留（含注释的文件先备份为 `models.json.bak`）；pi 无法加载时回滚并返回 `BAD_REQUEST`。新建时必须提供 `apiKey`，编辑时省略则保留原密钥 |
+| `provider.removeCustom` 🔒 | `{ providerId }` | `{ removed }`；同时删除保存的密钥 |
+| `provider.probeModels` 🔒 | `{ api, baseUrl, apiKey?, providerId? }` | `{ models: { id, name? }[] }`；请求接口的模型列表（OpenAI：`GET <baseUrl>/models`）。省略 `apiKey` 时使用 `providerId` 已保存的密钥 |
+
+登录、保存或删除后，如果当前默认模型不可用，Host 会自动把默认模型设为刚配置的服务商的第一个可用模型，并在结果中返回 `defaultModel`。
 
 ### UI
 
@@ -182,6 +200,7 @@
 | `workspace.changed` | – | 工作区列表或策略变化 |
 | `session.listChanged` | `workspaceId` | 会话列表变化（新建、分叉、关闭、重命名…） |
 | `session.activity` | `workspaceId, sessionId, state, pendingUi` | 活跃会话的运行状态或待回答请求数变化（1.1）。列表页据此显示“运行中 / 待批准”，无需订阅每个会话 |
+| `provider.changed` | – | 服务商、凭据、`models.json` 或默认模型变化（1.2）；重新调用 `provider.list` / `model.list` |
 
 仅发给本地（桌面）连接（`LOCAL_ONLY_EVENTS`）：
 
@@ -191,6 +210,15 @@
 | `device.changed` | – | 设备登记、吊销、改名，或连接状态变化；重新调用 `device.list` |
 | `pairing.request` | `request: { id, device, fingerprint, address?, createdAt, expiresAt }` | 设备出示了正确的配对码，等待用户用 `pairing.respond` 确认 |
 | `pairing.resolved` | `requestId, resolution: accepted\|rejected\|expired\|cancelled, deviceId?` | 配对请求结束（`cancelled`：设备在等待中断开） |
+
+服务商登录进度（1.2），只发给调用 `provider.login` 的那个连接；连接断开时登录自动取消：
+
+| 事件 | 字段 | 说明 |
+|---|---|---|
+| `auth.prompt` | `flowId, prompt: { id, type: text\|secret\|select\|manual_code, message, placeholder?, options? }` | 需要用户输入（API Key、授权码、选项等），用 `provider.loginRespond` 回答 |
+| `auth.promptClosed` | `flowId, promptId` | 问题已不需要回答（例如浏览器回调先完成） |
+| `auth.notice` | `flowId, notice` | `auth_url`（打开浏览器登录）、`device_code`（设备码）、`info`、`progress` |
+| `auth.done` | `flowId, providerId, ok, cancelled?, error?, defaultModel?` | 登录结束 |
 
 ## 5. EventLog、订阅与断线恢复
 

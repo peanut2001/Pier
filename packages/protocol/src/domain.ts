@@ -202,3 +202,117 @@ export interface PairingRequest {
 }
 
 export type PairingResolution = "accepted" | "rejected" | "expired" | "cancelled";
+
+// ---- Model providers and credentials (1.2) ----------------------------------------------
+
+export const AuthMethodSchema = z.enum(["api_key", "oauth"]);
+export type AuthMethod = z.infer<typeof AuthMethodSchema>;
+
+/** Wire APIs a custom (models.json) provider can speak. */
+export const CUSTOM_PROVIDER_APIS = [
+	"openai-completions",
+	"openai-responses",
+	"anthropic-messages",
+	"google-generative-ai",
+] as const;
+export const CustomProviderApiSchema = z.enum(CUSTOM_PROVIDER_APIS);
+export type CustomProviderApi = z.infer<typeof CustomProviderApiSchema>;
+
+export const ProviderIdSchema = z
+	.string()
+	.min(1)
+	.max(64)
+	.regex(/^[a-z0-9][a-z0-9._-]*$/, "Use lowercase letters, digits, '.', '_' or '-'");
+
+export const CustomModelSchema = z.object({
+	id: z.string().trim().min(1).max(200),
+	name: z.string().trim().max(200).optional(),
+	reasoning: z.boolean().optional(),
+	/** Whether the model accepts image input. */
+	images: z.boolean().optional(),
+	contextWindow: z.number().int().positive().max(100_000_000).optional(),
+	maxTokens: z.number().int().positive().max(100_000_000).optional(),
+});
+export type CustomModel = z.infer<typeof CustomModelSchema>;
+
+/** An OpenAI-, Anthropic- or Google-compatible endpoint stored in pi's `models.json`. */
+export const CustomProviderSchema = z.object({
+	id: ProviderIdSchema,
+	name: z.string().trim().max(100).optional(),
+	api: CustomProviderApiSchema,
+	baseUrl: z
+		.string()
+		.trim()
+		.max(2000)
+		.regex(/^https?:\/\/\S+$/i, "Base URL must start with http:// or https://"),
+	models: z.array(CustomModelSchema).min(1).max(500),
+});
+export type CustomProvider = z.infer<typeof CustomProviderSchema>;
+
+export interface ProviderAuthStatus {
+	configured: boolean;
+	/** Which credential is in use when configured. */
+	type?: AuthMethod;
+	/** `stored` (auth.json), `environment`, `models_json_key`, `models_json_command`, `runtime`, ... */
+	source?: string;
+	/** Human readable source, e.g. an environment variable name. */
+	label?: string;
+}
+
+/** A model provider known to the host: built in, from models.json, or registered by an extension. */
+export interface ProviderInfo {
+	id: string;
+	name: string;
+	/** Whether pi ships this provider. */
+	builtin: boolean;
+	/** API-key authentication. `interactive: false` means ambient-only (environment variables, cloud credentials). */
+	apiKey?: { name: string; interactive: boolean };
+	/** OAuth / subscription sign-in. */
+	oauth?: { name: string; loginLabel?: string; subscription: boolean };
+	status: ProviderAuthStatus;
+	/** A credential for this provider is saved in auth.json (so it can be removed). */
+	stored: boolean;
+	modelCount: number;
+	availableCount: number;
+	/** Present when models.json defines this provider as a custom endpoint. Never contains secrets. */
+	custom?: CustomProvider & { hasConfiguredKey: boolean };
+}
+
+export interface DefaultModelRef {
+	provider: string;
+	modelId: string;
+}
+
+export interface ProviderListResult {
+	providers: ProviderInfo[];
+	/** Default model for new sessions (pi global settings). */
+	defaultModel?: DefaultModelRef;
+	/** Whether the default model is currently usable. */
+	defaultAvailable: boolean;
+	/** Number of models with usable credentials. */
+	availableCount: number;
+	agentDir: string;
+	/** models.json / composition problems reported by pi. */
+	error?: string;
+}
+
+/** A question asked during a provider sign-in. */
+export interface AuthPromptInfo {
+	id: string;
+	type: "text" | "secret" | "select" | "manual_code";
+	message: string;
+	placeholder?: string;
+	options?: Array<{ id: string; label: string; description?: string }>;
+}
+
+/** Progress information shown during a provider sign-in. */
+export type AuthNotice =
+	| { type: "info"; message: string; links?: Array<{ url: string; label?: string }> }
+	| { type: "auth_url"; url: string; instructions?: string }
+	| {
+			type: "device_code";
+			userCode: string;
+			verificationUri: string;
+			expiresInSeconds?: number;
+	  }
+	| { type: "progress"; message: string };

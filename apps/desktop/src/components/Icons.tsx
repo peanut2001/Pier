@@ -181,6 +181,19 @@ export const IconPencil = make(
 	</>,
 );
 export const IconLoader = make(<path d="M21 12a9 9 0 1 1-6.22-8.56" />);
+export const IconKey = make(
+	<>
+		<path d="M2.59 18.41A2 2 0 0 0 2 19.83V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.17a2 2 0 0 0 1.42-.59l.81-.81a6.5 6.5 0 1 0-4.24-4.24z" />
+		<circle cx="16.5" cy="7.5" r=".5" fill="currentColor" />
+	</>,
+);
+export const IconExternal = make(
+	<path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />,
+);
+export const IconTrash = make(
+	<path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />,
+);
+export const IconDownload = make(<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />);
 
 /** App logo: the bundled favicon (blue→teal pier mark). */
 export function Logo({ size = 28 }: { size?: number }) {

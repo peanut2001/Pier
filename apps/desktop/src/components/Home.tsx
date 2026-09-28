@@ -10,6 +10,7 @@ import {
 	IconSparkles,
 	Logo,
 } from "./Icons.tsx";
+import { NoModelsBanner } from "./ModelsPanel.tsx";
 import { useAddWorkspace } from "./Sidebar.tsx";
 
 const STEPS = [
@@ -19,8 +20,9 @@ const STEPS = [
 ];
 
 export function Welcome() {
+	const store = useStore();
 	const addWorkspace = useAddWorkspace();
-	const hostInfo = useAppState((s) => s.hostInfo);
+	const providers = useAppState((s) => s.providers);
 	return (
 		<div className="home">
 			<div className="home-inner">
@@ -43,16 +45,20 @@ export function Welcome() {
 						</div>
 					))}
 				</div>
+				<NoModelsBanner />
 				<div className="hero-actions">
 					<button type="button" className="primary large" onClick={() => void addWorkspace()}>
 						<IconFolderPlus size={17} />
 						添加工作区
 					</button>
 				</div>
-				{hostInfo ? (
+				{providers && providers.availableCount > 0 ? (
 					<p className="muted small hero-note">
-						模型与凭据复用 pi 的配置（<code>{hostInfo.agentDir}</code>）。如果还没有可用模型，请先在终端运行{" "}
-						<code>pi</code> 完成登录。
+						已有 {providers.availableCount} 个可用模型
+						{providers.defaultModel ? `，默认使用 ${providers.defaultModel.modelId}` : ""}。
+						<button type="button" className="ghost link-button" onClick={() => store.openModels()}>
+							管理模型与服务商
+						</button>
 					</p>
 				) : null}
 			</div>
@@ -87,6 +93,7 @@ export function WorkspaceHome({ workspaceId }: { workspaceId: string }) {
 						新建会话
 					</button>
 				</div>
+				<NoModelsBanner />
 				<div className="recent">
 					<div className="section-heading">
 						<h3>最近的会话</h3>

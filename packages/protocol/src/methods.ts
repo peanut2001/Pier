@@ -1,11 +1,17 @@
 import { z } from "zod";
 import {
 	ApprovalPolicySchema,
+	AuthMethodSchema,
 	type ClientInfo,
+	CustomProviderApiSchema,
+	CustomProviderSchema,
+	type DefaultModelRef,
 	type DeviceInfo,
 	type HostInfo,
 	ImageInputSchema,
 	type ModelInfo,
+	type ProviderInfo,
+	type ProviderListResult,
 	type QueueState,
 	type RemoteAccessStatus,
 	type SessionSnapshot,
@@ -84,6 +90,34 @@ export const MethodParamsSchemas = {
 	"model.list": z.object({ sessionId: Id.optional() }).optional(),
 	"model.set": z.object({ ...SessionRef, provider: Id, modelId: Id, persist: z.boolean().optional() }),
 	"thinking.set": z.object({ ...SessionRef, level: ThinkingLevelSchema, persist: z.boolean().optional() }),
+	"model.setDefault": z.object({ provider: Id, modelId: Id }),
+
+	"provider.list": z.object({}).optional(),
+	/** Start an interactive sign-in. Progress arrives as `auth.*` events on this connection. */
+	"provider.login": z.object({ providerId: Id, method: AuthMethodSchema }),
+	"provider.loginRespond": z.object({
+		flowId: Id,
+		promptId: Id,
+		value: z.string().max(20_000).optional(),
+		cancelled: z.boolean().optional(),
+	}),
+	"provider.loginCancel": z.object({ flowId: Id }),
+	"provider.logout": z.object({ providerId: Id }),
+	"provider.saveCustom": z.object({
+		provider: CustomProviderSchema,
+		/** Saved to auth.json. Omit to keep the existing key. */
+		apiKey: z.string().trim().min(1).max(20_000).optional(),
+		/** True when creating: fails if the id is already taken. */
+		create: z.boolean().optional(),
+	}),
+	"provider.removeCustom": z.object({ providerId: Id }),
+	/** List the models an endpoint offers (`GET /models`). Uses the saved key of `providerId` when `apiKey` is omitted. */
+	"provider.probeModels": z.object({
+		api: CustomProviderApiSchema,
+		baseUrl: z.string().trim().min(1).max(2000),
+		apiKey: z.string().trim().max(20_000).optional(),
+		providerId: Id.optional(),
+	}),
 
 	"ui.respond": z.object({ ...SessionRef, requestId: Id, response: UiResponseSchema }),
 
@@ -122,6 +156,15 @@ export const LOCAL_ONLY_METHODS: ReadonlySet<MethodName> = new Set([
 	"workspace.add",
 	"workspace.remove",
 	"workspace.setPolicy",
+	"model.setDefault",
+	"provider.list",
+	"provider.login",
+	"provider.loginRespond",
+	"provider.loginCancel",
+	"provider.logout",
+	"provider.saveCustom",
+	"provider.removeCustom",
+	"provider.probeModels",
 ]);
 
 export interface HelloResult {
@@ -170,6 +213,15 @@ export interface MethodResults {
 	"model.list": { models: ModelInfo[]; current?: ModelInfo };
 	"model.set": { model: ModelInfo };
 	"thinking.set": { level: string };
+	"model.setDefault": { defaultModel: DefaultModelRef };
+	"provider.list": ProviderListResult;
+	"provider.login": { flowId: string };
+	"provider.loginRespond": { accepted: boolean };
+	"provider.loginCancel": { cancelled: boolean };
+	"provider.logout": { removed: boolean };
+	"provider.saveCustom": { provider: ProviderInfo; defaultModel?: DefaultModelRef };
+	"provider.removeCustom": { removed: boolean };
+	"provider.probeModels": { models: Array<{ id: string; name?: string }> };
 	"ui.respond": { accepted: boolean };
 	"device.list": { devices: DeviceInfo[] };
 	"device.revoke": { revoked: boolean };

@@ -24,6 +24,8 @@ export interface PiEnvironmentOptions {
 	agentDir?: string;
 	/** Shared model/auth runtime. Defaults to one backed by `<agentDir>/auth.json` and `models.json`. */
 	modelRuntime?: ModelRuntime;
+	/** models.json edited by Pier's provider settings. Defaults to `<agentDir>/models.json`. Must match the runtime's. */
+	modelsPath?: string;
 	/** Settings for a cwd. Defaults to pi's file-backed settings (global + project). */
 	settingsManager?: (cwd: string) => SettingsManager;
 	/** Session storage directory override. Defaults to pi's resolution (env, settings, per-cwd default). */
@@ -51,12 +53,14 @@ function expandHome(path: string): string {
  */
 export class PiEnvironment {
 	readonly agentDir: string;
+	readonly modelsPath: string;
 	readonly modelRuntime: ModelRuntime;
 	private readonly options: PiEnvironmentOptions;
 
 	private constructor(options: PiEnvironmentOptions, agentDir: string, modelRuntime: ModelRuntime) {
 		this.options = options;
 		this.agentDir = agentDir;
+		this.modelsPath = options.modelsPath ?? join(agentDir, "models.json");
 		this.modelRuntime = modelRuntime;
 	}
 
@@ -66,13 +70,18 @@ export class PiEnvironment {
 			options.modelRuntime ??
 			(await ModelRuntime.create({
 				authPath: join(agentDir, "auth.json"),
-				modelsPath: join(agentDir, "models.json"),
+				modelsPath: options.modelsPath ?? join(agentDir, "models.json"),
 			}));
 		return new PiEnvironment(options, agentDir, modelRuntime);
 	}
 
 	settingsFor(cwd: string): SettingsManager {
 		return this.options.settingsManager?.(cwd) ?? SettingsManager.create(cwd, this.agentDir);
+	}
+
+	/** Settings used for global values such as the default model (project settings do not apply). */
+	globalSettings(): SettingsManager {
+		return this.settingsFor(this.agentDir);
 	}
 
 	/** Session directory for a cwd, or undefined to use pi's per-cwd default. */
