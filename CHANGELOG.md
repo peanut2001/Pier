@@ -1,27 +1,39 @@
 # Changelog
 
-All notable changes to Pier are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, minor versions may contain breaking changes.
+Pier 的所有重要变更都记录在这里。版本号规则：日常发版只递增最后一位（0.2.1、0.2.2……），`x.y.0` 留给大版本；1.0 之前，大版本可能包含不兼容的变更。
 
-## Unreleased
+## v0.2.1 — 2026-09-29
 
-### Added
+直接在 Pier 里配置模型，并支持桌面端自动更新。
 
-- **Model configuration in Pier**: set up models without installing the pi CLI. The desktop app has a "模型与服务商" panel (sidebar, model picker, and a prompt on the home screens when no model is usable) to:
-  - sign in to any provider pi ships, with an API key or an account (OAuth, device codes, and pasted authorization codes are supported);
-  - add, edit, and remove OpenAI-, Anthropic-, or Gemini-compatible custom endpoints (proxies, gateways, Ollama / LM Studio / vLLM), including fetching the endpoint's model list;
-  - choose the default model for new sessions, and remove stored credentials.
-  Credentials go to pi's `auth.json` and custom endpoints to `models.json` (only the edited entry changes; a file with comments is backed up first), so the terminal `pi` sees the same configuration.
-- **Protocol 1.2** (backwards compatible): local-only `provider.list` / `login` / `loginRespond` / `loginCancel` / `logout` / `saveCustom` / `removeCustom` / `probeModels` and `model.setDefault`, the `provider.changed` host event, and `auth.*` sign-in events sent only to the connection that started the sign-in.
-- **Desktop auto-update** (Tauri updater): Pier checks the latest GitHub release shortly after launch and every 6 hours (can be turned off), shows a badge and a toast when a new version is out, and installs it from a "软件更新" dialog (the sidebar badge, the tray menu, or "检查更新" in the Pier Host panel) with release notes and download progress.
-  - Updates are signed with Pier's updater key and verified before installing; a tampered or unsigned bundle is rejected.
-  - Installing stops the Pier Host first (the dialog warns about sessions that are still running or waiting for approval), then relaunches Pier; if installing fails, the host starts again.
-  - Supported for the AppImage and deb on Linux, the app bundle on macOS, and the NSIS installer on Windows. Development builds show that they cannot update.
-  - Releases now also publish the updater bundles (`.app.tar.gz` on macOS), their `.sig` signatures, and `latest.json`.
+### 新增
 
-### Known limitations
+- **在 Pier 中直接配置模型**：不再需要另外安装 pi 命令行。桌面端新增「模型与服务商」面板（入口在侧边栏、会话的模型选择器；没有可用模型时，首页也会提示），可以：
+  - 登录 pi 内置的任一服务商，支持 API Key 和账号登录（包括浏览器授权、设备码和粘贴授权码）；
+  - 添加、编辑、删除 OpenAI / Anthropic / Gemini 兼容的自定义接口（中转站、公司网关、Ollama / LM Studio / vLLM 等），并可一键从接口获取模型列表；
+  - 设置新会话的默认模型，移除已保存的凭据。
 
-- Pier v0.2.0 and earlier have no updater, so install the first release with auto-update manually once; later releases arrive through auto-update.
-- Auto-update has been verified end to end with the Linux AppImage; the macOS and Windows paths are not yet verified on real machines.
+  凭据保存在 pi 的 `auth.json`，自定义接口写入 `models.json`（只改动编辑的那一项；文件含注释时会先备份为 `models.json.bak`，pi 无法加载时自动回滚），终端里的 `pi` 看到的是同一份配置。这些操作只能在电脑本机的桌面端进行，已配对的手机无权调用，接口返回的内容中也不包含任何密钥。
+- **协议 1.2**（向后兼容）：新增仅限本地连接的 `provider.list` / `login` / `loginRespond` / `loginCancel` / `logout` / `saveCustom` / `removeCustom` / `probeModels` 与 `model.setDefault`，新增 Host 事件 `provider.changed`，以及只发给发起登录的连接的 `auth.*` 登录事件。
+- **桌面端自动更新**（Tauri updater）：Pier 启动后不久以及之后每 6 小时检查一次最新的 GitHub Release（可关闭）。有新版本时显示提示和角标，可以在「软件更新」对话框中查看更新说明、下载进度并安装（入口：侧边栏角标、托盘菜单，或 Pier Host 面板中的「检查更新」）。
+  - 更新包使用 Pier 的更新密钥签名，安装前会校验签名，被篡改或未签名的更新包会被拒绝。
+  - 安装前先停止 Pier Host（如果还有正在运行或等待审批的会话，对话框会提醒），安装完成后自动重启 Pier；安装失败时 Host 会重新启动。
+  - 支持 Linux 的 AppImage 和 deb、macOS 的应用包以及 Windows 的 NSIS 安装包。开发版会提示无法更新。
+
+### 发布文件
+
+- 桌面端：`pier-desktop-v0.2.1-linux-x64.deb` 与 `.AppImage`、`pier-desktop-v0.2.1-darwin-arm64.dmg`、`pier-desktop-v0.2.1-darwin-x64.dmg`、`pier-desktop-v0.2.1-windows-x64.setup.exe`。每个安装包都内置 Pier Host 和 pi 的运行时资源。
+- 自动更新：各平台的更新包（macOS 为 `.app.tar.gz`）、对应的 `.sig` 签名，以及 `latest.json`。
+- 独立 Host：`pier-host-v0.2.1-<系统>-<架构>` 压缩包，覆盖 linux-x64、linux-arm64、darwin-arm64、darwin-x64、windows-x64。
+- `SHA256SUMS.txt` 列出所有文件的校验和。
+- 手机 App 暂未作为发布文件提供，请参考 README 用 Expo 从源码运行。
+
+### 已知限制
+
+- v0.2.0 及更早的版本没有自动更新功能，需要手动安装一次 v0.2.1，之后的版本即可自动更新。
+- 自动更新目前只在 Linux AppImage 上完整验证过，macOS 和 Windows 尚未在真机上验证。
+- 账号登录（OAuth）尚未用真实账号在各平台上验证过。
+- 安装包仍未做代码签名：macOS 需要移除隔离属性（`xattr -dr com.apple.quarantine /Applications/Pier.app`）或在「系统设置 → 隐私与安全性」中允许打开；Windows 的 SmartScreen 可能会要求确认。
 
 ## v0.2.0 — 2026-09-29
 

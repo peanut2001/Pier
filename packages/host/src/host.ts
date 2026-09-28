@@ -36,7 +36,7 @@ import { ProviderManager } from "./pi/providers.ts";
 import { RemoteAccess, type RemoteAccessOptions } from "./remote/remote-access.ts";
 import { SessionPool } from "./session-pool.ts";
 
-export const PIER_HOST_VERSION = "0.2.0";
+export const PIER_HOST_VERSION = "0.2.1";
 
 /** Unauthenticated connections are closed after this long without a successful `host.hello`. */
 export const HELLO_TIMEOUT_MS = 10_000;

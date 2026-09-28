@@ -108,7 +108,11 @@ Pier 自身状态保存在 `~/.pier`（可用 `PIER_DIR` 覆盖）：`config.jso
 
 版本号统一由根 `package.json` 与各包的 `version` 决定（`packages/host/test/version.test.ts` 会校验它们与 `PIER_HOST_VERSION`、`pier-cli` 版本及 `CHANGELOG.md` 一致）。
 
-1. 更新所有版本号，并在 `CHANGELOG.md` 中新增 `## v<版本>` 小节；合并到 `main`。
+**版本号规则**：日常发版只递增最后一位（`v0.2.1`、`v0.2.2`……），`x.y.0` 留给大版本。
+
+**发布说明**：GitHub Release 和应用内「软件更新」显示的说明都取自 `CHANGELOG.md` 中对应版本的小节，请尽量用中文撰写。
+
+1. 更新所有版本号，并在 `CHANGELOG.md` 中新增 `## v<版本> — <日期>` 小节；合并到 `main`。
 2. 在 `main` 的该提交上打 tag 并推送：`git tag -a v<版本> -m "Pier v<版本>" && git push origin v<版本>`。
 3. `.github/workflows/release.yml` 会校验 tag、版本号以及该提交是否在 `main` 上，然后运行完整检查；接着在各平台原生 runner 上构建并冒烟测试 sidecar（`packages/host/scripts/smoke-sidecar.mjs`），同时在各平台 runner 上用 `tauri build` 打包桌面端安装包（deb / AppImage / dmg / NSIS，未签名），最后创建 GitHub Release，附带 sidecar 压缩包、桌面端安装包、更新包及其签名、`latest.json` 和 `SHA256SUMS.txt`，发布说明取自 CHANGELOG。版本号带 `-` 后缀（如 `0.1.0-rc.1`）时标记为 prerelease。
 
