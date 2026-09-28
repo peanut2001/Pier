@@ -30,16 +30,6 @@
 	font-size: 13px;
 }
 
-.default-model-row {
-	display: flex;
-	flex-direction: column;
-	gap: 6px;
-}
-
-.default-model-row select {
-	max-width: 520px;
-}
-
 .provider-list {
 	display: flex;
 	flex-direction: column;
@@ -332,21 +322,6 @@ button.chip-button.added:disabled {
 
 .no-models-title {
 	font-weight: 600;
-}
-
-.sidebar-footer .models-button {
-	position: relative;
-}
-
-.warn-dot {
-	position: absolute;
-	top: 5px;
-	right: 5px;
-	width: 7px;
-	height: 7px;
-	border-radius: 50%;
-	background: var(--warning);
-	box-shadow: 0 0 0 2px var(--bg-app);
 }
 
 .dropdown-item.manage-models {

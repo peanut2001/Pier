@@ -52,6 +52,9 @@ export interface AuthFlowState {
 	error?: string;
 }
 
+/** Pages of the settings screen. */
+export type SettingsSection = "general" | "models" | "workspaces" | "remote" | "logs" | "about";
+
 export interface AppState {
 	host: HostStatus;
 	connection: ClientState | "none";
@@ -74,12 +77,10 @@ export interface AppState {
 	pairing?: { uri: string; expiresAt: string; addresses: string[] };
 	/** Model providers and credentials (undefined until loaded). */
 	providers?: ProviderListResult;
-	/** The model settings panel is open. */
-	showModels: boolean;
 	auth?: AuthFlowState;
 	update: UpdateStatus;
-	/** The update dialog is open (sidebar button or tray menu). */
-	updateOpen: boolean;
+	/** The settings screen is open on this page (undefined while closed). */
+	settings?: SettingsSection;
 }
 
 const PAIRING_RESULT_TEXT: Record<PairingResolution, string> = {
@@ -141,9 +142,7 @@ export class PierStore {
 			chatsVersion: 0,
 			devices: [],
 			pairingRequests: [],
-			showModels: false,
 			update: { state: "idle", currentVersion: APP_VERSION, autoCheck: true, downloaded: 0 },
-			updateOpen: false,
 		};
 	}
 
@@ -180,7 +179,7 @@ export class PierStore {
 		const off = this.bridge.onStatus((status) => this.onHostStatus(status));
 		void this.bridge.status().then((status) => this.onHostStatus(status));
 		const offUpdate = this.bridge.updates.onStatus((status) => this.onUpdateStatus(status));
-		const offOpen = this.bridge.updates.onOpen(() => this.showUpdate(true));
+		const offOpen = this.bridge.updates.onOpen(() => this.openSettings("about"));
 		void this.bridge.updates.status().then((status) => this.onUpdateStatus(status));
 		return () => {
 			off();
@@ -394,17 +393,12 @@ export class PierStore {
 			const providers = await client.request("provider.list");
 			if (this.client === client) this.set({ providers });
 		} catch (error) {
-			if (this.state.showModels) this.toast("error", `读取模型配置失败：${errorText(error)}`);
+			if (this.state.settings === "models") this.toast("error", `读取模型配置失败：${errorText(error)}`);
 		}
 	}
 
 	openModels(): void {
-		this.set({ showModels: true });
-		void this.loadProviders();
-	}
-
-	closeModels(): void {
-		this.set({ showModels: false });
+		this.openSettings("models");
 	}
 
 	/** Models with usable credentials. */
@@ -772,17 +766,24 @@ export class PierStore {
 			status.state === "available" &&
 			status.version &&
 			status.version !== this.announcedUpdate &&
-			!this.state.updateOpen;
+			this.state.settings !== "about";
 		this.set({ update: status });
 		if (announce && status.version) {
 			this.announcedUpdate = status.version;
-			this.toast("info", `Pier v${status.version} 已发布，点击左下角的“更新”查看并安装`);
+			this.toast("info", `Pier v${status.version} 已发布，可在“设置 → 关于与更新”中安装`);
 		}
 	}
 
-	showUpdate(open: boolean): void {
-		if (open && this.state.update.version) this.announcedUpdate = this.state.update.version;
-		this.set({ updateOpen: open });
+	// ---- settings screen ---------------------------------------------------------------
+
+	openSettings(section: SettingsSection = "general"): void {
+		if (section === "about" && this.state.update.version) this.announcedUpdate = this.state.update.version;
+		this.set({ settings: section });
+		if (section === "models") void this.loadProviders();
+	}
+
+	closeSettings(): void {
+		this.set({ settings: undefined });
 	}
 
 	async checkForUpdates(): Promise<UpdateStatus> {

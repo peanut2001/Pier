@@ -6,6 +6,7 @@ import { useAppState, useStore } from "../lib/store.tsx";
 import { IconPencil } from "./Icons.tsx";
 import { CopyButton } from "./Markdown.tsx";
 import { Modal } from "./Modal.tsx";
+import { SettingRow, SettingsCard, SettingsGroup, Switch } from "./SettingsUi.tsx";
 
 function useNow(intervalMs = 1000): number {
 	const [now, setNow] = useState(() => Date.now());
@@ -63,21 +64,19 @@ function PairingSection() {
 	if (!remote?.running) return null;
 	if (!pairing) {
 		return (
-			<div className="field">
-				<div className="field-label">配对新设备</div>
-				<p className="muted small">
-					在手机上安装 Pier App，然后生成二维码扫描配对。配对码 5 分钟内有效，只能使用一次。
-				</p>
+			<SettingRow
+				title="扫码配对"
+				description="在手机上安装 Pier App，然后生成二维码扫描配对。配对码 5 分钟内有效，只能使用一次。"
+			>
 				<button type="button" className="primary" onClick={() => void store.startPairing()}>
 					显示配对二维码
 				</button>
-			</div>
+			</SettingRow>
 		);
 	}
 	const expired = Date.parse(pairing.expiresAt) <= now;
 	return (
-		<div className="field">
-			<div className="field-label">配对新设备</div>
+		<div className="setting-row">
 			<div className="pairing">
 				<div className={`qr-frame${expired ? " expired" : ""}`}>
 					<QrCode text={pairing.uri} />
@@ -182,7 +181,8 @@ function DeviceRow({ device }: { device: DeviceInfo }) {
 	);
 }
 
-export function RemotePanel({ onClose }: { onClose: () => void }) {
+/** The “phone and remote access” settings page. */
+export function RemoteSettings() {
 	const store = useStore();
 	const remote = useAppState((s) => s.remote);
 	const devices = useAppState((s) => s.devices);
@@ -193,89 +193,96 @@ export function RemotePanel({ onClose }: { onClose: () => void }) {
 		void store.loadRemote();
 	}, [store]);
 
+	if (!remote) return <p className="muted">正在读取状态…</p>;
+
 	const toggle = async (enabled: boolean) => {
 		setBusy(true);
 		await store.configureRemote({ enabled });
 		setBusy(false);
 	};
-	const portValue = port ?? String(remote?.port ?? "");
+	const portValue = port ?? String(remote.port);
 	const portNumber = Number(portValue);
 	const portValid = Number.isInteger(portNumber) && portNumber >= 1024 && portNumber <= 65535;
 
 	return (
-		<Modal title="手机与远程访问" onClose={onClose} wide>
-			{!remote ? (
-				<p className="muted">正在读取状态…</p>
-			) : (
-				<>
-					<div className="field">
-						<label className={`policy-option${remote.enabled ? " selected" : ""}`}>
-							<input
-								type="checkbox"
-								checked={remote.enabled}
-								disabled={busy}
-								onChange={(e) => void toggle(e.target.checked)}
-							/>
-							<div>
-								<div className="policy-title">允许配对的手机通过局域网连接</div>
-								<div className="muted">
-									开启后 Pier 在端口 {remote.port} 上接受连接。只有配对过的设备能连接，所有内容端到端加密（Noise
-									协议）；同一局域网、Tailscale / WireGuard 网络内均可使用。
-								</div>
-							</div>
-						</label>
-						{remote.enabled && remote.error ? <div className="banner error inline">{remote.error}</div> : null}
-						{remote.running ? (
-							<div className="host-facts">
-								<span>监听中 · 端口 {remote.port}</span>
-								<span>地址 {remote.addresses.join("、") || "（未检测到局域网地址）"}</span>
-								{remote.mdns ? <span>局域网广播 _pier._tcp</span> : null}
-							</div>
-						) : null}
-						<div className="port-row">
-							<span className="muted small">端口</span>
-							<input
-								className="port-input"
-								inputMode="numeric"
-								value={portValue}
-								onChange={(e) => setPort(e.target.value.replace(/\D/g, ""))}
-							/>
-							<button
-								type="button"
-								disabled={!portValid || portNumber === remote.port || busy}
-								onClick={async () => {
-									setBusy(true);
-									await store.configureRemote({ port: portNumber });
-									setPort(undefined);
-									setBusy(false);
-								}}
-							>
-								应用
-							</button>
-							<span className="muted small">
-								这台电脑的密钥指纹 <span className="mono">{remote.hostFingerprint}</span>
-							</span>
+		<>
+			<p className="settings-intro">
+				用手机上的 Pier App 查看会话、继续对话和审批工具调用。只有配对过的设备能连接，所有内容端到端加密（Noise
+				协议）；同一局域网、Tailscale / WireGuard 网络内均可使用。
+			</p>
+			<SettingsGroup title="局域网访问">
+				<SettingsCard>
+					<SettingRow
+						title="允许配对的手机通过局域网连接"
+						description={
+							remote.running
+								? `监听中 · 地址 ${remote.addresses.join("、") || "（未检测到局域网地址）"}${remote.mdns ? " · 局域网广播 _pier._tcp" : ""}`
+								: `开启后 Pier 在端口 ${remote.port} 上接受连接。`
+						}
+					>
+						<Switch
+							label="允许局域网连接"
+							checked={remote.enabled}
+							disabled={busy}
+							onChange={(enabled) => void toggle(enabled)}
+						/>
+					</SettingRow>
+					{remote.enabled && remote.error ? (
+						<div className="setting-row">
+							<div className="banner error inline">{remote.error}</div>
 						</div>
-					</div>
+					) : null}
+					<SettingRow title="端口" description="范围 1024–65535，修改后会重新监听。">
+						<input
+							className="port-input"
+							inputMode="numeric"
+							value={portValue}
+							onChange={(e) => setPort(e.target.value.replace(/\D/g, ""))}
+						/>
+						<button
+							type="button"
+							disabled={!portValid || portNumber === remote.port || busy}
+							onClick={async () => {
+								setBusy(true);
+								await store.configureRemote({ port: portNumber });
+								setPort(undefined);
+								setBusy(false);
+							}}
+						>
+							应用
+						</button>
+					</SettingRow>
+					<SettingRow title="这台电脑的密钥指纹" description="配对时手机会显示同样的指纹，可用来核对。">
+						<span className="mono setting-value">{remote.hostFingerprint}</span>
+					</SettingRow>
+				</SettingsCard>
+			</SettingsGroup>
 
-					<PairingSection />
+			<SettingsGroup title="配对新设备">
+				<SettingsCard>
+					{remote.running ? (
+						<PairingSection />
+					) : (
+						<div className="settings-empty">开启局域网访问后即可扫码配对手机。</div>
+					)}
+				</SettingsCard>
+			</SettingsGroup>
 
-					<div className="field">
-						<div className="field-label">已配对的设备（{devices.length}）</div>
-						{devices.length ? (
-							<div className="device-list">
-								{devices.map((device) => (
-									<DeviceRow key={device.id} device={device} />
-								))}
-							</div>
-						) : (
-							<p className="muted small">还没有配对的设备。</p>
-						)}
-						<p className="muted small">移除设备会立即断开它的连接；它需要重新扫码配对才能再次连接。</p>
+			<SettingsGroup title={`已配对的设备（${devices.length}）`}>
+				{devices.length ? (
+					<div className="device-list">
+						{devices.map((device) => (
+							<DeviceRow key={device.id} device={device} />
+						))}
 					</div>
-				</>
-			)}
-		</Modal>
+				) : (
+					<SettingsCard>
+						<div className="settings-empty">还没有配对的设备。</div>
+					</SettingsCard>
+				)}
+				<p className="muted small settings-note">移除设备会立即断开它的连接；它需要重新扫码配对才能再次连接。</p>
+			</SettingsGroup>
+		</>
 	);
 }
 

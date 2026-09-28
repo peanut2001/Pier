@@ -1,4 +1,4 @@
-/* Software update dialog and its sidebar entry. */
+/* Software update state on the “about and updates” settings page. */
 
 .update-headline {
 	display: flex;
@@ -94,40 +94,6 @@
 
 .update-warning {
 	color: var(--warning);
-}
-
-.update-auto {
-	display: flex;
-	align-items: center;
-	gap: 8px;
-	margin: 14px 0 4px;
-	font-size: 13px;
-	cursor: pointer;
-}
-
-.update-actions,
-.modal-actions-group {
-	display: flex;
-	gap: 8px;
-}
-
-.sidebar-footer .update-button {
-	position: relative;
-}
-
-.sidebar-footer .update-button.on {
-	color: var(--accent-text);
-}
-
-.update-dot {
-	position: absolute;
-	top: 4px;
-	right: 4px;
-	width: 7px;
-	height: 7px;
-	border-radius: 999px;
-	background: var(--accent);
-	box-shadow: 0 0 0 2px var(--bg-app);
 }
 
 @media (prefers-reduced-motion: reduce) {

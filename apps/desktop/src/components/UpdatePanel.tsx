@@ -2,9 +2,9 @@ import { type ReactNode, useEffect, useState } from "react";
 import type { UpdateStatus } from "../lib/bridge.ts";
 import { formatBytes, relativeTime } from "../lib/format.ts";
 import { useAppState, useStore } from "../lib/store.tsx";
-import { IconAlert, IconCheck, IconDownload, IconExternal, IconLoader, IconRefresh } from "./Icons.tsx";
+import { IconAlert, IconCheck, IconDownload, IconExternal, IconLoader, IconRefresh, Logo } from "./Icons.tsx";
 import { Markdown } from "./Markdown.tsx";
-import { Modal } from "./Modal.tsx";
+import { SettingRow, SettingsCard, SettingsGroup, Switch } from "./SettingsUi.tsx";
 
 export const RELEASES_URL = "https://github.com/yiranxiaohui/Pier/releases";
 
@@ -40,7 +40,8 @@ function Progress({ update }: { update: UpdateStatus }) {
 	);
 }
 
-export function UpdatePanel({ onClose }: { onClose: () => void }) {
+/** The “about and updates” settings page. */
+export function UpdateSettings() {
 	const store = useStore();
 	const update = useAppState((s) => s.update);
 	const [busySessions, setBusySessions] = useState(0);
@@ -48,8 +49,8 @@ export function UpdatePanel({ onClose }: { onClose: () => void }) {
 	const pending = updatePending(update);
 	const working = update.state === "downloading" || update.state === "installing";
 
-	// Opening the dialog checks for updates unless one is already known or in progress.
-	// biome-ignore lint/correctness/useExhaustiveDependencies: only when the dialog opens.
+	// Opening the page checks for updates unless one is already known or in progress.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: only when the page opens.
 	useEffect(() => {
 		if (update.state === "idle" || update.state === "upToDate" || (update.state === "error" && !update.version)) {
 			void store.checkForUpdates();
@@ -77,7 +78,7 @@ export function UpdatePanel({ onClose }: { onClose: () => void }) {
 		void store.installUpdate();
 	};
 
-	let body: ReactNode;
+	let body: ReactNode = null;
 	if (update.state === "unsupported") {
 		body = (
 			<p className="muted">
@@ -131,58 +132,58 @@ export function UpdatePanel({ onClose }: { onClose: () => void }) {
 		);
 	} else if (update.state === "error") {
 		body = <div className="banner error inline">{update.error ?? "检查更新失败"}</div>;
-	} else {
-		body = <p className="muted">当前版本 v{update.currentVersion}</p>;
 	}
 
+	const action =
+		pending && !working ? (
+			<button type="button" className={confirm ? "danger" : "primary"} onClick={install}>
+				<IconDownload size={14} />
+				{confirm ? "仍然更新" : update.state === "error" ? "重试安装" : "更新并重启"}
+			</button>
+		) : working || update.state === "unsupported" ? null : (
+			<button type="button" disabled={update.state === "checking"} onClick={() => void store.checkForUpdates()}>
+				{update.state === "error" ? <IconAlert size={14} /> : <IconRefresh size={14} />}
+				{update.state === "error" ? "重试" : "检查更新"}
+			</button>
+		);
+
 	return (
-		<Modal title="软件更新" onClose={onClose}>
-			{body}
-			{update.state !== "unsupported" ? (
-				<label className="update-auto">
-					<input
-						type="checkbox"
-						checked={update.autoCheck}
-						onChange={(e) => void store.setUpdateAutoCheck(e.target.checked)}
-					/>
-					<span>自动检查更新（启动时及每 6 小时）</span>
-				</label>
-			) : null}
-			{update.lastChecked && update.state !== "checking" ? (
-				<div className="muted small">上次检查：{relativeTime(update.lastChecked)}</div>
-			) : null}
-			<div className="modal-actions spread">
-				<button type="button" className="ghost" onClick={() => store.openExternal(RELEASES_URL)}>
-					<IconExternal size={14} />
-					发布说明
-				</button>
-				<span className="update-actions">
-					{pending && !working ? (
-						<>
-							<button type="button" onClick={onClose}>
-								稍后
-							</button>
-							<button type="button" className={confirm ? "danger" : "primary"} onClick={install}>
-								<IconDownload size={14} />
-								{confirm ? "仍然更新" : update.state === "error" ? "重试安装" : "更新并重启"}
-							</button>
-						</>
-					) : working ? (
-						<button type="button" onClick={onClose}>
-							在后台继续
+		<>
+			<SettingsCard className="about-card">
+				<div className="about-head">
+					<Logo size={44} />
+					<div className="about-text">
+						<div className="about-name">Pier</div>
+						<div className="muted small">
+							版本 v{update.currentVersion}
+							{update.lastChecked && update.state !== "checking"
+								? ` · 上次检查 ${relativeTime(update.lastChecked)}`
+								: ""}
+						</div>
+					</div>
+					{action}
+				</div>
+				{body ? <div className="about-body">{body}</div> : null}
+			</SettingsCard>
+			<SettingsGroup title="更新">
+				<SettingsCard>
+					{update.state !== "unsupported" ? (
+						<SettingRow title="自动检查更新" description="启动时及每 6 小时检查一次，发现新版本时提醒你。">
+							<Switch
+								label="自动检查更新"
+								checked={update.autoCheck}
+								onChange={(checked) => void store.setUpdateAutoCheck(checked)}
+							/>
+						</SettingRow>
+					) : null}
+					<SettingRow title="发布说明" description="在 GitHub Releases 查看所有版本和安装包。">
+						<button type="button" onClick={() => store.openExternal(RELEASES_URL)}>
+							<IconExternal size={14} />
+							打开
 						</button>
-					) : update.state === "unsupported" ? (
-						<button type="button" onClick={onClose}>
-							关闭
-						</button>
-					) : (
-						<button type="button" disabled={update.state === "checking"} onClick={() => void store.checkForUpdates()}>
-							{update.state === "error" ? <IconAlert size={14} /> : <IconRefresh size={14} />}
-							{update.state === "error" ? "重试" : "检查更新"}
-						</button>
-					)}
-				</span>
-			</div>
-		</Modal>
+					</SettingRow>
+				</SettingsCard>
+			</SettingsGroup>
+		</>
 	);
 }

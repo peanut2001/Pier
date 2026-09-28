@@ -1,12 +1,11 @@
-import { useState } from "react";
 import { Welcome, WorkspaceHome } from "./components/Home.tsx";
-import { HostBanner, LogsPanel } from "./components/HostPanels.tsx";
+import { HostBanner } from "./components/HostPanels.tsx";
 import { IconAlert, IconInfo, IconMessage, IconX } from "./components/Icons.tsx";
-import { ModelsPanel } from "./components/ModelsPanel.tsx";
-import { PairingRequestDialog, RemotePanel } from "./components/RemotePanel.tsx";
+import { AuthDialog } from "./components/ModelsPanel.tsx";
+import { PairingRequestDialog } from "./components/RemotePanel.tsx";
 import { SessionView } from "./components/SessionView.tsx";
+import { SettingsPage } from "./components/Settings.tsx";
 import { Sidebar } from "./components/Sidebar.tsx";
-import { UpdatePanel } from "./components/UpdatePanel.tsx";
 import { useAppState, useStore } from "./lib/store.tsx";
 
 function Toasts() {
@@ -57,22 +56,23 @@ function Main() {
 
 export function App() {
 	const store = useStore();
-	const [showLogs, setShowLogs] = useState(false);
-	const [showRemote, setShowRemote] = useState(false);
-	const showUpdate = useAppState((s) => s.updateOpen);
+	const settings = useAppState((s) => s.settings);
 	return (
-		<div className="app">
-			<Sidebar onShowLogs={() => setShowLogs(true)} onShowRemote={() => setShowRemote(true)} />
-			<main className="main">
-				<HostBanner onShowLogs={() => setShowLogs(true)} />
-				<Main />
-			</main>
+		<>
+			{settings ? (
+				<SettingsPage section={settings} />
+			) : (
+				<div className="app">
+					<Sidebar />
+					<main className="main">
+						<HostBanner onShowLogs={() => store.openSettings("logs")} />
+						<Main />
+					</main>
+				</div>
+			)}
 			<Toasts />
-			{showLogs ? <LogsPanel onClose={() => setShowLogs(false)} /> : null}
-			{showRemote ? <RemotePanel onClose={() => setShowRemote(false)} /> : null}
-			<ModelsPanel />
-			{showUpdate ? <UpdatePanel onClose={() => store.showUpdate(false)} /> : null}
+			<AuthDialog />
 			<PairingRequestDialog />
-		</div>
+		</>
 	);
 }

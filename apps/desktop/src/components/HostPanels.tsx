@@ -1,8 +1,28 @@
 import { useEffect, useRef, useState } from "react";
 import { useAppState, useStore } from "../lib/store.tsx";
-import { IconAlert, IconDownload, IconInfo, IconLoader } from "./Icons.tsx";
+import { IconAlert, IconInfo, IconLoader } from "./Icons.tsx";
 import { CopyButton } from "./Markdown.tsx";
-import { Modal } from "./Modal.tsx";
+import { SettingsGroup } from "./SettingsUi.tsx";
+
+/** Connection state summarised for the sidebar and the settings screen. */
+export function useHostStatus(): { online: boolean; dot: "ok" | "bad" | "wait"; text: string } {
+	const host = useAppState((s) => s.host);
+	const connection = useAppState((s) => s.connection);
+	const hostInfo = useAppState((s) => s.hostInfo);
+	const online = host.state === "ready" && connection === "open";
+	const text = online
+		? `已连接 · pi ${hostInfo?.piVersion ?? ""}`
+		: connection === "reconnecting"
+			? "正在重连…"
+			: host.state === "failed"
+				? "Host 启动失败"
+				: host.state === "restarting"
+					? "Host 正在重启…"
+					: host.state === "stopped"
+						? "未连接"
+						: "正在启动…";
+	return { online, dot: online ? "ok" : host.state === "failed" ? "bad" : "wait", text };
+}
 
 /** Connection / host lifecycle banner shown above the main area when something is off. */
 export function HostBanner({ onShowLogs }: { onShowLogs: () => void }) {
@@ -56,11 +76,10 @@ export function HostBanner({ onShowLogs }: { onShowLogs: () => void }) {
 	);
 }
 
-export function LogsPanel({ onClose }: { onClose: () => void }) {
+/** The host log page of the settings screen. */
+export function LogsSettings() {
 	const store = useStore();
 	const host = useAppState((s) => s.host);
-	const hostInfo = useAppState((s) => s.hostInfo);
-	const update = useAppState((s) => s.update);
 	const [lines, setLines] = useState<string[]>([]);
 	const scroller = useRef<HTMLPreElement>(null);
 
@@ -82,49 +101,27 @@ export function LogsPanel({ onClose }: { onClose: () => void }) {
 	});
 
 	return (
-		<Modal title="Pier Host" onClose={onClose} wide>
-			<div className="host-facts">
-				<span className={`fact state-${host.state}`}>
+		<SettingsGroup
+			title={
+				<span className="settings-inline-status">
 					<span className={`status-dot ${host.state === "ready" ? "ok" : host.state === "failed" ? "bad" : "wait"}`} />
-					{host.state}
+					Pier Host 日志
 				</span>
-				{host.version ? <span className="fact">Host v{host.version}</span> : null}
-				{hostInfo ? <span className="fact">pi {hostInfo.piVersion}</span> : null}
-				{host.pid ? <span className="fact">pid {host.pid}</span> : null}
-				{host.url ? <span className="fact mono">{host.url}</span> : null}
-				{host.restarts ? <span className="fact">自动重启 {host.restarts} 次</span> : null}
-				{hostInfo ? (
-					<span className="fact mono" title="模型、凭据与会话复用 pi 的配置">
-						{hostInfo.agentDir}
-					</span>
-				) : null}
-			</div>
-			<pre className="logs" ref={scroller}>
-				{lines.join("\n") || "（暂无日志）"}
-			</pre>
-			<div className="modal-actions spread">
-				<CopyButton text={lines.join("\n")} label="复制日志" />
-				<span className="modal-actions-group">
-					{store.bridgeKind === "tauri" || update.state !== "unsupported" ? (
-						<button
-							type="button"
-							title={`Pier v${update.currentVersion}`}
-							onClick={() => {
-								onClose();
-								store.showUpdate(true);
-							}}
-						>
-							<IconDownload size={14} />
-							检查更新
-						</button>
-					) : null}
+			}
+			actions={
+				<>
+					<CopyButton text={lines.join("\n")} label="复制日志" />
 					{store.bridgeKind === "tauri" ? (
 						<button type="button" onClick={() => store.restartHost()}>
 							重启 Host
 						</button>
 					) : null}
-				</span>
-			</div>
-		</Modal>
+				</>
+			}
+		>
+			<pre className="logs settings-logs" ref={scroller}>
+				{lines.join("\n") || "（暂无日志）"}
+			</pre>
+		</SettingsGroup>
 	);
 }

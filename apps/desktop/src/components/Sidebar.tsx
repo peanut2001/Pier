@@ -2,18 +2,14 @@ import type { ApprovalPolicy, SessionSummary, WorkspaceInfo } from "@pier/protoc
 import { useState } from "react";
 import { POLICY_DESCRIPTION, POLICY_LABEL, relativeTime, sessionTitle } from "../lib/format.ts";
 import { useAppState, useStore } from "../lib/store.tsx";
+import { useHostStatus } from "./HostPanels.tsx";
 import {
 	IconChevronRight,
-	IconDownload,
 	IconFolder,
 	IconFolderPlus,
-	IconLogs,
 	IconMessagePlus,
 	IconPlus,
-	IconPower,
 	IconSettings,
-	IconSmartphone,
-	IconSparkles,
 	Logo,
 } from "./Icons.tsx";
 import { Modal } from "./Modal.tsx";
@@ -168,35 +164,19 @@ export function WorkspaceSettings({ workspace, onClose }: { workspace: Workspace
 	);
 }
 
-export function Sidebar({ onShowLogs, onShowRemote }: { onShowLogs: () => void; onShowRemote: () => void }) {
+export function Sidebar() {
 	const store = useStore();
 	const workspaces = useAppState((s) => s.workspaces);
-	const host = useAppState((s) => s.host);
-	const connection = useAppState((s) => s.connection);
-	const hostInfo = useAppState((s) => s.hostInfo);
-	const remote = useAppState((s) => s.remote);
-	const connectedDevices = useAppState((s) => s.devices.filter((d) => d.connected).length);
 	const noModels = useAppState((s) => s.providers?.availableCount === 0);
-	const update = useAppState((s) => s.update);
-	const updateReady = updatePending(update);
+	const updateReady = updatePending(useAppState((s) => s.update));
 	const addWorkspace = useAddWorkspace();
 	const [settingsFor, setSettingsFor] = useState<string | undefined>();
 	const settingsWorkspace = workspaces.find((w) => w.id === settingsFor);
 	const selectedWorkspaceId = useAppState((s) => s.selectedWorkspaceId);
 	const targetWorkspace = workspaces.find((w) => w.id === selectedWorkspaceId) ?? workspaces[0];
-
-	const online = host.state === "ready" && connection === "open";
-	const statusText = online
-		? `已连接 · pi ${hostInfo?.piVersion ?? ""}`
-		: connection === "reconnecting"
-			? "正在重连…"
-			: host.state === "failed"
-				? "Host 启动失败"
-				: host.state === "restarting"
-					? "Host 正在重启…"
-					: host.state === "stopped"
-						? "未连接"
-						: "正在启动…";
+	const status = useHostStatus();
+	const online = status.online;
+	const attention = updateReady ? "有可用更新" : noModels ? "还没有可用模型" : undefined;
 
 	return (
 		<aside className="sidebar">
@@ -238,60 +218,17 @@ export function Sidebar({ onShowLogs, onShowRemote }: { onShowLogs: () => void; 
 			<div className="sidebar-footer">
 				<button
 					type="button"
-					className="host-status"
-					onClick={onShowLogs}
-					title={hostInfo?.agentDir ? `配置目录 ${hostInfo.agentDir} · 点击查看日志` : "查看 Host 日志"}
+					className="settings-entry"
+					onClick={() => store.openSettings(updateReady ? "about" : noModels && online ? "models" : "general")}
+					title={`${status.text}${attention ? ` · ${attention}` : ""}`}
 				>
-					<span className={`status-dot ${online ? "ok" : host.state === "failed" ? "bad" : "wait"}`} />
-					<span className="host-status-text">{statusText}</span>
-					<IconLogs size={14} className="host-status-icon" />
+					<span className="settings-entry-icon">
+						<IconSettings size={15} />
+						{attention ? <span className={`entry-dot ${updateReady ? "accent" : "warn"}`} /> : null}
+					</span>
+					<span className="settings-entry-label">设置</span>
+					<span className={`status-dot ${status.dot}`} />
 				</button>
-				<span className="sidebar-footer-actions">
-					<button
-						type="button"
-						className={`ghost icon models-button${noModels ? " warn" : ""}`}
-						onClick={() => store.openModels()}
-						disabled={!online}
-						title={noModels ? "模型与服务商（还没有可用模型）" : "模型与服务商"}
-					>
-						<IconSparkles size={15} />
-						{noModels ? <span className="warn-dot" /> : null}
-					</button>
-					<button
-						type="button"
-						className={`ghost icon remote-button${remote?.running ? " on" : ""}`}
-						onClick={onShowRemote}
-						disabled={!online}
-						title={
-							remote?.running ? `手机远程访问已开启 · ${connectedDevices} 台设备在线` : "手机配对与远程访问（未开启）"
-						}
-					>
-						<IconSmartphone size={15} />
-						{remote?.running ? <span className="remote-count">{connectedDevices}</span> : null}
-					</button>
-					{updateReady ? (
-						<button
-							type="button"
-							className="ghost icon update-button on"
-							onClick={() => store.showUpdate(true)}
-							title={
-								update.state === "downloading"
-									? "正在下载更新…"
-									: update.state === "installing"
-										? "正在安装更新…"
-										: `Pier v${update.version ?? ""} 可以更新`
-							}
-						>
-							<IconDownload size={15} />
-							<span className="update-dot" />
-						</button>
-					) : null}
-					{store.bridgeKind === "tauri" ? (
-						<button type="button" className="ghost icon" onClick={() => store.quit()} title="退出 Pier（停止 Host）">
-							<IconPower size={15} />
-						</button>
-					) : null}
-				</span>
 			</div>
 			{settingsWorkspace ? (
 				<WorkspaceSettings workspace={settingsWorkspace} onClose={() => setSettingsFor(undefined)} />

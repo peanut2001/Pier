@@ -19,6 +19,7 @@ import {
 	IconLoader,
 	IconPencil,
 	IconPlus,
+	IconRefresh,
 	IconSearch,
 	IconSparkles,
 	IconTrash,
@@ -26,6 +27,7 @@ import {
 } from "./Icons.tsx";
 import { CopyButton } from "./Markdown.tsx";
 import { Modal } from "./Modal.tsx";
+import { SettingRow, SettingsCard, SettingsGroup } from "./SettingsUi.tsx";
 
 /** Providers listed first when adding one. */
 const POPULAR = [
@@ -124,42 +126,43 @@ function DefaultModelField() {
 	const names = new Map(providers.providers.map((p) => [p.id, p.name]));
 	const known = models?.some((m) => `${m.provider}\u0000${m.id}` === value);
 
+	if (providers.availableCount === 0) {
+		return (
+			<div className="models-empty">
+				<IconAlert size={16} />
+				<span>还没有可用的模型。在下面登录一个服务商，或添加一个自定义接口。</span>
+			</div>
+		);
+	}
 	return (
-		<div className="field">
-			<div className="field-label">新会话的默认模型</div>
-			{providers.availableCount === 0 ? (
-				<div className="models-empty">
-					<IconAlert size={16} />
-					<span>还没有可用的模型。在下面登录一个服务商，或添加一个自定义接口。</span>
-				</div>
-			) : (
-				<div className="default-model-row">
-					<select
-						value={value}
-						onChange={(e) => {
-							const [provider, modelId] = e.target.value.split("\u0000");
-							if (provider && modelId) void store.setDefaultModel(provider, modelId);
-						}}
-					>
-						{!current || !known ? (
-							<option value={value}>{current ? `${current.provider}/${current.modelId}（不可用）` : "未设置"}</option>
-						) : null}
-						{[...groups].map(([provider, list]) => (
-							<optgroup key={provider} label={names.get(provider) ?? provider}>
-								{list.map((model) => (
-									<option key={model.id} value={`${model.provider}\u0000${model.id}`}>
-										{model.name && model.name !== model.id ? `${model.name}（${model.id}）` : model.id}
-									</option>
-								))}
-							</optgroup>
-						))}
-					</select>
-					<span className="muted small">
-						共 {providers.availableCount} 个可用模型。会话中可以随时切换模型，这里只影响新会话。
-					</span>
-				</div>
-			)}
-		</div>
+		<SettingsCard>
+			<SettingRow
+				title="新会话的默认模型"
+				description={`共 ${providers.availableCount} 个可用模型。会话中可以随时切换模型，这里只影响新会话。`}
+			>
+				<select
+					className="setting-select"
+					value={value}
+					onChange={(e) => {
+						const [provider, modelId] = e.target.value.split("\u0000");
+						if (provider && modelId) void store.setDefaultModel(provider, modelId);
+					}}
+				>
+					{!current || !known ? (
+						<option value={value}>{current ? `${current.provider}/${current.modelId}（不可用）` : "未设置"}</option>
+					) : null}
+					{[...groups].map(([provider, list]) => (
+						<optgroup key={provider} label={names.get(provider) ?? provider}>
+							{list.map((model) => (
+								<option key={model.id} value={`${model.provider}\u0000${model.id}`}>
+									{model.name && model.name !== model.id ? `${model.name}（${model.id}）` : model.id}
+								</option>
+							))}
+						</optgroup>
+					))}
+				</select>
+			</SettingRow>
+		</SettingsCard>
 	);
 }
 
@@ -300,13 +303,12 @@ function AddProviderList({ providers }: { providers: ProviderInfo[] }) {
 function ProviderList({ onCustom }: { onCustom: (provider?: ProviderInfo) => void }) {
 	const store = useStore();
 	const providers = useAppState((s) => s.providers);
-	const hostInfo = useAppState((s) => s.hostInfo);
 	if (!providers) return <p className="muted">正在读取模型配置…</p>;
 	const configured = providers.providers.filter((p) => p.status.configured || p.stored || p.custom);
 	const others = providers.providers.filter((p) => !configured.includes(p));
 	return (
 		<>
-			<p className="muted">
+			<p className="settings-intro">
 				Pier 使用 pi 的模型配置，凭据保存在这台电脑的 <code>{providers.agentDir}</code> 中，与终端里的 pi 共用。
 			</p>
 			{providers.error ? (
@@ -315,11 +317,18 @@ function ProviderList({ onCustom }: { onCustom: (provider?: ProviderInfo) => voi
 					<span>{providers.error}</span>
 				</div>
 			) : null}
-			<DefaultModelField />
-			<div className="field">
-				<div className="section-row">
-					<div className="field-label">已配置的服务商（{configured.length}）</div>
-				</div>
+			<SettingsGroup title="默认模型">
+				<DefaultModelField />
+			</SettingsGroup>
+			<SettingsGroup
+				title={`已配置的服务商（${configured.length}）`}
+				actions={
+					<button type="button" className="ghost" onClick={() => void store.loadProviders()}>
+						<IconRefresh size={13} />
+						刷新
+					</button>
+				}
+			>
 				{configured.length ? (
 					<div className="provider-list">
 						{configured.map((provider) => (
@@ -327,30 +336,25 @@ function ProviderList({ onCustom }: { onCustom: (provider?: ProviderInfo) => voi
 						))}
 					</div>
 				) : (
-					<p className="muted small">还没有配置任何服务商。</p>
+					<SettingsCard>
+						<div className="settings-empty">还没有配置任何服务商。</div>
+					</SettingsCard>
 				)}
-			</div>
-			<div className="field">
-				<div className="section-row">
-					<div className="field-label">添加服务商</div>
+			</SettingsGroup>
+			<SettingsGroup
+				title="添加服务商"
+				actions={
 					<button type="button" className="primary" onClick={() => onCustom()}>
 						<IconPlus size={14} />
 						自定义接口
 					</button>
-				</div>
-				<p className="muted small">
+				}
+			>
+				<p className="muted small settings-note">
 					使用中转站、公司网关或本地模型（Ollama、LM Studio、vLLM 等）时，选择「自定义接口」填写 Base URL 和 API Key。
 				</p>
 				<AddProviderList providers={others} />
-			</div>
-			{hostInfo ? (
-				<div className="modal-actions spread">
-					<span className="muted small">pi {hostInfo.piVersion}</span>
-					<button type="button" onClick={() => void store.loadProviders()}>
-						刷新
-					</button>
-				</div>
-			) : null}
+			</SettingsGroup>
 		</>
 	);
 }
@@ -796,38 +800,38 @@ function CustomProviderForm({ editing, onDone }: { editing?: ProviderInfo; onDon
 	);
 }
 
-// ---- panel -----------------------------------------------------------------------------
+// ---- settings page ---------------------------------------------------------------------
 
-export function ModelsPanel() {
-	const store = useStore();
-	const open = useAppState((s) => s.showModels);
-	const auth = useAppState((s) => s.auth);
+/** The “models and providers” settings page. */
+export function ModelsSettings() {
 	const [custom, setCustom] = useState<{ provider?: ProviderInfo } | undefined>();
-	if (!open && !auth) return null;
-	if (auth) {
-		return (
-			<Modal
-				title={`${auth.method === "oauth" ? "账号登录" : "API Key"} · ${auth.providerName}`}
-				onClose={() => void store.cancelLogin()}
-			>
-				<LoginView auth={auth} />
-			</Modal>
-		);
-	}
-	if (custom) {
-		return (
-			<Modal
-				title={custom.provider ? `编辑 · ${custom.provider.name}` : "添加自定义接口"}
-				onClose={() => setCustom(undefined)}
-				wide
-			>
-				<CustomProviderForm editing={custom.provider} onDone={() => setCustom(undefined)} />
-			</Modal>
-		);
-	}
 	return (
-		<Modal title="模型与服务商" onClose={() => store.closeModels()} wide>
+		<>
 			<ProviderList onCustom={(provider) => setCustom(provider ? { provider } : {})} />
+			{custom ? (
+				<Modal
+					title={custom.provider ? `编辑 · ${custom.provider.name}` : "添加自定义接口"}
+					onClose={() => setCustom(undefined)}
+					wide
+				>
+					<CustomProviderForm editing={custom.provider} onDone={() => setCustom(undefined)} />
+				</Modal>
+			) : null}
+		</>
+	);
+}
+
+/** Provider sign-in dialog (API key or account login), shown over whatever is on screen. */
+export function AuthDialog() {
+	const store = useStore();
+	const auth = useAppState((s) => s.auth);
+	if (!auth) return null;
+	return (
+		<Modal
+			title={`${auth.method === "oauth" ? "账号登录" : "API Key"} · ${auth.providerName}`}
+			onClose={() => void store.cancelLogin()}
+		>
+			<LoginView auth={auth} />
 		</Modal>
 	);
 }
