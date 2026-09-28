@@ -3,6 +3,8 @@
 > Pier：以 [pi](https://github.com/earendil-works/pi) 作为 Agent 核心的桌面应用（Tauri），并提供可连接桌面端的原生手机 App（Expo / React Native）。
 >
 > 本文档是项目的总体规划与里程碑，随开发进度持续更新。
+>
+> **当前进度（2026-09-28）**：M0 除 Spike 2 / 3 外已完成；M1 已完成，验收流程由 `packages/host/test/host.integration.test.ts` 自动覆盖，并已用真实模型通过 `pier-cli` 手动走通。下一步：Spike 2 与 M2 桌面端骨架。
 
 ## 1. 目标与非目标
 
@@ -212,18 +214,18 @@ Pier/
 
 ### M0 脚手架与技术验证
 
-- [ ] pnpm monorepo、Biome、Vitest、TypeScript 项目引用、GitHub Actions（lint / typecheck / test）。
-- [ ] **Spike 1：Host 打包为 sidecar**。验证 pi SDK 能否用 `bun build --compile` 打成单文件，并能正常加载扩展、skills 与 `~/.pi/agent` 配置；失败则改为"内置 Node 运行时 + JS bundle"或 Node SEA。
+- [x] pnpm monorepo、Biome、Vitest、TypeScript 项目引用、GitHub Actions（lint / typecheck / test）。
+- [x] **Spike 1：Host 打包为 sidecar**（Linux 已端到端验证，macOS / Windows 已交叉编译，结论见 `docs/spikes.md`）。验证 pi SDK 能否用 `bun build --compile` 打成单文件，并能正常加载扩展、skills 与 `~/.pi/agent` 配置；失败则改为"内置 Node 运行时 + JS bundle"或 Node SEA。
 - [ ] **Spike 2**：Tauri 2 通过 `externalBin` 启动 sidecar，并通过 stdout 获取端口与本地 token。
 - [ ] **Spike 3**：Expo 开发构建中 WebSocket + `@noble/*` 加解密性能验证（iOS / Android 各一台真机）。
 - 验收：三个 spike 的结论写入 `docs/spikes.md`，确定打包方案。
 
 ### M1 Host 核心
 
-- [ ] `packages/protocol`：schema、类型、版本号；`docs/protocol.md`。
-- [ ] `packages/host`：工作区配置、会话池、`AgentSessionRuntime` 绑定、UI 桥接、EventLog、`pier-approval`。
-- [ ] 本地 WS Gateway（`127.0.0.1` + token）。
-- [ ] `packages/client` + 一个命令行调试客户端（`pnpm pier-cli`）。
+- [x] `packages/protocol`：schema、类型、版本号；`docs/protocol.md`。
+- [x] `packages/host`：工作区配置、会话池、`AgentSessionRuntime` 绑定、UI 桥接、EventLog、`pier-approval`。
+- [x] 本地 WS Gateway（`127.0.0.1` + token）。
+- [x] `packages/client` + 一个命令行调试客户端（`pnpm pier-cli`）。
 - 验收：通过 CLI 客户端完成新建会话 → prompt → 流式输出 → 触发审批并响应 → 断开重连后补发事件；单元测试覆盖 EventLog 与协议校验。
 
 ### M2 桌面端 MVP
@@ -281,6 +283,9 @@ Pier/
 
 ## 13. 下一步
 
-1. 按 M0 初始化 monorepo 与 CI。
-2. 执行 Spike 1（Host 打包）——它决定 sidecar 方案，是最大技术风险。
-3. 起草 `docs/protocol.md`，与 M1 Host 实现同步推进。
+1. ~~按 M0 初始化 monorepo 与 CI。~~ ✅
+2. ~~执行 Spike 1（Host 打包）。~~ ✅ 采用 Bun 单文件 + pi 资源目录，见 `docs/spikes.md`。
+3. ~~起草 `docs/protocol.md`，与 M1 Host 实现同步推进。~~ ✅
+4. Spike 2：Tauri 2 通过 `externalBin` 启动 sidecar，并在 macOS / Windows 上运行编译产物。
+5. M2：`apps/desktop` 骨架与 `packages/chat-state` reducer。
+6. Spike 3（M3 前）：Expo 真机加密性能。

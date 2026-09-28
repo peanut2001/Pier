@@ -1,0 +1,25 @@
+{
+	"name": "pier",
+	"private": true,
+	"type": "module",
+	"packageManager": "pnpm@12.6.0",
+	"engines": {
+		"node": ">=22"
+	},
+	"scripts": {
+		"typecheck": "tsc -b",
+		"lint": "biome check .",
+		"format": "biome check --write .",
+		"test": "vitest run",
+		"host": "tsx packages/host/src/main.ts",
+		"pier-cli": "tsx packages/client/src/cli.ts",
+		"build:sidecar": "node packages/host/scripts/build-sidecar.mjs"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "2.5.14",
+		"@types/node": "^26.6.3",
+		"tsx": "^4.23.15",
+		"typescript": "^7.0.2",
+		"vitest": "^5.0.2"
+	}
+}

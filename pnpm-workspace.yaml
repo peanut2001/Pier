@@ -1,0 +1,11 @@
+packages:
+  - "packages/*"
+  - "apps/*"
+
+# Hoisted layout keeps Expo/Metro (apps/mobile) compatible.
+nodeLinker: hoisted
+
+allowBuilds:
+  esbuild: true
+  "@google/genai": false
+  protobufjs: false

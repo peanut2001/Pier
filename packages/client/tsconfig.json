@@ -1,0 +1,10 @@
+{
+	"extends": "../../tsconfig.base.json",
+	"compilerOptions": {
+		"rootDir": ".",
+		"outDir": "dist/types",
+		"types": ["node"]
+	},
+	"references": [{ "path": "../protocol" }],
+	"include": ["src", "test"]
+}

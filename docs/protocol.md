@@ -1,0 +1,218 @@
+# Pier 协议 v1.0
+
+> 实现：`packages/protocol`（zod schema + TS 类型，Host 与所有客户端共享）。
+> 本文档描述线上格式与语义；字段的权威定义以 `packages/protocol/src` 为准。
+
+## 1. 传输与帧
+
+- 传输：WebSocket，**文本帧**，每帧一个 JSON 对象。二进制帧会被拒绝（关闭码 1003）。
+- 本地连接：Host 仅监听 `127.0.0.1`；远程连接（M3）在 Noise 握手后改为加密帧 `{ "t": "enc", "n": <nonce>, "c": <ciphertext> }`，其明文即本文档的帧。
+- 帧类型：
+
+```jsonc
+// 客户端 → Host：请求
+{ "type": "req", "id": "r1", "method": "session.prompt", "params": { "sessionId": "…", "text": "…" } }
+
+// Host → 客户端：响应（与请求 id 对应；同一连接上的响应可能乱序到达）
+{ "type": "res", "id": "r1", "ok": true, "result": { "accepted": true } }
+{ "type": "res", "id": "r1", "ok": false, "error": { "code": "NOT_FOUND", "message": "…", "data": … } }
+
+// Host → 客户端：事件
+{ "type": "evt", "sessionId": "…", "seq": 42, "event": { "type": "message_update", … } }
+{ "type": "evt", "event": { "type": "host.notice", … } }   // Host 级事件：无 sessionId / seq
+```
+
+- `id`：1–128 字符，由客户端生成，仅在本连接内唯一即可。
+- 无法解析的帧返回 `id: ""` 的 `BAD_REQUEST` 响应。
+
+### 错误码
+
+| code | 含义 |
+|---|---|
+| `BAD_REQUEST` | 帧或参数校验失败（`data` 为 zod issues） |
+| `UNAUTHENTICATED` | 尚未完成 `host.hello`，或 token 错误（Host 随后关闭连接，关闭码 4401） |
+| `FORBIDDEN` | 已认证但无权调用（例如远程设备调用仅限本地的方法） |
+| `NOT_FOUND` | 工作区 / 会话 / 模型不存在，或会话未在活跃池中 |
+| `CONFLICT` | 目标状态不允许（会话运行中、会话文件被外部修改、被其他 Host 锁定等） |
+| `PROTOCOL_MISMATCH` | 主版本不一致；`data.hostVersion` 为 Host 的版本 |
+| `UNSUPPORTED` | 协议已定义但此 Host 尚未实现（M1 中的 `device.*`、`pairing.start`） |
+| `TIMEOUT` | 客户端本地超时（Host 不会返回此码） |
+| `INTERNAL` | 未预期的 Host 错误 |
+
+## 2. 握手与版本
+
+连接后第一个请求必须是 `host.hello`；在其成功前，其他请求返回 `UNAUTHENTICATED`。10 秒内未完成握手的连接会被关闭。握手完成前 Host 按顺序处理帧，因此客户端可以在 `host.hello` 之后立即流水线发送请求。
+
+```jsonc
+{ "type": "req", "id": "h", "method": "host.hello", "params": {
+  "protocolVersion": "1.0",
+  "client": { "name": "pier-desktop", "version": "0.1.0", "platform": "darwin" },
+  "token": "<本地 token>",       // 本地连接必填
+  "coalesceMs": 50               // 可选：合并流式增量的窗口（0–1000ms，默认 0）
+}}
+// → { protocolVersion, host: HostInfo, connectionId }
+```
+
+- 版本号为 `<major>.<minor>`，`PROTOCOL_VERSION` 由 `@pier/protocol` 导出。主版本不同 → `PROTOCOL_MISMATCH`；次版本只做向后兼容的新增（新方法、新可选参数、新事件），客户端必须忽略未知事件类型和未知字段。
+- **本地 token**：Host 启动时生成（或取 `PIER_LOCAL_TOKEN`），通过 stdout 的 `pier.ready` 行交给 Tauri，并写入 `~/.pier/run/host.json`（0600）供本地调试工具使用。浏览器 WebSocket 无法设置请求头，所以 token 放在 `host.hello` 中而不是 URL 里（避免进入日志）。
+- **Origin 校验**：带 `Origin` 头的连接只允许 Tauri WebView 的来源（`tauri://localhost`、`http(s)://tauri.localhost`、开发时的 `http://localhost:1420`），其他网页在握手阶段即被拒绝（HTTP 403）。无 `Origin` 的连接（CLI）允许，但仍须 token。
+
+## 3. 方法
+
+参数中的 `sessionId` 均为 pi 会话 ID。标注 🔒 的方法仅本地桌面连接可调用（`LOCAL_ONLY_METHODS`）。
+
+### host
+
+| 方法 | 参数 | 结果 |
+|---|---|---|
+| `host.hello` | 见上 | `{ protocolVersion, host, connectionId }` |
+| `host.info` | – | `HostInfo`（hostId、hostName、version、protocolVersion、platform、piVersion、agentDir） |
+
+### workspace
+
+| 方法 | 参数 | 结果 |
+|---|---|---|
+| `workspace.list` | – | `{ workspaces: WorkspaceInfo[] }` |
+| `workspace.add` 🔒 | `{ path(绝对路径), name?, policy? }` | `{ workspace }`；路径会取 realpath，重复添加返回已有项 |
+| `workspace.remove` 🔒 | `{ workspaceId }` | `{ removed }`；先强制关闭该工作区的活跃会话 |
+| `workspace.setPolicy` 🔒 | `{ workspaceId, policy: "ask"\|"smart"\|"auto" }` | `{ workspace }`；立即对活跃会话生效 |
+
+### session
+
+| 方法 | 参数 | 结果 |
+|---|---|---|
+| `session.list` | `{ workspaceId }` | `{ sessions: SessionSummary[] }`，按修改时间倒序；活跃会话 `active: true` 并带实时 `state` |
+| `session.create` | `{ workspaceId, name? }` | `{ session }`（已进入活跃池） |
+| `session.open` | `{ workspaceId, sessionId }` 或 `{ workspaceId, path }` | `{ session }`；`path` 必须出现在该工作区的会话列表中 |
+| `session.close` | `{ sessionId, force? }` | `{ closed }`；运行中且未 `force` → `CONFLICT` |
+| `session.forkPoints` | `{ sessionId }` | `{ points: { entryId, text }[] }`（可 fork 的用户消息） |
+| `session.fork` | `{ sessionId, entryId, position?: "before"\|"at" }` | `{ session, selectedText? }`；生成**新**会话，原会话不变 |
+| `session.rename` | `{ sessionId, name }` | `{ session }` |
+| `session.subscribe` | `{ sessionId, sinceSeq?, epoch? }` | `{ mode: "replay"\|"snapshot", currentSeq, epoch }`，见 §5 |
+| `session.unsubscribe` | `{ sessionId }` | `{ unsubscribed }` |
+| `session.snapshot` | `{ sessionId }` | `SessionSnapshot`（一次性读取，不影响订阅） |
+
+### 运行
+
+| 方法 | 参数 | 结果 |
+|---|---|---|
+| `session.prompt` | `{ sessionId, text, images?, streamingBehavior? }` | `{ accepted: true }`，在 pi 接受 prompt 后立即返回，输出通过事件流给出。会话运行中且未指定 `streamingBehavior` → `CONFLICT` |
+| `session.steer` | `{ sessionId, text, images? }` | `{ queue }` |
+| `session.followUp` | `{ sessionId, text, images? }` | `{ queue }` |
+| `session.abort` | `{ sessionId }` | `{ aborted: true }`，在会话回到空闲后返回 |
+| `session.compact` | `{ sessionId, instructions? }` | `{ summary, tokensBefore }`，压缩完成后返回（可能较慢，客户端应放宽超时） |
+
+`images`：`{ type: "image", data: <base64>, mimeType: "image/…" }[]`，最多 16 张；单帧上限 64 MiB。
+
+### 模型
+
+| 方法 | 参数 | 结果 |
+|---|---|---|
+| `model.list` | `{ sessionId? }` | `{ models: ModelInfo[], current? }`（仅列出已配置凭据的模型） |
+| `model.set` | `{ sessionId, provider, modelId, persist? }` | `{ model }`；`persist: true` 写入 pi 全局默认值 |
+| `thinking.set` | `{ sessionId, level, persist? }` | `{ level }`（按模型能力钳制后的实际等级） |
+
+### UI 与设备
+
+| 方法 | 参数 | 结果 |
+|---|---|---|
+| `ui.respond` | `{ sessionId, requestId, response: UiResponse }` | `{ accepted }`；请求已被其他客户端回答 / 超时 / 取消时为 `false` |
+| `device.list` 🔒 / `device.revoke` 🔒 / `pairing.start` 🔒 | – | M1 中返回 `UNSUPPORTED`（M3 实现） |
+
+## 4. 事件
+
+### 4.1 pi 会话事件（透传）
+
+与 pi 的 JSON/RPC 模式相同的线上形态：`agent_start`、`agent_end`、`agent_settled`、`turn_start`、`turn_end`、`message_start`、`message_update`、`message_end`、`tool_execution_start|update|end`、`queue_update`、`compaction_start|end`、`auto_retry_start|end`、`session_info_changed`、`thinking_level_changed`、`summarization_retry_*`、`bash_execution_update`、`entry_appended`。
+
+两处精简：
+
+- `message_update` 去掉累积的 `partial` 消息，只保留 `{ type, usage, assistantMessageEvent }`；`toolcall_start` 额外带 `id` 与 `toolName`。客户端用 `message_start` + 增量重建流式消息，`message_end` 为权威结果。
+- `entry_appended` 对消息条目只保留元数据 `{ type: "message", id, parentId, timestamp, role }`（完整内容已在 `message_end` 中）。
+
+`agent_settled` 表示 pi 不会再自动继续，适合作为"任务完成"通知的触发点。
+
+### 4.2 Pier 会话事件
+
+| 事件 | 字段 | 说明 |
+|---|---|---|
+| `session.snapshot` | `snapshot` | 仅在订阅 / 恢复时单独发给该连接，**不带 seq**，不写入日志 |
+| `session.status` | `state: idle\|streaming\|compacting\|retrying` | 状态变化时发送 |
+| `session.model` | `model?, thinkingLevel` | `model.set` 之后 |
+| `session.replaced` | `previousSessionId, session` | 扩展命令（如 `/new`）替换了底层 pi 会话；帧的 `sessionId` 为旧 ID，随后会收到新会话的 `session.snapshot` |
+| `session.closed` | `reason: idle\|closed\|host_shutdown` | 会话离开活跃池 |
+| `ui.request` | `request: UiRequest` | 对话框或审批请求，见 §6 |
+| `ui.resolved` | `requestId, resolution: answered\|timeout\|cancelled, response?, by?` | `by` 为回答者的 `connectionId` |
+| `ui.notify` | `message, level` | 扩展通知 |
+| `ui.status` / `ui.widget` / `ui.title` / `ui.editorText` | 见类型定义 | 扩展的 fire-and-forget UI 调用；当前状态也包含在快照中 |
+| `extension.error` | `extensionPath, event, error` | 扩展处理器出错 |
+
+### 4.3 Host 事件（无 sessionId / seq）
+
+`host.notice { level, message, sessionId? }`、`workspace.changed`、`session.listChanged { workspaceId }`。发给所有已认证连接。
+
+## 5. EventLog、订阅与断线恢复
+
+- 每个活跃会话有一个 EventLog：单调递增的 `seq`（从 1 开始）与环形缓冲（默认 5000 条），以及随机的 `epoch`。Host 重启、会话被重新加载或被替换都会产生新的 epoch。
+- `session.subscribe` 的语义：
+  - 带 `sinceSeq` 且 `epoch` 与当前一致、缺口仍在缓冲内 → `mode: "replay"`，随后按序补发 `seq > sinceSeq` 的事件；
+  - 否则 → `mode: "snapshot"`，随后发送一个 `session.snapshot`，再接实时事件。
+- **顺序保证**：订阅响应先于补发事件或快照到达；补发 / 快照之后才是订阅期间产生的实时事件。快照的 `seq` 表示它已包含到该 seq 为止的全部事件，之后的事件从 `seq + 1` 开始。
+- 客户端应记录每个会话最后应用的 `seq` 与 `epoch`，并**丢弃 `seq <= lastSeq` 的事件**。`@pier/client` 自动完成这些：断线后指数退避重连，重新 `host.hello`，再用 `sinceSeq/epoch` 重新订阅；若会话已不在活跃池中（`NOT_FOUND`），会先 `session.open` 再从快照开始。
+- **增量合并**：`host.hello` 指定 `coalesceMs > 0` 时，同一会话、同一内容块、相同类型（`text_delta` / `thinking_delta` / `toolcall_delta`）的连续增量在窗口内合并为一帧，合并帧携带最后一条的 `seq`。其他任何帧到来前都会先刷出待合并的帧，顺序不变。建议手机端使用约 50ms。
+- **背压**：连接发送缓冲超过 16 MiB 时，Host 以关闭码 1013 断开，客户端重连后通过 `sinceSeq` 恢复。
+
+### SessionSnapshot
+
+```ts
+{
+  session: SessionSummary;     // 含 state
+  seq: number; epoch: string;
+  messages: AgentMessage[];    // 完整转录（含 system 消息，客户端可自行过滤）
+  streamingMessage?: AgentMessage; // 正在流式输出的部分消息
+  pendingToolCalls: string[];
+  pendingUi: UiRequest[];      // 仍待回答的对话框 / 审批
+  queue: { steering: string[]; followUp: string[] };
+  model?: ModelInfo; thinkingLevel: string;
+  statuses: Record<string, string>; widgets: Record<string, { lines: string[]; placement?: string }>;
+  title?: string; errorMessage?: string;
+}
+```
+
+## 6. UI 请求与审批
+
+- 扩展调用 `ctx.ui.select/confirm/input/editor` 时，Host 生成 `UiRequest` 并以 `ui.request` 广播给该会话的所有订阅者。**先到先得**：第一个合法的 `ui.respond` 生效，其他客户端的回答返回 `accepted: false`；所有人都会收到 `ui.resolved`。
+- 没有客户端在线时请求保持挂起（出现在之后的快照里），超时（默认 30 分钟，扩展可指定更短）后按默认答案解决：`confirm` → `false`，其余 → 取消。
+- `UiResponse` 依请求类型校验：`confirm` 需 `confirmed`；`select` 需 `value` 且在 `options` 中；`input` / `editor` 需 `value`；任意类型都可用 `{ cancelled: true }` 取消。
+- 终端专属能力（`custom`、`setFooter`、`setHeader`、编辑器组件、主题切换等）按 pi RPC 模式降级为 no-op；`ctx.ui.theme` 始终可用。
+
+### 审批（`pier-approval` 内置扩展）
+
+`kind: "approval"` 的请求带 `approval` 字段：
+
+```ts
+{ toolName, toolCallId, summary, input /* 长字段截断 */, reason, severity: "normal" | "high",
+  sessionAllowable: boolean, sessionScope?: string }
+```
+
+回答为 `{ decision: "allow_once" | "allow_session" | "deny", reason? }`。拒绝时 `reason` 会作为工具结果返回给模型；超时或取消视为拒绝。
+
+工作区策略：
+
+| 策略 | 行为 |
+|---|---|
+| `ask` | `bash`、`write`、`edit` 每次都需审批 |
+| `smart`（默认） | 只读命令白名单（`ls`、`cat`、`rg`、`git status/log/diff/show` 等，无输出重定向、命令替换）直接放行；工作区内的 `write`/`edit` 放行；其余 shell 命令与工作区外（含经符号链接逃逸）的写入需审批 |
+| `auto` | 全部放行 |
+
+在任何非 `auto` 策略下，危险模式（`rm -r`、`sudo`、`git push --force`、`git reset --hard`、`curl … \| sh` 等）一律以 `severity: "high"` 请求审批，且不提供"本会话内允许"。"本会话内允许"的范围：shell 命令按所用程序（如"运行 `npm` 的 bash 命令"）；写入按工作区或目标目录。只读工具（`read`、`grep`、`find`、`ls`）和扩展自定义工具不受策略约束。
+
+## 7. 与 pi CLI 的并发
+
+- Pier 使用与 pi 相同的会话文件（`~/.pi/agent/sessions`），可在终端 `pi --resume` 继续同一会话。
+- Host 在 `~/.pier/locks` 中为打开的会话加锁，防止两个 Pier Host 同时写入同一文件（持锁进程已退出时自动接管）。
+- 若会话空闲时文件被外部（例如 pi CLI）修改，后续写操作（`prompt`、`rename`、`model.set`、`compact` 等）返回 `CONFLICT`，需要关闭并重新打开会话。
+
+## 8. 空闲回收
+
+没有订阅者、非运行中、没有待处理 UI 请求，且 30 分钟无活动的会话会被自动 `dispose`（`session.closed { reason: "idle" }`），之后可通过 `session.open` 重新加载。

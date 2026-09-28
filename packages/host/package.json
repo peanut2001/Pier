@@ -1,0 +1,27 @@
+{
+	"name": "@pier/host",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"bin": {
+		"pier-host": "./src/main.ts"
+	},
+	"scripts": {
+		"dev": "tsx src/main.ts",
+		"build:sidecar": "node scripts/build-sidecar.mjs"
+	},
+	"dependencies": {
+		"@earendil-works/pi-coding-agent": "0.87.1",
+		"@pier/protocol": "workspace:*",
+		"ws": "^8.22.0",
+		"zod": "^4.6.5"
+	},
+	"devDependencies": {
+		"@types/ws": "^8.18.1",
+		"@pier/client": "workspace:*",
+		"@earendil-works/pi-ai": "0.87.1"
+	}
+}
