@@ -4,9 +4,9 @@
 	"version": "../package.json",
 	"identifier": "dev.pier.desktop",
 	"build": {
-		"beforeDevCommand": "pnpm dev:web",
+		"beforeDevCommand": "bun run dev:web",
 		"devUrl": "http://localhost:1420",
-		"beforeBuildCommand": "pnpm sidecar && pnpm build:web",
+		"beforeBuildCommand": "bun run sidecar && bun run build:web",
 		"frontendDist": "../dist"
 	},
 	"app": {

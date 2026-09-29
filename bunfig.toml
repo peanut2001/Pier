@@ -1,0 +1,3 @@
+[install]
+# Hoisted layout keeps Expo/Metro (apps/mobile) compatible.
+linker = "hoisted"

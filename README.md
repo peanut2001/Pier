@@ -25,23 +25,23 @@ M0–M2（Host 核心、桌面端 MVP）已完成；M3（手机端 MVP，局域�
 
 ## 开发
 
-需要 Node 22+（推荐 24）和 pnpm（`corepack enable`）；构建 sidecar 还需要 Bun。
+需要 Node 22+（推荐 24）和 [Bun](https://bun.sh)：Bun 管理依赖（`bun.lock`，版本见 `package.json` 的 `packageManager`）并编译 sidecar，脚本和测试仍在 Node 上运行。
 
 ```bash
-pnpm install
-pnpm lint        # Biome
-pnpm typecheck   # tsc -b（项目引用）
-pnpm test        # Vitest：单元测试 + 基于 faux 模型的端到端测试
+bun install
+bun run lint       # Biome
+bun run typecheck  # tsc -b（项目引用）
+bun run test       # Vitest：单元测试 + 基于 faux 模型的端到端测试
 ```
 
 Host 复用 pi 的配置（`~/.pi/agent`：模型、凭据、settings、会话目录）。桌面端可以直接在「设置 → 模型与服务商」中登录服务商（API Key 或账号）、一键「浏览器登录」云链API（在浏览器中授权后自动获取令牌和全部模型），或在「设置 → 个人中心」登录 / 注册云链API 账号、查看余额，并按分组把令牌一键配置为本地服务商、添加 OpenAI / Anthropic / Gemini 兼容的自定义接口并设置默认模型，不需要另外安装 pi；已经用 `pi` 配置过的电脑会直接沿用原有配置。
 
 ```bash
 # 终端 1：启动 Host（监听 127.0.0.1 的随机端口，并写入 ~/.pier/run/host.json）
-pnpm host
+bun run host
 
 # 终端 2：调试客户端（自动读取 ~/.pier/run/host.json）
-pnpm pier-cli
+bun run pier-cli
 > /ws add /path/to/project
 > /new
 > 列出当前目录的文件
@@ -52,11 +52,11 @@ pnpm pier-cli
 
 ### 桌面端
 
-除 Node 与 pnpm 外还需要 Rust（stable）、Bun，以及 Tauri 的[系统依赖](https://v2.tauri.app/start/prerequisites/)（Linux 上为 `libwebkit2gtk-4.1-dev`、`libayatana-appindicator3-dev`、`librsvg2-dev` 等）。
+除 Node 与 Bun 外还需要 Rust（stable），以及 Tauri 的[系统依赖](https://v2.tauri.app/start/prerequisites/)（Linux 上为 `libwebkit2gtk-4.1-dev`、`libayatana-appindicator3-dev`、`librsvg2-dev` 等）。
 
 ```bash
-pnpm desktop                                  # 构建 sidecar，然后 tauri dev（热更新前端）
-pnpm --filter @pier/desktop build             # 打包安装包（deb / AppImage / dmg / NSIS，取决于平台）
+bun run desktop                               # 构建 sidecar，然后 tauri dev（热更新前端）
+bun run --cwd apps/desktop build              # 打包安装包（deb / AppImage / dmg / NSIS，取决于平台）
 ```
 
 桌面端启动时会拉起内置的 Pier Host（`--watch-stdin`），关闭窗口只会隐藏到托盘，Agent 继续运行；从托盘或“设置 → 常规 → 退出 Pier”才会停止 Host。可用 `PIER_DIR` 隔离 Pier 状态目录，用 `PIER_HOST_BIN` 指定其他 Host 可执行文件。
@@ -68,8 +68,8 @@ pnpm --filter @pier/desktop build             # 打包安装包（deb / AppImage
 只调界面时可以不启动 Tauri：用假模型（faux）起一个 Host，再在浏览器里打开 Vite 开发服务器：
 
 ```bash
-pnpm faux-host                                # 输出 url 与 token，状态放在临时目录
-pnpm --filter @pier/desktop dev:web           # http://localhost:1420/?url=<url>&token=<token>
+bun run faux-host                             # 输出 url 与 token，状态放在临时目录
+bun run --cwd apps/desktop dev:web            # http://localhost:1420/?url=<url>&token=<token>
 ```
 
 发送包含“演示”的消息会运行一段脚本化任务（bash、write、edit 与一次需要审批的命令）。
@@ -79,28 +79,28 @@ pnpm --filter @pier/desktop dev:web           # http://localhost:1420/?url=<url>
 手机 App 通过加密通道连接电脑上的 Host，需要先在桌面端“手机”面板中开启远程访问并扫码配对（原理见 [docs/security.md](docs/security.md)）。
 
 ```bash
-pnpm --filter @pier/mobile start              # Metro 开发服务器
-pnpm --filter @pier/mobile android            # 本地构建并安装 Android 开发版（需要 Android SDK）
-pnpm --filter @pier/mobile ios                # 本地构建 iOS 开发版（需要 macOS 与 Xcode）
+bun run --cwd apps/mobile start               # Metro 开发服务器
+bun run --cwd apps/mobile android             # 本地构建并安装 Android 开发版（需要 Android SDK）
+bun run --cwd apps/mobile ios                 # 本地构建 iOS 开发版（需要 macOS 与 Xcode）
 cd apps/mobile && eas build --profile development   # 或用 EAS 云构建开发版
 ```
 
 App 用到相机、安全存储等原生模块，推荐使用开发构建（development build），而不是 Expo Go。每个 GitHub Release 都附带签好名的 Android 安装包 `pier-mobile-v<版本>-android.apk`，可以直接安装到手机上试用。iOS 暂时没有打包，需要自行构建。没有设备时可以用 Web 版调界面（安全存储回退为 localStorage，仅供开发）：
 
 ```bash
-pnpm faux-host --remote                       # 假模型 Host，并在 7433 端口开启远程访问
-pnpm --filter @pier/mobile web                # 在浏览器中“添加电脑 → 粘贴配对链接”
+bun run faux-host --remote                    # 假模型 Host，并在 7433 端口开启远程访问
+bun run --cwd apps/mobile web                 # 在浏览器中“添加电脑 → 粘贴配对链接”
 ```
 
-配对链接可以从桌面“设置 → 手机与远程 → 显示配对二维码 → 复制配对链接”获得；只运行 faux-host 时，也可以用 `pnpm pier-cli --url <url> --token <token>` 输入 `/pair` 生成链接，再用 `/pair yes` 确认（`/remote`、`/devices`、`/revoke` 管理远程访问与设备）。Android 模拟器访问宿主机时，用 `pnpm faux-host --remote --remote-address 10.0.2.2:7433` 让二维码里带上模拟器可达的地址。
+配对链接可以从桌面“设置 → 手机与远程 → 显示配对二维码 → 复制配对链接”获得；只运行 faux-host 时，也可以用 `bun run pier-cli --url <url> --token <token>` 输入 `/pair` 生成链接，再用 `/pair yes` 确认（`/remote`、`/devices`、`/revoke` 管理远程访问与设备）。Android 模拟器访问宿主机时，用 `bun run faux-host --remote --remote-address 10.0.2.2:7433` 让二维码里带上模拟器可达的地址。
 
 ### Sidecar
 
 构建单文件 sidecar（输出到 `packages/host/bin/`，包含 pi 运行时资源）：
 
 ```bash
-pnpm build:sidecar                          # 当前平台
-pnpm build:sidecar --target bun-darwin-arm64 # 交叉编译
+bun run build:sidecar                            # 当前平台
+bun run build:sidecar --target bun-darwin-arm64  # 交叉编译
 packages/host/bin/pier-host --help
 ```
 

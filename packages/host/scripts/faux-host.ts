@@ -3,8 +3,8 @@
  * Development host backed by pi's faux model: deterministic streaming, tool calls and an
  * approval request, without real credentials or token spend. Useful for UI work:
  *
- *   pnpm faux-host                     # prints a pier.ready line and a browser URL
- *   pnpm --filter @pier/desktop dev:web
+ *   bun run faux-host                  # prints a pier.ready line and a browser URL
+ *   bun run --cwd apps/desktop dev:web
  *   open http://localhost:1420/?url=<url>&token=<token>
  *
  * A prompt containing "demo" / "演示" runs a scripted coding task (bash, write, edit, and a

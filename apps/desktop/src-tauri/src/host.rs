@@ -207,7 +207,7 @@ impl HostManager {
         let exe = sidecar_path()?;
         if !exe.exists() {
             return Err(format!(
-                "找不到 Pier Host 可执行文件 {}（开发时先运行 `pnpm --filter @pier/desktop sidecar`）",
+                "找不到 Pier Host 可执行文件 {}（开发时先运行 `bun run --cwd apps/desktop sidecar`）",
                 exe.display()
             ));
         }

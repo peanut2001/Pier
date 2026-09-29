@@ -27,7 +27,8 @@ Pier 的所有重要变更都记录在这里。版本号规则：日常发版只
 ### 变更
 
 - **新建会话先选工作区**：桌面端点「新建会话」（侧栏按钮、工作区行的 `+`、工作区首页按钮或 `/new`）会打开空白的新对话页面，显示「我们应该在〈工作区〉中做些什么？」；输入框下方的工作区芯片可以切换工作区或添加新的工作区，也可以直接调整该工作区的审批策略、附加图片。发送第一条消息时才在所选工作区中创建会话并切换过去继续对话，只打开不发送不会留下空会话；草稿在离开页面后保留。
-- **不再单独发布 Pier Host**：Pier Host 已内置在桌面端安装包中，无需单独下载安装，GitHub Release 不再附带 `pier-host-v<版本>-<系统>-<架构>` 压缩包。发版流水线改为直接冒烟测试各平台安装包内置的 sidecar。需要单独运行 Host 时，可以按 README 用 `pnpm build:sidecar` 从源码构建。
+- **不再单独发布 Pier Host**：Pier Host 已内置在桌面端安装包中，无需单独下载安装，GitHub Release 不再附带 `pier-host-v<版本>-<系统>-<架构>` 压缩包。发版流水线改为直接冒烟测试各平台安装包内置的 sidecar。需要单独运行 Host 时，可以按 README 用 `bun run build:sidecar` 从源码构建。
+- **改用 Bun 管理依赖**：仓库从 pnpm 换成 Bun workspaces（`bun.lock`，`bunfig.toml` 保持 hoisted 布局以兼容 Expo/Metro），开发只需 Node 与 Bun，不再需要 pnpm / Corepack；README 中的命令相应改为 `bun install`、`bun run …`。CI 与发版流水线同步改用 Bun，Bun 版本由 `package.json` 的 `packageManager` 固定。
 - **移除通用的「NewAPI 登录」**：「添加服务商」不再单独提供 NewAPI 登录按钮和账号密码 / 访问令牌登录对话框，改为上面的「云链API」服务商；其他 NewAPI 中转站可以用「自定义接口」填写 Base URL 和 API Key。Host 的 `newapi.*` 协议方法保持不变。
 
 ### 修复

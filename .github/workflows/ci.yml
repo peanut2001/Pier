@@ -26,25 +26,26 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 24
-          # pnpm is enabled through Corepack in the next step; setup-node's automatic
-          # package-manager cache would otherwise look for pnpm before it exists.
+          # Dependencies are installed with Bun (setup-bun), so there is no npm cache to restore.
           package-manager-cache: false
 
-      - name: Enable pnpm via Corepack
-        run: corepack enable
+      # Bun installs the workspace from bun.lock; packageManager in package.json pins its version.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: bun install --frozen-lockfile
 
       - name: Lint
         if: matrix.os == 'ubuntu-latest'
-        run: pnpm lint
+        run: bun run lint
 
       - name: Typecheck
-        run: pnpm typecheck
+        run: bun run typecheck
 
       - name: Test
-        run: pnpm test
+        run: bun run test
 
   sidecar:
     name: sidecar build (${{ matrix.target }})
@@ -60,20 +61,19 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 24
-          # pnpm is enabled through Corepack in the next step; setup-node's automatic
-          # package-manager cache would otherwise look for pnpm before it exists.
+          # Dependencies are installed with Bun (setup-bun), so there is no npm cache to restore.
           package-manager-cache: false
 
+      # Bun installs the workspace from bun.lock; packageManager in package.json pins its version.
       - uses: oven-sh/setup-bun@v2
-
-      - name: Enable pnpm via Corepack
-        run: corepack enable
+        with:
+          bun-version-file: package.json
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: bun install --frozen-lockfile
 
       - name: Build sidecar
-        run: pnpm build:sidecar --target ${{ matrix.target }}
+        run: bun run build:sidecar --target ${{ matrix.target }}
 
       - name: Smoke test (native target only)
         if: matrix.target == 'bun-linux-x64'
@@ -96,11 +96,8 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 24
-          # pnpm is enabled through Corepack in the next step; setup-node's automatic
-          # package-manager cache would otherwise look for pnpm before it exists.
+          # Dependencies are installed with Bun (setup-bun), so there is no npm cache to restore.
           package-manager-cache: false
-
-      - uses: oven-sh/setup-bun@v2
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -116,18 +113,20 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev
 
-      - name: Enable pnpm via Corepack
-        run: corepack enable
+      # Bun installs the workspace from bun.lock; packageManager in package.json pins its version.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: bun install --frozen-lockfile
 
       # tauri-build requires the externalBin and resources to exist.
       - name: Prepare sidecar
-        run: pnpm --filter @pier/desktop sidecar
+        run: bun run --filter @pier/desktop sidecar
 
       - name: Build web UI
-        run: pnpm --filter @pier/desktop build:web
+        run: bun run --filter @pier/desktop build:web
 
       - name: cargo fmt
         working-directory: apps/desktop/src-tauri
@@ -151,25 +150,26 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 24
-          # pnpm is enabled through Corepack in the next step; setup-node's automatic
-          # package-manager cache would otherwise look for pnpm before it exists.
+          # Dependencies are installed with Bun (setup-bun), so there is no npm cache to restore.
           package-manager-cache: false
 
-      - name: Enable pnpm via Corepack
-        run: corepack enable
+      # Bun installs the workspace from bun.lock; packageManager in package.json pins its version.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: bun install --frozen-lockfile
 
       - name: Check Expo SDK dependency versions
         working-directory: apps/mobile
-        run: npx expo install --check
+        run: bunx expo install --check
 
       # Metro bundle + Hermes bytecode: catches resolution and syntax problems in the
       # shared workspace packages without building the native app.
       - name: Export JS bundle
         working-directory: apps/mobile
-        run: npx expo export --platform ${{ matrix.platform }} --output-dir dist/${{ matrix.platform }}
+        run: bunx expo export --platform ${{ matrix.platform }} --output-dir dist/${{ matrix.platform }}
 
       # The release APK depends on plugins/withAndroidRelease.js patching the generated Gradle
       # project; prebuild fails here if an Expo upgrade changes the template it expects.
@@ -177,5 +177,5 @@ jobs:
         if: matrix.platform == 'android'
         working-directory: apps/mobile
         run: |
-          npx expo prebuild --platform android --no-install
+          bunx expo prebuild --platform android --no-install
           grep -q "pier: release signing" android/app/build.gradle

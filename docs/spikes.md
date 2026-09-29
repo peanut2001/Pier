@@ -14,7 +14,7 @@
 
 ### 做法
 
-`pnpm build:sidecar [--target <bun-target>]`（`packages/host/scripts/build-sidecar.mjs`）：
+`bun run build:sidecar [--target <bun-target>]`（`packages/host/scripts/build-sidecar.mjs`）：
 
 1. `bun build --compile --no-compile-autoload-bunfig src/main.ts` 生成单文件可执行程序；
 2. 按 pi 自身 `build:binary` 的布局，把 SDK 运行时需要的资源复制到可执行文件旁：`package.json`（pi 的版本号与 `piConfig`）、`theme/*.json`、`export-html/`、`assets/`、`docs/`、`examples/`、`photon_rs_bg.wasm`。
@@ -76,7 +76,7 @@ pi 在 Bun 二进制中通过 `dirname(process.execPath)` 查找这些资源；�
 
 ### 打包验证
 
-`pnpm --filter @pier/desktop build --bundles deb` 生成 `Pier_0.0.1_amd64.deb`（43.7 MiB，依赖 `libwebkit2gtk-4.1-0`、`libgtk-3-0`、`libayatana-appindicator3-1`）。安装布局：
+`bun run --cwd apps/desktop build --bundles deb` 生成 `Pier_0.0.1_amd64.deb`（43.7 MiB，依赖 `libwebkit2gtk-4.1-0`、`libgtk-3-0`、`libayatana-appindicator3-1`）。安装布局：
 
 ```
 usr/bin/pier-desktop            主程序
@@ -90,7 +90,7 @@ usr/share/applications/Pier.desktop
 其他发现：
 
 - WebKitGTK 会接受 fontconfig 为**第一个**字体族返回的替代字体（`ui-monospace`、`SF Mono` 都被映射成 Noto Sans CJK），导致代码块不是等宽字体。Linux 上改用通用族 `monospace`。
-- 开发时可以用 `PIER_HOST_BIN` 让桌面端运行别的 Host（例如包装 `pnpm faux-host` 的脚本，它输出同样的 `pier.ready` 行并支持 `--watch-stdin`），便于在真实外壳里调界面。
+- 开发时可以用 `PIER_HOST_BIN` 让桌面端运行别的 Host（例如包装 `bun run faux-host` 的脚本，它输出同样的 `pier.ready` 行并支持 `--watch-stdin`），便于在真实外壳里调界面。
 
 ### 待验证
 
@@ -104,7 +104,7 @@ usr/share/applications/Pier.desktop
 ### 做法
 
 - 加密通道全部用纯 JS 实现（`packages/crypto`，见 `docs/security.md`）：Noise XX / IK、ChaCha20‑Poly1305、base64 文本帧。同一份代码在 Host（Node / Bun）、桌面 WebView 和手机（Hermes）上运行。
-- 基准测试 `runChannelBenchmark()` 走真实代码路径（IK 握手两端、`SecureTransport.seal` + `open`，含 JSON 与 base64 封装）。命令行：`pnpm --filter @pier/crypto bench`；手机：App“设置 → 加密性能测试”。
+- 基准测试 `runChannelBenchmark()` 走真实代码路径（IK 握手两端、`SecureTransport.seal` + `open`，含 JSON 与 base64 封装）。命令行：`bun run --cwd packages/crypto bench`；手机：App“设置 → 加密性能测试”。
 - 加解密热路径优先用引擎自带的实现：`TextEncoder` / `TextDecoder`、`Uint8Array.fromBase64` / `toBase64`（Bun、新版浏览器）或 Node 的 `Buffer`，没有时回退到纯 JS（`@scure/base` 与自带的 UTF‑8 编解码，已测试）。Hermes 没有 `crypto.getRandomValues`，App 启动时用 `expo-crypto` 补上。
 
 ### 结果（x86_64 Linux，16 线程）

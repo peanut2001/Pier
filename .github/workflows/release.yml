@@ -27,12 +27,13 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 24
-          # pnpm is enabled through Corepack in the next step; setup-node's automatic
-          # package-manager cache would otherwise look for pnpm before it exists.
+          # Dependencies are installed with Bun (setup-bun), so there is no npm cache to restore.
           package-manager-cache: false
 
-      - name: Enable pnpm via Corepack
-        run: corepack enable
+      # Bun installs the workspace from bun.lock; packageManager in package.json pins its version.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
 
       - name: Check tag, version, and branch
         id: version
@@ -55,11 +56,11 @@ jobs:
           echo "version=${version}" >> "$GITHUB_OUTPUT"
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: bun install --frozen-lockfile
 
-      - run: pnpm lint
-      - run: pnpm typecheck
-      - run: pnpm test
+      - run: bun run lint
+      - run: bun run typecheck
+      - run: bun run test
 
   desktop:
     name: desktop ${{ matrix.platform }}
@@ -86,11 +87,8 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 24
-          # pnpm is enabled through Corepack in the next step; setup-node's automatic
-          # package-manager cache would otherwise look for pnpm before it exists.
+          # Dependencies are installed with Bun (setup-bun), so there is no npm cache to restore.
           package-manager-cache: false
-
-      - uses: oven-sh/setup-bun@v2
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -100,11 +98,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf
 
-      - name: Enable pnpm via Corepack
-        run: corepack enable
+      # Bun installs the workspace from bun.lock; packageManager in package.json pins its version.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: bun install --frozen-lockfile
 
       # beforeBuildCommand builds the sidecar for this runner and the web UI.
       # The updater key signs the update bundles (createUpdaterArtifacts in tauri.conf.json);
@@ -119,7 +119,7 @@ jobs:
             echo "::error::The TAURI_SIGNING_PRIVATE_KEY secret is required to sign update bundles"
             exit 1
           fi
-          pnpm tauri build --bundles ${{ matrix.bundles }}
+          bun run tauri build --bundles ${{ matrix.bundles }}
 
       # The app is ad-hoc signed (bundle.macOS.signingIdentity "-"), not notarized: Gatekeeper
       # then offers "Open Anyway" instead of reporting the download as damaged. Check that the
@@ -193,8 +193,7 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 24
-          # pnpm is enabled through Corepack in the next step; setup-node's automatic
-          # package-manager cache would otherwise look for pnpm before it exists.
+          # Dependencies are installed with Bun (setup-bun), so there is no npm cache to restore.
           package-manager-cache: false
 
       - uses: actions/setup-java@v5
@@ -204,11 +203,13 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v5
 
-      - name: Enable pnpm via Corepack
-        run: corepack enable
+      # Bun installs the workspace from bun.lock; packageManager in package.json pins its version.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: bun install --frozen-lockfile
 
       - name: Release keystore
         env:
@@ -224,7 +225,7 @@ jobs:
       # android/ is generated from app.json; plugins/withAndroidRelease.js wires up release signing.
       - name: Prebuild
         working-directory: apps/mobile
-        run: npx expo prebuild --platform android --no-install
+        run: bunx expo prebuild --platform android --no-install
 
       - name: Build APK
         working-directory: apps/mobile/android

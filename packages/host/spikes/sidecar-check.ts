@@ -2,7 +2,7 @@
  * Spike 1 check: prints what the pi SDK loads through Pier's adapter (extensions,
  * skills, context files, models) using an in-memory session so nothing is persisted.
  *
- *   pnpm --filter @pier/host exec tsx spikes/sidecar-check.ts [cwd]
+ *   cd packages/host && bunx tsx spikes/sidecar-check.ts [cwd]
  *   bun build --compile spikes/sidecar-check.ts --outfile /tmp/sidecar-check && /tmp/sidecar-check [cwd]
  *
  * An extension file passed via PIER_SPIKE_EXTENSION is loaded in addition to discovery,

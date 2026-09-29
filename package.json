@@ -3,7 +3,7 @@
 	"version": "0.2.3",
 	"private": true,
 	"type": "module",
-	"packageManager": "pnpm@12.6.0",
+	"packageManager": "bun@1.4.2",
 	"engines": {
 		"node": ">=22"
 	},
@@ -15,7 +15,7 @@
 		"host": "tsx packages/host/src/main.ts",
 		"pier-cli": "tsx packages/client/src/cli.ts",
 		"faux-host": "tsx packages/host/scripts/faux-host.ts",
-		"desktop": "pnpm --filter @pier/desktop dev",
+		"desktop": "bun run --cwd apps/desktop dev",
 		"build:sidecar": "node packages/host/scripts/build-sidecar.mjs"
 	},
 	"devDependencies": {
@@ -24,5 +24,9 @@
 		"tsx": "^4.23.15",
 		"typescript": "^7.0.2",
 		"vitest": "^5.0.2"
-	}
+	},
+	"workspaces": [
+		"packages/*",
+		"apps/*"
+	]
 }

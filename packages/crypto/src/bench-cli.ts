@@ -1,4 +1,4 @@
-/** `pnpm --filter @pier/crypto bench`: secure-channel benchmark for the current runtime. */
+/** `bun run --cwd packages/crypto bench`: secure-channel benchmark for the current runtime. */
 import { formatBenchResults, runChannelBenchmark } from "./bench.ts";
 
 const runtime =

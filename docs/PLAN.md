@@ -66,7 +66,7 @@
 
 | 层 | 技术 |
 |---|---|
-| Monorepo | pnpm workspaces（`node-linker=hoisted` 以兼容 Expo/Metro），TypeScript strict |
+| Monorepo | Bun workspaces（`bunfig.toml` 设 `linker = "hoisted"` 以兼容 Expo/Metro），TypeScript strict |
 | 代码规范 | Biome（lint + format）、Vitest；Rust 侧 `cargo fmt` + `clippy` |
 | Host | Node 22+（开发） / 打包为单文件 sidecar；`@earendil-works/pi-coding-agent`、`ws`、`zod`、`bonjour-service`（mDNS） |
 | 协议 | `packages/protocol`：zod schema + 推导出的 TS 类型，Host 与客户端共享 |
@@ -95,7 +95,7 @@ Pier/
 │  ├─ protocol.md         # 协议详细定义（M1 产出）
 │  └─ security.md         # 威胁模型与配对流程（M3 产出）
 ├─ biome.json
-├─ pnpm-workspace.yaml
+├─ bunfig.toml
 └─ package.json
 ```
 
@@ -214,7 +214,7 @@ Pier/
 
 ### M0 脚手架与技术验证
 
-- [x] pnpm monorepo、Biome、Vitest、TypeScript 项目引用、GitHub Actions（lint / typecheck / test）。
+- [x] monorepo（最初用 pnpm，现为 Bun workspaces）、Biome、Vitest、TypeScript 项目引用、GitHub Actions（lint / typecheck / test）。
 - [x] **Spike 1：Host 打包为 sidecar**（Linux 已端到端验证，macOS / Windows 已交叉编译，结论见 `docs/spikes.md`）。验证 pi SDK 能否用 `bun build --compile` 打成单文件，并能正常加载扩展、skills 与 `~/.pi/agent` 配置；失败则改为"内置 Node 运行时 + JS bundle"或 Node SEA。
 - [x] **Spike 2**：Tauri 2 通过 `externalBin` 启动 sidecar，并通过 stdout 获取端口与本地 token（Linux 已验证，结论见 `docs/spikes.md`）。
 - [ ] **Spike 3**：Expo 开发构建中 WebSocket + `@noble/*` 加解密性能验证（iOS / Android 各一台真机）。桌面运行时基准、Hermes 打包与 Web 端到端已完成（见 `docs/spikes.md`）；App 内置测试页，真机数据待补。
@@ -225,7 +225,7 @@ Pier/
 - [x] `packages/protocol`：schema、类型、版本号；`docs/protocol.md`。
 - [x] `packages/host`：工作区配置、会话池、`AgentSessionRuntime` 绑定、UI 桥接、EventLog、`pier-approval`。
 - [x] 本地 WS Gateway（`127.0.0.1` + token）。
-- [x] `packages/client` + 一个命令行调试客户端（`pnpm pier-cli`）。
+- [x] `packages/client` + 一个命令行调试客户端（`bun run pier-cli`）。
 - 验收：通过 CLI 客户端完成新建会话 → prompt → 流式输出 → 触发审批并响应 → 断开重连后补发事件；单元测试覆盖 EventLog 与协议校验。
 
 ### M2 桌面端 MVP

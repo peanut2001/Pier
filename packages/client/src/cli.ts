@@ -79,7 +79,7 @@ function discover(values: { url?: string; token?: string; "pier-dir"?: string })
 		const runtime = JSON.parse(readFileSync(file, "utf8")) as { url: string; token: string };
 		return { url: runtime.url, token: token ?? runtime.token };
 	} catch {
-		throw new Error(`No running host found (${file}). Start one with \`pnpm host\` or pass --url/--token.`);
+		throw new Error(`No running host found (${file}). Start one with \`bun run host\` or pass --url/--token.`);
 	}
 }
 

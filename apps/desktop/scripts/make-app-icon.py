@@ -1,6 +1,6 @@
 # Builds the macOS-grid app icon source (1024 canvas, 824 squircle, 100px padding)
 # from the full-bleed mobile artwork. Regenerate the icon set afterwards with:
-#   pnpm tauri icon src-tauri/app-icon.png
+#   bun run tauri icon src-tauri/app-icon.png
 import math
 from PIL import Image, ImageDraw
 import os, sys
