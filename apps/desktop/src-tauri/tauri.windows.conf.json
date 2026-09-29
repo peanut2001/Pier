@@ -1,0 +1,17 @@
+{
+	"$schema": "https://schema.tauri.app/config/2",
+	"app": {
+		"windows": [
+			{
+				"label": "main",
+				"title": "Pier",
+				"width": 1280,
+				"height": 820,
+				"minWidth": 860,
+				"minHeight": 560,
+				"decorations": false,
+				"shadow": true
+			}
+		]
+	}
+}
