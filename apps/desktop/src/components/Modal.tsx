@@ -1,6 +1,11 @@
-import { type ReactNode, useEffect } from "react";
+import type { ReactNode } from "react";
 import { IconX } from "./Icons.tsx";
 
+/**
+ * A dialog that closes only through an explicit control (the header close button or the
+ * dialog's own buttons). Clicking the backdrop and pressing Esc deliberately do nothing, so a
+ * stray click or an IME-cancelling Esc cannot throw away a half-filled form.
+ */
 export function Modal({
 	title,
 	onClose,
@@ -14,23 +19,9 @@ export function Modal({
 	wide?: boolean;
 	className?: string;
 }) {
-	useEffect(() => {
-		const onKey = (e: KeyboardEvent) => {
-			if (e.key === "Escape") onClose();
-		};
-		window.addEventListener("keydown", onKey);
-		return () => window.removeEventListener("keydown", onKey);
-	}, [onClose]);
 	return (
-		// biome-ignore lint/a11y/noStaticElementInteractions: clicking the backdrop closes the dialog; Esc also works.
-		// biome-ignore lint/a11y/useKeyWithClickEvents: Esc is handled globally above.
-		<div className="modal-backdrop" onClick={onClose}>
-			{/* biome-ignore lint/a11y/useKeyWithClickEvents: only stops propagation. */}
-			{/* biome-ignore lint/a11y/noStaticElementInteractions: only stops propagation. */}
-			<div
-				className={`modal${wide ? " wide" : ""}${className ? ` ${className}` : ""}`}
-				onClick={(e) => e.stopPropagation()}
-			>
+		<div className="modal-backdrop">
+			<div className={`modal${wide ? " wide" : ""}${className ? ` ${className}` : ""}`}>
 				<div className="modal-header">
 					<h3>{title}</h3>
 					<button type="button" className="ghost icon" onClick={onClose} title="关闭">
