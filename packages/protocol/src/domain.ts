@@ -341,6 +341,20 @@ export interface HostInfo {
 	platform: string;
 	piVersion: string;
 	agentDir: string;
+	/**
+	 * The host can run shells for its clients (`terminal.*`, 1.16): it runs inside a desktop app
+	 * that provides pseudo-terminals. Absent on older hosts and headless ones.
+	 */
+	terminals?: boolean;
+}
+
+/** A shell `terminal.open` started on the host's computer (1.16). */
+export interface TerminalInfo {
+	terminalId: string;
+	/** Shell program name, e.g. `zsh` or `powershell`. */
+	shell: string;
+	/** Directory the shell started in (the home directory when the requested one is missing). */
+	cwd: string;
 }
 
 export interface ClientInfo {

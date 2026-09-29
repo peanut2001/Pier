@@ -50,10 +50,17 @@ export interface SpawnedTerminal {
 export interface TerminalHandlers {
 	/** Raw PTY output; may end in the middle of a UTF-8 sequence. */
 	output(data: Uint8Array): void;
-	/** The shell exited (`code` is null when it was killed by a signal). */
-	exit(code: number | null): void;
+	/**
+	 * The shell exited (`code` is null when it was killed by a signal). `error` is set when the
+	 * terminal was lost rather than ended, e.g. the connection to its computer dropped.
+	 */
+	exit(code: number | null, error?: string): void;
 }
 
+/**
+ * Runs shells: this computer's pseudo-terminals (the Tauri bridge), or another computer's
+ * through its Pier Host (`terminal.*`, see `remote-terminals.ts`).
+ */
 export interface TerminalBridge {
 	spawn(options: { cwd?: string; cols: number; rows: number }, handlers: TerminalHandlers): Promise<SpawnedTerminal>;
 	/** `binary` input carries one byte per character (xterm's `onBinary`). */

@@ -1,7 +1,8 @@
 import type { WorkspaceFileEntry, WorkspaceInfo } from "@pier/protocol";
 import { type PointerEvent as ReactPointerEvent, useCallback, useEffect, useRef, useState } from "react";
 import { formatBytes, joinPath, relativeTime } from "../lib/format.ts";
-import { hostCanDeleteFiles, LOCAL_NODE, useAppState, useStore } from "../lib/store.tsx";
+import { useCanOpenTerminal } from "../lib/remote-terminals.ts";
+import { hostCanDeleteFiles, useAppState, useStore } from "../lib/store.tsx";
 import { terminals } from "../lib/terminals.ts";
 import { ContextMenu, type ContextMenuItem, type ContextMenuPosition, contextMenuPosition } from "./ContextMenu.tsx";
 import {
@@ -247,9 +248,8 @@ function ResizeHandle() {
 export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInfo; composerKey?: string }) {
 	const store = useStore();
 	const connection = useAppState((s) => s.connection);
-	// Terminals and the file manager are on this computer: only for its own workspaces.
-	const local = useAppState((s) => s.node === LOCAL_NODE);
-	const canTerminal = terminals.supported && local;
+	// Terminals open on the workspace's computer (this one, or a paired one that runs them).
+	const canTerminal = useCanOpenTerminal(workspace);
 	const canDelete = useAppState((s) => hostCanDeleteFiles(s.hostInfo));
 	/** Entry awaiting delete confirmation. */
 	const [deleting, setDeleting] = useState<WorkspaceFileEntry>();

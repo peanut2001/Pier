@@ -4,6 +4,10 @@
  * The xterm instances live outside React so terminals keep their scrollback and keep
  * running while the panel is hidden, the settings page is open, or the user switches
  * sessions. React components only attach an instance's element to the visible container.
+ *
+ * A terminal runs on the computer of the workspace it was opened for: this one through the
+ * desktop app's pseudo-terminals, a paired one through its Pier Host (`terminal.*`). The
+ * store decides which (`setResolver`).
  */
 
 import type { WorkspaceInfo } from "@pier/protocol";
@@ -23,6 +27,8 @@ export interface TerminalTab {
 	cwd?: string;
 	workspaceId?: string;
 	workspaceName?: string;
+	/** Name of the other computer the shell runs on; unset on this computer. */
+	hostName?: string;
 	status: TerminalStatus;
 	exitCode?: number | null;
 	/** The title the shell set (OSC 0/2), shown as a tooltip. */
@@ -43,11 +49,23 @@ export interface OpenTerminalOptions {
 	cwd?: string;
 }
 
+/** Where a terminal runs. */
+export interface TerminalTarget {
+	backend: TerminalBridge;
+	/** Set for another computer. */
+	hostName?: string;
+}
+
+/** Picks the computer for a new terminal; undefined when it cannot run terminals. */
+export type TerminalResolver = (workspace: WorkspaceInfo | undefined) => TerminalTarget | undefined;
+
 interface Instance {
 	term: Terminal;
 	fit: FitAddon;
 	element: HTMLDivElement;
 	opened: boolean;
+	/** What runs the shell; undefined when the computer cannot run terminals. */
+	backend: TerminalBridge | undefined;
 	id?: number;
 	/** Input typed before the shell was ready. */
 	pending: Array<{ data: string; binary: boolean }>;
@@ -132,6 +150,7 @@ export class TerminalManager {
 	private nextKey = 0;
 	/** Hangs up shells orphaned by a page reload, once, before the first spawn. */
 	private cleanup: Promise<void> | undefined;
+	private resolver: TerminalResolver = () => (this.backend ? { backend: this.backend } : undefined);
 
 	constructor(
 		private readonly backend: TerminalBridge | undefined,
@@ -155,8 +174,18 @@ export class TerminalManager {
 		});
 	}
 
+	/** Whether this computer can run terminals (the desktop app). */
 	get supported(): boolean {
 		return this.backend !== undefined;
+	}
+
+	/** This computer's terminals, for resolvers. */
+	get local(): TerminalBridge | undefined {
+		return this.backend;
+	}
+
+	setResolver(resolver: TerminalResolver): void {
+		this.resolver = resolver;
 	}
 
 	getState = (): TerminalState => this.state;
@@ -201,13 +230,15 @@ export class TerminalManager {
 	/** Open a new terminal tab and show the panel. The shell starts once the tab is laid out. */
 	create({ workspace, cwd }: OpenTerminalOptions = {}): string {
 		const key = `t${++this.nextKey}`;
+		const target = this.resolver(workspace);
 		const tab: TerminalTab = {
 			key,
 			status: "starting",
 			...((cwd ?? workspace?.path) ? { cwd: cwd ?? workspace?.path } : {}),
 			...(workspace ? { workspaceId: workspace.id, workspaceName: workspace.name } : {}),
+			...(target?.hostName ? { hostName: target.hostName } : {}),
 		};
-		this.instances.set(key, this.createInstance(key));
+		this.instances.set(key, this.createInstance(key, target?.backend));
 		this.set({ tabs: [...this.state.tabs, tab], active: key, open: true });
 		return key;
 	}
@@ -217,7 +248,7 @@ export class TerminalManager {
 		const instance = this.instances.get(key);
 		if (instance) {
 			this.instances.delete(key);
-			if (instance.id !== undefined) void this.backend?.kill(instance.id).catch(() => {});
+			if (instance.id !== undefined) void instance.backend?.kill(instance.id).catch(() => {});
 			instance.term.dispose();
 			instance.element.remove();
 		}
@@ -276,7 +307,7 @@ export class TerminalManager {
 		if (key) requestAnimationFrame(() => this.focus(key));
 	}
 
-	private createInstance(key: string): Instance {
+	private createInstance(key: string, backend: TerminalBridge | undefined): Instance {
 		const element = document.createElement("div");
 		element.className = "terminal-instance";
 		const term = new Terminal({
@@ -297,13 +328,13 @@ export class TerminalManager {
 				void this.openExternal(uri);
 			}),
 		);
-		const instance: Instance = { term, fit, element, opened: false, pending: [] };
+		const instance: Instance = { term, fit, element, opened: false, backend, pending: [] };
 
 		term.attachCustomKeyEventHandler((event) => this.handleKey(key, instance, event));
 		term.onData((data) => this.input(key, instance, data, false));
 		term.onBinary((data) => this.input(key, instance, data, true));
 		term.onResize(({ cols, rows }) => {
-			if (instance.id !== undefined) void this.backend?.resize(instance.id, cols, rows).catch(() => {});
+			if (instance.id !== undefined) void instance.backend?.resize(instance.id, cols, rows).catch(() => {});
 		});
 		term.onTitleChange((title) => this.patchTab(key, { title }));
 		return instance;
@@ -357,25 +388,32 @@ export class TerminalManager {
 			instance.pending.push({ data, binary });
 			return;
 		}
-		void this.backend?.write(instance.id, data, binary).catch(() => {});
+		void instance.backend?.write(instance.id, data, binary).catch(() => {});
 	}
 
 	private async start(key: string, instance: Instance): Promise<void> {
 		const tab = this.state.tabs.find((t) => t.key === key);
-		const backend = this.backend;
+		const backend = instance.backend;
 		if (!tab || !backend) {
-			instance.term.write("\x1b[33m仅桌面应用支持终端。\x1b[0m\r\n");
+			instance.term.write(
+				tab?.workspaceId
+					? "\x1b[33m这个工作区所在的电脑不支持终端（它的 Pier 可能需要升级，或者暂时无法连接）。\x1b[0m\r\n"
+					: "\x1b[33m仅桌面应用支持终端。\x1b[0m\r\n",
+			);
+			instance.term.write("\x1b[2m按回车键关闭\x1b[0m");
 			this.patchTab(key, { status: "failed" });
 			return;
 		}
 		try {
-			this.cleanup ??= backend.killAll().catch(() => {});
-			await this.cleanup;
+			if (backend === this.backend) {
+				this.cleanup ??= backend.killAll().catch(() => {});
+				await this.cleanup;
+			}
 			const spawned = await backend.spawn(
 				{ ...(tab.cwd ? { cwd: tab.cwd } : {}), cols: instance.term.cols, rows: instance.term.rows },
 				{
 					output: (data) => instance.term.write(data),
-					exit: (code) => this.exited(key, instance, code),
+					exit: (code, error) => this.exited(key, instance, code, error),
 				},
 			);
 			if (this.instances.get(key) !== instance) {
@@ -398,15 +436,15 @@ export class TerminalManager {
 		}
 	}
 
-	/** `exit` (code 0) closes the tab like other terminals; failures stay visible. */
-	private exited(key: string, instance: Instance, code: number | null): void {
+	/** `exit` (code 0) closes the tab like other terminals; failures and lost terminals stay visible. */
+	private exited(key: string, instance: Instance, code: number | null, error?: string): void {
 		if (this.instances.get(key) !== instance) return;
 		instance.id = undefined;
-		if (code === 0) {
+		if (code === 0 && !error) {
 			this.close(key);
 			return;
 		}
-		const detail = code === null ? "进程已结束" : `进程已退出，代码 ${code}`;
+		const detail = error ?? (code === null ? "进程已结束" : `进程已退出，代码 ${code}`);
 		instance.term.write(`\r\n\x1b[2m[${detail}] 按回车键关闭\x1b[0m`);
 		this.patchTab(key, { status: "exited", exitCode: code });
 	}
@@ -418,8 +456,10 @@ export function useTerminals<T>(selector: (state: TerminalState) => T): T {
 	return useSyncExternalStore(terminals.subscribe, () => selector(terminals.getState()));
 }
 
-/** Short tab label: `zsh · workspace`. */
+/** Short tab label: `zsh · workspace`, with the computer for another one: `zsh · workspace（Ubuntu）`. */
 export function terminalLabel(tab: TerminalTab): string {
 	const shell = tab.shell ?? "终端";
-	return tab.workspaceName ? `${shell} · ${tab.workspaceName}` : shell;
+	const where = tab.workspaceName ?? tab.hostName;
+	const host = tab.hostName && tab.workspaceName ? `（${tab.hostName}）` : "";
+	return where ? `${shell} · ${where}${host}` : shell;
 }

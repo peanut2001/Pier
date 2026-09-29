@@ -10,6 +10,15 @@
 //! `{"type":"pier.shell.request","id":…,"method":"update.check"|"update.install"}` on stdout,
 //! and this side answers with `pier.shell.response` lines and pushes every updater status as
 //! `{"type":"pier.shell.updateStatus","status":{…}}` on stdin.
+//!
+//! The channel also runs the terminals the host offers its clients (`terminal.*`): once the host
+//! is ready this side announces `{"type":"pier.shell.capabilities","terminals":true}`; the host
+//! starts shells with a `terminal.spawn` request (`params: {key, cwd?, cols, rows}`, answered
+//! with `{id, shell, cwd}`), types and resizes with
+//! `{"type":"pier.shell.terminal","op":"write"|"resize"|"pause"|"resume"|"kill","id":…}`, and gets
+//! `{"type":"pier.shell.terminalOutput","key":…,"data":"<base64>"}` and one final
+//! `{"type":"pier.shell.terminalExit","key":…,"code":…}` back. Those shells belong to the
+//! host run that started them: they are hung up when it stops, restarts or crashes.
 
 use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -20,10 +29,13 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine as _;
 use serde::Serialize;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::terminal::{input_bytes, Output, Sink, TerminalManager};
 use crate::updater::{UpdateManager, UpdateStatus};
 
 pub const STATUS_EVENT: &str = "pier://host-status";
@@ -32,6 +44,10 @@ pub const LOG_EVENT: &str = "pier://host-log";
 const SHELL_REQUEST: &str = "pier.shell.request";
 const SHELL_RESPONSE: &str = "pier.shell.response";
 const SHELL_UPDATE_STATUS: &str = "pier.shell.updateStatus";
+const SHELL_CAPABILITIES: &str = "pier.shell.capabilities";
+const SHELL_TERMINAL: &str = "pier.shell.terminal";
+const SHELL_TERMINAL_OUTPUT: &str = "pier.shell.terminalOutput";
+const SHELL_TERMINAL_EXIT: &str = "pier.shell.terminalExit";
 
 const MAX_LOG_LINES: usize = 2000;
 /// A cold first start of the Bun binary takes a few seconds; leave generous headroom.
@@ -86,6 +102,8 @@ struct Inner {
 pub struct HostManager {
     app: AppHandle,
     inner: Arc<Mutex<Inner>>,
+    /// Shells the host runs for its clients; separate from the webview's own terminals.
+    terminals: TerminalManager,
 }
 
 impl HostManager {
@@ -111,6 +129,7 @@ impl HostManager {
                 fast_failures: 0,
                 started_at: None,
             })),
+            terminals: TerminalManager::default(),
         }
     }
 
@@ -256,26 +275,32 @@ impl HostManager {
     fn read_stdout(&self, generation: u64, stdout: impl Read) {
         for line in BufReader::new(stdout).lines() {
             let Ok(line) = line else { break };
-            if !self.try_ready(generation, &line) && !self.try_shell_request(&line) {
-                self.push_log(line);
+            let message = line
+                .trim_start()
+                .starts_with('{')
+                .then(|| serde_json::from_str::<Value>(&line).ok())
+                .flatten();
+            let kind = message
+                .as_ref()
+                .and_then(|m| m.get("type"))
+                .and_then(Value::as_str);
+            match (kind, message.as_ref()) {
+                (Some("pier.ready"), Some(value)) => self.on_ready(generation, value),
+                (Some(SHELL_REQUEST), Some(value)) => self.on_shell_request(generation, value),
+                (Some(SHELL_TERMINAL), Some(value)) => self.on_terminal_input(value),
+                _ => self.push_log(line),
             }
         }
     }
 
-    fn try_ready(&self, generation: u64, line: &str) -> bool {
-        let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
-            return false;
-        };
-        if value.get("type").and_then(|t| t.as_str()) != Some("pier.ready") {
-            return false;
-        }
+    fn on_ready(&self, generation: u64, value: &Value) {
         let text = |key: &str| value.get(key).and_then(|v| v.as_str()).map(str::to_owned);
         let version = text("version");
         let url = text("url");
         {
             let mut inner = self.lock();
             if inner.status.generation != generation || inner.status.state != HostState::Starting {
-                return true;
+                return;
             }
             inner.status.state = HostState::Ready;
             inner.status.url = url.clone();
@@ -290,10 +315,10 @@ impl HostManager {
             version.unwrap_or_default()
         ));
         self.emit_status();
+        self.send_shell(&json!({ "type": SHELL_CAPABILITIES, "terminals": true }));
         if let Some(updates) = self.app.try_state::<UpdateManager>() {
             self.send_update_status(&updates.status());
         }
-        true
     }
 
     /// Write one line to the host's stdin (the shell channel). Dropped while no host runs or
@@ -305,30 +330,54 @@ impl HostManager {
         }
     }
 
+    /// Write one line to the stdin of host run `generation`, waiting while the queue is full
+    /// (terminal output must not be dropped; a busy host slows the shell down instead).
+    /// `false` once that run is gone.
+    fn send_shell_blocking(&self, generation: u64, message: &Value) -> bool {
+        let stdin = {
+            let inner = self.lock();
+            if inner.status.generation != generation {
+                return false;
+            }
+            inner.stdin.clone()
+        };
+        stdin.is_some_and(|stdin| stdin.send(format!("{message}\n")).is_ok())
+    }
+
     /// Tell the host about the updater's state (it relays it to its clients).
     pub fn send_update_status(&self, status: &UpdateStatus) {
         self.send_shell(&json!({ "type": SHELL_UPDATE_STATUS, "status": status }));
     }
 
-    /// Handle a `pier.shell.request` line from the host: drive the updater and answer.
-    fn try_shell_request(&self, line: &str) -> bool {
-        let Ok(value) = serde_json::from_str::<Value>(line) else {
-            return false;
-        };
-        if value.get("type").and_then(Value::as_str) != Some(SHELL_REQUEST) {
-            return false;
-        }
+    /// Handle a `pier.shell.request` line from the host: drive the updater or start a
+    /// terminal, and answer.
+    fn on_shell_request(&self, generation: u64, value: &Value) {
         let id = value.get("id").cloned().unwrap_or(Value::Null);
         let method = value
             .get("method")
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_string();
+        if method == "terminal.spawn" {
+            let response = match self.spawn_terminal(generation, value.get("params")) {
+                Ok(result) => {
+                    json!({ "type": SHELL_RESPONSE, "id": id, "ok": true, "result": result })
+                }
+                Err(error) => {
+                    json!({ "type": SHELL_RESPONSE, "id": id, "ok": false, "error": error })
+                }
+            };
+            // Must not be dropped behind queued terminal output, and must not block this reader
+            // (the host stops reading stdin while its stdout is full).
+            let manager = self.clone();
+            thread::spawn(move || manager.send_shell_blocking(generation, &response));
+            return;
+        }
         let Some(updates) = self.app.try_state::<UpdateManager>() else {
             self.send_shell(&json!({
                 "type": SHELL_RESPONSE, "id": id, "ok": false, "error": "更新服务尚未就绪"
             }));
-            return true;
+            return;
         };
         let updates = updates.inner().clone();
         let manager = self.clone();
@@ -354,7 +403,82 @@ impl HostManager {
             };
             manager.send_shell(&response);
         });
-        true
+    }
+
+    /// Start a shell for the host. Its output goes back tagged with the host's `key`, so the
+    /// host can attribute output that arrives before this request's response.
+    fn spawn_terminal(&self, generation: u64, params: Option<&Value>) -> Result<Value, String> {
+        let params = params.ok_or("缺少终端参数")?;
+        let key = params
+            .get("key")
+            .and_then(Value::as_str)
+            .filter(|key| !key.is_empty() && key.len() <= 128)
+            .ok_or("缺少终端标识")?
+            .to_string();
+        let size = |name: &str| {
+            params
+                .get(name)
+                .and_then(Value::as_u64)
+                .map(|n| n.clamp(2, 1000) as u16)
+                .unwrap_or(24)
+        };
+        let cwd = params.get("cwd").and_then(Value::as_str).map(str::to_owned);
+        let manager = self.clone();
+        let sink: Sink = Arc::new(move |output| {
+            let message = match output {
+                Output::Data(bytes) => json!({
+                    "type": SHELL_TERMINAL_OUTPUT, "key": key, "data": BASE64.encode(bytes)
+                }),
+                Output::Exit(code) => {
+                    json!({ "type": SHELL_TERMINAL_EXIT, "key": key, "code": code })
+                }
+            };
+            manager.send_shell_blocking(generation, &message)
+        });
+        let spawned = self
+            .terminals
+            .spawn(cwd, size("cols"), size("rows"), sink)?;
+        self.push_log(format!(
+            "[pier] 已为远程客户端打开终端：{}（{}）",
+            spawned.shell, spawned.cwd
+        ));
+        Ok(json!({ "id": spawned.id, "shell": spawned.shell, "cwd": spawned.cwd }))
+    }
+
+    /// Handle a `pier.shell.terminal` line: input, resize or hang-up for a host terminal.
+    fn on_terminal_input(&self, value: &Value) {
+        let Some(id) = value
+            .get("id")
+            .and_then(Value::as_u64)
+            .and_then(|id| u32::try_from(id).ok())
+        else {
+            return;
+        };
+        let size = |name: &str| {
+            value
+                .get(name)
+                .and_then(Value::as_u64)
+                .map(|n| n.clamp(2, 1000) as u16)
+        };
+        match value.get("op").and_then(Value::as_str) {
+            Some("write") => {
+                if let Some(data) = value.get("data").and_then(Value::as_str) {
+                    let binary = value.get("binary").and_then(Value::as_bool) == Some(true);
+                    let _ = self
+                        .terminals
+                        .write(id, input_bytes(data.to_string(), binary));
+                }
+            }
+            Some("resize") => {
+                if let (Some(cols), Some(rows)) = (size("cols"), size("rows")) {
+                    let _ = self.terminals.resize(id, cols, rows);
+                }
+            }
+            Some("pause") => self.terminals.pause(id, true),
+            Some("resume") => self.terminals.pause(id, false),
+            Some("kill") => self.terminals.kill(id),
+            _ => {}
+        }
     }
 
     fn read_stderr(&self, stderr: impl Read) {
@@ -433,6 +557,8 @@ impl HostManager {
                 }
             }
         };
+        // Shells the host started for its clients die with it.
+        self.terminals.kill_all();
         self.push_log(format!("[pier] {reason}"));
         self.emit_status();
         if let Some(delay) = delay {
@@ -467,6 +593,7 @@ impl HostManager {
             (inner.child.take(), inner.stdin.take())
         };
         self.push_log("[pier] 正在重启 Host…".into());
+        self.terminals.kill_all();
         stop_child(child, stdin);
         self.spawn();
     }
@@ -518,6 +645,7 @@ impl HostManager {
         if reason.is_some() {
             self.emit_status();
         }
+        self.terminals.kill_all();
         stop_child(child, stdin);
     }
 }
