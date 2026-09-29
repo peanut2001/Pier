@@ -1,0 +1,75 @@
+/*
+ * Windows' custom title bar (the window is undecorated there): a drag strip that blends into
+ * the window background, with native-sized caption buttons on the right. It takes the place of
+ * the panels' top gap, so the layout keeps roughly the height it has under a native title bar.
+ */
+
+.titlebar {
+	display: flex;
+	flex: none;
+	align-items: stretch;
+	height: 32px;
+	user-select: none;
+	-webkit-user-select: none;
+}
+
+.titlebar-drag {
+	flex: 1;
+	min-width: 0;
+}
+
+.titlebar-controls {
+	display: flex;
+	flex: none;
+}
+
+button.titlebar-button {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 46px;
+	height: 100%;
+	padding: 0;
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+	color: var(--text-muted);
+	box-shadow: none;
+	cursor: default;
+	transition:
+		background-color 0.1s linear,
+		color 0.1s linear;
+}
+
+button.titlebar-button:hover {
+	background: rgba(127, 127, 127, 0.16);
+	color: var(--text);
+}
+
+button.titlebar-button:active {
+	background: rgba(127, 127, 127, 0.26);
+	transform: none;
+}
+
+button.titlebar-button.close:hover {
+	background: #c42b1c;
+	color: #fff;
+}
+
+button.titlebar-button.close:active {
+	background: #c42b1ce6;
+	color: rgba(255, 255, 255, 0.8);
+}
+
+button.titlebar-button:focus-visible {
+	outline: none;
+}
+
+:root.custom-titlebar .window > .app .main,
+:root.custom-titlebar .window > .app .files-panel {
+	margin-top: 0;
+}
+
+:root.custom-titlebar .sidebar {
+	padding-top: 0;
+}

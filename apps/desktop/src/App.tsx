@@ -14,6 +14,7 @@ import { SettingsPage } from "./components/Settings.tsx";
 import { Sidebar, SidebarToggle } from "./components/Sidebar.tsx";
 import { StatusBar } from "./components/StatusBar.tsx";
 import { TerminalPanel } from "./components/TerminalPanel.tsx";
+import { TitleBar } from "./components/TitleBar.tsx";
 import { LOCAL_NODE, NEW_CHAT_DRAFT, useAppState, useStore } from "./lib/store.tsx";
 import { terminals, useTerminals } from "./lib/terminals.ts";
 
@@ -138,6 +139,7 @@ export function App() {
 
 	return (
 		<div className="window">
+			<TitleBar />
 			{settings ? (
 				<SettingsPage section={settings} />
 			) : (
