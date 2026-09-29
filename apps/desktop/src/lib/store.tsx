@@ -1493,9 +1493,11 @@ export class PierStore {
 	 * host's error. Closes a preview of the deleted path and refreshes the file panel.
 	 */
 	async deletePath(workspaceId: string, path: string): Promise<WorkspacePathDeleteResult> {
-		const client = this.client;
+		const client = this.clientFor(workspaceId);
 		if (!client) throw new Error("尚未连接到 Pier Host");
-		if (!hostCanDeleteFiles(this.state.hostInfo)) throw new Error("这台电脑的 Pier 版本过旧，不支持删除文件");
+		if (!hostCanDeleteFiles(this.state.nodes[this.nodeOf(workspaceId)]?.hostInfo)) {
+			throw new Error("这台电脑的 Pier 版本过旧，不支持删除文件");
+		}
 		const result = await client.request("workspace.deletePath", { workspaceId, path });
 		const preview = this.state.filePreview;
 		if (
