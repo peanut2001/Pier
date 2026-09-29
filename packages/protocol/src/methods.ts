@@ -13,6 +13,9 @@ import {
 	CustomProviderSchema,
 	type DefaultModelRef,
 	type DeviceInfo,
+	type ExtensionCatalogResult,
+	ExtensionCatalogSortSchema,
+	ExtensionCatalogTypeSchema,
 	type ExtensionListResult,
 	type ExtensionPackageInfo,
 	type ExtensionReloadSummary,
@@ -342,6 +345,18 @@ export const MethodParamsSchemas = {
 	 * Pier's trash; a settings path entry is removed from settings (the files stay).
 	 */
 	"extension.delete": z.object({ path: z.string().min(1).max(4096), workspaceId: Id.optional() }),
+	/**
+	 * Search the pi package gallery (https://pi.dev/packages, 1.20) from the host's computer,
+	 * falling back to the npm registry. `page` starts at 1. Install a result with `extension.install`.
+	 */
+	"extension.search": z
+		.object({
+			query: z.string().trim().max(200).optional(),
+			type: ExtensionCatalogTypeSchema.optional(),
+			sort: ExtensionCatalogSortSchema.optional(),
+			page: z.number().int().min(1).max(1000).optional(),
+		})
+		.optional(),
 
 	/**
 	 * pi settings files (1.15): the user settings (`<agentDir>/settings.json`) and, with
@@ -565,6 +580,7 @@ export interface MethodResults {
 	"extension.checkUpdates": { updates: ExtensionUpdateInfo[] };
 	"extension.setEnabled": { resource: ExtensionResourceInfo; reload: ExtensionReloadSummary };
 	"extension.delete": { deleted: boolean; reload: ExtensionReloadSummary };
+	"extension.search": ExtensionCatalogResult;
 	"settings.get": PiSettingsResult;
 	"settings.update": PiSettingsChangeResult;
 	"settings.write": PiSettingsChangeResult;

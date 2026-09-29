@@ -12,6 +12,9 @@ import type {
 	DefaultModelRef,
 	DeviceInfo,
 	EventFrame,
+	ExtensionCatalogResult,
+	ExtensionCatalogSort,
+	ExtensionCatalogType,
 	ExtensionListResult,
 	ExtensionPackageInfo,
 	ExtensionReloadSummary,
@@ -1813,6 +1816,21 @@ export class PierStore {
 			(c) => c.request("extension.delete", { path: resource.path, ...(workspaceId ? { workspaceId } : {}) }),
 		);
 		return result?.deleted ?? false;
+	}
+
+	/**
+	 * Search the pi package gallery (pi.dev/packages) from the computer the settings screen
+	 * manages; rejects with the host's error.
+	 */
+	async searchExtensionCatalog(params: {
+		query?: string;
+		type?: ExtensionCatalogType;
+		sort?: ExtensionCatalogSort;
+		page?: number;
+	}): Promise<ExtensionCatalogResult> {
+		const client = this.settingsClient;
+		if (!client) throw this.settingsOffline();
+		return client.request("extension.search", params, { timeoutMs: 45_000 });
 	}
 
 	// ---- workspaces --------------------------------------------------------------------

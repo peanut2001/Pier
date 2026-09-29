@@ -825,6 +825,51 @@ export interface ExtensionUpdateInfo {
 	scope: ExtensionScope;
 }
 
+// ---- pi package catalog (1.20) ----------------------------------------------------------
+
+/** Resource kinds the pi package gallery (https://pi.dev/packages) tags packages with. */
+export const ExtensionCatalogTypeSchema = z.enum(["extension", "skill", "theme", "prompt"]);
+export type ExtensionCatalogType = z.infer<typeof ExtensionCatalogTypeSchema>;
+
+/** Catalog order: most monthly downloads, most recently published, or by name. */
+export const ExtensionCatalogSortSchema = z.enum(["downloads", "recent", "name"]);
+export type ExtensionCatalogSort = z.infer<typeof ExtensionCatalogSortSchema>;
+
+/** A package published to npm for pi (keyword `pi-package`), as listed by the gallery. */
+export interface ExtensionCatalogPackage {
+	/** npm package name. */
+	name: string;
+	/** What to pass to `extension.install` (`npm:<name>`). */
+	source: string;
+	description?: string;
+	/** Latest published version. */
+	version?: string;
+	/** Publisher / author name. */
+	author?: string;
+	/** Resource kinds the package ships; empty when the gallery does not know. */
+	types: ExtensionCatalogType[];
+	monthlyDownloads?: number;
+	/** When the latest version was published (ISO 8601). */
+	publishedAt?: string;
+	npmUrl: string;
+	repositoryUrl?: string;
+	/** The package's page in the pi gallery. */
+	galleryUrl?: string;
+}
+
+export interface ExtensionCatalogResult {
+	/** `pi.dev`: the official gallery. `npm`: the npm registry search (when the gallery is unreachable). */
+	origin: "pi.dev" | "npm";
+	packages: ExtensionCatalogPackage[];
+	/** Matching packages in total. */
+	total: number;
+	page: number;
+	pageSize: number;
+	hasMore: boolean;
+	/** Why the gallery was not used (with `origin: "npm"`). */
+	notice?: string;
+}
+
 /** How open sessions picked up an extension change (1.8). */
 export interface ExtensionReloadSummary {
 	/** Idle sessions that were reloaded. */

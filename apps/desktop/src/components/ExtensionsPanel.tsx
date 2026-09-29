@@ -7,13 +7,16 @@ import type {
 	ExtensionUpdateInfo,
 } from "@pier/protocol";
 import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { hostSpeaksMinor } from "../lib/settings-target.ts";
 import { useAppState, useSettingsWorkspaces, useStore } from "../lib/store.tsx";
+import { ExtensionCatalog } from "./ExtensionCatalog.tsx";
 import {
 	IconAlert,
 	IconChevronDown,
 	IconChevronRight,
 	IconDownload,
 	IconLoader,
+	IconPuzzle,
 	IconRefresh,
 	IconSearch,
 	IconTrash,
@@ -262,18 +265,18 @@ function InstallForm({
 	busy,
 	installing,
 	onInstall,
+	scope,
+	onScopeChange: setScope,
 }: {
 	workspaceName?: string;
 	busy: boolean;
 	installing: boolean;
 	onInstall: (source: string, scope: ExtensionScope) => Promise<boolean>;
+	scope: ExtensionScope;
+	onScopeChange: (scope: ExtensionScope) => void;
 }) {
 	const progress = useAppState((s) => s.extensionProgress);
 	const [source, setSource] = useState("");
-	const [scope, setScope] = useState<ExtensionScope>("user");
-	useEffect(() => {
-		if (!workspaceName) setScope("user");
-	}, [workspaceName]);
 	const submit = async (e: FormEvent) => {
 		e.preventDefault();
 		const value = source.trim();
@@ -340,8 +343,16 @@ export function ExtensionsSettings() {
 	const [updates, setUpdates] = useState<ExtensionUpdateInfo[]>();
 	const [query, setQuery] = useState("");
 	const [showAllOthers, setShowAllOthers] = useState(false);
+	const [tab, setTab] = useState<"installed" | "catalog">("installed");
+	const [scope, setScope] = useState<ExtensionScope>("user");
+	const [installingSource, setInstallingSource] = useState<string>();
+	const hostInfo = useAppState((s) => s.nodes[s.settingsNode]?.hostInfo);
 	const workspace = workspaces.find((w) => w.id === workspaceId);
 	const target = workspace?.id;
+
+	useEffect(() => {
+		if (!workspace) setScope("user");
+	}, [workspace]);
 
 	useEffect(() => {
 		if (workspaceId && !workspaces.some((w) => w.id === workspaceId)) setWorkspaceId("");
@@ -395,10 +406,16 @@ export function ExtensionsSettings() {
 	const onReinstall = (pkg: ExtensionPackageInfo) =>
 		void run("install", () => store.installExtension(pkg.source, pkg.scope, target));
 	const onInstall = async (source: string, scope: ExtensionScope): Promise<boolean> => {
+		if (busy) return false;
 		let ok = false;
-		await run("install", async () => {
-			ok = (await store.installExtension(source, scope, scope === "project" ? target : undefined)) !== false;
-		});
+		setInstallingSource(source);
+		try {
+			await run("install", async () => {
+				ok = (await store.installExtension(source, scope, scope === "project" ? target : undefined)) !== false;
+			});
+		} finally {
+			setInstallingSource(undefined);
+		}
 		return ok;
 	};
 	const onCheckUpdates = () =>
@@ -485,145 +502,193 @@ export function ExtensionsSettings() {
 				</SettingsCard>
 			</SettingsGroup>
 
-			<SettingsGroup>
-				<InstallForm
-					{...(workspace ? { workspaceName: workspace.name } : {})}
-					busy={isBusy}
-					installing={busy === "install"}
-					onInstall={onInstall}
-				/>
-				{busy && busy !== "install" && progress?.message ? (
-					<p className="muted small mono settings-note">{progress.message}</p>
-				) : null}
-			</SettingsGroup>
+			<div className="segmented extension-tabs" role="tablist" aria-label="扩展页面">
+				<button
+					type="button"
+					role="tab"
+					aria-selected={tab === "installed"}
+					className={tab === "installed" ? "active" : ""}
+					onClick={() => setTab("installed")}
+				>
+					<IconPuzzle size={13} />
+					已安装{data ? `（${data.packages.length + view.extensionCount}）` : ""}
+				</button>
+				<button
+					type="button"
+					role="tab"
+					aria-selected={tab === "catalog"}
+					className={tab === "catalog" ? "active" : ""}
+					onClick={() => setTab("catalog")}
+				>
+					<IconSearch size={13} />
+					扩展市场
+				</button>
+			</div>
 
-			{error ? (
-				<div className="banner error inline models-error">
-					<IconAlert size={15} />
-					<span>读取扩展失败：{error}</span>
-				</div>
-			) : null}
-
-			{data ? (
+			{tab === "catalog" ? (
+				<SettingsGroup>
+					<ExtensionCatalog
+						installed={data?.packages ?? []}
+						scope={scope}
+						onScopeChange={setScope}
+						{...(workspace ? { workspaceName: workspace.name } : {})}
+						busy={isBusy}
+						{...(installingSource ? { installingSource } : {})}
+						onInstall={onInstall}
+						{...(hostInfo && !hostSpeaksMinor(hostInfo, 20)
+							? {
+									unsupported: `这台电脑上的 Pier v${hostInfo.version}（协议 ${hostInfo.protocolVersion}）不支持搜索 pi 官方扩展仓库（需要协议 1.20 或更高）。请先在「关于与更新」中更新那台电脑，或在「已安装」中按来源安装。`,
+								}
+							: {})}
+					/>
+				</SettingsGroup>
+			) : (
 				<>
-					<div className="provider-search extension-search">
-						<IconSearch size={14} />
-						<input placeholder="搜索扩展、技能、提示词" value={query} onChange={(e) => setQuery(e.target.value)} />
-						{query ? (
-							<button type="button" className="ghost icon" title="清除" onClick={() => setQuery("")}>
-								<IconX size={13} />
-							</button>
+					<SettingsGroup>
+						<InstallForm
+							{...(workspace ? { workspaceName: workspace.name } : {})}
+							busy={isBusy}
+							installing={busy === "install"}
+							onInstall={onInstall}
+							scope={scope}
+							onScopeChange={setScope}
+						/>
+						{busy && busy !== "install" && progress?.message ? (
+							<p className="muted small mono settings-note">{progress.message}</p>
 						) : null}
-					</div>
-
-					<SettingsGroup
-						title={`扩展包（${view.packageCount}）`}
-						actions={
-							view.updatable ? (
-								<>
-									<button type="button" className="ghost" disabled={isBusy} onClick={onCheckUpdates}>
-										{busy === "check" ? <IconLoader size={13} className="spin" /> : <IconSearch size={13} />}
-										检查更新
-									</button>
-									<button
-										type="button"
-										className="ghost"
-										disabled={isBusy}
-										title="更新所有未固定版本的 npm / git 扩展包"
-										onClick={() => onUpdate()}
-									>
-										{busy === "update" ? <IconLoader size={13} className="spin" /> : <IconRefresh size={13} />}
-										全部更新
-									</button>
-								</>
-							) : null
-						}
-					>
-						{view.packages.length ? (
-							<div className="provider-list">
-								{view.packages.map(({ pkg, resources }) => (
-									<PackageRow
-										key={packageKey(pkg)}
-										pkg={pkg}
-										resources={resources}
-										update={updateKeys.has(packageKey(pkg))}
-										busy={isBusy}
-										onToggle={onToggle}
-										onUpdate={onUpdate}
-										onReinstall={onReinstall}
-										onRemove={onRemove}
-									/>
-								))}
-							</div>
-						) : (
-							<SettingsCard>
-								<div className="settings-empty">{view.packageCount ? "没有匹配的扩展包。" : "还没有安装扩展包。"}</div>
-							</SettingsCard>
-						)}
 					</SettingsGroup>
 
-					<SettingsGroup
-						title={`独立扩展（${view.extensionCount}）`}
-						actions={<CopyButton text={`${data.agentDir}/extensions`} label="复制扩展目录" />}
-					>
-						<p className="muted small settings-note">
-							放在 <code>{data.agentDir}/extensions</code>
-							{workspace ? (
-								<>
-									{" "}
-									或 <code>{workspace.path}/.pi/extensions</code>
-								</>
-							) : null}{" "}
-							中的 .ts / .js 文件或带 index.ts 的目录，以及 settings.json 中 <code>extensions</code> 列出的路径。
-						</p>
-						{view.extensions.length ? (
-							<div className="provider-list">
-								{view.extensions.map((resource) => (
-									<ResourceRow
-										key={resource.path}
-										resource={resource}
-										busy={isBusy}
-										onToggle={onToggle}
-										onDelete={onDelete}
-									/>
-								))}
-							</div>
-						) : (
-							<SettingsCard>
-								<div className="settings-empty">{view.extensionCount ? "没有匹配的扩展。" : "没有独立扩展。"}</div>
-							</SettingsCard>
-						)}
-					</SettingsGroup>
+					{error ? (
+						<div className="banner error inline models-error">
+							<IconAlert size={15} />
+							<span>读取扩展失败：{error}</span>
+						</div>
+					) : null}
 
-					{view.otherCount ? (
-						<SettingsGroup title={`技能、提示词与主题（${view.otherCount}）`}>
-							{others.length ? (
-								<div className="provider-list">
-									{others.map((resource) => (
-										<ResourceRow
-											key={`${resource.type}:${resource.path}`}
-											resource={resource}
-											busy={isBusy}
-											onToggle={onToggle}
-										/>
-									))}
-									{!showAllOthers && !q && view.others.length > COLLAPSED_OTHERS ? (
-										<button type="button" className="ghost show-all" onClick={() => setShowAllOthers(true)}>
-											显示全部 {view.others.length} 项
-										</button>
-									) : null}
-								</div>
-							) : (
-								<SettingsCard>
-									<div className="settings-empty">没有匹配的资源。</div>
-								</SettingsCard>
-							)}
-						</SettingsGroup>
+					{data ? (
+						<>
+							<div className="provider-search extension-search">
+								<IconSearch size={14} />
+								<input placeholder="搜索扩展、技能、提示词" value={query} onChange={(e) => setQuery(e.target.value)} />
+								{query ? (
+									<button type="button" className="ghost icon" title="清除" onClick={() => setQuery("")}>
+										<IconX size={13} />
+									</button>
+								) : null}
+							</div>
+
+							<SettingsGroup
+								title={`扩展包（${view.packageCount}）`}
+								actions={
+									view.updatable ? (
+										<>
+											<button type="button" className="ghost" disabled={isBusy} onClick={onCheckUpdates}>
+												{busy === "check" ? <IconLoader size={13} className="spin" /> : <IconSearch size={13} />}
+												检查更新
+											</button>
+											<button
+												type="button"
+												className="ghost"
+												disabled={isBusy}
+												title="更新所有未固定版本的 npm / git 扩展包"
+												onClick={() => onUpdate()}
+											>
+												{busy === "update" ? <IconLoader size={13} className="spin" /> : <IconRefresh size={13} />}
+												全部更新
+											</button>
+										</>
+									) : null
+								}
+							>
+								{view.packages.length ? (
+									<div className="provider-list">
+										{view.packages.map(({ pkg, resources }) => (
+											<PackageRow
+												key={packageKey(pkg)}
+												pkg={pkg}
+												resources={resources}
+												update={updateKeys.has(packageKey(pkg))}
+												busy={isBusy}
+												onToggle={onToggle}
+												onUpdate={onUpdate}
+												onReinstall={onReinstall}
+												onRemove={onRemove}
+											/>
+										))}
+									</div>
+								) : (
+									<SettingsCard>
+										<div className="settings-empty">
+											{view.packageCount ? "没有匹配的扩展包。" : "还没有安装扩展包。"}
+										</div>
+									</SettingsCard>
+								)}
+							</SettingsGroup>
+
+							<SettingsGroup
+								title={`独立扩展（${view.extensionCount}）`}
+								actions={<CopyButton text={`${data.agentDir}/extensions`} label="复制扩展目录" />}
+							>
+								<p className="muted small settings-note">
+									放在 <code>{data.agentDir}/extensions</code>
+									{workspace ? (
+										<>
+											{" "}
+											或 <code>{workspace.path}/.pi/extensions</code>
+										</>
+									) : null}{" "}
+									中的 .ts / .js 文件或带 index.ts 的目录，以及 settings.json 中 <code>extensions</code> 列出的路径。
+								</p>
+								{view.extensions.length ? (
+									<div className="provider-list">
+										{view.extensions.map((resource) => (
+											<ResourceRow
+												key={resource.path}
+												resource={resource}
+												busy={isBusy}
+												onToggle={onToggle}
+												onDelete={onDelete}
+											/>
+										))}
+									</div>
+								) : (
+									<SettingsCard>
+										<div className="settings-empty">{view.extensionCount ? "没有匹配的扩展。" : "没有独立扩展。"}</div>
+									</SettingsCard>
+								)}
+							</SettingsGroup>
+
+							{view.otherCount ? (
+								<SettingsGroup title={`技能、提示词与主题（${view.otherCount}）`}>
+									{others.length ? (
+										<div className="provider-list">
+											{others.map((resource) => (
+												<ResourceRow
+													key={`${resource.type}:${resource.path}`}
+													resource={resource}
+													busy={isBusy}
+													onToggle={onToggle}
+												/>
+											))}
+											{!showAllOthers && !q && view.others.length > COLLAPSED_OTHERS ? (
+												<button type="button" className="ghost show-all" onClick={() => setShowAllOthers(true)}>
+													显示全部 {view.others.length} 项
+												</button>
+											) : null}
+										</div>
+									) : (
+										<SettingsCard>
+											<div className="settings-empty">没有匹配的资源。</div>
+										</SettingsCard>
+									)}
+								</SettingsGroup>
+							) : null}
+						</>
+					) : !error ? (
+						<p className="muted">正在读取扩展…</p>
 					) : null}
 				</>
-			) : !error ? (
-				<p className="muted">正在读取扩展…</p>
-			) : null}
+			)}
 		</>
 	);
 }

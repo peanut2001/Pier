@@ -53,6 +53,7 @@ import { AccountManager } from "./pi/account.ts";
 import { PI_VERSION, PiEnvironment, type PiEnvironmentOptions, toModelInfo } from "./pi/environment.ts";
 import { ExtensionManager, type ExtensionTarget } from "./pi/extensions.ts";
 import { NewApiManager } from "./pi/newapi.ts";
+import { PackageCatalog, type PackageCatalogOptions } from "./pi/package-catalog.ts";
 import { ProviderManager } from "./pi/providers.ts";
 import { PiSettingsFiles } from "./pi/settings-files.ts";
 import { RemoteAccess, type RemoteAccessOptions } from "./remote/remote-access.ts";
@@ -96,6 +97,8 @@ export interface PierHostOptions {
 	log?: (message: string) => void;
 	/** Site of the personal center (tests). Defaults to 云链API. */
 	accountSite?: string;
+	/** Where `extension.search` looks (tests). Defaults to pi.dev with the npm registry as fallback. */
+	packageCatalog?: PackageCatalogOptions;
 	/** The desktop app the host runs in (its updater and terminals), when there is one. */
 	shell?: AppShell;
 }
@@ -270,6 +273,7 @@ export class PierHost implements RequestHandler {
 	readonly newapi: NewApiManager;
 	readonly account: AccountManager;
 	readonly extensions: ExtensionManager;
+	readonly packageCatalog: PackageCatalog;
 	readonly settings: PiSettingsFiles;
 	readonly peers: PeerManager;
 	private readonly log: (message: string) => void;
@@ -325,6 +329,7 @@ export class PierHost implements RequestHandler {
 			onProgress: (progress) => this.broadcast({ type: "extension.progress", ...progress }),
 			log,
 		});
+		this.packageCatalog = new PackageCatalog({ userAgent: pierUserAgent(), log, ...options.packageCatalog });
 		this.settings = new PiSettingsFiles(env.agentDir);
 		this.providers = new ProviderManager(env, {
 			onChanged: () => {
@@ -901,6 +906,8 @@ export class PierHost implements RequestHandler {
 					reload: await this.applyExtensionChange(scope === "project" ? target?.id : undefined),
 				};
 			},
+
+			"extension.search": (_ctx, params) => this.packageCatalog.search(params ?? {}),
 
 			"settings.get": (_ctx, params) => {
 				const workspace = params?.workspaceId ? this.requireWorkspace(params.workspaceId) : undefined;
