@@ -14,7 +14,9 @@
  * mobile app can pair with it; `--remote-address <host:port>` overrides the addresses
  * put into pairing codes (e.g. `10.0.2.2:7433` for the Android emulator).
  * `--account-site <url>` points the personal center at another NewAPI site (e.g. a local one)
- * instead of 云链API. State lives in a temporary directory that is removed on exit.
+ * instead of 云链API. `--demo-updates` pretends the host runs in a desktop app whose updater
+ * finds v9.9.9 and fakes installing it (`update.*`, for the remote update UI). State lives in a
+ * temporary directory that is removed on exit.
  *
  * Sample slash commands for the command menu: the extension command `/greet`, the prompt
  * template `/explain <topic>`, and `/skill:faux-skill`.
@@ -23,8 +25,9 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxText, fauxThinking, fauxToolCall } from "@earendil-works/pi-ai";
-import { PROTOCOL_VERSION } from "@pier/protocol";
+import { type AppUpdateStatus, PROTOCOL_VERSION } from "@pier/protocol";
 import { PIER_HOST_VERSION } from "../src/host.ts";
+import type { AppShell, ShellMethod } from "../src/shell.ts";
 import { startTestHost, TOKEN } from "../test/helpers.ts";
 
 type Context = { messages: Array<{ role: string; content?: unknown }> };
@@ -145,12 +148,72 @@ function sampleResources(): string {
 	return dir;
 }
 
+/** `--demo-updates`: a desktop app updater that finds v9.9.9 and fakes installing it. */
+class DemoShell implements AppShell {
+	updateStatus: AppUpdateStatus = {
+		state: "idle",
+		currentVersion: PIER_HOST_VERSION,
+		autoCheck: true,
+		downloaded: 0,
+	};
+	private readonly listeners = new Set<(status: AppUpdateStatus) => void>();
+
+	onUpdateStatus(listener: (status: AppUpdateStatus) => void): () => void {
+		this.listeners.add(listener);
+		return () => this.listeners.delete(listener);
+	}
+
+	private set(patch: Partial<AppUpdateStatus>): AppUpdateStatus {
+		this.updateStatus = { ...this.updateStatus, ...patch };
+		for (const listener of this.listeners) listener(this.updateStatus);
+		return this.updateStatus;
+	}
+
+	private async check(): Promise<AppUpdateStatus> {
+		this.set({ state: "checking" });
+		await sleep(800);
+		return this.set({
+			state: "available",
+			version: "9.9.9",
+			notes: "### Added\n\n- Demo update for the remote update UI.",
+			date: new Date().toISOString(),
+			lastChecked: Date.now(),
+		});
+	}
+
+	async request(method: ShellMethod): Promise<AppUpdateStatus> {
+		const busy = ["checking", "downloading", "installing"].includes(this.updateStatus.state);
+		if (busy) return this.updateStatus;
+		if (method === "update.check") return this.check();
+		if (!this.updateStatus.version && (await this.check()).state !== "available") return this.updateStatus;
+		const total = 48 * 1024 * 1024;
+		const status = this.set({ state: "downloading", downloaded: 0, total });
+		void (async () => {
+			for (let downloaded = total / 20; downloaded <= total; downloaded += total / 20) {
+				await sleep(300);
+				this.set({ downloaded });
+			}
+			this.set({ state: "installing" });
+			await sleep(1500);
+			this.set({ state: "error", error: "安装更新失败：演示模式不会真正安装" });
+		})();
+		return status;
+	}
+
+	close(): void {}
+}
+
+function sleep(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 const remote = process.argv.includes("--remote");
 const resources = sampleResources();
 const remoteAddress = flag("--remote-address");
 const accountSite = flag("--account-site");
 const t = await startTestHost({
 	...(accountSite ? { accountSite } : {}),
+	...(process.argv.includes("--demo-updates") ? { shell: new DemoShell() } : {}),
 	tokensPerSecond: Number(process.env.FAUX_TPS ?? 400),
 	log: (message) => process.stderr.write(`[faux-host] ${message}\n`),
 	extraResources: {

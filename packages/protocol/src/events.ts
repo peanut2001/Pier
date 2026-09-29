@@ -1,4 +1,5 @@
 import type {
+	AppUpdateStatus,
 	AuthNotice,
 	AuthPromptInfo,
 	DefaultModelRef,
@@ -104,6 +105,11 @@ export type PierHostEvent =
 	 * workspace's project settings changed. Sent to every connection.
 	 */
 	| { type: "extension.changed"; workspaceId?: string }
+	/**
+	 * The desktop app's updater on the host's computer changed state or made progress (1.13).
+	 * Sent to every connection.
+	 */
+	| { type: "update.status"; status: AppUpdateStatus }
 	/** Progress of `extension.install` / `remove` / `update` (1.8). Local connections only. */
 	| {
 			type: "extension.progress";

@@ -2,6 +2,7 @@ import { ChatController, type ChatView } from "@pier/chat-state";
 import { CLOSE_DEVICE_REVOKED, type ClientState, PierClient } from "@pier/client";
 import type {
 	ApprovalPolicy,
+	AppUpdateStatus,
 	AuthMethod,
 	AuthNotice,
 	AuthPromptInfo,
@@ -98,6 +99,23 @@ export function hostCanDeleteFiles(info: HostInfo | undefined): boolean {
 /** Whether a host reports its resource usage (`host.stats`, 1.12). */
 export function hostReportsStats(info: HostInfo | undefined): boolean {
 	return hostSpeaks(info, 12);
+}
+
+/** Whether Pier on a computer can be updated from here (`update.*`, 1.13). */
+export function hostUpdatesRemotely(info: HostInfo | undefined): boolean {
+	return hostSpeaks(info, 13);
+}
+
+/** Pier's updater on a paired computer, driven through its host. */
+export interface PeerUpdateEntry {
+	/** The updater's last known status there. */
+	status?: AppUpdateStatus;
+	/** That computer's Pier is too old to be updated from here. */
+	tooOld?: boolean;
+	/** A request from this computer is in flight. */
+	busy?: "check" | "install";
+	/** An install this computer started, announced once the computer is back. */
+	installing?: { from: string; to?: string };
 }
 
 /** How often the status bar samples host usage while the window is visible. */
@@ -249,6 +267,8 @@ export interface AppState {
 	directoryPicker?: { title: string; node: string } | undefined;
 	/** Resource usage per computer (`LOCAL_NODE` or a paired computer's id), while sampled. */
 	hostStats: Record<string, HostStatsEntry>;
+	/** Pier's updater on each paired computer. */
+	peerUpdates: Record<string, PeerUpdateEntry>;
 }
 
 /** Recompute the lists that combine every computer (after `nodes` or `peers` changed). */
@@ -455,6 +475,7 @@ export class PierStore {
 			filesVersion: {},
 			extensionsVersion: 0,
 			hostStats: {},
+			peerUpdates: {},
 		};
 		this.state = { ...state, ...deriveWorkspaces(state), ...deriveShown(state) };
 	}
@@ -664,6 +685,7 @@ export class PierStore {
 				...(selected ? { selectedWorkspaceId: undefined, selectedSessionId: undefined } : {}),
 				...(target ? { newChat: {} } : {}),
 				...(s.node === node ? { node: LOCAL_NODE } : {}),
+				peerUpdates: Object.fromEntries(Object.entries(s.peerUpdates).filter(([id]) => id !== node)),
 			};
 		});
 		this.saveNodeCache();
@@ -757,7 +779,10 @@ export class PierStore {
 			);
 			if (state === "open") {
 				this.retryAttempts.delete(node);
-				if (wasOpen) void this.loadWorkspaces(node);
+				if (wasOpen) {
+					void this.loadWorkspaces(node);
+					void this.loadPeerUpdate(node);
+				}
 				wasOpen = true;
 			}
 		});
@@ -771,6 +796,7 @@ export class PierStore {
 			const hello = await client.connect();
 			if (!current()) return;
 			this.patchNode(node, { hostInfo: hello.host, revoked: false, connectError: undefined });
+			void this.loadPeerUpdate(node);
 			await this.loadWorkspaces(node);
 		} catch (error) {
 			if (!current()) return;
@@ -877,6 +903,8 @@ export class PierStore {
 		else if (event.type === "session.activity") {
 			// A run that ends (or pauses for an answer) has likely written files.
 			if (event.state === "idle" || Number(event.pendingUi) > 0) this.bumpFiles(String(event.workspaceId));
+		} else if (event.type === "update.status") {
+			if (node !== LOCAL_NODE) this.onPeerUpdateStatus(node, event.status as AppUpdateStatus);
 		} else if (event.type === "host.notice") {
 			const message = String(event.message ?? "");
 			this.toast(
@@ -2023,12 +2051,15 @@ export class PierStore {
 		}
 	}
 
-	/** Sessions that are working or waiting for an answer; installing an update stops them. */
-	async busySessionCount(): Promise<number> {
-		const client = this.localClient;
+	/**
+	 * Sessions on a computer (this one by default) that are working or waiting for an answer;
+	 * installing an update there stops them.
+	 */
+	async busySessionCount(node = LOCAL_NODE): Promise<number> {
+		const client = this.clients.get(node);
 		if (!client) return 0;
 		const lists = await Promise.all(
-			this.state.localWorkspaces.map((w) =>
+			(this.state.nodes[node]?.workspaces ?? []).map((w) =>
 				client.request("session.list", { workspaceId: w.id }).then(
 					(r) => r.sessions,
 					() => this.state.sessions[w.id] ?? [],
@@ -2039,6 +2070,112 @@ export class PierStore {
 			.flat()
 			.filter((s) => s.state === "streaming" || s.state === "retrying" || s.state === "compacting" || s.pendingUi)
 			.length;
+	}
+
+	// ---- updates on paired computers ---------------------------------------------------
+
+	private patchPeerUpdate(node: string, patch: Partial<PeerUpdateEntry>): void {
+		this.set((s) => {
+			const entry: PeerUpdateEntry = { ...s.peerUpdates[node], ...patch };
+			for (const key of Object.keys(patch) as Array<keyof PeerUpdateEntry>) {
+				if (patch[key] === undefined) delete entry[key];
+			}
+			return { peerUpdates: { ...s.peerUpdates, [node]: entry } };
+		});
+	}
+
+	private onPeerUpdateStatus(node: string, status: AppUpdateStatus): void {
+		// A download or verification failure there leaves Pier running: report it right away.
+		const failed = status.state === "error" && this.state.peerUpdates[node]?.installing;
+		this.patchPeerUpdate(node, { status, ...(failed ? { installing: undefined } : {}) });
+		if (failed) this.toast("error", `${this.nodeName(node)}：${status.error ?? "更新失败"}`);
+	}
+
+	/** The open connection to a paired computer, or undefined while it is offline. */
+	private openPeerClient(node: string): PierClient | undefined {
+		const client = this.clients.get(node);
+		return node !== LOCAL_NODE && client && this.state.nodes[node]?.connection === "open" ? client : undefined;
+	}
+
+	/**
+	 * Read Pier's updater state on a paired computer (after every (re)connect), and announce the
+	 * result of an install this computer started there.
+	 */
+	async loadPeerUpdate(node: string): Promise<void> {
+		const client = this.openPeerClient(node);
+		if (!client) return;
+		const info = this.state.nodes[node]?.hostInfo;
+		const installing = this.state.peerUpdates[node]?.installing;
+		if (installing && info && info.version !== installing.from) {
+			this.patchPeerUpdate(node, { installing: undefined });
+			this.toast("info", `${this.nodeName(node)} 已更新到 Pier v${info.version}`);
+		}
+		if (!hostUpdatesRemotely(info)) {
+			this.patchPeerUpdate(node, { tooOld: true, status: undefined });
+			return;
+		}
+		try {
+			const status = await client.request("update.status");
+			if (this.clients.get(node) !== client) return;
+			this.patchPeerUpdate(node, { status, tooOld: undefined });
+			// Back on the old version without installing: the install failed there.
+			if (installing && info?.version === installing.from && status.state === "error") {
+				this.patchPeerUpdate(node, { installing: undefined });
+				this.toast("error", `${this.nodeName(node)}：${status.error ?? "更新失败"}`);
+			}
+		} catch {
+			// Transient; the next reconnect reads it again.
+		}
+	}
+
+	/** Check for a new Pier release on a paired computer. */
+	async checkPeerUpdate(node: string): Promise<void> {
+		const client = this.openPeerClient(node);
+		if (!client || this.state.peerUpdates[node]?.busy) return;
+		this.patchPeerUpdate(node, { busy: "check" });
+		try {
+			const status = await client.request("update.check", {}, { timeoutMs: 120_000 });
+			this.patchPeerUpdate(node, { status });
+			if (status.state === "error") this.toast("error", `${this.nodeName(node)}：${status.error ?? "检查更新失败"}`);
+		} catch (error) {
+			this.toast("error", `${this.nodeName(node)} 检查更新失败：${errorText(error)}`);
+		} finally {
+			this.patchPeerUpdate(node, { busy: undefined });
+		}
+	}
+
+	/**
+	 * Install the newest Pier release on a paired computer; Pier restarts there, and this
+	 * computer reconnects once it is back.
+	 */
+	async installPeerUpdate(node: string): Promise<void> {
+		const client = this.openPeerClient(node);
+		if (!client || this.state.peerUpdates[node]?.busy) return;
+		const from = this.state.nodes[node]?.hostInfo?.version ?? "";
+		const name = this.nodeName(node);
+		this.patchPeerUpdate(node, { busy: "install" });
+		try {
+			const status = await client.request("update.install", {}, { timeoutMs: 120_000 });
+			const started = status.state === "downloading" || status.state === "installing";
+			this.patchPeerUpdate(node, {
+				status,
+				...(started ? { installing: { from, ...(status.version ? { to: status.version } : {}) } } : {}),
+			});
+			if (started) {
+				this.toast(
+					"info",
+					`正在更新 ${name}${status.version ? ` 到 Pier v${status.version}` : ""}，完成后会自动重新连接`,
+				);
+			} else if (status.state === "upToDate") {
+				this.toast("info", `${name} 的 Pier v${status.currentVersion} 已是最新版本`);
+			} else if (status.state === "error") {
+				this.toast("error", `${name}：${status.error ?? "更新失败"}`);
+			}
+		} catch (error) {
+			this.toast("error", `${name} 更新失败：${errorText(error)}`);
+		} finally {
+			this.patchPeerUpdate(node, { busy: undefined });
+		}
 	}
 
 	// ---- misc --------------------------------------------------------------------------

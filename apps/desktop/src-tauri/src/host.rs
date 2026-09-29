@@ -4,20 +4,34 @@
 //! `{"type":"pier.ready","url":"ws://127.0.0.1:<port>","port":…,"token":"…","pid":…,"version":"…","protocolVersion":"1.0"}`
 //! and logs to stderr. It runs with `--watch-stdin`, so it shuts down gracefully when its
 //! stdin closes — including when this process dies unexpectedly.
+//!
+//! The same pipes carry the shell channel (`packages/host/src/shell.ts`), so paired computers
+//! can drive this app's updater through the host: the host asks with
+//! `{"type":"pier.shell.request","id":…,"method":"update.check"|"update.install"}` on stdout,
+//! and this side answers with `pier.shell.response` lines and pushes every updater status as
+//! `{"type":"pier.shell.updateStatus","status":{…}}` on stdin.
 
 use std::collections::VecDeque;
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::mpsc::{sync_channel, SyncSender};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
+use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
+
+use crate::updater::{UpdateManager, UpdateStatus};
 
 pub const STATUS_EVENT: &str = "pier://host-status";
 pub const LOG_EVENT: &str = "pier://host-log";
+
+const SHELL_REQUEST: &str = "pier.shell.request";
+const SHELL_RESPONSE: &str = "pier.shell.response";
+const SHELL_UPDATE_STATUS: &str = "pier.shell.updateStatus";
 
 const MAX_LOG_LINES: usize = 2000;
 /// A cold first start of the Bun binary takes a few seconds; leave generous headroom.
@@ -59,7 +73,9 @@ pub struct HostStatus {
 struct Inner {
     status: HostStatus,
     child: Option<Child>,
-    stdin: Option<ChildStdin>,
+    /// Lines for the host's stdin, written by a per-host thread so a stuck host cannot block
+    /// the shell. Dropping it closes stdin (the host's graceful-shutdown signal).
+    stdin: Option<SyncSender<String>>,
     logs: VecDeque<String>,
     shutting_down: bool,
     fast_failures: u32,
@@ -172,7 +188,7 @@ impl HostManager {
             Ok(mut child) => {
                 let stdout = child.stdout.take();
                 let stderr = child.stderr.take();
-                let stdin = child.stdin.take();
+                let stdin = child.stdin.take().map(stdin_writer);
                 let pid = child.id();
                 {
                     let mut inner = self.lock();
@@ -240,7 +256,7 @@ impl HostManager {
     fn read_stdout(&self, generation: u64, stdout: impl Read) {
         for line in BufReader::new(stdout).lines() {
             let Ok(line) = line else { break };
-            if !self.try_ready(generation, &line) {
+            if !self.try_ready(generation, &line) && !self.try_shell_request(&line) {
                 self.push_log(line);
             }
         }
@@ -274,6 +290,70 @@ impl HostManager {
             version.unwrap_or_default()
         ));
         self.emit_status();
+        if let Some(updates) = self.app.try_state::<UpdateManager>() {
+            self.send_update_status(&updates.status());
+        }
+        true
+    }
+
+    /// Write one line to the host's stdin (the shell channel). Dropped while no host runs or
+    /// when the host stopped reading.
+    fn send_shell(&self, message: &Value) {
+        let inner = self.lock();
+        if let Some(stdin) = inner.stdin.as_ref() {
+            let _ = stdin.try_send(format!("{message}\n"));
+        }
+    }
+
+    /// Tell the host about the updater's state (it relays it to its clients).
+    pub fn send_update_status(&self, status: &UpdateStatus) {
+        self.send_shell(&json!({ "type": SHELL_UPDATE_STATUS, "status": status }));
+    }
+
+    /// Handle a `pier.shell.request` line from the host: drive the updater and answer.
+    fn try_shell_request(&self, line: &str) -> bool {
+        let Ok(value) = serde_json::from_str::<Value>(line) else {
+            return false;
+        };
+        if value.get("type").and_then(Value::as_str) != Some(SHELL_REQUEST) {
+            return false;
+        }
+        let id = value.get("id").cloned().unwrap_or(Value::Null);
+        let method = value
+            .get("method")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let Some(updates) = self.app.try_state::<UpdateManager>() else {
+            self.send_shell(&json!({
+                "type": SHELL_RESPONSE, "id": id, "ok": false, "error": "更新服务尚未就绪"
+            }));
+            return true;
+        };
+        let updates = updates.inner().clone();
+        let manager = self.clone();
+        tauri::async_runtime::spawn(async move {
+            let result = match method.as_str() {
+                "update.check" => {
+                    manager.push_log("[pier] 远程请求：检查更新".into());
+                    Ok(updates.check().await)
+                }
+                "update.install" => {
+                    manager.push_log("[pier] 远程请求：安装更新".into());
+                    Ok(updates.install_latest().await)
+                }
+                other => Err(format!("未知的请求 {other}")),
+            };
+            let response = match result {
+                Ok(status) => {
+                    json!({ "type": SHELL_RESPONSE, "id": id, "ok": true, "result": status })
+                }
+                Err(error) => {
+                    json!({ "type": SHELL_RESPONSE, "id": id, "ok": false, "error": error })
+                }
+            };
+            manager.send_shell(&response);
+        });
         true
     }
 
@@ -442,8 +522,26 @@ impl HostManager {
     }
 }
 
+/// Own the host's stdin on a thread that writes the queued lines; stdin closes once the
+/// sender is dropped (or the host stops reading and the pipe breaks).
+fn stdin_writer(mut stdin: ChildStdin) -> SyncSender<String> {
+    let (sender, receiver) = sync_channel::<String>(256);
+    thread::spawn(move || {
+        for line in receiver {
+            if stdin
+                .write_all(line.as_bytes())
+                .and_then(|_| stdin.flush())
+                .is_err()
+            {
+                break;
+            }
+        }
+    });
+    sender
+}
+
 /// Close stdin (the host's graceful-shutdown signal), wait, then kill if needed.
-fn stop_child(child: Option<Child>, stdin: Option<ChildStdin>) {
+fn stop_child(child: Option<Child>, stdin: Option<SyncSender<String>>) {
     drop(stdin);
     let Some(mut child) = child else { return };
     let deadline = Instant::now() + SHUTDOWN_GRACE;
