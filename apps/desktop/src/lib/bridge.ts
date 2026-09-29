@@ -30,6 +30,8 @@ export interface Bridge {
 	/** Ask the user for a directory. Resolves to an absolute path, or null when cancelled. */
 	pickDirectory(): Promise<string | null>;
 	openExternal(url: string): Promise<void>;
+	/** Show a local file or directory in the system file manager; only the desktop app can. */
+	revealPath?(path: string): Promise<void>;
 	quit(): Promise<void>;
 	updates: UpdateBridge;
 	/** Integrated terminals; only the desktop app can run local shells. */
@@ -133,6 +135,10 @@ function tauriBridge(): Bridge {
 		openExternal: async (url) => {
 			const { openUrl } = await import("@tauri-apps/plugin-opener");
 			await openUrl(url);
+		},
+		revealPath: async (path) => {
+			const { revealItemInDir } = await import("@tauri-apps/plugin-opener");
+			await revealItemInDir(path);
 		},
 		quit: async () => (await core).invoke("quit_app"),
 		updates: {

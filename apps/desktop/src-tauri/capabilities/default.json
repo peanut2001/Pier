@@ -3,5 +3,11 @@
 	"identifier": "default",
 	"description": "Permissions for the main Pier window",
 	"windows": ["main"],
-	"permissions": ["core:default", "dialog:allow-open", "opener:allow-open-url", "opener:allow-default-urls"]
+	"permissions": [
+		"core:default",
+		"dialog:allow-open",
+		"opener:allow-open-url",
+		"opener:allow-default-urls",
+		"opener:allow-reveal-item-in-dir"
+	]
 }
