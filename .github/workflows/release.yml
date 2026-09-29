@@ -178,6 +178,24 @@ jobs:
           fi
           pnpm tauri build --bundles ${{ matrix.bundles }}
 
+      # The app is ad-hoc signed (bundle.macOS.signingIdentity "-"), not notarized: Gatekeeper
+      # then offers "Open Anyway" instead of reporting the download as damaged. Check that the
+      # signature covers the sidecar and that the hardened runtime still lets Bun's JIT run.
+      - name: Verify macOS signature
+        if: runner.os == 'macOS'
+        run: |
+          app=$(ls -d apps/desktop/src-tauri/target/release/bundle/macos/*.app | head -1)
+          [ -d "$app" ] || { echo "::error::No .app bundle produced"; exit 1; }
+          codesign --verify --deep --strict --verbose=2 "$app"
+          for exe in "$app/Contents/MacOS/"*; do
+            info=$(codesign -dvvv "$exe" 2>&1)
+            echo "$info" | grep -E '^(Executable|Identifier|Signature|CodeDirectory)'
+            echo "$info" | grep -q '^Signature=adhoc' || { echo "::error::$exe is not ad-hoc signed"; exit 1; }
+          done
+          # Pier.app ships pi's assets as a resource; the desktop passes them through PI_PACKAGE_DIR.
+          PI_PACKAGE_DIR="$app/Contents/Resources/pi-assets" \
+            node packages/host/scripts/smoke-sidecar.mjs "$app/Contents/MacOS/pier-host" "${{ needs.verify.outputs.version }}"
+
       - name: Collect bundles
         run: |
           mkdir -p dist
