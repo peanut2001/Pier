@@ -1,7 +1,15 @@
 import type { ApprovalPolicy, WorkspaceInfo } from "@pier/protocol";
 import { type ComponentType, type ReactNode, useEffect, useState } from "react";
 import { POLICY_DESCRIPTION, POLICY_LABEL } from "../lib/format.ts";
-import { type SettingsSection, useAppState, useComputers, useStore } from "../lib/store.tsx";
+import { pageFollowsHost, pageIsLocalOnly } from "../lib/settings-target.ts";
+import {
+	LOCAL_NODE,
+	type SettingsSection,
+	useAppState,
+	useComputers,
+	useSettingsTarget,
+	useStore,
+} from "../lib/store.tsx";
 import { AccountSettings } from "./AccountPanel.tsx";
 import { ExtensionsSettings } from "./ExtensionsPanel.tsx";
 import { HostBanner, LogsSettings, useHostStatus } from "./HostPanels.tsx";
@@ -10,10 +18,13 @@ import {
 	IconFolder,
 	IconFolderPlus,
 	IconInfo,
+	IconLoader,
 	IconLogs,
+	IconMonitor,
 	IconPlus,
 	IconPower,
 	IconPuzzle,
+	IconRefresh,
 	IconSearch,
 	IconSettings,
 	IconSliders,
@@ -116,7 +127,94 @@ const GENERAL = SECTIONS.find((item) => item.id === "general") as SectionDef;
 
 // ---- pages -----------------------------------------------------------------------------
 
+function syncedText(at: number | undefined): string {
+	if (!at) return "尚未同步";
+	return `已同步 · ${new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`;
+}
+
+/** The “常规” page for a paired computer: its Pier, reached through this computer's host. */
+function RemoteGeneralSettings() {
+	const store = useStore();
+	const target = useSettingsTarget();
+	const syncing = useAppState((s) => s.settingsSyncing);
+	const syncedAt = useAppState((s) => s.settingsSyncedAt);
+	const info = target.hostInfo;
+	const versions = [
+		info?.version ? `Pier v${info.version}` : "",
+		info?.piVersion ? `pi ${info.piVersion}` : "",
+		info?.protocolVersion ? `协议 ${info.protocolVersion}` : "",
+	].filter(Boolean);
+	return (
+		<SettingsGroup title={`${target.name} 上的 Pier`}>
+			<SettingsCard>
+				<SettingRow
+					title="连接状态"
+					description={
+						<span className="settings-inline-status">
+							<span className={`status-dot ${target.online ? "ok" : target.connectError ? "bad" : "wait"}`} />
+							{target.online
+								? `已通过加密通道连接 · ${syncedText(syncedAt)}`
+								: target.revoked
+									? "那台电脑已移除这台电脑，需要重新配对"
+									: target.connectError
+										? `无法连接：${target.connectError}`
+										: "正在连接…"}
+						</span>
+					}
+				>
+					{target.online ? (
+						<button type="button" disabled={syncing} onClick={() => void store.syncSettings()}>
+							{syncing ? <IconLoader size={14} className="spin" /> : <IconRefresh size={14} />}
+							同步设置
+						</button>
+					) : target.revoked ? (
+						<button type="button" onClick={() => store.openAddPeer()}>
+							重新配对
+						</button>
+					) : (
+						<button type="button" onClick={() => store.retryNode(target.node)}>
+							立即重试
+						</button>
+					)}
+				</SettingRow>
+				{versions.length ? (
+					<SettingRow title="版本" description="那台电脑上的 Pier、内置 pi 与协议版本。">
+						<span className="setting-value">{versions.join(" · ")}</span>
+					</SettingRow>
+				) : null}
+				{info?.platform ? (
+					<SettingRow title="系统" description="那台电脑的操作系统。">
+						<span className="setting-value mono">{info.platform}</span>
+					</SettingRow>
+				) : null}
+				{info?.agentDir ? (
+					<SettingRow title="配置目录" description="那台电脑上 pi 的配置目录；这里的修改直接保存在那里。">
+						<code className="setting-value mono" title={info.agentDir}>
+							{info.agentDir}
+						</code>
+						<CopyButton text={info.agentDir} label="复制路径" iconOnly />
+					</SettingRow>
+				) : null}
+				<SettingRow
+					title="更新"
+					description="在「关于与更新 → 其他电脑」中检查并安装那台电脑上的 Pier 更新。重启或退出 Pier 只能在那台电脑上进行。"
+				>
+					<button type="button" onClick={() => store.openSettings("about")}>
+						<IconInfo size={14} />
+						关于与更新
+					</button>
+				</SettingRow>
+			</SettingsCard>
+		</SettingsGroup>
+	);
+}
+
 function GeneralSettings() {
+	const remote = useAppState((s) => s.settingsNode !== LOCAL_NODE);
+	return remote ? <RemoteGeneralSettings /> : <LocalGeneralSettings />;
+}
+
+function LocalGeneralSettings() {
 	const store = useStore();
 	const host = useAppState((s) => s.host);
 	const hostInfo = useAppState((s) => s.localHostInfo);
@@ -333,12 +431,131 @@ const PAGES: Record<SettingsSection, ComponentType> = {
 
 // ---- screen ----------------------------------------------------------------------------
 
+/**
+ * Choose the computer whose Pier the settings screen manages, and sync its settings again.
+ * Only shown once another computer is paired.
+ */
+function HostSwitcher() {
+	const store = useStore();
+	const computers = useComputers();
+	const target = useSettingsTarget();
+	const syncing = useAppState((s) => s.settingsSyncing);
+	if (computers.length < 2) return null;
+	return (
+		<div className="settings-host">
+			<div className="settings-host-label">
+				<IconMonitor size={13} />
+				设置哪台电脑上的 Pier
+			</div>
+			<div className="settings-host-row">
+				<span className={`status-dot ${target.online ? "ok" : target.connectError ? "bad" : "wait"}`} />
+				<select
+					className="setting-select settings-host-select"
+					aria-label="要设置的电脑"
+					value={target.node}
+					onChange={(e) => store.setSettingsNode(e.target.value)}
+				>
+					{computers.map((computer) => (
+						<option key={computer.id} value={computer.id}>
+							{computer.name}
+							{computer.local ? "（本机）" : computer.online ? "" : "（离线）"}
+						</option>
+					))}
+				</select>
+				<button
+					type="button"
+					className="ghost icon"
+					title={`从${target.local ? "本机" : ` ${target.name} `}重新同步设置`}
+					disabled={syncing}
+					onClick={() => void store.syncSettings()}
+				>
+					{syncing ? <IconLoader size={14} className="spin" /> : <IconRefresh size={14} />}
+				</button>
+			</div>
+		</div>
+	);
+}
+
+/** Above the pages that manage a paired computer: which computer the changes go to. */
+function RemoteTargetBanner() {
+	const store = useStore();
+	const target = useSettingsTarget();
+	const syncing = useAppState((s) => s.settingsSyncing);
+	const syncedAt = useAppState((s) => s.settingsSyncedAt);
+	return (
+		<div className="banner info inline settings-target-banner">
+			<IconMonitor size={15} />
+			<span>
+				正在设置 <strong>{target.name}</strong> 上的 Pier，修改会直接保存到那台电脑。
+				{target.online ? <span className="muted"> {syncedText(syncedAt)}</span> : null}
+			</span>
+			<span className="banner-actions">
+				<button type="button" disabled={syncing || !target.online} onClick={() => void store.syncSettings()}>
+					{syncing ? <IconLoader size={13} className="spin" /> : <IconRefresh size={13} />}
+					同步
+				</button>
+				<button type="button" className="ghost" onClick={() => store.setSettingsNode(LOCAL_NODE)}>
+					切换到本机
+				</button>
+			</span>
+		</div>
+	);
+}
+
+/** A page that manages a paired computer which cannot be reached (or is too old) right now. */
+function RemoteUnavailable({ blocker }: { blocker?: string | undefined }) {
+	const store = useStore();
+	const target = useSettingsTarget();
+	if (blocker) {
+		return (
+			<SettingsCard>
+				<SettingRow title="无法远程修改" description={blocker}>
+					<button type="button" onClick={() => store.openSettings("about")}>
+						关于与更新
+					</button>
+				</SettingRow>
+			</SettingsCard>
+		);
+	}
+	const text = target.revoked
+		? `${target.name} 已移除这台电脑（或重置了 Pier），需要重新配对后才能修改它的设置。`
+		: target.connectError
+			? `无法连接到 ${target.name}：${target.connectError}。连接后会自动同步它的设置。`
+			: `正在连接 ${target.name}，连接后会自动同步它的设置…`;
+	return (
+		<SettingsCard>
+			<SettingRow title={`${target.name} 未连接`} description={text}>
+				{target.revoked ? (
+					<button type="button" onClick={() => store.openAddPeer()}>
+						重新配对
+					</button>
+				) : (
+					<button type="button" onClick={() => store.retryNode(target.node)}>
+						立即重试
+					</button>
+				)}
+				<button type="button" className="ghost" onClick={() => store.setSettingsNode(LOCAL_NODE)}>
+					切换到本机
+				</button>
+			</SettingRow>
+		</SettingsCard>
+	);
+}
+
 function NavBadge({ id }: { id: SettingsSection }): ReactNode {
 	const noModels = useAppState((s) => s.providers?.availableCount === 0);
 	const remote = useAppState((s) => s.remote);
 	const connected = useAppState((s) => s.devices.filter((d) => d.connected).length);
 	const update = useAppState((s) => s.update);
+	const managingOther = useAppState((s) => s.settingsNode !== LOCAL_NODE);
 	if (id === "models" && noModels) return <span className="nav-dot warn" title="还没有可用模型" />;
+	if (managingOther && pageIsLocalOnly(id)) {
+		return (
+			<span className="nav-tag" title="这一页只针对本机">
+				本机
+			</span>
+		);
+	}
 	if (id === "remote" && remote?.running) {
 		return (
 			<span className="nav-count" title={`${connected} 台设备在线`}>
@@ -354,6 +571,10 @@ export function SettingsPage({ section }: { section: SettingsSection }) {
 	const store = useStore();
 	const [query, setQuery] = useState("");
 	const { online } = useHostStatus();
+	const target = useSettingsTarget();
+	const sync = useAppState((s) => s.settingsSync);
+	// Re-render when the managed computer's info (protocol version) changes.
+	useAppState((s) => s.nodes[s.settingsNode]?.hostInfo);
 
 	// Esc leaves the settings screen unless a dialog on top of it handles the key.
 	useEffect(() => {
@@ -374,6 +595,22 @@ export function SettingsPage({ section }: { section: SettingsSection }) {
 	})).filter((group) => group.items.length);
 	const current = SECTIONS.find((item) => item.id === section) ?? GENERAL;
 	const Page = PAGES[current.id];
+	const followsHost = pageFollowsHost(current.id);
+	const remoteTarget = followsHost && !target.local;
+	const blocker = remoteTarget ? store.settingsBlocker(current.id) : undefined;
+	let body: ReactNode;
+	if (current.online && !online) {
+		body = (
+			<SettingsCard>
+				<div className="settings-empty">Pier Host 未连接，连接后才能修改这些设置。</div>
+			</SettingsCard>
+		);
+	} else if (remoteTarget && current.id !== "general" && (!target.online || blocker)) {
+		body = <RemoteUnavailable blocker={target.online ? blocker : undefined} />;
+	} else {
+		// Switching computers or syncing again remounts the page, which reads everything afresh.
+		body = <Page key={followsHost ? `${target.node}:${sync}:${current.id}` : current.id} />;
+	}
 
 	return (
 		<div className="app settings-screen">
@@ -385,6 +622,7 @@ export function SettingsPage({ section }: { section: SettingsSection }) {
 					</button>
 				</div>
 				<h1 className="settings-nav-title">设置</h1>
+				<HostSwitcher />
 				<div className="settings-search">
 					<IconSearch size={14} />
 					<input placeholder="搜索设置" value={query} onChange={(e) => setQuery(e.target.value)} />
@@ -420,13 +658,13 @@ export function SettingsPage({ section }: { section: SettingsSection }) {
 				<div className="settings-scroll">
 					<div className="settings-content">
 						<h1 className="settings-title">{current.label}</h1>
-						{current.online && !online ? (
-							<SettingsCard>
-								<div className="settings-empty">Pier Host 未连接，连接后才能修改这些设置。</div>
-							</SettingsCard>
-						) : (
-							<Page key={current.id} />
-						)}
+						{remoteTarget && current.id !== "general" ? <RemoteTargetBanner /> : null}
+						{!target.local && pageIsLocalOnly(current.id) ? (
+							<p className="muted small settings-note">
+								这一页只针对本机（{store.nodeName(LOCAL_NODE)}），不受上方所选电脑影响。
+							</p>
+						) : null}
+						{body}
 					</div>
 				</div>
 			</main>

@@ -8,7 +8,7 @@ import type {
 	ProviderInfo,
 } from "@pier/protocol";
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useAppState, useStore } from "../lib/store.tsx";
+import { useAppState, useSettingsTarget, useStore } from "../lib/store.tsx";
 import { findYunlianGroupProvider, formatQuota, relayProvider, YUNLIAN_NAME, yunlianGroupId } from "../lib/yunlian.ts";
 import {
 	IconAlert,
@@ -494,7 +494,10 @@ function RegisterForm({ site, onDone }: { site: AccountSite; onDone: (result: Ac
 
 function SignIn({ site, onDone }: { site: AccountSite; onDone: (result: AccountLoginResult) => void }) {
 	const [tab, setTab] = useState<"login" | "register">("login");
-	if (site.browserLogin) {
+	const target = useSettingsTarget();
+	// The browser returns to a loopback address on the host's own computer, so a paired
+	// computer signs in with a password or an access token instead.
+	if (site.browserLogin && target.local) {
 		return (
 			<SettingsGroup>
 				<SettingsCard className="account-card">
@@ -509,6 +512,12 @@ function SignIn({ site, onDone }: { site: AccountSite; onDone: (result: AccountL
 		<SettingsGroup>
 			<SettingsCard className="account-card">
 				<SiteHeader site={site} />
+				{site.browserLogin ? (
+					<p className="muted small">
+						浏览器授权只能在 {target.name} 本机上完成。这里请用账号密码或访问令牌登录，登录状态保存在 {target.name} 上的
+						Pier 中。
+					</p>
+				) : null}
 				<div className="segmented" role="tablist">
 					<button
 						type="button"
@@ -689,6 +698,7 @@ function Dashboard({
 }) {
 	const store = useStore();
 	const providers = useAppState((s) => s.providers);
+	const target = useSettingsTarget();
 	const [confirm, setConfirm] = useState(false);
 	const { site, user } = overview;
 	const entries = useMemo(() => groupEntries(overview), [overview]);
@@ -855,7 +865,9 @@ function Dashboard({
 						</div>
 					) : null}
 				</div>
-				<p className="muted small settings-note">令牌密钥由 Pier Host 直接保存在本机，不会显示在界面上。</p>
+				<p className="muted small settings-note">
+					令牌密钥由 Pier Host 直接保存在{target.local ? "本机" : ` ${target.name} 上`}，不会显示在界面上。
+				</p>
 			</SettingsGroup>
 		</>
 	);

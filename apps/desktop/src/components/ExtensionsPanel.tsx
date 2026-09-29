@@ -7,7 +7,7 @@ import type {
 	ExtensionUpdateInfo,
 } from "@pier/protocol";
 import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
-import { useAppState, useStore } from "../lib/store.tsx";
+import { useAppState, useSettingsWorkspaces, useStore } from "../lib/store.tsx";
 import {
 	IconAlert,
 	IconChevronDown,
@@ -326,7 +326,7 @@ function InstallForm({
 
 export function ExtensionsSettings() {
 	const store = useStore();
-	const workspaces = useAppState((s) => s.localWorkspaces);
+	const workspaces = useSettingsWorkspaces();
 	const selectedWorkspaceId = useAppState((s) => s.selectedWorkspaceId);
 	const version = useAppState((s) => s.extensionsVersion);
 	const progress = useAppState((s) => s.extensionProgress);
