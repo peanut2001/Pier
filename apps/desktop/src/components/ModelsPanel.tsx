@@ -68,6 +68,8 @@ const BASE_URL_NOTE: Record<CustomProviderApi, string> = {
 };
 
 const PROVIDER_ID_RE = /^[a-z0-9][a-z0-9._-]*$/;
+/** Credential sources the host can remove from models.json (`provider.logout`). */
+const MODELS_JSON_SOURCES: ReadonlySet<string> = new Set(["models_json_key", "models_json_command"]);
 
 function errorText(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
@@ -173,6 +175,7 @@ function ConfiguredRow({ provider, onEdit }: { provider: ProviderInfo; onEdit: (
 	const store = useStore();
 	const [confirm, setConfirm] = useState(false);
 	const custom = provider.custom;
+	const removable = provider.stored || MODELS_JSON_SOURCES.has(provider.status.source ?? "");
 	return (
 		<div className="provider-row">
 			<span className={`status-dot ${provider.status.configured ? "ok" : "bad"}`} />
@@ -214,10 +217,11 @@ function ConfiguredRow({ provider, onEdit }: { provider: ProviderInfo; onEdit: (
 						<IconTrash size={13} />
 						{confirm ? "确认删除" : "删除"}
 					</button>
-				) : provider.stored ? (
+				) : removable ? (
 					<button
 						type="button"
 						className={confirm ? "danger" : "ghost"}
+						title={provider.stored ? undefined : "从 models.json 中删除这个服务商的 apiKey"}
 						onBlur={() => setConfirm(false)}
 						onClick={() => {
 							if (!confirm) {

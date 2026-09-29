@@ -399,13 +399,52 @@ export class ProviderManager {
 		}
 	}
 
-	async logout(providerId: string): Promise<boolean> {
-		const credentials = await this.runtime.listCredentials({ signal: AbortSignal.timeout(CREDENTIAL_TIMEOUT_MS) });
-		if (!credentials.some((c) => c.providerId === providerId)) return false;
-		await this.runtime.logout(providerId, { signal: AbortSignal.timeout(CREDENTIAL_TIMEOUT_MS) });
-		await this.ensureDefault().catch(() => undefined);
-		this.changed();
-		return true;
+	/**
+	 * Remove the credential pi currently uses for `providerId`: the one saved in auth.json,
+	 * or, when there is none, the literal key / key command in its models.json entry.
+	 * Environment variables are never touched.
+	 */
+	logout(providerId: string): Promise<boolean> {
+		return this.serialize(async () => {
+			const credentials = await this.runtime.listCredentials({ signal: AbortSignal.timeout(CREDENTIAL_TIMEOUT_MS) });
+			if (credentials.some((c) => c.providerId === providerId)) {
+				await this.runtime.logout(providerId, { signal: AbortSignal.timeout(CREDENTIAL_TIMEOUT_MS) });
+			} else if (!(await this.removeConfiguredKey(providerId))) {
+				return false;
+			}
+			await this.ensureDefault().catch(() => undefined);
+			this.changed();
+			return true;
+		});
+	}
+
+	/** Drop the `apiKey` of a models.json entry when pi resolves the provider's key from it. */
+	private async removeConfiguredKey(providerId: string): Promise<boolean> {
+		const source = this.runtime.getProviderAuthStatus(providerId).source;
+		if (source !== "models_json_key" && source !== "models_json_command") return false;
+		const path = this.env.modelsPath;
+		let loaded: ReturnType<typeof loadModelsJson>;
+		try {
+			loaded = loadModelsJson(path);
+		} catch (error) {
+			throw new PierProtocolError("CONFLICT", errorText(error));
+		}
+		const previous = loaded.doc.providers[providerId];
+		if (!previous || previous.apiKey === undefined) return false;
+		const next = { ...previous };
+		delete next.apiKey;
+		const providers = { ...loaded.doc.providers };
+		// An override left with nothing but a display name is invalid for pi: drop it.
+		if (Object.keys(next).every((key) => key === "name")) delete providers[providerId];
+		else providers[providerId] = next;
+		writeModelsJson(path, loaded, { ...loaded.doc, providers });
+		await this.runtime.refresh({ allowNetwork: false });
+		// pi only reports models_json_* while it loaded the file, so any error now is ours.
+		const problem = this.providerProblem(providerId);
+		if (!problem) return true;
+		restoreModelsJson(path, loaded.raw);
+		await this.runtime.refresh({ allowNetwork: false }).catch(() => undefined);
+		throw new PierProtocolError("BAD_REQUEST", problem);
 	}
 
 	/** Save an API key non-interactively (custom providers ask for exactly one secret). */

@@ -339,6 +339,49 @@ describe("provider configuration", () => {
 		expect((await t.client.request("provider.logout", { providerId: "openai" })).removed).toBe(false);
 	});
 
+	it("removes a built-in provider's key from models.json, stored credential first", async () => {
+		writeFileSync(
+			t.modelsPath,
+			JSON.stringify({
+				providers: {
+					deepseek: { apiKey: "sk-in-models-json" },
+					openai: { apiKey: "!echo sk-from-command", headers: { "x-extra": "1" } },
+					anthropic: { apiKey: "$PIER_TEST_UNSET_ANTHROPIC_KEY" },
+				},
+			}),
+		);
+		await t.credentials.modify("deepseek", async () => ({ type: "api_key", key: SECRET }));
+		await t.host.env.modelRuntime.refresh({ allowNetwork: false });
+		const find = async (id: string) => (await t.client.request("provider.list")).providers.find((p) => p.id === id);
+		expect(await find("deepseek")).toMatchObject({ stored: true, status: { configured: true, source: "stored" } });
+		expect((await find("openai"))?.status).toMatchObject({ configured: true, source: "models_json_command" });
+
+		// The stored credential goes first; models.json is untouched.
+		expect((await t.client.request("provider.logout", { providerId: "deepseek" })).removed).toBe(true);
+		expect(await t.credentials.read("deepseek")).toBeUndefined();
+		expect(JSON.parse(readFileSync(t.modelsPath, "utf8")).providers.deepseek).toEqual({ apiKey: "sk-in-models-json" });
+		expect(await find("deepseek")).toMatchObject({
+			stored: false,
+			status: { configured: true, source: "models_json_key" },
+		});
+
+		// Then the models.json key: an entry holding nothing else is dropped.
+		expect((await t.client.request("provider.logout", { providerId: "deepseek" })).removed).toBe(true);
+		expect((await t.client.request("provider.logout", { providerId: "openai" })).removed).toBe(true);
+		const doc = JSON.parse(readFileSync(t.modelsPath, "utf8"));
+		expect(doc.providers).toEqual({
+			openai: { headers: { "x-extra": "1" } },
+			anthropic: { apiKey: "$PIER_TEST_UNSET_ANTHROPIC_KEY" },
+		});
+		expect((await find("deepseek"))?.status.configured).toBe(false);
+		expect((await find("openai"))?.status.configured).toBe(false);
+
+		// Environment variable references are not credentials Pier removes.
+		expect((await t.client.request("provider.logout", { providerId: "anthropic" })).removed).toBe(false);
+		expect((await t.client.request("provider.logout", { providerId: "deepseek" })).removed).toBe(false);
+		expect(JSON.parse(readFileSync(t.modelsPath, "utf8"))).toEqual(doc);
+	});
+
 	it("cancels a sign-in", async () => {
 		const mark = t.events.mark();
 		const { flowId } = await t.client.request("provider.login", { providerId: "openai", method: "api_key" });

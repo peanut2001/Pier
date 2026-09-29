@@ -505,7 +505,7 @@ export class PierStore {
 	async logoutProvider(provider: ProviderInfo): Promise<void> {
 		const result = await this.call("移除凭据", (c) => c.request("provider.logout", { providerId: provider.id }));
 		if (result) {
-			this.toast("info", result.removed ? `已移除 ${provider.name} 的凭据` : `${provider.name} 没有保存的凭据`);
+			this.toast("info", result.removed ? `已移除 ${provider.name} 的凭据` : `${provider.name} 没有可移除的凭据`);
 			void this.loadProviders();
 		}
 	}

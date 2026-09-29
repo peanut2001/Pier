@@ -136,7 +136,7 @@
 | `provider.login` 🔒 | `{ providerId, method: "api_key"\|"oauth" }` | `{ flowId }`；随后本连接收到 `auth.*` 事件（见 §4.3）。同一连接再次调用会取消之前的登录 |
 | `provider.loginRespond` 🔒 | `{ flowId, promptId, value?, cancelled? }` | `{ accepted }`；回答 `auth.prompt`，`cancelled: true` 取消整个登录 |
 | `provider.loginCancel` 🔒 | `{ flowId }` | `{ cancelled }` |
-| `provider.logout` 🔒 | `{ providerId }` | `{ removed }`；只删除 `auth.json` 中保存的凭据，不影响环境变量和 `models.json` |
+| `provider.logout` 🔒 | `{ providerId }` | `{ removed }`；删除 pi 当前使用的凭据：优先删除 `auth.json` 中保存的凭据；没有时，如果密钥来自 `models.json` 里该服务商的 `apiKey`（明文密钥或 `!命令`），则删除这个字段（只剩 `name` 的条目整项删除，pi 无法加载时回滚并返回 `BAD_REQUEST`）。不影响环境变量及 `$VAR` 形式的引用 |
 | `provider.saveCustom` 🔒 | `{ provider: CustomProvider, apiKey?, apiKeyRef?, create? }` | `{ provider, defaultModel? }`；`CustomProvider = { id, name?, api, baseUrl, models: { id, name?, reasoning?, images?, contextWindow?, maxTokens? }[] }`，`api` 为 `openai-completions`、`openai-responses`、`anthropic-messages`、`google-generative-ai` 之一。只改动表单涉及的字段，文件中的其他内容保留（含注释的文件先备份为 `models.json.bak`）；pi 无法加载时回滚并返回 `BAD_REQUEST`。新建时必须提供 `apiKey`（或 1.3 起的 `apiKeyRef`，见下文 NewAPI），编辑时省略则保留原密钥 |
 | `provider.removeCustom` 🔒 | `{ providerId }` | `{ removed }`；同时删除保存的密钥 |
 | `provider.probeModels` 🔒 | `{ api, baseUrl, apiKey?, apiKeyRef?, providerId? }` | `{ models: { id, name? }[] }`；请求接口的模型列表（OpenAI：`GET <baseUrl>/models`）。省略 `apiKey` 时使用 `apiKeyRef`（1.3）或 `providerId` 已保存的密钥 |
