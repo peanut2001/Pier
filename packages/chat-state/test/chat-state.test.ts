@@ -9,7 +9,9 @@ import {
 	parsePartialJson,
 	reduceChat,
 	sessionUsage,
+	stripImageHints,
 	summarizeToolCall,
+	userText,
 } from "../src/index.ts";
 
 const summary: SessionSummary = {
@@ -366,5 +368,40 @@ describe("helpers", () => {
 		]);
 		expect(editReplacements({ path: "a", oldText: "x", newText: "y" })).toEqual([{ oldText: "x", newText: "y" }]);
 		expect(editReplacements(null)).toEqual([]);
+	});
+});
+
+describe("stripImageHints", () => {
+	const note =
+		"[Image: original 2039x1128, displayed at 2000x1106. Multiply coordinates by 1.02 to map to original image.]";
+
+	it("removes the notes pi appends to prompts with images", () => {
+		expect(stripImageHints(`不支持下拉吗\n\n${note}`)).toBe("不支持下拉吗");
+		expect(stripImageHints(`a\nb\n\n[Image converted from image/bmp to image/png.]\n${note}`)).toBe("a\nb");
+		expect(stripImageHints("x\n\n[Image omitted: could not be resized below the inline image size limit.]")).toBe("x");
+		expect(stripImageHints(`\n\n${note}`)).toBe("");
+		expect(stripImageHints(`x\n\n\n${note}`)).toBe("x\n");
+	});
+
+	it("leaves other text unchanged", () => {
+		expect(stripImageHints("hello")).toBe("hello");
+		expect(stripImageHints(note)).toBe(note);
+		expect(stripImageHints(`x\n${note}`)).toBe(`x\n${note}`);
+		expect(stripImageHints(`${note}\n\nafter`)).toBe(`${note}\n\nafter`);
+		expect(stripImageHints("x\n\n[Image: something else]")).toBe("x\n\n[Image: something else]");
+	});
+
+	it("applies to user transcript items only", () => {
+		const content = [
+			{ type: "text", text: `看图\n\n${note}` },
+			{ type: "image", data: "AAA", mimeType: "image/png" },
+		];
+		expect(userText(content)).toBe("看图");
+		const state: ChatState = {
+			...initialChatState("s1"),
+			messages: [{ role: "user", content, timestamp: 1 } as ChatState["messages"][number]],
+		};
+		const [item] = buildTranscript(state);
+		expect(item).toMatchObject({ kind: "user", text: "看图" });
 	});
 });

@@ -10,6 +10,7 @@ import {
 	type ImagePart,
 	type ToolCallPart,
 	type ToolResultMessage,
+	userText,
 } from "./messages.ts";
 import type { ChatState, ToolExecution } from "./reducer.ts";
 
@@ -116,7 +117,7 @@ export function buildTranscript(state: ChatState): TranscriptItem[] {
 				items.push({
 					kind: "user",
 					key,
-					text: contentText((message as { content: unknown }).content),
+					text: userText((message as { content: unknown }).content),
 					images: contentImages((message as { content: unknown }).content),
 					timestamp: Number(message.timestamp ?? 0),
 				});

@@ -1,5 +1,5 @@
 import type { ChatController } from "@pier/chat-state";
-import { type ChatState, contentText, sessionUsage } from "@pier/chat-state";
+import { type ChatState, sessionUsage, userText } from "@pier/chat-state";
 import type { SessionSummary } from "@pier/protocol";
 import { useState } from "react";
 import { formatCost, formatPercent, formatTokens, RUN_STATE_LABEL, sessionTitle } from "../lib/format.ts";
@@ -15,7 +15,7 @@ import { Transcript } from "./Transcript.tsx";
 
 function firstUserText(chat: ChatState): string {
 	const first = chat.messages.find((m) => m.role === "user");
-	return first ? contentText((first as { content: unknown }).content) : "";
+	return first ? userText((first as { content: unknown }).content) : "";
 }
 
 function Title({ chat, fallback }: { chat: ChatState; fallback: SessionSummary }) {

@@ -129,6 +129,31 @@ export function contentText(content: unknown): string {
 		.join("");
 }
 
+/**
+ * One of the notes pi appends to a user prompt after normalizing its attached images
+ * (`[Image: original WxH, displayed at WxH. ...]`, `[Image omitted: ...]`,
+ * `[Image converted from A to B.]`). They are meant for the model, not the user.
+ */
+const IMAGE_HINT_LINE =
+	/^\[Image(?:: original \d+[x×]\d+, displayed at \d+[x×]\d+\. Multiply coordinates by [\d.]+ to map to original image\.| omitted: .+| converted from \S+ to \S+\.)\]$/;
+
+/**
+ * Remove the image-normalization notes pi appends as `${text}\n\n${hints}` to user prompts
+ * that carry images. Text without that exact trailing block is returned unchanged.
+ */
+export function stripImageHints(text: string): string {
+	const lines = text.split("\n");
+	let end = lines.length;
+	while (end > 0 && IMAGE_HINT_LINE.test(lines[end - 1] ?? "")) end--;
+	if (end === lines.length || end === 0 || lines[end - 1] !== "") return text;
+	return lines.slice(0, end - 1).join("\n");
+}
+
+/** Display text of a user message: its text parts without pi's image notes. */
+export function userText(content: unknown): string {
+	return stripImageHints(contentText(content));
+}
+
 /** Image parts of a message content value. */
 export function contentImages(content: unknown): ImagePart[] {
 	if (!Array.isArray(content)) return [];
