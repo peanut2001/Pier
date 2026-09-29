@@ -1,5 +1,5 @@
 /**
- * Terminals for clients (`terminal.*`, 1.16): shells in the desktop app's pseudo-terminals,
+ * Terminals for clients (`terminal.*`, 1.18): shells in the desktop app's pseudo-terminals,
  * each owned by the connection that opened it.
  *
  * A terminal's output and end go only to its connection, and it is hung up when that

@@ -115,7 +115,7 @@ export type PierHostEvent =
 	 * `workspaceId` is set for a workspace's project settings. Sent to every connection.
 	 */
 	| { type: "settings.changed"; scope: "user" | "project"; workspaceId?: string }
-	// Terminals (1.16), sent only to the connection that opened the terminal.
+	// Terminals (1.18), sent only to the connection that opened the terminal.
 	/** Output of a terminal: raw bytes, base64-encoded (UTF-8 sequences may be split across events). */
 	| { type: "terminal.output"; terminalId: string; data: string }
 	/**

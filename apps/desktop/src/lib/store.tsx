@@ -26,6 +26,7 @@ import type {
 	MethodParams,
 	MethodResult,
 	ModelInfo,
+	PackageManagerInfo,
 	PairingRequest,
 	PairingResolution,
 	PeerInfo,
@@ -109,9 +110,9 @@ export function hostUpdatesRemotely(info: HostInfo | undefined): boolean {
 	return hostSpeaks(info, 13);
 }
 
-/** Whether a computer can run terminals for this one (`terminal.*`, 1.16, inside its desktop app). */
+/** Whether a computer can run terminals for this one (`terminal.*`, 1.18, inside its desktop app). */
 export function hostRunsTerminals(info: HostInfo | undefined): boolean {
-	return info?.terminals === true && hostSpeaks(info, 16);
+	return info?.terminals === true && hostSpeaks(info, 18);
 }
 
 /** Pier's updater on a paired computer, driven through its host. */
@@ -1524,6 +1525,14 @@ export class PierStore {
 		const client = this.localClient;
 		if (!client) throw new Error("尚未连接到 Pier Host");
 		return client.request("settings.get", workspaceId ? { workspaceId } : {});
+	}
+
+	/** npm, pnpm and bun found on this computer, for pi's `npmCommand`; rejects with the host's error. */
+	async detectPackageManagers(): Promise<PackageManagerInfo[]> {
+		const client = this.localClient;
+		if (!client) throw new Error("尚未连接到 Pier Host");
+		const result = await client.request("host.packageManagers", {}, { timeoutMs: 20_000 });
+		return result.managers;
 	}
 
 	/** Set (or, without `value`, remove) settings in one file. Failures are reported as a toast. */

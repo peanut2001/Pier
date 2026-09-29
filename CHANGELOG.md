@@ -2,12 +2,20 @@
 
 Pier 的所有重要变更都记录在这里。版本号规则：日常发版只递增最后一位（0.2.1、0.2.2……），`x.y.0` 留给大版本；1.0 之前，大版本可能包含不兼容的变更。
 
-## Unreleased
+## 未发布
 
 ### 新增
 
+- **检测本机的 npm / pnpm / bun**：「设置 → pi 配置 → 工具与 Shell → npm 命令」下方列出本机找到的 npm、pnpm 和 bun（版本、完整路径、是否在 PATH 中、哪一个是默认的 npm），点「使用」即把 `npmCommand` 设为它的完整路径，正在使用的一项会高亮；无法运行的（例如 npm 找不到 `node`）会标出原因。除 `PATH` 外还会查找 `~/.bun/bin`、pnpm 与 Volta 的安装目录、Homebrew、`/usr/local/bin` 等常见位置。
+- **协议 1.17**（向后兼容）：新增 `host.packageManagers`，对已配对设备开放。
 - **在其他电脑上打开终端**：内置终端现在在工作区所在的电脑上打开。查看其他电脑的工作区时，文件面板的「在终端中打开」、目录旁的终端按钮、顶部的终端按钮与 `` Ctrl+` `` 都会在那台电脑上启动 shell，标签页标出电脑名称；本机与各台电脑的终端共用底部面板。那台电脑上的 Pier 用它的桌面端伪终端运行 shell（等同于在那台电脑上登录），打开终端会写入它的审计日志（不记录输入）；连接断开时终端随之关闭并在标签页中说明。那台电脑需要升级到这个版本，并运行桌面端（独立运行的 `pier-host` 不提供终端）。
-- **协议 1.16**（向后兼容）：新增 `terminal.open` / `terminal.write` / `terminal.resize` / `terminal.close` 与 `terminal.output` / `terminal.exit` 事件，对已配对设备开放；`HostInfo.terminals` 表示 Host 能否运行终端。Host 通过 sidecar 的 stdio 使用桌面端的伪终端（`pier.shell.capabilities`、`terminal.spawn`、`pier.shell.terminal*` 消息），输出按连接的积压暂停 / 恢复读取。`faux-host --demo-terminals` 提供可远程打开的演示终端。
+- **协议 1.18**（向后兼容）：新增 `terminal.open` / `terminal.write` / `terminal.resize` / `terminal.close` 与 `terminal.output` / `terminal.exit` 事件，对已配对设备开放；`HostInfo.terminals` 表示 Host 能否运行终端。Host 通过 sidecar 的 stdio 使用桌面端的伪终端（`pier.shell.capabilities`、`terminal.spawn`、`pier.shell.terminal*` 消息），输出按连接的积压暂停 / 恢复读取。`faux-host --demo-terminals` 提供可远程打开的演示终端。
+
+### 变更
+
+- **个人中心改为浏览器登录**：「设置 → 个人中心」不再在 Pier 中输入账号密码，而是点击「在浏览器中登录」，在系统浏览器里用云链API 支持的任意方式（账号密码、GitHub、LinuxDO、Passkey 等）登录并授权 Pier，完成后自动回到 Pier 显示余额与分组。Pier 只保存站点为它建立的独立登录会话（可以在网页「登录会话」中随时注销），不会接触密码；没有账号可以在登录页面注册。站点需要支持应用授权登录的 NewAPI（`app_authorization_scopes` 包含 `account`），不支持的站点仍显示原来的账号密码 / 访问令牌表单。
+- **协议 1.16**（向后兼容）：新增 `account.authorizeStart` / `account.authorizeWait` / `account.authorizeCancel`，`AccountSite` 新增 `browserLogin`。
+- **使用终端中的 PATH**：在 macOS 和 Linux 上，从程序坞 / 启动器打开的 Pier（包括 AppImage）没有终端里的 `PATH`，用 nvm、fnm、mise、Volta、Homebrew 或 bun 安装的工具会报「找不到命令」。内置的 Pier Host 现在启动时会向登录 Shell 读取一次 `PATH`（最多 5 秒）并放在前面，扩展安装和 Agent 的 bash 工具都能找到这些命令。Shell 启动文件可以根据 `PIER_RESOLVING_ENVIRONMENT=1` 跳过耗时的初始化；`pier-host --no-login-shell-path` 可关闭这一行为。
 
 ## v0.2.10 — 2026-09-29
 

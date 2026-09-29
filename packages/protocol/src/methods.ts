@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+	type AccountAuthorizeStart,
 	type AccountLoginResult,
 	type AccountOverview,
 	type AccountStatus,
@@ -29,6 +30,7 @@ import {
 	type NewApiLoginResult,
 	type NewApiModel,
 	type NewApiToken,
+	type PackageManagerDetection,
 	type PeerInfo,
 	type PiSettingsChangeResult,
 	type PiSettingsResult,
@@ -93,6 +95,8 @@ export const MethodParamsSchemas = {
 	"host.listDirectories": z.object({ path: z.string().min(1).max(4096).optional() }).optional(),
 	/** CPU, memory, disk and network usage of the host's computer (1.12). */
 	"host.stats": z.object({}).optional(),
+	/** npm, pnpm and bun on the host's computer, for pi's `npmCommand` setting (1.17). */
+	"host.packageManagers": z.object({}).optional(),
 
 	/**
 	 * The desktop app's updater on the host's computer (1.13), so a paired computer or phone can
@@ -273,6 +277,15 @@ export const MethodParamsSchemas = {
 		z.object({ accessToken: z.string().trim().min(1).max(2000), userId: z.number().int().positive().optional() }),
 	]),
 	"account.verify": z.object({ code: z.string().trim().min(1).max(100) }),
+	/**
+	 * Browser sign-in (1.16) when `AccountSite.browserLogin`: the user signs in on the website with
+	 * any method and approves Pier, which gets a login session of its own. Only for local UIs,
+	 * because the browser returns to a loopback address on the host's computer.
+	 */
+	"account.authorizeStart": z.object({}).optional(),
+	/** Resolve once the user approves (reject when they decline, the flow expires or is cancelled). */
+	"account.authorizeWait": z.object({ flowId: Id }),
+	"account.authorizeCancel": z.object({ flowId: Id }),
 	/** Email a registration verification code. */
 	"account.sendCode": z.object({ email: z.string().trim().min(3).max(50) }),
 	/** Register with a password, then sign in. */
@@ -358,7 +371,7 @@ export const MethodParamsSchemas = {
 	"ui.respond": z.object({ ...SessionRef, requestId: Id, response: UiResponseSchema }),
 
 	/**
-	 * Start the user's shell in a pseudo-terminal on the host's computer (1.16), for this
+	 * Start the user's shell in a pseudo-terminal on the host's computer (1.18), for this
 	 * connection only: output arrives as `terminal.output` events, the end as `terminal.exit`,
 	 * and the shell is hung up when the connection closes. `cwd` must be absolute; the shell
 	 * starts in the home directory when it is omitted or missing. `UNSUPPORTED` unless
@@ -461,6 +474,7 @@ export interface MethodResults {
 	"host.info": HostInfo;
 	"host.listDirectories": HostDirectoryListing;
 	"host.stats": HostStats;
+	"host.packageManagers": PackageManagerDetection;
 	"update.status": AppUpdateStatus;
 	"update.check": AppUpdateStatus;
 	"update.install": AppUpdateStatus;
@@ -522,6 +536,9 @@ export interface MethodResults {
 	"account.status": AccountStatus;
 	"account.login": AccountLoginResult;
 	"account.verify": AccountLoginResult;
+	"account.authorizeStart": AccountAuthorizeStart;
+	"account.authorizeWait": AccountLoginResult;
+	"account.authorizeCancel": { cancelled: boolean };
 	"account.sendCode": { sent: true };
 	"account.register": AccountLoginResult;
 	"account.overview": AccountOverview;

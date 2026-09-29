@@ -3,7 +3,7 @@
  *
  * The shell owns the app's updater; the host relays it to its clients (`update.*`, 1.13) so a
  * paired computer or phone can update Pier on this computer. It also provides pseudo-terminals,
- * which the host offers to its clients (`terminal.*`, 1.16). One JSON object per line:
+ * which the host offers to its clients (`terminal.*`, 1.18). One JSON object per line:
  *
  * - shell → host (stdin): `{"type":"pier.shell.updateStatus","status":{…}}` whenever the
  *   updater's state changes (and once when the host is ready),

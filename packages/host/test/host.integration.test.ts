@@ -116,6 +116,16 @@ describe("authentication and handshake", () => {
 		await expectError(client.request("session.prompt", { sessionId: "nope", text: "x" }), "NOT_FOUND");
 		await expectError(client.request("workspace.add", { path: "relative/path" }), "BAD_REQUEST");
 	});
+
+	it("lists the package managers on the host", async () => {
+		const client = await t.connect();
+		const { managers } = await client.request("host.packageManagers");
+		expect(Array.isArray(managers)).toBe(true);
+		for (const manager of managers) {
+			expect(["npm", "pnpm", "bun"]).toContain(manager.name);
+			expect(manager.path).toMatch(/[\\/]/);
+		}
+	});
 });
 
 describe("sessions end to end", () => {

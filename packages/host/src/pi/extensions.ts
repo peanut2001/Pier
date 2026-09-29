@@ -134,7 +134,7 @@ function explain(error: unknown): Error {
 			`Could not run \`${command}\`: it is not installed or not on the PATH of Pier Host. ` +
 				(command.includes("git")
 					? "Install git and restart Pier."
-					: 'Install Node.js (npm) and restart Pier, or set "npmCommand" in pi settings.json to the full path of npm.'),
+					: 'Install Node.js (npm) and restart Pier, or pick npm, pnpm or bun under Settings → pi 配置 → npm 命令 ("npmCommand" in pi settings.json).'),
 		);
 	}
 	return error instanceof Error ? error : new Error(message);

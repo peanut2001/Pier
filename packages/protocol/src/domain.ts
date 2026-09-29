@@ -142,6 +142,29 @@ export interface HostStats {
 	hostRss: number;
 }
 
+/** An npm-compatible package manager pi can use for `npmCommand`. */
+export type PackageManagerName = "npm" | "pnpm" | "bun";
+
+/** One package manager executable found on the host (`host.packageManagers`, 1.17). */
+export interface PackageManagerInfo {
+	name: PackageManagerName;
+	/** Absolute path of the executable as found (not resolved through symlinks). */
+	path: string;
+	/** Found in a directory on the host's `PATH`, not only in a well-known install directory. */
+	onPath: boolean;
+	/** A bare `name` runs this one (the first of its name on the host's `PATH`). */
+	default?: true;
+	/** `--version` output, without a leading `v`; omitted when it could not be run (see `error`). */
+	version?: string;
+	/** Why `--version` failed (e.g. `node` is not on the host's `PATH` for npm). */
+	error?: string;
+}
+
+export interface PackageManagerDetection {
+	/** `PATH` order first, then the well-known install directories; one entry per real file. */
+	managers: PackageManagerInfo[];
+}
+
 /** One entry of a workspace directory listing (`workspace.files`, 1.5). */
 export interface WorkspaceFileEntry {
 	name: string;
@@ -342,13 +365,13 @@ export interface HostInfo {
 	piVersion: string;
 	agentDir: string;
 	/**
-	 * The host can run shells for its clients (`terminal.*`, 1.16): it runs inside a desktop app
+	 * The host can run shells for its clients (`terminal.*`, 1.18): it runs inside a desktop app
 	 * that provides pseudo-terminals. Absent on older hosts and headless ones.
 	 */
 	terminals?: boolean;
 }
 
-/** A shell `terminal.open` started on the host's computer (1.16). */
+/** A shell `terminal.open` started on the host's computer (1.18). */
 export interface TerminalInfo {
 	terminalId: string;
 	/** Shell program name, e.g. `zsh` or `powershell`. */
@@ -661,6 +684,11 @@ export interface AccountSite {
 	/** Registration needs an email verification code (`account.sendCode`). */
 	emailVerification: boolean;
 	passwordLogin: boolean;
+	/**
+	 * The site can sign Pier in through the browser (NewAPI app authorization with the `account`
+	 * scope, 1.11): `account.authorizeStart`. Every sign-in method of the website works there.
+	 */
+	browserLogin: boolean;
 	/** Password sign-in and registration need a Turnstile check, which only the website can do. */
 	turnstile: boolean;
 	/** Third-party sign-in methods the website offers, e.g. `GitHub`, `LinuxDO`. */
@@ -698,7 +726,16 @@ export interface AccountOverview {
 	groups: NewApiGroup[];
 }
 
-/** Result of `account.login`, `account.verify` and `account.register`. */
+/** Result of `account.authorizeStart` (1.11): open `authorizeUrl` in the user's browser. */
+export interface AccountAuthorizeStart {
+	flowId: string;
+	/** The site's sign-in consent page. The browser returns to a loopback address on the host. */
+	authorizeUrl: string;
+	/** ISO time after which the flow is abandoned. */
+	expiresAt: string;
+}
+
+/** Result of `account.login`, `account.verify`, `account.register` and `account.authorizeWait`. */
 export type AccountLoginResult =
 	| { status: "ok"; overview: AccountOverview }
 	/** The account asks for a two-factor code; answer with `account.verify`. */

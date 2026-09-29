@@ -1,6 +1,6 @@
 /**
  * A `TerminalBridge` over a Pier connection: shells another computer's Pier Host runs for
- * this one (`terminal.*`, protocol 1.16).
+ * this one (`terminal.*`, protocol 1.18).
  *
  * A remote terminal belongs to one connection: when it drops, the host hangs the shell up,
  * so the tab ends with an explanation instead of silently reattaching to nothing.

@@ -18,6 +18,8 @@ export interface FakeOptions {
 	turnstile?: boolean;
 	/** NewAPI app authorization (`/app-auth` + `POST /api/app-auth/token`). */
 	appAuth?: boolean;
+	/** App authorization also offers the `account` scope (sign-in instead of a token). */
+	appAccount?: boolean;
 	/** Registration needs an emailed verification code. */
 	emailVerification?: boolean;
 }
@@ -27,7 +29,8 @@ export const EMAIL_CODE = "654321";
 /** What the site's consent page received, and the code it issued. */
 export interface FakeGrant {
 	code: string;
-	tokenId: number;
+	/** The approved token; undefined for a sign-in (`scope=account`). */
+	tokenId: number | undefined;
 	params: URLSearchParams;
 }
 
@@ -48,9 +51,11 @@ export interface FakeNewApi {
 	users: Map<string, string>;
 	/** Emails that were sent a verification code. */
 	codesSent: string[];
+	/** Access tokens handed out by sign-in grants. */
+	appSessions: number;
 	/**
-	 * Play the browser: "sign in" on the consent page of `authorizeUrl`, approve a new token and
-	 * return the loopback URL the site redirects to.
+	 * Play the browser: "sign in" on the consent page of `authorizeUrl`, approve a new token (or
+	 * the sign-in, for `scope=account`) and return the loopback URL the site redirects to.
 	 */
 	approve(authorizeUrl: string): string;
 }
@@ -96,18 +101,22 @@ export function startFakeNewApi(options: FakeOptions): Promise<FakeNewApi> {
 		refreshes: 0,
 		users: new Map([["alice", PASSWORD]]),
 		codesSent: [],
+		appSessions: 0,
 		approve(authorizeUrl) {
 			const url = new URL(authorizeUrl);
 			if (url.pathname !== "/app-auth") throw new Error(`unexpected consent page ${url.pathname}`);
 			const params = url.searchParams;
-			const id = Math.max(...fake.tokens.map((t) => t.id)) + 1;
-			fake.tokens.push({
-				id,
-				name: params.get("key_name") ?? "app",
-				key: `APP${id}keykeykeykeykeykeykeykeykeykey`,
-				group: "",
-				status: 1,
-			});
+			let id: number | undefined;
+			if (params.get("scope") !== "account") {
+				id = Math.max(...fake.tokens.map((t) => t.id)) + 1;
+				fake.tokens.push({
+					id,
+					name: params.get("key_name") ?? "app",
+					key: `APP${id}keykeykeykeykeykeykeykeykeykey`,
+					group: "",
+					status: 1,
+				});
+			}
 			const grant = { code: randomBytes(16).toString("hex"), tokenId: id, params };
 			fake.grants.push(grant);
 			const redirect = new URL(params.get("redirect_uri") ?? "");
@@ -192,6 +201,7 @@ export function startFakeNewApi(options: FakeOptions): Promise<FakeNewApi> {
 					password_login_encryption_enabled: options.encryption === true,
 					turnstile_check: options.turnstile === true,
 					...(options.appAuth ? { app_authorization_enabled: true } : {}),
+					...(options.appAuth && options.appAccount ? { app_authorization_scopes: ["token", "account"] } : {}),
 				},
 			});
 		}
@@ -203,6 +213,23 @@ export function startFakeNewApi(options: FakeOptions): Promise<FakeNewApi> {
 			const challenge = createHash("sha256").update(String(body.code_verifier)).digest("base64url");
 			if (challenge !== grant.params.get("code_challenge") || body.redirect_uri !== grant.params.get("redirect_uri")) {
 				return send(res, { success: false, message: "授权码无效或已过期，请重新授权" });
+			}
+			if (grant.tokenId === undefined) {
+				const access = `app-access-${++fake.appSessions}`;
+				fake.accessTokens.add(access);
+				fake.refreshToken = `sid-app.secret${++refreshCount}`;
+				return send(res, {
+					success: true,
+					data: {
+						scope: "account",
+						access_token: access,
+						token_type: "Bearer",
+						access_expires_at: expiresAt(),
+						refresh_token: fake.refreshToken,
+						session: { sid: "sid-app", login_method: "app" },
+						user: USER,
+					},
+				});
 			}
 			const token = fake.tokens.find((t) => t.id === grant.tokenId);
 			return send(res, {
