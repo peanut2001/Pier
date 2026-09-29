@@ -6,6 +6,7 @@ import {
 	type AppUpdateStatus,
 	type EventFrame,
 	type ExtensionReloadSummary,
+	type ExtensionScope,
 	type HostInfo,
 	isMethodName,
 	isProtocolCompatible,
@@ -51,6 +52,7 @@ import { PI_VERSION, PiEnvironment, type PiEnvironmentOptions, toModelInfo } fro
 import { ExtensionManager, type ExtensionTarget } from "./pi/extensions.ts";
 import { NewApiManager } from "./pi/newapi.ts";
 import { ProviderManager } from "./pi/providers.ts";
+import { PiSettingsFiles } from "./pi/settings-files.ts";
 import { RemoteAccess, type RemoteAccessOptions } from "./remote/remote-access.ts";
 import { SessionArchiveStore } from "./session-archive.ts";
 import { SessionPool } from "./session-pool.ts";
@@ -131,6 +133,8 @@ const AUDITED_METHODS = new Set<MethodName>([
 	"extension.setEnabled",
 	"extension.delete",
 	"update.install",
+	"settings.update",
+	"settings.write",
 ]);
 
 function auditDetail(method: MethodName, params: Record<string, unknown>): Record<string, unknown> | undefined {
@@ -199,6 +203,20 @@ function auditDetail(method: MethodName, params: Record<string, unknown>): Recor
 			return { type: params.type, path: params.path, enabled: params.enabled };
 		case "extension.delete":
 			return { path: params.path };
+		case "settings.update":
+			return {
+				scope: params.scope,
+				...(params.workspaceId ? { workspaceId: params.workspaceId } : {}),
+				keys: Array.isArray(params.changes)
+					? params.changes.map((c) => ((c as { path?: string[] }).path ?? []).join("."))
+					: [],
+			};
+		case "settings.write":
+			return {
+				scope: params.scope,
+				...(params.workspaceId ? { workspaceId: params.workspaceId } : {}),
+				bytes: typeof params.text === "string" ? Buffer.byteLength(params.text) : 0,
+			};
 		default:
 			return undefined;
 	}
@@ -238,6 +256,7 @@ export class PierHost implements RequestHandler {
 	readonly newapi: NewApiManager;
 	readonly account: AccountManager;
 	readonly extensions: ExtensionManager;
+	readonly settings: PiSettingsFiles;
 	readonly peers: PeerManager;
 	private readonly log: (message: string) => void;
 	private readonly connections = new Set<Connection>();
@@ -291,6 +310,7 @@ export class PierHost implements RequestHandler {
 			onProgress: (progress) => this.broadcast({ type: "extension.progress", ...progress }),
 			log,
 		});
+		this.settings = new PiSettingsFiles(env.agentDir);
 		this.providers = new ProviderManager(env, {
 			onChanged: () => {
 				// Open sessions keep the model object they resolved; pick up edited capabilities.
@@ -498,6 +518,13 @@ export class PierHost implements RequestHandler {
 	 * (project settings changed).
 	 */
 	private async applyExtensionChange(workspaceId?: string): Promise<ExtensionReloadSummary> {
+		const summary = await this.reloadSessions(workspaceId, "extension change");
+		this.broadcast({ type: "extension.changed", ...(workspaceId ? { workspaceId } : {}) });
+		return summary;
+	}
+
+	/** Reload idle open sessions (of one workspace, when given) so they pick up changed settings. */
+	private async reloadSessions(workspaceId: string | undefined, reason: string): Promise<ExtensionReloadSummary> {
 		const summary: ExtensionReloadSummary = { reloaded: 0, pending: 0, failed: 0 };
 		for (const session of this.pool.all()) {
 			if (workspaceId && session.workspaceId !== workspaceId) continue;
@@ -510,13 +537,36 @@ export class PierHost implements RequestHandler {
 				summary.reloaded++;
 			} catch (error) {
 				summary.failed++;
-				this.log(
-					`reload after extension change failed for ${session.id}: ${error instanceof Error ? error.message : error}`,
-				);
+				this.log(`reload after ${reason} failed for ${session.id}: ${error instanceof Error ? error.message : error}`);
 			}
 		}
-		this.broadcast({ type: "extension.changed", ...(workspaceId ? { workspaceId } : {}) });
 		return summary;
+	}
+
+	/**
+	 * Apply a settings file change: reload the affected idle sessions (unless `reload` is false)
+	 * and tell every connection. Settings also hold packages and the default model, so the
+	 * extension and provider views refresh too.
+	 */
+	private async applySettingsChange(
+		scope: ExtensionScope,
+		workspaceId: string | undefined,
+		reload: boolean,
+	): Promise<ExtensionReloadSummary> {
+		const target = scope === "project" ? workspaceId : undefined;
+		const summary = reload
+			? await this.reloadSessions(target, "settings change")
+			: { reloaded: 0, pending: 0, failed: 0 };
+		this.broadcast({ type: "settings.changed", scope, ...(target ? { workspaceId: target } : {}) });
+		this.broadcast({ type: "extension.changed", ...(target ? { workspaceId: target } : {}) });
+		if (scope === "user") this.broadcast({ type: "provider.changed" });
+		return summary;
+	}
+
+	private settingsWorkspace(scope: ExtensionScope, workspaceId: string | undefined): string | undefined {
+		if (scope === "project" && !workspaceId)
+			throw new PierProtocolError("BAD_REQUEST", "Project scope needs a workspaceId");
+		return scope === "project" && workspaceId ? this.requireWorkspace(workspaceId).path : undefined;
 	}
 
 	private subscribeConnection(ctx: HandlerContext, session: ManagedSession, sinceSeq?: number, epoch?: string) {
@@ -818,6 +868,34 @@ export class PierHost implements RequestHandler {
 					deleted: true,
 					reload: await this.applyExtensionChange(scope === "project" ? target?.id : undefined),
 				};
+			},
+
+			"settings.get": (_ctx, params) => {
+				const workspace = params?.workspaceId ? this.requireWorkspace(params.workspaceId) : undefined;
+				return {
+					agentDir: this.env.agentDir,
+					user: this.settings.read("user"),
+					...(workspace
+						? { project: { ...this.settings.read("project", workspace.path), workspaceId: workspace.id } }
+						: {}),
+				};
+			},
+			"settings.update": async (_ctx, params) => {
+				const path = this.settingsWorkspace(params.scope, params.workspaceId);
+				const changes = params.changes.map((c) => (c.value === undefined ? { path: c.path } : c));
+				const { file, changed } = this.settings.update(params.scope, path, changes);
+				const reload = changed
+					? await this.applySettingsChange(params.scope, params.workspaceId, params.reload ?? true)
+					: { reloaded: 0, pending: 0, failed: 0 };
+				return { file, changed, reload };
+			},
+			"settings.write": async (_ctx, params) => {
+				const path = this.settingsWorkspace(params.scope, params.workspaceId);
+				const { file, changed } = this.settings.write(params.scope, path, params.text, params.expectedModifiedAt);
+				const reload = changed
+					? await this.applySettingsChange(params.scope, params.workspaceId, true)
+					: { reloaded: 0, pending: 0, failed: 0 };
+				return { file, changed, reload };
 			},
 
 			"ui.respond": (ctx, params) => ({

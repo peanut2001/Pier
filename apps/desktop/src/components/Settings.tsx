@@ -16,6 +16,7 @@ import {
 	IconPuzzle,
 	IconSearch,
 	IconSettings,
+	IconSliders,
 	IconSmartphone,
 	IconSparkles,
 	IconUser,
@@ -23,6 +24,7 @@ import {
 } from "./Icons.tsx";
 import { CopyButton } from "./Markdown.tsx";
 import { ModelsSettings } from "./ModelsPanel.tsx";
+import { PiSettings } from "./PiSettingsPanel.tsx";
 import { RemoteSettings } from "./RemotePanel.tsx";
 import { SettingRow, SettingsCard, SettingsGroup } from "./SettingsUi.tsx";
 import { addWorkspaceBlocker } from "./Sidebar.tsx";
@@ -76,6 +78,14 @@ const GROUPS: Array<{ title: string; items: SectionDef[] }> = [
 				label: "扩展",
 				icon: IconPuzzle,
 				keywords: "扩展 插件 extension package 扩展包 npm git 安装 卸载 更新 启用 停用 技能 skill 提示词 prompt 主题",
+				online: true,
+			},
+			{
+				id: "pi",
+				label: "pi 配置",
+				icon: IconSliders,
+				keywords:
+					"pi settings settings.json 配置文件 思考 压缩 重试 超时 代理 proxy shell 工具 tools 传输 缓存 主题 终端 json 编辑",
 				online: true,
 			},
 		],
@@ -315,6 +325,7 @@ const PAGES: Record<SettingsSection, ComponentType> = {
 	models: ModelsSettings,
 	workspaces: WorkspacesSettings,
 	extensions: ExtensionsSettings,
+	pi: PiSettings,
 	remote: RemoteSettings,
 	logs: LogsSettings,
 	about: UpdateSettings,

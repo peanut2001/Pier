@@ -29,6 +29,8 @@ import type {
 	PairingRequest,
 	PairingResolution,
 	PeerInfo,
+	PiSettingsChangeResult,
+	PiSettingsResult,
 	ProviderInfo,
 	ProviderListResult,
 	RemoteAccessStatus,
@@ -189,6 +191,7 @@ export type SettingsSection =
 	| "models"
 	| "workspaces"
 	| "extensions"
+	| "pi"
 	| "remote"
 	| "logs"
 	| "about";
@@ -275,6 +278,8 @@ export interface AppState {
 	filePreview?: { workspaceId: string; path: string; composerKey?: string } | undefined;
 	/** Bumped when pi extension or package settings changed, so the extensions page reloads. */
 	extensionsVersion: number;
+	/** Bumped when a pi settings file may have changed, so the pi settings page reloads. */
+	piSettingsVersion: number;
 	extensionProgress?: ExtensionProgressState | undefined;
 	/** The directory picker for a paired computer is open. */
 	directoryPicker?: { title: string; node: string } | undefined;
@@ -487,6 +492,7 @@ export class PierStore {
 			filesPanelWidth: clampPanelWidth(panel.width ?? FILES_PANEL_DEFAULT_WIDTH),
 			filesVersion: {},
 			extensionsVersion: 0,
+			piSettingsVersion: 0,
 			hostStats: {},
 			peerUpdates: {},
 		};
@@ -881,8 +887,15 @@ export class PierStore {
 			this.scheduleRefresh(PEERS_KEY);
 		} else if (event.type === "provider.changed") {
 			this.scheduleRefresh(PROVIDERS_KEY);
+			// Setting the default model writes the user settings.
+			this.set((s) => ({ piSettingsVersion: s.piSettingsVersion + 1 }));
 		} else if (event.type === "extension.changed") {
-			this.set((s) => ({ extensionsVersion: s.extensionsVersion + 1 }));
+			this.set((s) => ({
+				extensionsVersion: s.extensionsVersion + 1,
+				piSettingsVersion: s.piSettingsVersion + 1,
+			}));
+		} else if (event.type === "settings.changed") {
+			this.set((s) => ({ piSettingsVersion: s.piSettingsVersion + 1 }));
 		} else if (event.type === "extension.progress") {
 			const { type: _type, ...progress } = event as unknown as ExtensionProgressState & { type: string };
 			this.set({ extensionProgress: progress });
@@ -1492,6 +1505,61 @@ export class PierStore {
 			this.toast("error", `${action}失败：${errorText(error)}`);
 			return undefined;
 		}
+	}
+
+	// ---- pi settings files ---------------------------------------------------------------
+
+	/** Read the user settings, plus a workspace's project settings; rejects with the host's error. */
+	async getPiSettings(workspaceId?: string): Promise<PiSettingsResult> {
+		const client = this.localClient;
+		if (!client) throw new Error("尚未连接到 Pier Host");
+		return client.request("settings.get", workspaceId ? { workspaceId } : {});
+	}
+
+	/** Set (or, without `value`, remove) settings in one file. Failures are reported as a toast. */
+	async updatePiSettings(
+		scope: ExtensionScope,
+		workspaceId: string | undefined,
+		changes: Array<{ path: string[]; value?: unknown }>,
+		reload = true,
+	): Promise<PiSettingsChangeResult | undefined> {
+		const result = await this.callLocal("保存设置", (c) =>
+			c.request("settings.update", {
+				scope,
+				...(scope === "project" && workspaceId ? { workspaceId } : {}),
+				changes,
+				reload,
+			}),
+		);
+		if (result) this.reportSettingsReload(result.reload);
+		return result;
+	}
+
+	/** Replace a settings file with `text`; rejects with the host's error (e.g. `CONFLICT`). */
+	async writePiSettings(
+		scope: ExtensionScope,
+		workspaceId: string | undefined,
+		text: string,
+		expectedModifiedAt?: string,
+	): Promise<PiSettingsChangeResult> {
+		const client = this.localClient;
+		if (!client) throw new Error("尚未连接到 Pier Host");
+		const result = await client.request("settings.write", {
+			scope,
+			...(scope === "project" && workspaceId ? { workspaceId } : {}),
+			text,
+			...(expectedModifiedAt ? { expectedModifiedAt } : {}),
+		});
+		this.reportSettingsReload(result.reload);
+		return result;
+	}
+
+	/** Mention sessions that did not pick up a settings change (reloaded ones need no toast). */
+	private reportSettingsReload(reload: ExtensionReloadSummary): void {
+		const parts: string[] = [];
+		if (reload.pending) parts.push(`${reload.pending} 个会话正在运行，完成后在会话中执行 /reload 生效`);
+		if (reload.failed) parts.push(`${reload.failed} 个会话重新加载失败（详见日志）`);
+		if (parts.length) this.toast(reload.failed ? "warning" : "info", `设置已保存；${parts.join("；")}`);
 	}
 
 	// ---- pi extensions and packages -----------------------------------------------------

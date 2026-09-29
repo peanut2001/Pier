@@ -781,3 +781,38 @@ export interface ExtensionReloadSummary {
 	/** Sessions whose reload failed (see the host log). */
 	failed: number;
 }
+
+// ---- pi settings files (1.15) -------------------------------------------------------------
+
+/** One pi settings file: `<agentDir>/settings.json` (`user`) or `<workspace>/.pi/settings.json` (`project`). */
+export interface PiSettingsFile {
+	scope: ExtensionScope;
+	/** Absolute path of the file. */
+	path: string;
+	/** The file exists (a missing file means every setting is at its default). */
+	exists: boolean;
+	/** The file's text as stored (without a byte-order mark); `""` when it does not exist. */
+	text: string;
+	/** The parsed settings; undefined when the text is not a JSON object (see `error`). */
+	settings?: Record<string, unknown>;
+	/** Why the text could not be parsed as a JSON object. */
+	error?: string;
+	/** Last modification time (ISO 8601), for `settings.write`'s `expectedModifiedAt`. */
+	modifiedAt?: string;
+}
+
+export interface PiSettingsResult {
+	/** The pi agent directory holding the user settings. */
+	agentDir: string;
+	user: PiSettingsFile;
+	/** The workspace's project settings, when `workspaceId` was given. */
+	project?: PiSettingsFile & { workspaceId: string };
+}
+
+/** Result of changing a settings file. */
+export interface PiSettingsChangeResult {
+	file: PiSettingsFile;
+	/** False when the change left the file as it was (nothing was written or reloaded). */
+	changed: boolean;
+	reload: ExtensionReloadSummary;
+}
