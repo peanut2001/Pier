@@ -433,6 +433,24 @@ export class MobileStore {
 		return chat;
 	}
 
+	/** Fork into a new session; the forked message becomes its draft. */
+	async forkSession(sessionId: string, entryId: string): Promise<SessionSummary | undefined> {
+		const client = this.client;
+		if (!client) return undefined;
+		try {
+			const { session, selectedText } = await client.request("session.fork", { sessionId, entryId });
+			if (selectedText) this.saveDraft(session.id, selectedText);
+			const workspaceId = session.workspaceId;
+			this.setHost((h) => ({
+				sessions: { ...h.sessions, [workspaceId]: [session, ...(h.sessions[workspaceId] ?? [])] },
+			}));
+			return session;
+		} catch (error) {
+			this.toast("error", `分叉会话失败：${errorText(error)}`);
+			return undefined;
+		}
+	}
+
 	draft(sessionId: string): string {
 		return this.drafts.get(sessionId) ?? "";
 	}

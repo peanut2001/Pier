@@ -18,6 +18,7 @@ import {
 	type ProviderListResult,
 	type QueueState,
 	type RemoteAccessStatus,
+	type SessionCommandInfo,
 	type SessionSnapshot,
 	type SessionSummary,
 	StreamingBehaviorSchema,
@@ -79,6 +80,10 @@ export const MethodParamsSchemas = {
 	}),
 	"session.unsubscribe": z.object(SessionRef),
 	"session.snapshot": z.object(SessionRef),
+	/** Slash commands the session's agent runtime handles in `session.prompt` (1.5). */
+	"session.commands": z.object(SessionRef),
+	/** Reload extensions, skills, prompt templates, themes, and context files (1.5). */
+	"session.reload": z.object(SessionRef),
 
 	"session.prompt": z.object({
 		...SessionRef,
@@ -258,6 +263,8 @@ export interface MethodResults {
 	"session.subscribe": SubscribeResult;
 	"session.unsubscribe": { unsubscribed: boolean };
 	"session.snapshot": SessionSnapshot;
+	"session.commands": { commands: SessionCommandInfo[] };
+	"session.reload": { reloaded: true };
 	"session.prompt": { accepted: true };
 	"session.steer": { queue: QueueState };
 	"session.followUp": { queue: QueueState };

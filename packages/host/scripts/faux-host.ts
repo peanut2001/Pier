@@ -14,8 +14,12 @@
  * mobile app can pair with it; `--remote-address <host:port>` overrides the addresses
  * put into pairing codes (e.g. `10.0.2.2:7433` for the Android emulator).
  * State lives in a temporary directory that is removed on exit.
+ *
+ * Sample slash commands for the command menu: the extension command `/greet`, the prompt
+ * template `/explain <topic>`, and `/skill:faux-skill`.
  */
-import { writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxText, fauxThinking, fauxToolCall } from "@earendil-works/pi-ai";
 import { PROTOCOL_VERSION } from "@pier/protocol";
@@ -124,11 +128,45 @@ function flag(name: string): string | undefined {
 	return index >= 0 ? process.argv[index + 1] : undefined;
 }
 
+/** Sample prompt template and skill, so the slash-command menu has host commands to show. */
+function sampleResources(): string {
+	const dir = mkdtempSync(join(tmpdir(), "pier-faux-resources-"));
+	mkdirSync(join(dir, "prompts"));
+	writeFileSync(
+		join(dir, "prompts", "explain.md"),
+		'---\ndescription: Explain a topic step by step\nargument-hint: "<topic>"\n---\nExplain $@ step by step.\n',
+	);
+	mkdirSync(join(dir, "skills", "faux-skill"), { recursive: true });
+	writeFileSync(
+		join(dir, "skills", "faux-skill", "SKILL.md"),
+		"---\nname: faux-skill\ndescription: A sample skill of the faux host\n---\n\nAnswer like a pirate.\n",
+	);
+	return dir;
+}
+
 const remote = process.argv.includes("--remote");
+const resources = sampleResources();
 const remoteAddress = flag("--remote-address");
 const t = await startTestHost({
 	tokensPerSecond: Number(process.env.FAUX_TPS ?? 400),
 	log: (message) => process.stderr.write(`[faux-host] ${message}\n`),
+	extraResources: {
+		promptTemplatePaths: [join(resources, "prompts")],
+		skillPaths: [join(resources, "skills")],
+		extensions: [
+			{
+				name: "faux-commands",
+				factory: (pi) => {
+					pi.registerCommand("greet", {
+						description: "Show a greeting from an extension command",
+						handler: async (args, ctx) => {
+							ctx.ui.notify(`Hello${args ? `, ${args}` : ""}! (from /greet)`, "info");
+						},
+					});
+				},
+			},
+		],
+	},
 	...(remote
 		? {
 				remote: {
@@ -160,6 +198,7 @@ const stop = async () => {
 	if (stopping) return;
 	stopping = true;
 	await t.close();
+	rmSync(resources, { recursive: true, force: true });
 	process.exit(0);
 };
 process.on("SIGINT", () => void stop());

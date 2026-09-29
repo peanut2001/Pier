@@ -249,6 +249,7 @@
 /* ---- composer -------------------------------------------------------------------- */
 
 .composer {
+	position: relative;
 	display: flex;
 	flex-direction: column;
 	gap: 6px;
@@ -477,4 +478,100 @@
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
+}
+
+/* Slash-command menu: opens above the composer while typing `/`. */
+
+.slash-menu {
+	position: absolute;
+	left: 0;
+	right: 0;
+	bottom: calc(100% + 8px);
+	z-index: 30;
+	max-height: 340px;
+	overflow-y: auto;
+	padding: 6px;
+	background: var(--bg-raised);
+	border: 1px solid var(--border-strong);
+	border-radius: 12px;
+	box-shadow: var(--shadow-lg);
+	animation: pop-in 0.14s var(--ease);
+	transform-origin: bottom left;
+}
+
+.slash-item {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	width: 100%;
+	padding: 7px 10px;
+	border: none;
+	border-radius: 8px;
+	background: transparent;
+	font-weight: 400;
+	text-align: left;
+}
+
+.slash-item.active,
+.slash-item.active:hover:not(:disabled) {
+	background: var(--accent-soft);
+}
+
+.slash-item-main {
+	display: inline-flex;
+	align-items: baseline;
+	gap: 8px;
+	flex: none;
+	max-width: 55%;
+	min-width: 0;
+}
+
+.slash-item-name {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-family: var(--mono);
+	font-size: 13px;
+	color: var(--text);
+}
+
+.slash-item-hint {
+	flex: none;
+	font-family: var(--mono);
+	font-size: 12px;
+	color: var(--text-faint);
+}
+
+.slash-item-desc {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 12.5px;
+	color: var(--text-muted);
+}
+
+.slash-item-badge {
+	flex: none;
+	margin-left: auto;
+	padding: 0 6px;
+	border-radius: 999px;
+	background: var(--bg-active);
+	font-size: 10.5px;
+	color: var(--text-muted);
+}
+
+.slash-status {
+	padding: 10px;
+	font-size: 12.5px;
+	color: var(--text-muted);
+}
+
+.slash-footer {
+	padding: 6px 10px 2px;
+	margin-top: 4px;
+	border-top: 1px solid var(--border);
+	font-size: 11px;
+	color: var(--text-faint);
 }

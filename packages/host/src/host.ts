@@ -70,6 +70,7 @@ const AUDITED_METHODS = new Set<MethodName>([
 	"session.followUp",
 	"session.abort",
 	"session.compact",
+	"session.reload",
 	"model.set",
 	"thinking.set",
 	"ui.respond",
@@ -410,6 +411,11 @@ export class PierHost implements RequestHandler {
 				return { unsubscribed: session.unsubscribe(ctx.connection.connectionId) };
 			},
 			"session.snapshot": (_ctx, params) => this.pool.require(params.sessionId).snapshot(),
+			"session.commands": (_ctx, params) => ({ commands: this.pool.require(params.sessionId).commands() }),
+			"session.reload": async (_ctx, params) => {
+				await this.pool.require(params.sessionId).reload();
+				return { reloaded: true as const };
+			},
 
 			"session.prompt": async (_ctx, params) => {
 				await this.pool.require(params.sessionId).prompt(params.text, params.images, params.streamingBehavior);

@@ -7,6 +7,7 @@ import {
 	PierProtocolError,
 	type PierSessionEvent,
 	type QueueState,
+	type SessionCommandInfo,
 	type SessionRunState,
 	type SessionSnapshot,
 	type SessionSummary,
@@ -369,6 +370,12 @@ export class ManagedSession {
 		}
 		return new Promise<void>((resolve, reject) => {
 			let settled = false;
+			// Extension commands may wait for UI answers from any client, so accept them right away
+			// instead of holding the request until the handler returns.
+			if (this.isExtensionCommand(text)) {
+				settled = true;
+				resolve();
+			}
 			session
 				.prompt(text, {
 					...(images ? { images: toImages(images) } : {}),
@@ -397,6 +404,13 @@ export class ManagedSession {
 					}
 				});
 		});
+	}
+
+	private isExtensionCommand(text: string): boolean {
+		if (!text.startsWith("/")) return false;
+		const space = text.indexOf(" ");
+		const name = space === -1 ? text.slice(1) : text.slice(1, space);
+		return name.length > 0 && this.runtime.session.extensionRunner.getCommand(name) !== undefined;
 	}
 
 	async steer(text: string, images?: ImageInput[]): Promise<QueueState> {
@@ -447,6 +461,46 @@ export class ManagedSession {
 		this.runtime.session.setThinkingLevel(level, { persist });
 		this.guard.record();
 		return this.runtime.session.thinkingLevel;
+	}
+
+	/** Slash commands pi handles in `prompt()`: extension commands, prompt templates, and skills. */
+	commands(): SessionCommandInfo[] {
+		const session = this.runtime.session;
+		const commands: SessionCommandInfo[] = [];
+		for (const command of session.extensionRunner.getRegisteredCommands()) {
+			commands.push({
+				name: command.invocationName,
+				...(command.description ? { description: command.description } : {}),
+				source: "extension",
+			});
+		}
+		for (const template of session.promptTemplates) {
+			commands.push({
+				name: template.name,
+				...(template.description ? { description: template.description } : {}),
+				...(template.argumentHint ? { argumentHint: template.argumentHint } : {}),
+				source: "prompt",
+			});
+		}
+		// Like pi's interactive mode, `enableSkillCommands: false` hides skills from discovery;
+		// a typed `/skill:name` still works.
+		if (session.settingsManager.getEnableSkillCommands()) {
+			for (const skill of session.resourceLoader.getSkills().skills) {
+				commands.push({
+					name: `skill:${skill.name}`,
+					...(skill.description ? { description: skill.description } : {}),
+					source: "skill",
+				});
+			}
+		}
+		return commands;
+	}
+
+	/** Reload settings, extensions, skills, prompt templates, themes, and context files. */
+	async reload(): Promise<void> {
+		this.lastActivity = Date.now();
+		if (this.busy) throw new PierProtocolError("CONFLICT", "Wait for the agent to finish before reloading");
+		await this.runtime.session.reload();
 	}
 
 	forkPoints(): Array<{ entryId: string; text: string }> {

@@ -1,9 +1,10 @@
-import type { ChatController, ChatState } from "@pier/chat-state";
+import { type ChatController, type ChatState, resolveSlash, runBuiltin, type SlashActions } from "@pier/chat-state";
 import type { WorkspaceInfo } from "@pier/protocol";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { type Draft, useStore } from "../lib/store.tsx";
 import { IconArrowUp, IconImage, IconStop, IconX } from "./Icons.tsx";
 import { PolicyPicker } from "./SessionControls.tsx";
+import { SlashMenu, type SlashMenuEntry, useSlashMenu } from "./SlashMenu.tsx";
 
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 
@@ -66,17 +67,60 @@ export function Composer({
 	const running = chat.runState === "streaming" || chat.runState === "retrying" || chat.runState === "compacting";
 	const closed = !!chat.closed;
 	const canSend = !closed && chat.loaded && !sending && (draft.text.trim().length > 0 || draft.images.length > 0);
+	const menu = useSlashMenu(controller, draft.text);
 
-	async function send(mode: "auto" | "steer" | "followUp") {
-		if (!canSend) return;
-		const text = draft.text.trim();
+	const actions: SlashActions = {
+		newSession: () => store.createSession(controller.workspaceId),
+		fork: (entryId) => (chat.session ? store.forkSession(chat.session, entryId) : false),
+		notify: (level, message) => store.toast(level, message),
+	};
+
+	async function send(mode: "auto" | "steer" | "followUp", override?: string) {
+		const text = (override ?? draft.text).trim();
+		if (closed || !chat.loaded || sending || (!text && !draft.images.length)) return;
 		const images = draft.images.map(({ data, mimeType }) => ({ type: "image" as const, data, mimeType }));
+		const previous = { ...draft, text: override ?? draft.text };
+		const cleared = { text: "", images: [] };
+
+		let resolution = resolveSlash(text, menu.list.commands, menu.list.known);
+		if (resolution.kind === "unknown" || (resolution.kind === "host" && !menu.list.known)) {
+			// The list may be stale (or still loading) right after typing.
+			const fresh = await controller.loadCommands();
+			resolution = resolveSlash(text, fresh.commands, fresh.known);
+		}
+		if (resolution.kind === "unknown") {
+			store.toast("error", `未知命令 /${resolution.name}，输入 / 查看可用的命令`);
+			return;
+		}
+
 		setSending(true);
-		const previous = draft;
-		setDraft({ text: "", images: [] });
-		const result = await controller.send(text, images, mode);
+		if (resolution.kind === "builtin") {
+			// Built-ins keep attached images; clear the text first because /new and /fork switch sessions.
+			const kept = { ...previous, text: "" };
+			setDraft(kept);
+			store.saveDraft(sessionId, kept);
+			const result = await runBuiltin(controller, resolution.name, resolution.args, actions);
+			setSending(false);
+			if (result.kind === "failed") setDraft(previous);
+			else if (result.kind === "complete") setDraft({ ...previous, text: result.text });
+			textarea.current?.focus();
+			return;
+		}
+
+		setDraft(cleared);
+		const result =
+			resolution.kind === "host"
+				? await controller.sendCommand(text, images, mode)
+				: await controller.send(text, images, mode);
 		setSending(false);
 		if (result === undefined) setDraft(previous);
+		textarea.current?.focus();
+	}
+
+	function pick(entry: SlashMenuEntry, tab = false) {
+		const next = entry.pick(tab);
+		if (next.run) void send(running ? "steer" : "auto", next.text);
+		else setDraft((d) => ({ ...d, text: next.text }));
 		textarea.current?.focus();
 	}
 
@@ -127,6 +171,7 @@ export function Composer({
 					))}
 				</div>
 			) : null}
+			<SlashMenu menu={menu} onPick={(entry) => pick(entry)} />
 			<textarea
 				ref={textarea}
 				rows={1}
@@ -137,7 +182,7 @@ export function Composer({
 						? "会话已关闭"
 						: running
 							? "补充指示以引导当前任务，Esc 停止…"
-							: "描述你的任务…（Enter 发送，Shift+Enter 换行）"
+							: "描述你的任务…（Enter 发送，Shift+Enter 换行，/ 使用命令）"
 				}
 				onChange={(e) => setDraft((d) => ({ ...d, text: e.target.value }))}
 				onPaste={(e) => {
@@ -149,6 +194,26 @@ export function Composer({
 				}}
 				onKeyDown={(e) => {
 					if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+					if (menu.open) {
+						const entry = menu.entries[menu.active];
+						if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+							if (menu.entries.length) {
+								e.preventDefault();
+								menu.move(e.key === "ArrowDown" ? 1 : -1);
+							}
+							return;
+						}
+						if (e.key === "Escape") {
+							e.preventDefault();
+							menu.dismiss();
+							return;
+						}
+						if (entry && (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey && !e.altKey))) {
+							e.preventDefault();
+							pick(entry, e.key === "Tab");
+							return;
+						}
+					}
 					if (e.key === "Escape" && running) {
 						e.preventDefault();
 						void controller.abort();

@@ -32,6 +32,12 @@ export interface PiEnvironmentOptions {
 	sessionDir?: string;
 	/** Disable discovery of extensions, skills, prompt templates, themes, and context files (tests). */
 	isolated?: boolean;
+	/** Resources loaded in addition to (or, when isolated, instead of) the discovered ones (tests). */
+	extraResources?: {
+		extensions?: InlineExtension[];
+		skillPaths?: string[];
+		promptTemplatePaths?: string[];
+	};
 }
 
 export interface RuntimeRequest {
@@ -145,6 +151,7 @@ export class PiEnvironment {
 
 	async createRuntime(request: RuntimeRequest): Promise<AgentSessionRuntime> {
 		const isolated = this.options.isolated === true;
+		const extra = this.options.extraResources ?? {};
 		const factory: CreateAgentSessionRuntimeFactory = async ({ cwd, agentDir, sessionManager, sessionStartEvent }) => {
 			const services = await createAgentSessionServices({
 				cwd,
@@ -152,7 +159,9 @@ export class PiEnvironment {
 				modelRuntime: this.modelRuntime,
 				settingsManager: this.settingsFor(cwd),
 				resourceLoaderOptions: {
-					extensionFactories: request.extensions(),
+					extensionFactories: [...request.extensions(), ...(extra.extensions ?? [])],
+					...(extra.skillPaths ? { additionalSkillPaths: extra.skillPaths } : {}),
+					...(extra.promptTemplatePaths ? { additionalPromptTemplatePaths: extra.promptTemplatePaths } : {}),
 					...(isolated
 						? { noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true }
 						: {}),

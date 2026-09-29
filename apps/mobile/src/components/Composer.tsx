@@ -1,16 +1,19 @@
-import type { ChatController } from "@pier/chat-state";
+import { type ChatController, resolveSlash, runBuiltin, type SlashActions } from "@pier/chat-state";
 import type { ImageInput } from "@pier/protocol";
 import * as ImagePicker from "expo-image-picker";
+import { useRouter } from "expo-router";
 import { useState } from "react";
 import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { isBusy } from "../format.ts";
 import { useStore } from "../store.ts";
 import { usePalette } from "../theme.ts";
+import { type SlashEntry, SlashMenu, useSlashMenu } from "./SlashMenu.tsx";
 
 const MAX_IMAGES = 8;
 
 export function Composer({ chat, runState }: { chat: ChatController; runState: string }) {
 	const store = useStore();
+	const router = useRouter();
 	const p = usePalette();
 	const [text, setText] = useState(() => store.draft(chat.sessionId));
 	const [images, setImages] = useState<ImageInput[]>([]);
@@ -21,6 +24,22 @@ export function Composer({ chat, runState }: { chat: ChatController; runState: s
 	const update = (value: string) => {
 		setText(value);
 		store.saveDraft(chat.sessionId, value);
+	};
+	const menu = useSlashMenu(chat, text);
+
+	const openSession = (session: { id: string; workspaceId: string } | undefined) => {
+		const hostId = store.getState().host.hostId;
+		if (!session || !hostId) return false;
+		router.push({
+			pathname: "/host/[hostId]/session/[sessionId]",
+			params: { hostId, sessionId: session.id, workspaceId: session.workspaceId },
+		});
+		return true;
+	};
+	const actions: SlashActions = {
+		newSession: async () => openSession(await store.createSession(chat.workspaceId)),
+		fork: async (entryId) => openSession(await store.forkSession(chat.sessionId, entryId)),
+		notify: (level, message) => store.toast(level === "error" ? "error" : "info", message),
 	};
 
 	const pickImages = async () => {
@@ -42,11 +61,30 @@ export function Composer({ chat, runState }: { chat: ChatController; runState: s
 		setImages((current) => [...current, ...picked].slice(0, MAX_IMAGES));
 	};
 
-	const send = async (mode: "auto" | "steer" | "followUp") => {
-		if (!canSend) return;
+	const send = async (mode: "auto" | "steer" | "followUp", override?: string) => {
+		const body = (override ?? text).trim();
+		if (sending || (!body && !images.length)) return;
+		let resolution = resolveSlash(body, menu.list.commands, menu.list.known);
+		if (resolution.kind === "unknown" || (resolution.kind === "host" && !menu.list.known)) {
+			const fresh = await chat.loadCommands();
+			resolution = resolveSlash(body, fresh.commands, fresh.known);
+		}
+		if (resolution.kind === "unknown") {
+			store.toast("error", `未知命令 /${resolution.name}，输入 / 查看可用的命令`);
+			return;
+		}
 		setSending(true);
-		const body = text.trim();
-		const result = await chat.send(body, images, mode);
+		if (resolution.kind === "builtin") {
+			const previous = override ?? text;
+			update("");
+			const result = await runBuiltin(chat, resolution.name, resolution.args, actions);
+			setSending(false);
+			if (result.kind === "failed") update(previous);
+			else if (result.kind === "complete") update(result.text);
+			return;
+		}
+		const result =
+			resolution.kind === "host" ? await chat.sendCommand(body, images, mode) : await chat.send(body, images, mode);
 		setSending(false);
 		if (result !== undefined) {
 			update("");
@@ -54,8 +92,15 @@ export function Composer({ chat, runState }: { chat: ChatController; runState: s
 		}
 	};
 
+	const pick = (entry: SlashEntry) => {
+		const next = entry.pick();
+		if (next.run) void send(busy ? "steer" : "auto", next.text);
+		else update(next.text);
+	};
+
 	return (
 		<View style={[styles.root, { borderColor: p.border, backgroundColor: p.card }]}>
+			<SlashMenu menu={menu} onPick={pick} />
 			{images.length ? (
 				<ScrollView horizontal style={styles.images} contentContainerStyle={styles.imagesContent}>
 					{images.map((image, index) => (
@@ -80,7 +125,7 @@ export function Composer({ chat, runState }: { chat: ChatController; runState: s
 					value={text}
 					onChangeText={update}
 					multiline
-					placeholder={busy ? "引导 Agent，或排队下一条…" : "给 Agent 发消息"}
+					placeholder={busy ? "引导 Agent，或排队下一条…" : "给 Agent 发消息，/ 使用命令"}
 					placeholderTextColor={p.faint}
 					style={[styles.input, { color: p.text, backgroundColor: p.bg, borderColor: p.border }]}
 				/>

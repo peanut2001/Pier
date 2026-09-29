@@ -707,11 +707,12 @@ export class PierStore {
 
 	// ---- sessions ----------------------------------------------------------------------
 
-	async createSession(workspaceId: string): Promise<void> {
+	async createSession(workspaceId: string): Promise<boolean> {
 		const result = await this.call("新建会话", (c) => c.request("session.create", { workspaceId }));
-		if (!result) return;
+		if (!result) return false;
 		this.upsertSession(result.session);
 		this.selectSession(result.session);
+		return true;
 	}
 
 	private upsertSession(session: SessionSummary): void {
@@ -805,13 +806,14 @@ export class PierStore {
 		if (result) this.upsertSession(result.session);
 	}
 
-	async forkSession(session: SessionSummary, entryId: string): Promise<string | undefined> {
+	/** Fork into a new session and open it. Resolves to whether it succeeded. */
+	async forkSession(session: SessionSummary, entryId: string): Promise<boolean> {
 		const result = await this.call("分叉会话", (c) => c.request("session.fork", { sessionId: session.id, entryId }));
-		if (!result) return undefined;
+		if (!result) return false;
 		if (result.selectedText) this.saveDraft(result.session.id, { text: result.selectedText, images: [] });
 		this.upsertSession(result.session);
 		this.selectSession(result.session);
-		return result.selectedText;
+		return true;
 	}
 
 	// ---- drafts ------------------------------------------------------------------------

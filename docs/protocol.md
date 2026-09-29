@@ -1,4 +1,4 @@
-# Pier 协议 v1.4
+# Pier 协议 v1.5
 
 > 实现：`packages/protocol`（zod schema + TS 类型，Host 与所有客户端共享）。
 > 本文档描述线上格式与语义；字段的权威定义以 `packages/protocol/src` 为准。
@@ -57,7 +57,7 @@
 
 ```jsonc
 { "type": "req", "id": "h", "method": "host.hello", "params": {
-  "protocolVersion": "1.4",
+  "protocolVersion": "1.5",
   "client": { "name": "pier-desktop", "version": "0.1.0", "platform": "darwin" },
   "token": "<本地 token>",       // 本地连接必填；远程连接由加密通道认证，不需要
   "coalesceMs": 50               // 可选：合并流式增量的窗口（0–1000ms，默认 0）
@@ -104,6 +104,8 @@
 | `session.subscribe` | `{ sessionId, sinceSeq?, epoch? }` | `{ mode: "replay"\|"snapshot", currentSeq, epoch }`，见 §5 |
 | `session.unsubscribe` | `{ sessionId }` | `{ unsubscribed }` |
 | `session.snapshot` | `{ sessionId }` | `SessionSnapshot`（一次性读取，不影响订阅） |
+| `session.commands` | `{ sessionId }` | `{ commands: { name, description?, argumentHint?, source: "extension"\|"prompt"\|"skill" }[] }`；会话的 Agent 运行时在 `session.prompt` 中处理的斜杠命令：扩展命令、提示词模板和 `skill:<名称>`（pi 设置 `enableSkillCommands: false` 时不列出 skill，但手动输入仍然有效）。`name` 不含开头的 `/`（1.5） |
+| `session.reload` | `{ sessionId }` | `{ reloaded: true }`；重新加载 settings、扩展、skills、提示词模板、主题与上下文文件，相当于 pi 的 `/reload`。Agent 运行中或有待回答的对话框时 → `CONFLICT`（1.5） |
 
 ### 运行
 
@@ -116,6 +118,14 @@
 | `session.compact` | `{ sessionId, instructions? }` | `{ summary, tokensBefore }`，压缩完成后返回（可能较慢，客户端应放宽超时） |
 
 `images`：`{ type: "image", data: <base64>, mimeType: "image/…" }[]`，最多 16 张；单帧上限 64 MiB。
+
+#### 斜杠命令
+
+`session.prompt` 的文本以 `/` 开头时，由 pi 按以下顺序处理：扩展命令（立即执行，运行中也可以，不会进入对话）→ `/skill:<名称> [参数]`（展开为 skill 内容）→ `/<模板> [参数]`（展开为提示词模板）→ 其余原样作为普通消息发给模型。可用的命令用 `session.commands` 列出。扩展命令被识别后 `session.prompt` 立即返回 `{ accepted: true }`，不等待命令结束（命令可能在等待 `ui.request` 的回答）；命令的错误以 `extension.error` 事件给出。
+
+`session.steer` / `session.followUp` 会展开 skill 与模板，但不执行扩展命令；运行中发送命令请用带 `streamingBehavior` 的 `session.prompt`。
+
+pi 终端界面自带的命令（`/model`、`/compact`、`/new`、`/fork`、`/name`、`/reload` 等）不经过 `session.prompt`：Pier 客户端在本地识别它们，改为调用对应的协议方法（`model.set`、`session.compact`、`session.create`、`session.fork`、`session.rename`、`session.reload`），无法识别的命令提示“未知命令”而不发送。共用的解析与执行逻辑在 `@pier/chat-state` 的 `slash.ts`。
 
 ### 模型
 

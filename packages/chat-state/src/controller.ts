@@ -1,6 +1,13 @@
 import type { PierClient, Subscription } from "@pier/client";
 import type { EventFrame, ImageInput, SessionSummary, ThinkingLevel, UiResponse } from "@pier/protocol";
 import { applySnapshot, type ChatState, clearResync, dismissNotice, initialChatState, reduceChat } from "./reducer.ts";
+import { BUILTIN_COMMANDS, mergeCommands, type SlashCommand } from "./slash.ts";
+
+/** Slash commands of a session, and whether the host could list its own (older hosts cannot). */
+export interface CommandList {
+	commands: SlashCommand[];
+	known: boolean;
+}
 
 export interface ChatView {
 	chat: ChatState;
@@ -25,6 +32,8 @@ export class ChatController {
 	private readonly listeners = new Set<() => void>();
 	private sub: Subscription | undefined;
 	private disposed = false;
+	private commandList: CommandList = { commands: [...BUILTIN_COMMANDS], known: false };
+	private commandsLoading: Promise<CommandList> | undefined;
 	readonly workspaceId: string;
 
 	constructor(
@@ -77,6 +86,7 @@ export class ChatController {
 		let chat = reduceChat(this.view.chat, frame);
 		if (chat === this.view.chat) return;
 		if (frame.event.type === "session.replaced") {
+			this.commandList = { commands: [...BUILTIN_COMMANDS], known: false };
 			this.hooks.onReplaced(previousId, frame.event.session as SessionSummary);
 		}
 		if (chat.needsResync) {
@@ -118,6 +128,63 @@ export class ChatController {
 			return this.run("排队", () => this.client.request("session.followUp", { sessionId, text, ...imageParam }));
 		}
 		return this.run("引导", () => this.client.request("session.steer", { sessionId, text, ...imageParam }));
+	}
+
+	/**
+	 * Send a slash command the agent runtime handles (extension command, prompt template, skill).
+	 * Unlike `send`, it goes through `session.prompt` while the agent runs too, because pi only
+	 * runs extension commands from a prompt.
+	 */
+	sendCommand(text: string, images: ImageInput[], mode: "auto" | "steer" | "followUp" = "auto"): Promise<unknown> {
+		const sessionId = this.sessionId;
+		const idle = this.chat.runState === "idle" || this.chat.runState === "inactive";
+		const streamingBehavior =
+			idle && mode === "auto" ? {} : ({ streamingBehavior: mode === "followUp" ? "followUp" : "steer" } as const);
+		return this.run("发送命令", () =>
+			this.client.request("session.prompt", {
+				sessionId,
+				text,
+				...(images.length ? { images } : {}),
+				...streamingBehavior,
+			}),
+		);
+	}
+
+	/** Last known slash commands (built-ins until `loadCommands` finished). */
+	get commands(): CommandList {
+		return this.commandList;
+	}
+
+	/** Fetch the host's slash commands for this session. Never rejects. */
+	loadCommands(): Promise<CommandList> {
+		if (this.commandsLoading) return this.commandsLoading;
+		const sessionId = this.sessionId;
+		const loading = this.client
+			.request("session.commands", { sessionId })
+			.then((result): CommandList => ({ commands: mergeCommands(result.commands), known: true }))
+			.catch((): CommandList => ({ commands: [...BUILTIN_COMMANDS], known: false }))
+			.then((list) => {
+				if (this.sessionId === sessionId) this.commandList = list;
+				return list;
+			})
+			.finally(() => {
+				if (this.commandsLoading === loading) this.commandsLoading = undefined;
+			});
+		this.commandsLoading = loading;
+		return loading;
+	}
+
+	rename(name: string): Promise<unknown> {
+		return this.run("重命名", () => this.client.request("session.rename", { sessionId: this.sessionId, name }));
+	}
+
+	reload(): Promise<unknown> {
+		return this.run("重新加载", async () => {
+			const result = await this.client.request("session.reload", { sessionId: this.sessionId });
+			this.commandsLoading = undefined;
+			await this.loadCommands();
+			return result;
+		});
 	}
 
 	abort(): Promise<unknown> {

@@ -14,7 +14,7 @@ import { PierClient, type PierClientOptions } from "@pier/client";
 import type { EventFrame } from "@pier/protocol";
 import { startLocalGateway } from "../src/gateway/local-gateway.ts";
 import { PierHost, type PierHostOptions } from "../src/host.ts";
-import { PiEnvironment } from "../src/pi/environment.ts";
+import { PiEnvironment, type PiEnvironmentOptions } from "../src/pi/environment.ts";
 
 export { fauxAssistantMessage, fauxText, fauxToolCall };
 export type FauxStep = Parameters<ReturnType<typeof fauxProvider>["setResponses"]>[0][number];
@@ -32,7 +32,10 @@ export interface TestHost {
 }
 
 export async function startTestHost(
-	options: Partial<Omit<PierHostOptions, "env" | "localToken">> & { tokensPerSecond?: number } = {},
+	options: Partial<Omit<PierHostOptions, "env" | "localToken">> & {
+		tokensPerSecond?: number;
+		extraResources?: PiEnvironmentOptions["extraResources"];
+	} = {},
 ): Promise<TestHost> {
 	const root = mkdtempSync(join(tmpdir(), "pier-it-"));
 	const workspaceDir = join(root, "workspace");
@@ -58,8 +61,9 @@ export async function startTestHost(
 		settingsManager: () => SettingsManager.inMemory({ defaultProvider: "faux", defaultModel: "faux-1" }),
 		sessionDir: join(root, "sessions"),
 		isolated: true,
+		...(options.extraResources ? { extraResources: options.extraResources } : {}),
 	});
-	const { tokensPerSecond: _ignored, ...hostOptions } = options;
+	const { tokensPerSecond: _ignored, extraResources: _extra, ...hostOptions } = options;
 	const host = await PierHost.create({ pierDir: join(root, "pier"), env, localToken: TOKEN, ...hostOptions });
 	const gateway = await startLocalGateway(host);
 	const clients: PierClient[] = [];

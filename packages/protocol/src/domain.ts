@@ -58,6 +58,21 @@ export interface ModelInfo {
 	contextWindow?: number;
 }
 
+/** Where a slash command offered by the host comes from (1.5). */
+export type SessionCommandSource = "extension" | "prompt" | "skill";
+
+/**
+ * A slash command the agent runtime handles when it arrives as a prompt (1.5): extension
+ * commands, prompt templates, and `skill:<name>` commands. `name` excludes the leading `/`.
+ */
+export interface SessionCommandInfo {
+	name: string;
+	description?: string;
+	/** Usage hint for the arguments, e.g. `<file>`. */
+	argumentHint?: string;
+	source: SessionCommandSource;
+}
+
 export interface QueueState {
 	steering: string[];
 	followUp: string[];
