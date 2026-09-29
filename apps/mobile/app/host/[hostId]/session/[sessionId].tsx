@@ -1,4 +1,4 @@
-import { type ChatController, contentText, isRole } from "@pier/chat-state";
+import { type ChatController, isRole, userText } from "@pier/chat-state";
 import type { ModelInfo, SessionSummary, ThinkingLevel } from "@pier/protocol";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -171,7 +171,7 @@ export default function SessionScreen() {
 		? sessionTitle({
 				name: state.session.name,
 				firstMessage:
-					state.session.firstMessage || (firstUser && isRole(firstUser, "user") ? contentText(firstUser.content) : ""),
+					state.session.firstMessage || (firstUser && isRole(firstUser, "user") ? userText(firstUser.content) : ""),
 			})
 		: "会话";
 

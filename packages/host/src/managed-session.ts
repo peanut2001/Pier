@@ -1,4 +1,5 @@
 import type { AgentSession, AgentSessionEvent, AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
+import { stripImageHints } from "@pier/chat-state";
 import {
 	type ApprovalDetails,
 	type EventFrame,
@@ -319,7 +320,7 @@ export class ManagedSession {
 			createdAt: header?.timestamp ?? now,
 			modifiedAt: new Date(this.lastActivity).toISOString(),
 			messageCount: messages.length,
-			firstMessage: firstUser ? textOf(firstUser.content).slice(0, 200) : "",
+			firstMessage: firstUser ? stripImageHints(textOf(firstUser.content)).slice(0, 200) : "",
 			...(header?.parentSession ? { parentSessionPath: header.parentSession } : {}),
 			active: true,
 			state: this.runState,

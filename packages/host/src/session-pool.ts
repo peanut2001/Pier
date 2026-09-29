@@ -1,5 +1,6 @@
 import { constants, copyFileSync, existsSync, mkdirSync, renameSync, rmSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
+import { stripImageHints } from "@pier/chat-state";
 import {
 	PierProtocolError,
 	type SessionCleanupResult,
@@ -179,7 +180,7 @@ export class SessionPool {
 				createdAt: info.created.toISOString(),
 				modifiedAt: info.modified.toISOString(),
 				messageCount: info.messageCount,
-				firstMessage: info.firstMessage.slice(0, 200),
+				firstMessage: stripImageHints(info.firstMessage).slice(0, 200),
 				...(info.parentSessionPath ? { parentSessionPath: info.parentSessionPath } : {}),
 				active: false,
 				state: "inactive",
