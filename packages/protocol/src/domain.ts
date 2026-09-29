@@ -228,6 +228,25 @@ export interface SessionSummary {
 	state: SessionRunState;
 	/** Dialogs / approvals waiting for an answer (active sessions only). Added in 1.1. */
 	pendingUi?: number;
+	/** Set when the session was archived with `session.archive` (1.14); absent otherwise. */
+	archived?: boolean;
+}
+
+/** Which sessions `session.cleanup` affects by archive state (1.14). */
+export type SessionCleanupScope = "all" | "archived" | "unarchived";
+
+/** A session `session.cleanup` left alone (1.14). */
+export interface SessionCleanupSkip {
+	sessionId: string;
+	/** `running`: busy or waiting for an answer. `locked`: open in another Pier host. `error`: see `message`. */
+	reason: "running" | "locked" | "error";
+	message?: string;
+}
+
+export interface SessionCleanupResult {
+	/** Sessions that were (or, with `dryRun`, would be) archived or deleted. */
+	sessionIds: string[];
+	skipped: SessionCleanupSkip[];
 }
 
 export interface ModelInfo {

@@ -341,3 +341,32 @@
 	gap: 6px;
 	margin-top: 10px;
 }
+
+.cleanup-checkbox {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-top: 10px;
+	font-size: 13px;
+	cursor: pointer;
+}
+
+.cleanup-preview {
+	padding: 10px 14px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	background: var(--bg-active);
+	font-size: 13px;
+}
+
+.cleanup-preview ul {
+	margin: 6px 0 0;
+	padding-left: 18px;
+	color: var(--text-muted);
+}
+
+.cleanup-preview li {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}

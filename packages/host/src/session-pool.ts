@@ -1,12 +1,27 @@
 import { constants, copyFileSync, existsSync, mkdirSync, renameSync, rmSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
-import { PierProtocolError, type SessionSummary, type WorkspaceInfo } from "@pier/protocol";
+import {
+	PierProtocolError,
+	type SessionCleanupResult,
+	type SessionCleanupScope,
+	type SessionSummary,
+	type WorkspaceInfo,
+} from "@pier/protocol";
 import type { ConfigStore } from "./config.ts";
 import { ManagedSession, type ManagedSessionOptions } from "./managed-session.ts";
 import type { PiEnvironment } from "./pi/environment.ts";
+import type { SessionArchiveStore } from "./session-archive.ts";
 import { SessionLock } from "./session-lock.ts";
 
 export const DEFAULT_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
+
+export interface SessionCleanupOptions {
+	action: "archive" | "delete";
+	/** Only sessions last modified before this time. */
+	modifiedBefore?: Date;
+	scope?: SessionCleanupScope;
+	dryRun?: boolean;
+}
 
 export interface SessionPoolOptions {
 	env: PiEnvironment;
@@ -14,6 +29,8 @@ export interface SessionPoolOptions {
 	locksDir: string;
 	/** Where deleted session files are moved. */
 	trashDir: string;
+	/** Archived session ids. */
+	archive: SessionArchiveStore;
 	uiTimeoutMs?: number;
 	idleTimeoutMs?: number;
 	eventLogCapacity?: number;
@@ -74,6 +91,7 @@ export class SessionPool {
 				this.options.onSessionReplaced?.(session, previousId);
 			},
 			onActivity: (session) => this.options.onSessionActivity?.(session),
+			isArchived: (sessionId) => this.options.archive.has(sessionId),
 		};
 	}
 
@@ -165,6 +183,7 @@ export class SessionPool {
 				...(info.parentSessionPath ? { parentSessionPath: info.parentSessionPath } : {}),
 				active: false,
 				state: "inactive",
+				...(this.options.archive.has(info.id) ? { archived: true } : {}),
 			});
 		}
 		for (const session of this.all()) {
@@ -200,7 +219,10 @@ export class SessionPool {
 			if (opening) await opening.catch(() => undefined);
 			active = this.sessions.get(sessionId) ?? (file ? this.findActiveByPath(file) : undefined);
 			if (active) await this.close(active.id, force, "deleted");
-			if (!file || !existsSync(file)) return active !== undefined;
+			if (!file || !existsSync(file)) {
+				this.options.archive.set([sessionId], false);
+				return active !== undefined;
+			}
 			// Refuses when another Pier host has the session open.
 			const lock = SessionLock.acquire(this.options.locksDir, file);
 			try {
@@ -208,10 +230,70 @@ export class SessionPool {
 			} finally {
 				lock.release();
 			}
+			this.options.archive.set([sessionId], false);
 			return true;
 		} finally {
 			if (key) this.deleting.delete(key);
 		}
+	}
+
+	/**
+	 * Archive or unarchive one session of `workspace`. The session must be open or listed in
+	 * the workspace.
+	 */
+	async setArchived(workspace: WorkspaceInfo, sessionId: string, archived: boolean): Promise<SessionSummary> {
+		const active = this.sessions.get(sessionId);
+		if (active && active.workspaceId !== workspace.id) {
+			throw new PierProtocolError("NOT_FOUND", "Session not in workspace");
+		}
+		const summary = active ? undefined : (await this.list(workspace)).find((s) => s.id === sessionId);
+		if (!active && !summary) throw new PierProtocolError("NOT_FOUND", "Session not found in this workspace");
+		this.options.archive.set([sessionId], archived);
+		if (active) return active.summary();
+		const { archived: _previous, ...rest } = summary as SessionSummary;
+		return archived ? { ...rest, archived: true } : rest;
+	}
+
+	/** Archive or delete the sessions of `workspace` matching `options`, skipping busy ones. */
+	async cleanup(workspace: WorkspaceInfo, options: SessionCleanupOptions): Promise<SessionCleanupResult> {
+		const scope = options.scope ?? "all";
+		const cutoff = options.modifiedBefore?.getTime();
+		const result: SessionCleanupResult = { sessionIds: [], skipped: [] };
+		const selected = (await this.list(workspace)).filter((s) => {
+			if (scope === "archived" && !s.archived) return false;
+			if (scope === "unarchived" && s.archived) return false;
+			if (options.action === "archive" && s.archived) return false;
+			return cutoff === undefined || Date.parse(s.modifiedAt) < cutoff;
+		});
+		const targets: string[] = [];
+		for (const summary of selected) {
+			const active = this.sessions.get(summary.id);
+			// Archiving does not touch the session, so only deleting skips running ones.
+			if (options.action === "delete" && active?.busy) {
+				result.skipped.push({ sessionId: summary.id, reason: "running" });
+			} else {
+				targets.push(summary.id);
+			}
+		}
+		if (options.dryRun) return { ...result, sessionIds: targets };
+		if (options.action === "archive") {
+			this.options.archive.set(targets, true);
+			return { ...result, sessionIds: targets };
+		}
+		for (const id of targets) {
+			try {
+				if (await this.delete(workspace, id)) result.sessionIds.push(id);
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				const conflict = error instanceof PierProtocolError && error.code === "CONFLICT";
+				result.skipped.push({
+					sessionId: id,
+					reason: conflict ? (/another Pier host/.test(message) ? "locked" : "running") : "error",
+					message,
+				});
+			}
+		}
+		return result;
 	}
 
 	async close(sessionId: string, force = false, reason: "closed" | "idle" | "deleted" = "closed"): Promise<boolean> {

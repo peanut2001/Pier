@@ -32,6 +32,7 @@ import type {
 	ProviderInfo,
 	ProviderListResult,
 	RemoteAccessStatus,
+	SessionCleanupResult,
 	SessionSummary,
 	WorkspaceFileContent,
 	WorkspaceFilesResult,
@@ -116,6 +117,18 @@ export interface PeerUpdateEntry {
 	busy?: "check" | "install";
 	/** An install this computer started, announced once the computer is back. */
 	installing?: { from: string; to?: string };
+}
+
+/** Whether a host can archive and bulk-clean sessions (`session.archive` / `session.cleanup`, 1.14). */
+export function hostCanArchiveSessions(info: HostInfo | undefined): boolean {
+	return hostSpeaks(info, 14);
+}
+
+/** Parameters of `session.cleanup` the desktop chooses. */
+export interface SessionCleanupRequest {
+	action: "archive" | "delete";
+	modifiedBefore?: string;
+	scope?: "all" | "archived" | "unarchived";
 }
 
 /** How often the status bar samples host usage while the window is visible. */
@@ -1973,6 +1986,71 @@ export class PierStore {
 		if (result) this.upsertSession(result.session);
 	}
 
+	/** Whether the computer of a workspace can archive and bulk-clean sessions (protocol 1.14). */
+	canArchiveSessions(workspaceId: string): boolean {
+		return hostCanArchiveSessions(this.state.nodes[this.nodeOf(workspaceId)]?.hostInfo);
+	}
+
+	/** Archive or unarchive a session; it stays where it is in the list. Resolves to whether it worked. */
+	async archiveSession(session: SessionSummary, archived: boolean): Promise<boolean> {
+		const result = await this.callWith(this.clientFor(session.workspaceId), archived ? "归档会话" : "取消归档", (c) =>
+			c.request("session.archive", { workspaceId: session.workspaceId, sessionId: session.id, archived }),
+		);
+		if (!result) return false;
+		this.set((s) => {
+			const list = s.sessions[session.workspaceId];
+			if (!list) return {};
+			const next = list.map((x) => {
+				if (x.id !== session.id) return x;
+				const { archived: _previous, ...rest } = x;
+				return archived ? { ...rest, archived: true } : rest;
+			});
+			return { sessions: { ...s.sessions, [session.workspaceId]: next } };
+		});
+		return true;
+	}
+
+	/**
+	 * Archive or delete many sessions of a workspace (`session.cleanup`). With `dryRun` only
+	 * reports what would happen and rejects with the host's error; otherwise errors are toasted
+	 * and resolve to undefined.
+	 */
+	async cleanupSessions(
+		workspaceId: string,
+		request: SessionCleanupRequest,
+		dryRun = false,
+	): Promise<SessionCleanupResult | undefined> {
+		const client = this.clientFor(workspaceId);
+		const params = { workspaceId, ...request, ...(dryRun ? { dryRun: true } : {}) };
+		if (dryRun) {
+			if (!client) throw new Error("尚未连接到 Pier Host");
+			return client.request("session.cleanup", params);
+		}
+		const label = request.action === "archive" ? "归档会话" : "删除会话";
+		const result = await this.callWith(client, label, (c) => c.request("session.cleanup", params));
+		if (!result) return undefined;
+		if (request.action === "delete") {
+			const deleted = new Set(result.sessionIds);
+			for (const id of deleted) {
+				this.dropChat(id);
+				this.drafts.delete(id);
+				this.autoSend.delete(id);
+			}
+			this.set((s) => ({
+				sessions: {
+					...s.sessions,
+					[workspaceId]: (s.sessions[workspaceId] ?? []).filter((x) => !deleted.has(x.id)),
+				},
+				...(s.selectedSessionId && deleted.has(s.selectedSessionId) ? { selectedSessionId: undefined } : {}),
+			}));
+		}
+		await this.refreshSessions(workspaceId);
+		const verb = request.action === "archive" ? "归档" : "删除";
+		const skipped = result.skipped.length ? `，跳过 ${result.skipped.length} 个运行中或被占用的会话` : "";
+		this.toast("info", `已${verb} ${result.sessionIds.length} 个会话${skipped}`);
+		return result;
+	}
+
 	/** Fork into a new session and open it. Resolves to whether it succeeded. */
 	async forkSession(session: SessionSummary, entryId: string): Promise<boolean> {
 		const result = await this.callWith(this.clientFor(session.workspaceId), "分叉会话", (c) =>
@@ -2241,6 +2319,14 @@ export function useCanManageWorkspace(workspaceId: string | undefined): boolean 
 	return useAppState((s) => {
 		const node = (workspaceId && s.workspaceNodes[workspaceId]) || s.node;
 		return node === LOCAL_NODE || hostAllowsRemoteManagement(s.nodes[node]?.hostInfo);
+	});
+}
+
+/** Whether the computer of a workspace can archive and bulk-clean sessions (protocol 1.14). */
+export function useCanArchiveSessions(workspaceId: string | undefined): boolean {
+	return useAppState((s) => {
+		const node = (workspaceId && s.workspaceNodes[workspaceId]) || s.node;
+		return hostCanArchiveSessions(s.nodes[node]?.hostInfo);
 	});
 }
 

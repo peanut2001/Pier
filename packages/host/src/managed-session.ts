@@ -57,6 +57,8 @@ export interface ManagedSessionOptions {
 	onReplaced?: (session: ManagedSession, previousId: string) => void;
 	/** Called when the run state or the number of pending UI requests changes. */
 	onActivity?: (session: ManagedSession) => void;
+	/** Whether a session id is archived (`session.archive`). */
+	isArchived?: (sessionId: string) => boolean;
 }
 
 /** pi events that indicate the session file may have been written by this host. */
@@ -322,6 +324,7 @@ export class ManagedSession {
 			active: true,
 			state: this.runState,
 			pendingUi: this.bridge.pendingRequests.length,
+			...(this.options.isArchived?.(session.sessionId) ? { archived: true } : {}),
 		};
 	}
 
