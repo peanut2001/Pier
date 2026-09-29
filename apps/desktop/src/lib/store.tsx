@@ -39,7 +39,7 @@ import type { Bridge, HostStatus, UpdateStatus } from "./bridge.ts";
 import { fileToken } from "./composer-text.ts";
 import { isYunlianProvider, YUNLIAN_SITE, yunlianGroupOf, yunlianProvider } from "./yunlian.ts";
 
-export const APP_VERSION = "0.2.5";
+export const APP_VERSION = "0.2.6";
 
 /** Subscriptions kept alive for recently viewed sessions (so approvals elsewhere stay visible). */
 const MAX_LIVE_CHATS = 8;

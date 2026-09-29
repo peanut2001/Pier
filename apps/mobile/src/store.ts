@@ -22,7 +22,7 @@ import {
 	saveDeviceName,
 } from "./identity.ts";
 
-export const APP_VERSION = "0.2.5";
+export const APP_VERSION = "0.2.6";
 
 /** Live session subscriptions kept for quick back-and-forth navigation. */
 const MAX_LIVE_CHATS = 4;
