@@ -168,7 +168,7 @@ describe("reduceChat", () => {
 		// Tool results are folded into their calls.
 		expect(items.map((i) => i.kind)).toEqual(["user", "assistant"]);
 		expect(items[1]?.kind === "assistant" && items[1].blocks[2]).toMatchObject({ status: "done", result: toolResult });
-		expect(sessionUsage(state)).toMatchObject({ input: 10, output: 5, lastContext: 15 });
+		expect(sessionUsage(state)).toMatchObject({ input: 10, output: 5, cacheRead: 0, cacheHitRate: 0, lastContext: 15 });
 	});
 
 	it("marks tool calls without a result as interrupted once idle", () => {
@@ -318,6 +318,22 @@ describe("helpers", () => {
 		expect(summarizeToolCall("grep", { pattern: "foo", path: "src" })).toBe("foo  ·  src");
 		expect(summarizeToolCall("custom", { query: "q", n: 1 })).toBe("q");
 		expect(summarizeToolCall("ls", {})).toBe(".");
+	});
+
+	it("aggregates prompt cache usage into a hit rate", () => {
+		const assistant = (input: number, cacheRead: number, cacheWrite: number) => ({
+			role: "assistant",
+			content: [{ type: "text", text: "ok" }],
+			usage: { input, output: 10, cacheRead, cacheWrite, totalTokens: input + cacheRead + cacheWrite + 10 },
+			timestamp: 1,
+		});
+		const state = loaded({
+			messages: [assistant(100, 0, 900), assistant(50, 900, 50)] as SessionSnapshot["messages"],
+		});
+		const usage = sessionUsage(state);
+		expect(usage).toMatchObject({ input: 2000, output: 20, cacheRead: 900, cacheWrite: 950, lastContext: 1010 });
+		expect(usage.cacheHitRate).toBeCloseTo(0.45);
+		expect(sessionUsage(loaded()).cacheHitRate).toBeUndefined();
 	});
 
 	it("extracts edit replacements", () => {

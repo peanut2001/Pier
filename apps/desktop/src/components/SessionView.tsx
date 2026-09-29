@@ -2,7 +2,7 @@ import type { ChatController } from "@pier/chat-state";
 import { type ChatState, contentText, sessionUsage } from "@pier/chat-state";
 import type { SessionSummary } from "@pier/protocol";
 import { useState } from "react";
-import { formatCost, formatTokens, RUN_STATE_LABEL, sessionTitle } from "../lib/format.ts";
+import { formatCost, formatPercent, formatTokens, RUN_STATE_LABEL, sessionTitle } from "../lib/format.ts";
 import { useAppState, useChatView, useStore } from "../lib/store.tsx";
 import { Composer } from "./Composer.tsx";
 import { IconAlert, IconFolder, IconInfo, IconLoader, IconX } from "./Icons.tsx";
@@ -182,6 +182,13 @@ function StatusBar({ chat }: { chat: ChatState }) {
 				<span title="本会话累计">
 					↑{formatTokens(usage.input)} ↓{formatTokens(usage.output)}
 					{usage.cost ? ` · ${formatCost(usage.cost)}` : ""}
+				</span>
+			) : null}
+			{usage.cacheHitRate !== undefined ? (
+				<span
+					title={`本会话累计：缓存读取 ${formatTokens(usage.cacheRead)}，缓存写入 ${formatTokens(usage.cacheWrite)}，输入合计 ${formatTokens(usage.input)}`}
+				>
+					缓存命中 {formatPercent(usage.cacheHitRate)}
 				</span>
 			) : null}
 			<span className="spacer" />

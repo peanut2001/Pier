@@ -31,6 +31,13 @@ export function formatCost(n: number): string {
 	return n < 0.01 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`;
 }
 
+/** Format a 0–1 ratio as a whole-number percentage (keeps one decimal below 10%). */
+export function formatPercent(ratio: number): string {
+	const pct = ratio * 100;
+	if (pct > 0 && pct < 10) return `${pct.toFixed(1)}%`;
+	return `${Math.round(pct)}%`;
+}
+
 export function formatBytes(n: number): string {
 	if (n < 1024) return `${n} B`;
 	if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;

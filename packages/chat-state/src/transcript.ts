@@ -222,20 +222,41 @@ export function editReplacements(args: unknown): Array<{ oldText: string; newTex
 	return edits;
 }
 
+export interface SessionUsage {
+	/** Total prompt tokens, including cache reads and writes. */
+	input: number;
+	output: number;
+	/** Prompt tokens served from the provider's prompt cache. */
+	cacheRead: number;
+	/** Prompt tokens written to the provider's prompt cache. */
+	cacheWrite: number;
+	/** cacheRead / input, or undefined when no prompt tokens were recorded. */
+	cacheHitRate: number | undefined;
+	cost: number;
+	lastContext: number;
+}
+
 /** Aggregate token usage and cost of the assistant messages in the transcript. */
-export function sessionUsage(state: ChatState): { input: number; output: number; cost: number; lastContext: number } {
+export function sessionUsage(state: ChatState): SessionUsage {
 	let input = 0;
 	let output = 0;
+	let cacheRead = 0;
+	let cacheWrite = 0;
 	let cost = 0;
 	let lastContext = 0;
 	for (const message of state.messages) {
 		if (message.role !== "assistant") continue;
 		const usage = (message as AssistantMessage).usage;
 		if (!usage) continue;
-		input += usage.input + usage.cacheRead + usage.cacheWrite;
-		output += usage.output;
+		const read = usage.cacheRead ?? 0;
+		const write = usage.cacheWrite ?? 0;
+		input += (usage.input ?? 0) + read + write;
+		cacheRead += read;
+		cacheWrite += write;
+		output += usage.output ?? 0;
 		cost += usage.cost?.total ?? 0;
 		if (usage.totalTokens) lastContext = usage.totalTokens;
 	}
-	return { input, output, cost, lastContext };
+	const cacheHitRate = input > 0 ? cacheRead / input : undefined;
+	return { input, output, cacheRead, cacheWrite, cacheHitRate, cost, lastContext };
 }
