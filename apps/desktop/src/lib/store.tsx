@@ -5,6 +5,7 @@ import type {
 	AuthMethod,
 	AuthNotice,
 	AuthPromptInfo,
+	CustomModel,
 	CustomProvider,
 	CustomProviderApi,
 	DefaultModelRef,
@@ -621,7 +622,7 @@ export class PierStore {
 		apiKey?: string;
 		apiKeyRef?: string;
 		providerId?: string;
-	}): Promise<Array<{ id: string; name?: string }>> {
+	}): Promise<CustomModel[]> {
 		const client = this.client;
 		if (!client) throw new Error("尚未连接到 Pier Host");
 		return (await client.request("provider.probeModels", params, { timeoutMs: 30_000 })).models;

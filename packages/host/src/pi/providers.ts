@@ -5,6 +5,7 @@ import {
 	type AuthMethod,
 	type AuthNotice,
 	type AuthPromptInfo,
+	type CustomModel,
 	type CustomProvider,
 	type CustomProviderApi,
 	type DefaultModelRef,
@@ -15,6 +16,7 @@ import {
 	type ProviderListResult,
 } from "@pier/protocol";
 import type { PiEnvironment } from "./environment.ts";
+import { fillModelsJsonProviders, ModelCapabilityIndex } from "./model-capabilities.ts";
 import {
 	loadModelsJson,
 	mergeCustomProvider,
@@ -195,6 +197,42 @@ export class ProviderManager {
 		} catch {
 			// Listeners must not break config operations.
 		}
+	}
+
+	/** pi's catalog of the models its built-in providers offer. */
+	private capabilityIndex(): ModelCapabilityIndex {
+		const runtime = this.runtime;
+		return new ModelCapabilityIndex([...this.builtinIds].flatMap((id) => runtime.getModels(id)));
+	}
+
+	/**
+	 * Fill in the capabilities (reasoning, image input, context window, output limit) that
+	 * custom providers in models.json leave out, from pi's model catalog. Settings that are
+	 * present are kept. Returns the number of models that changed.
+	 */
+	fillCapabilities(): Promise<number> {
+		return this.serialize(async () => {
+			const path = this.env.modelsPath;
+			let loaded: ReturnType<typeof loadModelsJson>;
+			try {
+				loaded = loadModelsJson(path);
+			} catch {
+				return 0;
+			}
+			const result = fillModelsJsonProviders(this.capabilityIndex(), loaded.doc.providers, this.builtinIds);
+			if (!result) return 0;
+			const errorsBefore = this.runtime.getError() ?? "";
+			writeModelsJson(path, loaded, { ...loaded.doc, providers: result.providers });
+			await this.runtime.refresh({ allowNetwork: false });
+			if ((this.runtime.getError() ?? "") !== errorsBefore) {
+				restoreModelsJson(path, loaded.raw);
+				await this.runtime.refresh({ allowNetwork: false }).catch(() => undefined);
+				return 0;
+			}
+			this.options.log?.(`Filled in the capabilities of ${result.filled} custom model(s) from pi's catalog`);
+			this.changed();
+			return result.filled;
+		});
 	}
 
 	defaultModel(): DefaultModelRef | undefined {
@@ -466,11 +504,14 @@ export class ProviderManager {
 	// ---- custom endpoints (models.json) --------------------------------------------------
 
 	saveCustom(
-		input: CustomProvider,
+		form: CustomProvider,
 		apiKey: string | undefined,
 		create: boolean,
 	): Promise<{ provider: ProviderInfo; defaultModel?: DefaultModelRef }> {
 		return this.serialize(async () => {
+			const index = this.capabilityIndex();
+			// Capabilities left unset (new or never configured models) come from pi's catalog.
+			const input: CustomProvider = { ...form, models: form.models.map((model) => index.fill(model)) };
 			const id = input.id;
 			if (this.builtinIds.has(id)) {
 				throw new PierProtocolError("CONFLICT", `“${id}” 是 pi 内置服务商的 ID，请换一个`);
@@ -569,13 +610,13 @@ export class ProviderManager {
 		});
 	}
 
-	/** List the model ids an endpoint offers. */
+	/** List the models an endpoint offers, with the capabilities pi's catalog knows for them. */
 	async probeModels(params: {
 		api: CustomProviderApi;
 		baseUrl: string;
 		apiKey?: string;
 		providerId?: string;
-	}): Promise<Array<{ id: string; name?: string }>> {
+	}): Promise<CustomModel[]> {
 		let key = params.apiKey?.trim() || undefined;
 		if (!key && params.providerId && this.runtime.getProvider(params.providerId)) {
 			key = (await this.runtime.getAuth(params.providerId).catch(() => undefined))?.auth.apiKey;
@@ -632,6 +673,7 @@ export class ProviderManager {
 					: undefined;
 		if (!list) throw new PierProtocolError("BAD_REQUEST", `${url} 的返回中没有模型列表`);
 		const models = new Map<string, { id: string; name?: string }>();
+		const index = this.capabilityIndex();
 		for (const item of list) {
 			if (typeof item === "string") {
 				models.set(item, { id: item });
@@ -650,7 +692,7 @@ export class ProviderManager {
 						: undefined;
 			models.set(id, { id, ...(name && name !== id ? { name } : {}) });
 		}
-		return [...models.values()].sort((a, b) => a.id.localeCompare(b.id));
+		return [...models.values()].sort((a, b) => a.id.localeCompare(b.id)).map((model) => index.fill(model));
 	}
 
 	shutdown(): void {

@@ -26,6 +26,9 @@ import { createUiContext } from "./pi/ui-context.ts";
 import { ExternalChangeGuard, SessionLock } from "./session-lock.ts";
 import { UiBridge } from "./ui-bridge.ts";
 
+/** pi's thinking level when neither the model nor the settings name one. */
+const DEFAULT_THINKING_LEVEL = "medium";
+
 export interface SessionSubscriber {
 	readonly connectionId: string;
 	send(frame: EventFrame): void;
@@ -454,6 +457,42 @@ export class ManagedSession {
 		const info = toModelInfo(model);
 		this.emit({ type: "session.model", model: info, thinkingLevel: this.runtime.session.thinkingLevel });
 		return info;
+	}
+
+	/**
+	 * Re-resolve the current model after models.json or a provider catalog changed, so edited
+	 * capabilities (such as reasoning) apply without selecting the model again. A model that just
+	 * became a reasoning model gets the configured default thinking level instead of `off`.
+	 */
+	refreshModel(): void {
+		const session = this.runtime.session;
+		const current = session.model;
+		if (!current) return;
+		const refreshed = this.options.env.modelRuntime.getModel(current.provider, current.id);
+		if (!refreshed || refreshed === current) return;
+		const before = JSON.stringify(toModelInfo(current));
+		const levelBefore = session.thinkingLevel;
+		session.agent.state.model = refreshed;
+		if (
+			!current.reasoning &&
+			refreshed.reasoning &&
+			session.thinkingLevel === "off" &&
+			session.isIdle &&
+			!this.guard.changedExternally()
+		) {
+			const settings = session.settingsManager;
+			const level =
+				settings.getModelThinkingLevel(refreshed.provider, refreshed.id) ??
+				settings.getDefaultThinkingLevel() ??
+				DEFAULT_THINKING_LEVEL;
+			if (level !== "off") {
+				session.setThinkingLevel(level);
+				this.guard.record();
+			}
+		}
+		const info = toModelInfo(refreshed);
+		if (JSON.stringify(info) === before && session.thinkingLevel === levelBefore) return;
+		this.emit({ type: "session.model", model: info, thinkingLevel: session.thinkingLevel });
 	}
 
 	setThinking(level: ThinkingLevel, persist: boolean): string {

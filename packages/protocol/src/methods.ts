@@ -6,6 +6,7 @@ import {
 	ApprovalPolicySchema,
 	AuthMethodSchema,
 	type ClientInfo,
+	type CustomModel,
 	CustomProviderApiSchema,
 	CustomProviderSchema,
 	type DefaultModelRef,
@@ -327,7 +328,8 @@ export interface MethodResults {
 	"provider.logout": { removed: boolean };
 	"provider.saveCustom": { provider: ProviderInfo; defaultModel?: DefaultModelRef };
 	"provider.removeCustom": { removed: boolean };
-	"provider.probeModels": { models: Array<{ id: string; name?: string }> };
+	/** Capabilities pi's model catalog knows for an id are filled in (1.6). */
+	"provider.probeModels": { models: CustomModel[] };
 	"newapi.login": NewApiLoginResult;
 	"newapi.verify": NewApiLoginResult;
 	"newapi.createToken": { tokenId: number; tokens: NewApiToken[] };

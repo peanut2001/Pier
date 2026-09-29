@@ -120,8 +120,8 @@ export function toCustomProvider(
 		models.push({
 			id: model.id,
 			...(typeof model.name === "string" && model.name !== model.id ? { name: model.name } : {}),
-			...(model.reasoning === true ? { reasoning: true } : {}),
-			...(Array.isArray(model.input) && model.input.includes("image") ? { images: true } : {}),
+			...(typeof model.reasoning === "boolean" ? { reasoning: model.reasoning } : {}),
+			...(Array.isArray(model.input) ? { images: model.input.includes("image") } : {}),
 			...(typeof model.contextWindow === "number" ? { contextWindow: model.contextWindow } : {}),
 			...(typeof model.maxTokens === "number" ? { maxTokens: model.maxTokens } : {}),
 		});
@@ -160,7 +160,8 @@ export function mergeCustomProvider(previous: Json | undefined, provider: Custom
 			delete out.api;
 			if (model.name && model.name !== model.id) out.name = model.name;
 			else delete out.name;
-			if (model.reasoning) out.reasoning = true;
+			// `false` is kept so a model the user marked as non-reasoning is not filled in again.
+			if (model.reasoning !== undefined) out.reasoning = model.reasoning;
 			else delete out.reasoning;
 			out.input = model.images ? ["text", "image"] : ["text"];
 			if (model.contextWindow) out.contextWindow = model.contextWindow;

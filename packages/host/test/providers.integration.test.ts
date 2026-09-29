@@ -26,11 +26,12 @@ interface Harness {
 	close(): Promise<void>;
 }
 
-async function startHarness(): Promise<Harness> {
+async function startHarness(initialModelsJson?: unknown): Promise<Harness> {
 	const root = mkdtempSync(join(tmpdir(), "pier-providers-"));
 	const agentDir = join(root, "agent");
 	const modelsPath = join(agentDir, "models.json");
 	mkdirSync(agentDir, { recursive: true });
+	if (initialModelsJson !== undefined) writeFileSync(modelsPath, JSON.stringify(initialModelsJson));
 	const credentials = new InMemoryCredentialStore();
 	const modelRuntime = await ModelRuntime.create({ credentials, modelsPath, refreshOnCreate: false });
 	const settings = SettingsManager.inMemory({});
@@ -133,7 +134,7 @@ describe("models.json helpers", () => {
 			baseUrl: "https://new/v1",
 			models: [
 				{ id: "keep", images: true },
-				{ id: "new", reasoning: true, contextWindow: 200000 },
+				{ id: "new", reasoning: true, images: false, contextWindow: 200000 },
 			],
 			hasConfiguredKey: true,
 		});
@@ -273,6 +274,65 @@ describe("provider configuration", () => {
 		expect(JSON.parse(readFileSync(t.modelsPath, "utf8")).providers).toEqual({});
 	});
 
+	it("fills in model capabilities from pi's catalog and refreshes open sessions", async () => {
+		const probe = await t.client.request("provider.probeModels", {
+			api: "openai-completions",
+			baseUrl: models.url,
+			apiKey: SECRET,
+		});
+		// The test endpoint's ids are unknown to the catalog: nothing is guessed.
+		expect(probe.models).toEqual([{ id: "gpt-a" }, { id: "gpt-b" }]);
+
+		await t.client.request("provider.saveCustom", {
+			provider: {
+				id: "relay",
+				api: "openai-completions",
+				baseUrl: models.url,
+				models: [{ id: "gpt-a" }, { id: "claude-opus-4-5" }, { id: "anthropic/claude-sonnet-4-5", reasoning: false }],
+			},
+			apiKey: SECRET,
+			create: true,
+		});
+		const saved = JSON.parse(readFileSync(t.modelsPath, "utf8")).providers.relay.models;
+		expect(saved[0]).toEqual({ id: "gpt-a", input: ["text"] });
+		expect(saved[1]).toMatchObject({ id: "claude-opus-4-5", reasoning: true, input: ["text", "image"] });
+		expect(saved[1].contextWindow).toBeGreaterThan(0);
+		expect(saved[1].maxTokens).toBeGreaterThan(0);
+		// An explicit choice is kept, and survives a round trip through the form.
+		expect(saved[2]).toMatchObject({ id: "anthropic/claude-sonnet-4-5", reasoning: false });
+		const listed = (await t.client.request("provider.list")).providers.find((p) => p.id === "relay");
+		expect(listed?.custom?.models[2]).toMatchObject({ reasoning: false, images: true });
+
+		// A session on a model that was saved as non-reasoning picks up the edit without reselecting it.
+		const workspaceDir = join(t.root, "workspace");
+		mkdirSync(workspaceDir);
+		const { workspace } = await t.client.request("workspace.add", { path: workspaceDir });
+		const { session } = await t.client.request("session.create", { workspaceId: workspace.id });
+		const rec = new Recorder();
+		await t.client.subscribe(session.id, rec.handler, { workspaceId: workspace.id });
+		await rec.waitForType("session.snapshot");
+		await t.client.request("model.set", { sessionId: session.id, provider: "relay", modelId: "gpt-a" });
+		const before = await t.client.request("session.snapshot", { sessionId: session.id });
+		expect(before.model).toMatchObject({ id: "gpt-a", reasoning: false });
+		expect(before.thinkingLevel).toBe("off");
+
+		const mark = rec.mark();
+		await t.client.request("provider.saveCustom", {
+			provider: {
+				id: "relay",
+				api: "openai-completions",
+				baseUrl: models.url,
+				models: [{ id: "gpt-a", reasoning: true }, { id: "claude-opus-4-5" }],
+			},
+		});
+		const changed = await rec.waitFor((f) => f.event.type === "session.model", mark);
+		expect(changed.event).toMatchObject({ model: { id: "gpt-a", reasoning: true } });
+		expect(changed.event.thinkingLevel).not.toBe("off");
+		const after = await t.client.request("session.snapshot", { sessionId: session.id });
+		expect(after.model).toMatchObject({ id: "gpt-a", reasoning: true });
+		expect(after.thinkingLevel).not.toBe("off");
+	});
+
 	it("keeps other models.json content and rolls back invalid edits", async () => {
 		writeFileSync(
 			t.modelsPath,
@@ -396,5 +456,37 @@ describe("provider configuration", () => {
 		await expect(t.client.request("provider.login", { providerId: "openai", method: "oauth" })).rejects.toMatchObject({
 			code: "BAD_REQUEST",
 		});
+	});
+});
+
+describe("model capabilities in an existing models.json", () => {
+	it("are filled in when the host starts, keeping settings that are present", async () => {
+		const t = await startHarness({
+			providers: {
+				relay: {
+					api: "openai-completions",
+					baseUrl: "http://127.0.0.1:9/v1",
+					apiKey: "x",
+					models: [
+						{ id: "claude-opus-4-5" },
+						{ id: "gpt-5", reasoning: false, input: ["text"] },
+						{ id: "unknown-model" },
+					],
+				},
+				openai: { apiKey: "y" },
+			},
+		});
+		try {
+			const doc = JSON.parse(readFileSync(t.modelsPath, "utf8"));
+			const [opus, gpt, unknown] = doc.providers.relay.models;
+			expect(opus).toMatchObject({ id: "claude-opus-4-5", reasoning: true, input: ["text", "image"] });
+			expect(gpt).toMatchObject({ id: "gpt-5", reasoning: false, input: ["text"] });
+			expect(unknown).toEqual({ id: "unknown-model" });
+			expect(doc.providers.openai).toEqual({ apiKey: "y" });
+			const list = await t.client.request("model.list");
+			expect(list.models.find((m) => m.id === "claude-opus-4-5")).toMatchObject({ reasoning: true });
+		} finally {
+			await t.close();
+		}
 	});
 });

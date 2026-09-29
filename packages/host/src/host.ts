@@ -183,7 +183,11 @@ export class PierHost implements RequestHandler {
 		});
 		const log = options.log ?? (() => {});
 		this.providers = new ProviderManager(env, {
-			onChanged: () => this.broadcast({ type: "provider.changed" }),
+			onChanged: () => {
+				// Open sessions keep the model object they resolved; pick up edited capabilities.
+				for (const session of this.pool.all()) session.refreshModel();
+				this.broadcast({ type: "provider.changed" });
+			},
 			log,
 		});
 		this.newapi = new NewApiManager({ log });
@@ -211,6 +215,7 @@ export class PierHost implements RequestHandler {
 	static async create(options: PierHostOptions): Promise<PierHost> {
 		const env = options.env instanceof PiEnvironment ? options.env : await PiEnvironment.create(options.env ?? {});
 		const host = new PierHost(options, env);
+		await host.providers.fillCapabilities().catch(() => 0);
 		host.pool.startSweeper();
 		await host.remote.apply();
 		return host;

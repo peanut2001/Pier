@@ -599,9 +599,7 @@ function CustomProviderForm({ editing, onDone }: { editing?: ProviderInfo; onDon
 	const [baseUrl, setBaseUrl] = useState(initial?.baseUrl ?? "");
 	const [apiKey, setApiKey] = useState("");
 	const [models, setModels] = useState<ModelRow[]>(() => (initial?.models ?? [{ id: "" }]).map(row));
-	const [probe, setProbe] = useState<{ busy?: boolean; error?: string; models?: Array<{ id: string; name?: string }> }>(
-		{},
-	);
+	const [probe, setProbe] = useState<{ busy?: boolean; error?: string; models?: CustomModel[] }>({});
 	const [saving, setSaving] = useState(false);
 	const [error, setError] = useState<string | undefined>();
 
@@ -628,14 +626,12 @@ function CustomProviderForm({ editing, onDone }: { editing?: ProviderInfo; onDon
 		}
 	};
 
-	const addModels = (list: Array<{ id: string; name?: string }>) =>
+	// Probed models carry the capabilities the host found in pi's model catalog.
+	const addModels = (list: CustomModel[]) =>
 		setModels((current) => {
 			const kept = current.filter((m) => m.id.trim());
 			const have = new Set(kept.map((m) => m.id.trim()));
-			return [
-				...kept,
-				...list.filter((m) => !have.has(m.id)).map((m) => row({ id: m.id, ...(m.name ? { name: m.name } : {}) })),
-			];
+			return [...kept, ...list.filter((m) => !have.has(m.id)).map((m) => row({ ...m }))];
 		});
 
 	const validate = (cleaned: CustomModel[]): string | undefined => {
@@ -845,6 +841,9 @@ function CustomProviderForm({ editing, onDone }: { editing?: ProviderInfo; onDon
 						</div>
 					))}
 				</div>
+				<p className="muted small">
+					常见模型的推理、图片与上下文会按 pi 内置的模型目录自动识别；手动修改过的设置保持不变。
+				</p>
 			</div>
 			{error ? (
 				<div className="banner error inline">
