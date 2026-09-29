@@ -14,7 +14,7 @@
     },
     "apps/desktop": {
       "name": "@pier/desktop",
-      "version": "0.2.6",
+      "version": "0.2.9",
       "dependencies": {
         "@fontsource-variable/inter": "5.3.0",
         "@pier/chat-state": "workspace:*",
@@ -44,7 +44,7 @@
     },
     "apps/mobile": {
       "name": "@pier/mobile",
-      "version": "0.2.6",
+      "version": "0.2.9",
       "dependencies": {
         "@expo/metro-runtime": "~57.0.16",
         "@pier/chat-state": "workspace:*",
@@ -79,7 +79,7 @@
     },
     "packages/chat-state": {
       "name": "@pier/chat-state",
-      "version": "0.2.6",
+      "version": "0.2.9",
       "dependencies": {
         "@pier/client": "workspace:*",
         "@pier/protocol": "workspace:*",
@@ -87,7 +87,7 @@
     },
     "packages/client": {
       "name": "@pier/client",
-      "version": "0.2.6",
+      "version": "0.2.9",
       "dependencies": {
         "@pier/crypto": "workspace:*",
         "@pier/protocol": "workspace:*",
@@ -95,7 +95,7 @@
     },
     "packages/crypto": {
       "name": "@pier/crypto",
-      "version": "0.2.6",
+      "version": "0.2.9",
       "dependencies": {
         "@noble/ciphers": "^2.4.0",
         "@noble/curves": "^2.4.0",
@@ -105,7 +105,7 @@
     },
     "packages/host": {
       "name": "@pier/host",
-      "version": "0.2.6",
+      "version": "0.2.9",
       "bin": {
         "pier-host": "./src/main.ts",
       },
@@ -116,17 +116,19 @@
         "@pier/crypto": "workspace:*",
         "@pier/protocol": "workspace:*",
         "bonjour-service": "^1.4.4",
+        "proper-lockfile": "4.1.2",
         "ws": "^8.22.0",
         "zod": "^4.6.5",
       },
       "devDependencies": {
         "@pier/chat-state": "workspace:*",
+        "@types/proper-lockfile": "4.1.4",
         "@types/ws": "^8.18.1",
       },
     },
     "packages/protocol": {
       "name": "@pier/protocol",
-      "version": "0.2.6",
+      "version": "0.2.9",
       "dependencies": {
         "zod": "^4.6.5",
       },
@@ -710,6 +712,8 @@
     "@types/ms": ["@types/ms@2.1.0", "", {}, "sha512-GsCCIZDE/p3i96vtEqx+7dBUGXrc7zeSK3wwPHIaRThS+9OhWIXRqzs4d6k1SVU8g91DrNRWxWUGhp5KXQb2VA=="],
 
     "@types/node": ["@types/node@26.6.3", "", { "dependencies": { "undici-types": "8.9.0" } }, "sha512-dsqMQQoeTLqu9wynDD00q573mNzso3IdQOAfHRJqLCcmCFPoGo9A1bDpUcv/9tnKpErQWv9uKeGfl37EIS02Yg=="],
+
+    "@types/proper-lockfile": ["@types/proper-lockfile@4.1.4", "", { "dependencies": { "@types/retry": "*" } }, "sha512-uo2ABllncSqg9F1D4nugVl9v93RmjxF6LJzQLMLDdPaXCUIDPeOJ21Gbqi43xNKzBi/WQ0Q0dICqufzQbMjipQ=="],
 
     "@types/react": ["@types/react@19.2.18", "", { "dependencies": { "csstype": "3.2.3" } }, "sha512-AnzbBERsrLKtk2XSfTbYRLjQPdy116Sty4q+T+Bp3IC4l6jNBvreVPAHmpq9qhXQM7CXZPjLVmGMw9sy+hxQ3w=="],
 

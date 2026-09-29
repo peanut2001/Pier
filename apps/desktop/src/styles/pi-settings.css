@@ -1,0 +1,148 @@
+/* Settings → pi 配置: form and JSON editor for pi's settings.json. */
+
+.pi-settings-toolbar {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	margin-bottom: 20px;
+}
+
+.pi-settings-toolbar .segmented {
+	align-self: center;
+}
+
+.pi-settings-toolbar .segmented button {
+	gap: 6px;
+}
+
+.pi-settings-search {
+	flex: 1;
+	min-width: 0;
+	margin-bottom: 0;
+}
+
+.pi-setting-title {
+	display: inline-flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px;
+}
+
+.mini-tag.accent {
+	background: var(--accent-soft);
+	color: var(--accent-text);
+}
+
+.pi-setting-meta {
+	color: var(--text-faint);
+}
+
+.pi-setting-meta code {
+	font-size: 11.5px;
+}
+
+input.pi-setting-input {
+	width: 260px;
+	max-width: 100%;
+	min-width: 0;
+}
+
+input.pi-setting-input.numeric {
+	width: 130px;
+	text-align: right;
+}
+
+.pi-setting-unit {
+	flex: none;
+}
+
+/* Keeps switches and selects aligned with rows that show a reset button. */
+.pi-setting-reset-placeholder {
+	flex: none;
+	width: 28px;
+}
+
+textarea.pi-setting-list {
+	font-size: 12.5px;
+}
+
+.pi-settings-card .setting-row.stack .setting-control {
+	justify-content: flex-start;
+	max-width: none;
+}
+
+.pi-tool-chips {
+	display: flex;
+	flex: 1;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+button.pi-tool-chip {
+	padding: 4px 11px;
+	border-radius: 999px;
+	color: var(--text-muted);
+	font-size: 12px;
+}
+
+button.pi-tool-chip.on,
+button.pi-tool-chip.on:hover:not(:disabled) {
+	border-color: var(--accent-ring);
+	background: var(--accent-soft);
+	color: var(--accent-text);
+}
+
+button.pi-group-toggle {
+	gap: 6px;
+	margin-left: -8px;
+	padding: 4px 8px;
+	font-size: 14px;
+	font-weight: 600;
+	color: var(--text);
+}
+
+.pi-json-card {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	padding-top: 12px;
+	padding-bottom: 12px;
+}
+
+.pi-json-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+}
+
+.pi-json-head > .muted {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.pi-json-actions {
+	display: flex;
+	flex: none;
+	gap: 8px;
+}
+
+.pi-json-card > .banner.inline {
+	margin: 0;
+}
+
+textarea.pi-json-editor {
+	min-height: 420px;
+	height: calc(100vh - 460px);
+	font-size: 12.5px;
+	line-height: 1.6;
+	tab-size: 2;
+	white-space: pre;
+	overflow: auto;
+}
+
+.pi-json-status {
+	min-height: 18px;
+}

@@ -104,6 +104,11 @@ export type PierHostEvent =
 	 * workspace's project settings changed. Sent to every connection.
 	 */
 	| { type: "extension.changed"; workspaceId?: string }
+	/**
+	 * A pi settings file was changed through `settings.update` / `settings.write` (1.13).
+	 * `workspaceId` is set for a workspace's project settings. Sent to every connection.
+	 */
+	| { type: "settings.changed"; scope: "user" | "project"; workspaceId?: string }
 	/** Progress of `extension.install` / `remove` / `update` (1.8). Local connections only. */
 	| {
 			type: "extension.progress";

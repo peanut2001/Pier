@@ -1,4 +1,4 @@
-# Pier 协议 v1.12
+# Pier 协议 v1.13
 
 > 实现：`packages/protocol`（zod schema + TS 类型，Host 与所有客户端共享）。
 > 本文档描述线上格式与语义；字段的权威定义以 `packages/protocol/src` 为准。
@@ -59,7 +59,7 @@
 
 ```jsonc
 { "type": "req", "id": "h", "method": "host.hello", "params": {
-  "protocolVersion": "1.12",
+  "protocolVersion": "1.13",
   "client": { "name": "pier-desktop", "version": "0.1.0", "platform": "darwin" },
   "token": "<本地 token>",       // 本地连接必填；远程连接由加密通道认证，不需要
   "coalesceMs": 50               // 可选：合并流式增量的窗口（0–1000ms，默认 0）
@@ -234,6 +234,18 @@ pi 终端界面自带的命令（`/model`、`/compact`、`/new`、`/fork`、`/na
 
 settings 文件无法解析时，修改类方法返回 `CONFLICT`，避免覆盖用户的文件。
 
+### pi 设置（1.13）
+
+直接读写 pi 的 settings 文件，供「设置 → pi 配置」可视化编辑（终端里的 pi 读取同一份文件）。与 `extension.*` 相同，`scope: "user"` 为 `<agentDir>/settings.json`，`scope: "project"` 为 `<工作区>/.pi/settings.json`，需要带 `workspaceId`。Host 不校验各设置项的含义，只保证文件是 JSON 对象；写入时与 pi 使用同一把文件锁（`proper-lockfile`），不会与正在保存设置的 pi 进程交错。对已配对设备开放，远程调用写入审计日志（只记录修改的键名和字节数，不记录值）。
+
+文件有实际变化时，Host 对受影响的空闲会话执行 `session.reload`（全局改动为所有会话，项目改动为该工作区的会话；运行中的会话计入 `pending`），然后广播 `settings.changed`、`extension.changed`（settings 中也有扩展包与资源），全局改动再广播 `provider.changed`（默认模型也在其中）。个别设置（如 `defaultTools`、`transport`）只在创建会话时读取，重新加载不会改变已打开会话的这些值。
+
+| 方法 | 参数 | 结果 |
+|---|---|---|
+| `settings.get` | `{ workspaceId? }` | `PiSettingsResult = { agentDir, user, project? }`，`user` / `project` 为 `PiSettingsFile = { scope, path, exists, text, settings?, error?, modifiedAt? }`（`project` 另带 `workspaceId`）。按文件原样返回，不合并全局与项目设置，也不补默认值。文件不存在时 `exists: false, text: "", settings: {}`；内容不是 JSON 对象时省略 `settings` 并给出 `error`，`text` 仍为原文 |
+| `settings.update` | `{ scope, workspaceId?, changes: { path: string[], value? }[], reload?(true) }` | `PiSettingsChangeResult = { file, changed, reload }`；在文件当前内容上逐项修改：`path` 为键路径（如 `["compaction", "enabled"]`，1–8 段，禁止 `__proto__` / `prototype` / `constructor`），带 `value` 时设置（沿途创建对象），省略时删除该键并移除因此变空的父对象。其他键（包括 Pier 不认识的）保持不变，按 pi 的格式（两个空格缩进）写回，保留原有的结尾换行。路径经过的值不是对象时 `BAD_REQUEST`；文件无法解析时 `CONFLICT`（改用 `settings.write` 修复）。内容没有变化时不写文件，`changed: false`。`reload: false` 跳过重新加载会话（只影响终端 pi 的设置），仍会广播事件 |
+| `settings.write` | `{ scope, workspaceId?, text, expectedModifiedAt? }` | `PiSettingsChangeResult`；用 `text`（最多 1 MiB，必须是 JSON 对象）整体替换文件，原样写入。带 `expectedModifiedAt`（读取时的 `modifiedAt`）时，文件在此之后被修改（或已被删除）则 `CONFLICT`，不写入。`text` 不是 JSON 对象时 `BAD_REQUEST` |
+
 ### UI
 
 | 方法 | 参数 | 结果 |
@@ -305,6 +317,7 @@ Host 保存已配对的电脑于 `~/.pier/peers.json`（0600），每次经代�
 | `session.activity` | `workspaceId, sessionId, state, pendingUi` | 活跃会话的运行状态或待回答请求数变化（1.1）。列表页据此显示“运行中 / 待批准”，无需订阅每个会话 |
 | `provider.changed` | – | 服务商、凭据、`models.json` 或默认模型变化（1.2）；重新调用 `provider.list` / `model.list` |
 | `extension.changed` | `workspaceId?` | 扩展或扩展包设置变化（1.8）；只改了某个工作区的项目设置时带 `workspaceId`。重新调用 `extension.list`，会话的斜杠命令也可能变化 |
+| `settings.changed` | `scope, workspaceId?` | 通过 `settings.update` / `settings.write` 修改了 pi 的 settings 文件（1.13）；`scope: "project"` 时带 `workspaceId`。重新调用 `settings.get`。在 Pier 之外修改文件（终端 pi、手动编辑）不会触发 |
 
 仅发给本地（桌面）连接（`LOCAL_ONLY_EVENTS`）：
 

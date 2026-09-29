@@ -248,3 +248,21 @@ export const IconServer = make(
 		<path d="M6 6h.01M6 18h.01" />
 	</>,
 );
+export const IconSliders = make(
+	<>
+		<path d="M21 4h-7M10 4H3M21 12h-9M8 12H3M21 20h-5M12 20H3" />
+		<path d="M14 2v4M8 10v4M16 18v4" />
+	</>,
+);
+export const IconUndo = make(
+	<>
+		<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+		<path d="M3 3v5h5" />
+	</>,
+);
+export const IconBraces = make(
+	<>
+		<path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5c0 1.1.9 2 2 2h1" />
+		<path d="M16 21h1a2 2 0 0 0 2-2v-5c0-1.1.9-2 2-2a2 2 0 0 1-2-2V5a2 2 0 0 0-2-2h-1" />
+	</>,
+);

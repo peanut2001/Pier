@@ -29,6 +29,8 @@ import {
 	type NewApiModel,
 	type NewApiToken,
 	type PeerInfo,
+	type PiSettingsChangeResult,
+	type PiSettingsResult,
 	type ProviderInfo,
 	type ProviderListResult,
 	type QueueState,
@@ -50,6 +52,17 @@ const Id = z.string().min(1).max(256);
 const SessionRef = { sessionId: Id };
 const Text = z.string().max(1_000_000);
 const Images = z.array(ImageInputSchema).max(16).optional();
+/** Key path into a settings object; prototype keys are rejected. */
+const SettingsKeyPath = z
+	.array(
+		z
+			.string()
+			.min(1)
+			.max(200)
+			.refine((key) => key !== "__proto__" && key !== "prototype" && key !== "constructor", "Reserved key"),
+	)
+	.min(1)
+	.max(8);
 
 export const ClientInfoSchema = z.object({
 	name: z.string().min(1).max(100),
@@ -278,6 +291,36 @@ export const MethodParamsSchemas = {
 	 */
 	"extension.delete": z.object({ path: z.string().min(1).max(4096), workspaceId: Id.optional() }),
 
+	/**
+	 * pi settings files (1.13): the user settings (`<agentDir>/settings.json`) and, with
+	 * `workspaceId`, that workspace's `.pi/settings.json`, as stored (not merged).
+	 */
+	"settings.get": z.object({ workspaceId: Id.optional() }).optional(),
+	/**
+	 * Set or remove individual settings, keeping everything else in the file. Each change names
+	 * a key path (`["compaction", "enabled"]`); omit `value` to remove the key. `project` scope
+	 * needs `workspaceId`. `reload: false` skips reloading open sessions (terminal-only settings).
+	 */
+	"settings.update": z.object({
+		scope: ExtensionScopeSchema,
+		workspaceId: Id.optional(),
+		changes: z
+			.array(z.object({ path: SettingsKeyPath, value: z.unknown().optional() }))
+			.min(1)
+			.max(200),
+		reload: z.boolean().optional(),
+	}),
+	/**
+	 * Replace a settings file with `text`, which must be a JSON object. With `expectedModifiedAt`
+	 * fails with `CONFLICT` when the file changed since it was read.
+	 */
+	"settings.write": z.object({
+		scope: ExtensionScopeSchema,
+		workspaceId: Id.optional(),
+		text: z.string().max(1024 * 1024),
+		expectedModifiedAt: z.string().max(64).optional(),
+	}),
+
 	"ui.respond": z.object({ ...SessionRef, requestId: Id, response: UiResponseSchema }),
 
 	"device.list": z.object({}).optional(),
@@ -431,6 +474,9 @@ export interface MethodResults {
 	"extension.checkUpdates": { updates: ExtensionUpdateInfo[] };
 	"extension.setEnabled": { resource: ExtensionResourceInfo; reload: ExtensionReloadSummary };
 	"extension.delete": { deleted: boolean; reload: ExtensionReloadSummary };
+	"settings.get": PiSettingsResult;
+	"settings.update": PiSettingsChangeResult;
+	"settings.write": PiSettingsChangeResult;
 	"ui.respond": { accepted: boolean };
 	"device.list": { devices: DeviceInfo[] };
 	"device.revoke": { revoked: boolean };
