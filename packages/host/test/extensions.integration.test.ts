@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import type { PierClient } from "@pier/client";
 import { LOCAL_ONLY_METHODS, PierProtocolError, type SessionSummary, type WorkspaceInfo } from "@pier/protocol";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -81,8 +81,8 @@ describe("extension management", () => {
 
 		const installed = await client.request("extension.install", { source: pkgDir });
 		expect(installed.package).toMatchObject({
-			// Settings keep local paths relative to the settings file.
-			source: "../demo-package",
+			// Settings keep local paths relative to the settings file (with the platform separator, as pi writes them).
+			source: relative(agentDir, pkgDir),
 			installedPath: pkgDir,
 			scope: "user",
 			kind: "local",
@@ -130,7 +130,7 @@ describe("extension management", () => {
 		expect(off.resource).toMatchObject({ path, enabled: false, origin: "package" });
 		expect(off.reload.reloaded).toBe(1);
 		expect(settingsOf(join(agentDir, "settings.json")).packages).toEqual([
-			{ source: "../demo-package", extensions: ["-extensions/demo.js"] },
+			{ source: relative(agentDir, pkgDir), extensions: [`-${join("extensions", "demo.js")}`] },
 		]);
 		expect(await commandNames(session.id)).not.toContain("demo-cmd");
 		// The skill of the same package is unaffected.
@@ -163,8 +163,18 @@ describe("extension management", () => {
 
 		const single = join(agentDir, "extensions", "single.js");
 		await client.request("extension.setEnabled", { type: "extensions", path: single, enabled: false });
-		expect(settingsOf(join(agentDir, "settings.json")).extensions).toEqual(["-extensions/single.js"]);
+		expect(settingsOf(join(agentDir, "settings.json")).extensions).toEqual([`-${join("extensions", "single.js")}`]);
 		expect(await commandNames(session.id)).not.toContain("single-cmd");
+
+		// An override written with "/" (by hand or on another OS) names the same file, so it is replaced.
+		const settings = settingsOf(join(agentDir, "settings.json"));
+		writeFileSync(
+			join(agentDir, "settings.json"),
+			JSON.stringify({ ...settings, extensions: ["-extensions/single.js"] }),
+		);
+		await client.request("extension.setEnabled", { type: "extensions", path: single, enabled: true });
+		expect(settingsOf(join(agentDir, "settings.json")).extensions).toEqual([`+${join("extensions", "single.js")}`]);
+		expect(await commandNames(session.id)).toContain("single-cmd");
 
 		const deleted = await client.request("extension.delete", {
 			path: join(agentDir, "extensions", "multi", "index.js"),
