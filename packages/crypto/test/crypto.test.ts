@@ -193,7 +193,8 @@ describe("secure channel", () => {
 		const first = device.seal("one");
 		const second = device.seal("two");
 		const tampered = JSON.parse(first) as { c: string };
-		tampered.c = `A${tampered.c.slice(1)}`;
+		// Change the first character (to a different one: the ciphertext may already start with "A").
+		tampered.c = `${tampered.c.startsWith("A") ? "B" : "A"}${tampered.c.slice(1)}`;
 		expect(() => host.open(JSON.stringify({ ...JSON.parse(first), c: tampered.c }))).toThrow();
 		expect(() => host.open(second)).toThrow(/nonce/);
 		expect(host.open(first)).toBe("one");
