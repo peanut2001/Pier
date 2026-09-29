@@ -18,6 +18,7 @@ import type {
 	ExtensionResourceType,
 	ExtensionScope,
 	ExtensionUpdateInfo,
+	HostDirectoryListing,
 	HostInfo,
 	MethodName,
 	MethodParams,
@@ -35,7 +36,7 @@ import type {
 	WorkspaceFileWriteResult,
 	WorkspaceInfo,
 } from "@pier/protocol";
-import { PierProtocolError } from "@pier/protocol";
+import { PierProtocolError, parseProtocolVersion } from "@pier/protocol";
 import { createContext, useContext, useSyncExternalStore } from "react";
 import type { Bridge, HostStatus, UpdateStatus } from "./bridge.ts";
 import { fileToken } from "./composer-text.ts";
@@ -45,6 +46,18 @@ export const APP_VERSION = "0.2.7";
 
 /** Node id of this computer; any other node is a paired computer's host id. */
 export const LOCAL_NODE = "local";
+
+/** Where a workspace change applies: the shown computer, or this one (the settings screen). */
+export type WorkspaceTarget = "node" | "local";
+
+/**
+ * Whether a host lets paired devices manage it (workspaces, policies, file edits): hosts
+ * speaking protocol 1.10 or later trust paired devices fully.
+ */
+export function hostAllowsRemoteManagement(info: HostInfo | undefined): boolean {
+	const version = info ? parseProtocolVersion(info.protocolVersion) : undefined;
+	return version !== undefined && (version.major > 1 || (version.major === 1 && version.minor >= 10));
+}
 
 /** Subscriptions kept alive for recently viewed sessions (so approvals elsewhere stay visible). */
 const MAX_LIVE_CHATS = 8;
@@ -169,6 +182,8 @@ export interface AppState {
 	/** Bumped when pi extension or package settings changed, so the extensions page reloads. */
 	extensionsVersion: number;
 	extensionProgress?: ExtensionProgressState | undefined;
+	/** The directory picker for the shown (paired) computer is open. */
+	directoryPicker?: { title: string } | undefined;
 }
 
 const PAIRING_RESULT_TEXT: Record<PairingResolution, string> = {
@@ -246,6 +261,7 @@ export class PierStore {
 	client: PierClient | undefined;
 	/** This computer's Pier Host (settings, models, pairing, and the proxy to other computers). */
 	private localClient: PierClient | undefined;
+	private directoryPickerResolve: ((path: string | null) => void) | undefined;
 	private clientKey: string | undefined;
 	private localUrl: string | undefined;
 	private localToken: string | undefined;
@@ -442,6 +458,7 @@ export class PierStore {
 	 * session lists on screen (reconnecting to the same computer).
 	 */
 	private teardownNode(keepData = false): void {
+		if (!keepData && this.state.directoryPicker) this.resolveDirectoryPicker(null);
 		for (const chat of this.chats.values()) chat.dispose();
 		this.chats.clear();
 		this.recent = [];
@@ -1310,7 +1327,7 @@ export class PierStore {
 	): Promise<WorkspaceFileWriteResult> {
 		const client = this.client;
 		if (!client) throw new Error("尚未连接到 Pier Host");
-		if (!this.isLocalNode) throw new Error("只能编辑本机的文件");
+		if (!this.canManageNode) throw new Error("那台电脑的 Pier 版本过旧，不支持远程编辑文件");
 		const result = await client.request("workspace.writeFile", {
 			workspaceId,
 			path,
@@ -1356,17 +1373,33 @@ export class PierStore {
 		this.saveDraft(sessionId, { ...draft, text: `${draft.text}${sep}${fileToken(path, directory)} ` });
 	}
 
-	/** Add a workspace on this computer (workspaces of other computers are managed there). */
-	async addWorkspace(path: string, policy?: ApprovalPolicy): Promise<WorkspaceInfo | undefined> {
-		const result = await this.callLocal("添加工作区", (c) =>
+	/** The client that a workspace change goes to. */
+	private workspaceClient(target: WorkspaceTarget): PierClient | undefined {
+		return target === "node" ? this.client : this.localClient;
+	}
+
+	/** Reload the workspace lists after a change made through `client`. */
+	private async afterWorkspaceChange(client: PierClient): Promise<void> {
+		if (client === this.client) await this.loadWorkspaces();
+		else if (client === this.localClient) await this.loadLocalWorkspaces();
+	}
+
+	/**
+	 * Add a workspace on the shown computer (`node`, the default) or on this one (`local`,
+	 * the settings screen). Paired computers accept this from hosts speaking protocol 1.10.
+	 */
+	async addWorkspace(
+		path: string,
+		policy?: ApprovalPolicy,
+		target: WorkspaceTarget = "node",
+	): Promise<WorkspaceInfo | undefined> {
+		const client = this.workspaceClient(target);
+		const result = await this.callWith(client, "添加工作区", (c) =>
 			c.request("workspace.add", { path, ...(policy ? { policy } : {}) }),
 		);
-		if (!result) return undefined;
-		if (!this.isLocalNode) {
-			await this.loadLocalWorkspaces();
-			return result.workspace;
-		}
-		await this.loadWorkspaces();
+		if (!result || !client) return undefined;
+		await this.afterWorkspaceChange(client);
+		if (client !== this.client) return result.workspace;
 		this.set((s) => ({
 			selectedWorkspaceId: result.workspace.id,
 			expanded: { ...s.expanded, [result.workspace.id]: true },
@@ -1376,34 +1409,67 @@ export class PierStore {
 		return result.workspace;
 	}
 
-	async removeWorkspace(workspaceId: string): Promise<void> {
-		const result = await this.callLocal("移除工作区", (c) => c.request("workspace.remove", { workspaceId }));
-		if (!result) return;
-		if (!this.isLocalNode) {
-			await this.loadLocalWorkspaces();
-			return;
+	async removeWorkspace(workspaceId: string, target: WorkspaceTarget = "node"): Promise<void> {
+		const client = this.workspaceClient(target);
+		const result = await this.callWith(client, "移除工作区", (c) => c.request("workspace.remove", { workspaceId }));
+		if (!result || !client) return;
+		if (client === this.client) {
+			for (const [id, chat] of this.chats) {
+				if (chat.workspaceId === workspaceId) this.dropChat(id);
+			}
+			if (this.state.selectedWorkspaceId === workspaceId) {
+				this.set({ selectedWorkspaceId: undefined, selectedSessionId: undefined });
+			}
 		}
-		for (const [id, chat] of this.chats) {
-			if (chat.workspaceId === workspaceId) this.dropChat(id);
-		}
-		if (this.state.selectedWorkspaceId === workspaceId) {
-			this.set({ selectedWorkspaceId: undefined, selectedSessionId: undefined });
-		}
-		await this.loadWorkspaces();
+		await this.afterWorkspaceChange(client);
 	}
 
-	async setPolicy(workspaceId: string, policy: ApprovalPolicy): Promise<void> {
-		const result = await this.callLocal("修改审批策略", (c) =>
+	async setPolicy(workspaceId: string, policy: ApprovalPolicy, target: WorkspaceTarget = "node"): Promise<void> {
+		const client = this.workspaceClient(target);
+		const result = await this.callWith(client, "修改审批策略", (c) =>
 			c.request("workspace.setPolicy", { workspaceId, policy }),
 		);
-		if (result) {
-			const replace = (list: WorkspaceInfo[]) => list.map((w) => (w.id === workspaceId ? result.workspace : w));
-			this.set((s) =>
-				this.isLocalNode
-					? { workspaces: replace(s.workspaces), localWorkspaces: replace(s.localWorkspaces) }
-					: { localWorkspaces: replace(s.localWorkspaces) },
-			);
-		}
+		if (!result) return;
+		const replace = (list: WorkspaceInfo[]) => list.map((w) => (w.id === workspaceId ? result.workspace : w));
+		const shown = client === this.client;
+		const local = client === this.localClient;
+		this.set((s) => ({
+			...(shown ? { workspaces: replace(s.workspaces) } : {}),
+			...(local ? { localWorkspaces: replace(s.localWorkspaces) } : {}),
+		}));
+	}
+
+	/** Whether the shown computer lets this one manage it (always true for this computer). */
+	get canManageNode(): boolean {
+		return this.isLocalNode || hostAllowsRemoteManagement(this.state.hostInfo);
+	}
+
+	/** Subdirectories of a directory on the shown computer (its home directory by default). */
+	async listDirectories(path?: string): Promise<HostDirectoryListing> {
+		const client = this.client;
+		if (!client) throw new Error("尚未连接到 Pier Host");
+		return client.request("host.listDirectories", path ? { path } : {});
+	}
+
+	/**
+	 * Pick a directory on the shown computer: the system dialog for this computer, or Pier's
+	 * directory browser for a paired one. Resolves to `null` when cancelled.
+	 */
+	pickNodeDirectory(title = "选择工作区目录"): Promise<string | null> {
+		if (this.isLocalNode) return this.pickDirectory();
+		this.directoryPickerResolve?.(null);
+		return new Promise((resolve) => {
+			this.directoryPickerResolve = resolve;
+			this.set({ directoryPicker: { title } });
+		});
+	}
+
+	/** Close the paired computer's directory picker with a path, or `null` when cancelled. */
+	resolveDirectoryPicker(path: string | null): void {
+		const resolve = this.directoryPickerResolve;
+		this.directoryPickerResolve = undefined;
+		this.set({ directoryPicker: undefined });
+		resolve?.(path);
 	}
 
 	toggleExpanded(workspaceId: string): void {
@@ -1726,6 +1792,15 @@ export function useStore(): PierStore {
 export function useAppState<T>(selector: (state: AppState) => T): T {
 	const store = useStore();
 	return useSyncExternalStore(store.subscribe, () => selector(store.getState()));
+}
+
+/**
+ * Whether the main window may manage the shown computer: add and remove workspaces, change
+ * approval policies, and edit files. Always true for this computer; for a paired computer,
+ * when its host trusts paired devices (protocol 1.10 or later).
+ */
+export function useCanManageNode(): boolean {
+	return useAppState((s) => s.node === LOCAL_NODE || hostAllowsRemoteManagement(s.hostInfo));
 }
 
 const EMPTY_VIEW: ChatView | undefined = undefined;

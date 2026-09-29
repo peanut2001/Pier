@@ -251,3 +251,93 @@
 	color: var(--text);
 	font-size: 13px;
 }
+
+/* ---- directory picker (another computer's directories) ------------------------------ */
+
+.directory-picker-intro {
+	margin: 0 0 12px;
+	line-height: 1.6;
+}
+
+.directory-picker-bar {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	margin-bottom: 8px;
+}
+
+.directory-picker-bar input {
+	flex: 1;
+	min-width: 0;
+	height: 32px;
+	font-size: 12.5px;
+}
+
+.directory-picker-bar .ghost.icon {
+	flex: none;
+	width: 30px;
+	height: 30px;
+	border-radius: 8px;
+}
+
+.directory-picker-list {
+	height: min(340px, calc(100vh - 320px));
+	min-height: 160px;
+	overflow-y: auto;
+	padding: 4px;
+	border: 1px solid var(--border);
+	border-radius: 10px;
+	background: var(--bg-input);
+}
+
+.directory-picker-item {
+	display: flex;
+	align-items: center;
+	justify-content: flex-start;
+	gap: 8px;
+	width: 100%;
+	height: 30px;
+	padding: 0 8px;
+	border: none;
+	border-radius: 7px;
+	background: transparent;
+	color: var(--text);
+	font-size: 13px;
+	font-weight: 400;
+	text-align: left;
+}
+
+.directory-picker-item:hover:not(:disabled) {
+	background: var(--bg-hover);
+}
+
+.directory-picker-item:active:not(:disabled) {
+	transform: none;
+}
+
+.directory-picker-item > svg {
+	flex: none;
+	color: var(--text-muted);
+}
+
+.directory-picker-name {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.directory-picker-empty {
+	padding: 16px 10px;
+	font-size: 13px;
+	line-height: 1.6;
+	word-break: break-all;
+}
+
+.directory-picker-hidden {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin-top: 10px;
+}

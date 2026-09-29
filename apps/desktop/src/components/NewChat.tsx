@@ -1,7 +1,7 @@
 import type { WorkspaceInfo } from "@pier/protocol";
 import { useEffect, useRef, useState } from "react";
 import { draftToPrompt } from "../lib/composer-text.ts";
-import { type Draft, LOCAL_NODE, NEW_CHAT_DRAFT, useAppState, useStore } from "../lib/store.tsx";
+import { type Draft, NEW_CHAT_DRAFT, useAppState, useCanManageNode, useStore } from "../lib/store.tsx";
 import { readImages, useComposerInsert } from "./Composer.tsx";
 import { ComposerInput, type ComposerInputHandle } from "./ComposerInput.tsx";
 import { FilesPanelToggle } from "./FilesPanel.tsx";
@@ -27,7 +27,7 @@ function WorkspacePicker({ workspace, disabled }: { workspace?: WorkspaceInfo; d
 	const store = useStore();
 	const workspaces = useAppState((s) => s.workspaces);
 	const addWorkspace = useAddWorkspace();
-	const local = useAppState((s) => s.node === LOCAL_NODE);
+	const canAdd = useCanManageNode();
 	const [open, setOpen] = useState(false);
 	const ref = useOutsideClick(open, () => setOpen(false));
 	return (
@@ -70,7 +70,7 @@ function WorkspacePicker({ workspace, disabled }: { workspace?: WorkspaceInfo; d
 							</button>
 						);
 					})}
-					{local ? (
+					{canAdd ? (
 						<>
 							{workspaces.length ? <div className="dropdown-separator" /> : null}
 							<button
@@ -88,7 +88,9 @@ function WorkspacePicker({ workspace, disabled }: { workspace?: WorkspaceInfo; d
 							</button>
 						</>
 					) : workspaces.length ? null : (
-						<div className="dropdown-note">那台电脑上还没有工作区，请在它的 Pier 中添加。</div>
+						<div className="dropdown-note">
+							那台电脑的 Pier 版本较旧，不支持远程添加工作区。请升级那台电脑上的 Pier，或在那台电脑上添加。
+						</div>
 					)}
 				</div>
 			) : null}

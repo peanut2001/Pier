@@ -218,7 +218,7 @@ function WorkspaceCard({ workspace }: { workspace: WorkspaceInfo }) {
 							setConfirmRemove(true);
 							return;
 						}
-						void store.removeWorkspace(workspace.id);
+						void store.removeWorkspace(workspace.id, "local");
 					}}
 					title="从 Pier 移除工作区（不会删除任何文件）"
 				>
@@ -236,7 +236,7 @@ function WorkspaceCard({ workspace }: { workspace: WorkspaceInfo }) {
 				<select
 					className="setting-select compact"
 					value={workspace.policy}
-					onChange={(e) => void store.setPolicy(workspace.id, e.target.value as ApprovalPolicy)}
+					onChange={(e) => void store.setPolicy(workspace.id, e.target.value as ApprovalPolicy, "local")}
 				>
 					{(["ask", "smart", "auto"] as ApprovalPolicy[]).map((policy) => (
 						<option key={policy} value={policy}>
@@ -252,7 +252,7 @@ function WorkspaceCard({ workspace }: { workspace: WorkspaceInfo }) {
 
 function WorkspacesSettings() {
 	const workspaces = useAppState((s) => s.localWorkspaces);
-	const addWorkspace = useAddWorkspace();
+	const addWorkspace = useAddWorkspace("local");
 	return (
 		<>
 			<p className="settings-intro">

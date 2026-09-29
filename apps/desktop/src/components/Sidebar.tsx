@@ -1,7 +1,7 @@
 import type { ApprovalPolicy, SessionSummary, WorkspaceInfo } from "@pier/protocol";
 import { useEffect, useState } from "react";
 import { POLICY_DESCRIPTION, POLICY_LABEL, relativeTime, sessionTitle } from "../lib/format.ts";
-import { LOCAL_NODE, useAppState, useStore } from "../lib/store.tsx";
+import { LOCAL_NODE, useAppState, useCanManageNode, useStore, type WorkspaceTarget } from "../lib/store.tsx";
 import { useHostStatus, useNodeStatus } from "./HostPanels.tsx";
 import {
 	IconCheck,
@@ -48,16 +48,20 @@ export function SidebarToggle({ floating = false }: { floating?: boolean }) {
 	return floating ? <div className="home-toolbar left">{button}</div> : button;
 }
 
-/** Whether workspaces can be added from the main window (only on this computer). */
+/** Whether workspaces can be added from the main window (this computer, or a paired one that allows it). */
 export function useCanAddWorkspace(): boolean {
-	return useAppState((s) => s.node === LOCAL_NODE);
+	return useCanManageNode();
 }
 
-export function useAddWorkspace(): () => Promise<void> {
+/**
+ * Pick a directory and add it as a workspace: on the shown computer (`node`, the default,
+ * browsing a paired computer's directories when needed) or on this one (`local`).
+ */
+export function useAddWorkspace(target: WorkspaceTarget = "node"): () => Promise<void> {
 	const store = useStore();
 	return async () => {
-		const path = await store.pickDirectory();
-		if (path) await store.addWorkspace(path);
+		const path = target === "local" ? await store.pickDirectory() : await store.pickNodeDirectory();
+		if (path) await store.addWorkspace(path, undefined, target);
 	};
 }
 
@@ -414,7 +418,9 @@ export function Sidebar({ open = true }: { open?: boolean }) {
 							添加第一个工作区
 						</button>
 					) : (
-						<div className="session-empty">那台电脑上还没有工作区，请在它的 Pier 中添加。</div>
+						<div className="session-empty">
+							那台电脑的 Pier 版本较旧，不支持远程添加工作区。请升级那台电脑上的 Pier，或在那台电脑上添加。
+						</div>
 					)
 				) : null}
 			</div>

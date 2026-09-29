@@ -59,7 +59,7 @@ describe("extension management", () => {
 		return (await client.request("session.commands", { sessionId })).commands.map((c) => c.name);
 	}
 
-	it("keeps every extension method local-only", () => {
+	it("lets paired devices manage extensions (1.10)", () => {
 		for (const method of [
 			"extension.list",
 			"extension.install",
@@ -69,7 +69,7 @@ describe("extension management", () => {
 			"extension.setEnabled",
 			"extension.delete",
 		] as const) {
-			expect(LOCAL_ONLY_METHODS.has(method), method).toBe(true);
+			expect(LOCAL_ONLY_METHODS.has(method), method).toBe(false);
 		}
 	});
 

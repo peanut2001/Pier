@@ -1,5 +1,5 @@
 import { POLICY_LABEL, relativeTime, sessionTitle } from "../lib/format.ts";
-import { LOCAL_NODE, useAppState, useStore } from "../lib/store.tsx";
+import { LOCAL_NODE, useAppState, useCanManageNode, useStore } from "../lib/store.tsx";
 import { FilesPanelToggle } from "./FilesPanel.tsx";
 import {
 	IconChevronRight,
@@ -22,9 +22,11 @@ const STEPS = [
 	{ icon: IconShield, title: "审批操作", text: "执行命令或修改工作区外的文件前，Pier 会先征求你的同意。" },
 ];
 
-/** A paired computer without workspaces: they can only be added on that computer. */
+/** A paired computer without workspaces. */
 function RemoteWelcome() {
 	const store = useStore();
+	const addWorkspace = useAddWorkspace();
+	const canAdd = useCanManageNode();
 	useAppState((s) => s.peers);
 	const name = store.nodeName();
 	return (
@@ -36,12 +38,25 @@ function RemoteWelcome() {
 						<IconMonitor size={26} />
 					</div>
 					<h1>{name} 上还没有工作区</h1>
-					<p className="hero-text">
-						工作区只能在那台电脑的 Pier 中添加（「添加工作区」或「设置 → 工作区」）。添加后会自动出现在这里，
-						之后就可以在这台电脑上新建会话、查看输出和审批命令，Agent 在 {name} 上运行。
-					</p>
+					{canAdd ? (
+						<p className="hero-text">
+							选择 {name} 上的一个项目目录作为工作区，之后就可以在这台电脑上新建会话、查看输出和审批命令，Agent 在{" "}
+							{name} 上运行。
+						</p>
+					) : (
+						<p className="hero-text">
+							{name} 上的 Pier 版本较旧，不支持从这里添加工作区。请升级那台电脑上的
+							Pier，或在那台电脑上添加（「添加工作区」或「设置 → 工作区」），添加后会自动出现在这里。
+						</p>
+					)}
 				</div>
 				<div className="hero-actions">
+					{canAdd ? (
+						<button type="button" className="primary large" onClick={() => void addWorkspace()}>
+							<IconFolderPlus size={17} />
+							添加工作区
+						</button>
+					) : null}
 					<button type="button" onClick={() => store.switchNode(LOCAL_NODE)}>
 						切换回本机
 					</button>

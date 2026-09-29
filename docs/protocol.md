@@ -1,4 +1,4 @@
-# Pier 协议 v1.9
+# Pier 协议 v1.10
 
 > 实现：`packages/protocol`（zod schema + TS 类型，Host 与所有客户端共享）。
 > 本文档描述线上格式与语义；字段的权威定义以 `packages/protocol/src` 为准。
@@ -59,7 +59,7 @@
 
 ```jsonc
 { "type": "req", "id": "h", "method": "host.hello", "params": {
-  "protocolVersion": "1.9",
+  "protocolVersion": "1.10",
   "client": { "name": "pier-desktop", "version": "0.1.0", "platform": "darwin" },
   "token": "<本地 token>",       // 本地连接必填；远程连接由加密通道认证，不需要
   "coalesceMs": 50               // 可选：合并流式增量的窗口（0–1000ms，默认 0）
@@ -74,7 +74,7 @@
 
 ## 3. 方法
 
-参数中的 `sessionId` 均为 pi 会话 ID。标注 🔒 的方法仅本地桌面连接可调用（`LOCAL_ONLY_METHODS`）。
+参数中的 `sessionId` 均为 pi 会话 ID。标注 🔒 的方法仅本地桌面连接可调用（`LOCAL_ONLY_METHODS`），它们决定谁能连接这台电脑：设备、配对、远程访问与 `peer.*`。其余方法对已配对的远程设备（手机和其他电脑）同样开放（1.10）：配对即完全信任，可以管理工作区与审批策略、编辑文件、配置服务商与模型、账号和扩展；1.9 及以前这些方法也仅限本地。
 
 ### host
 
@@ -82,18 +82,19 @@
 |---|---|---|
 | `host.hello` | 见上 | `{ protocolVersion, host, connectionId }` |
 | `host.info` | – | `HostInfo`（hostId、hostName、version、protocolVersion、platform、piVersion、agentDir） |
+| `host.listDirectories` | `{ path?(绝对路径) }` | `HostDirectoryListing`：`{ path, parent?, home, separator, entries: { name, path, symlink? }[], truncated?, total? }`；列出 Host 上一个目录的子目录（含指向目录的符号链接），用于在其他电脑上选择工作区（1.10）。省略 `path` 时为用户主目录；`path` 不做 realpath，`parent` 在文件系统根目录时省略。按名称自然排序，最多 2000 项，超出时 `truncated: true` 并给出 `total`。相对路径或不是目录时 `BAD_REQUEST`，不存在时 `NOT_FOUND`，无权限时 `FORBIDDEN` |
 
 ### workspace
 
 | 方法 | 参数 | 结果 |
 |---|---|---|
 | `workspace.list` | – | `{ workspaces: WorkspaceInfo[] }` |
-| `workspace.add` 🔒 | `{ path(绝对路径), name?, policy? }` | `{ workspace }`；路径会取 realpath，重复添加返回已有项 |
-| `workspace.remove` 🔒 | `{ workspaceId }` | `{ removed }`；先强制关闭该工作区的活跃会话 |
-| `workspace.setPolicy` 🔒 | `{ workspaceId, policy: "ask"\|"smart"\|"auto" }` | `{ workspace }`；立即对活跃会话生效 |
+| `workspace.add` | `{ path(绝对路径), name?, policy? }` | `{ workspace }`；路径会取 realpath，重复添加返回已有项 |
+| `workspace.remove` | `{ workspaceId }` | `{ removed }`；先强制关闭该工作区的活跃会话 |
+| `workspace.setPolicy` | `{ workspaceId, policy: "ask"\|"smart"\|"auto" }` | `{ workspace }`；立即对活跃会话生效 |
 | `workspace.files` | `{ workspaceId, path? }` | `WorkspaceFilesResult`：`{ path, entries: { name, path, kind: "file"\|"directory"\|"other", symlink?, size?, modifiedAt? }[], truncated?, total? }`；列出工作区中的一个目录（不递归）。`path` 为相对工作区根目录的路径（`/` 分隔，省略或 `""` 为根目录），绝对路径或含 `..` 时 `BAD_REQUEST`，目录（跟随符号链接后）位于工作区之外时 `FORBIDDEN`，不存在时 `NOT_FOUND`。目录在前、再按名称自然排序，不列出 `.git`、`.hg`、`.svn`；每个目录最多返回 2000 项，超出时 `truncated: true` 并给出 `total`。指向工作区外目录的符号链接和失效链接为 `other`（1.5） |
 | `workspace.readFile` | `{ workspaceId, path }` | `WorkspaceFileContent`：`{ path, size, modifiedAt, kind: "text"\|"image"\|"binary", text?, truncated?, data?, mimeType?, tooLarge? }`；读取工作区中的一个文件用于预览。`path` 的规则与 `workspace.files` 相同；文件（跟随符号链接后）位于工作区之外时 `FORBIDDEN`，不存在时 `NOT_FOUND`，是目录或特殊文件时 `BAD_REQUEST`。`.png`/`.jpg`/`.jpeg`/`.gif`/`.webp`/`.bmp`/`.ico`/`.avif`/`.svg` 为 `image`，`data` 为 Base64（不含 `data:` 前缀），超过 8 MiB 时不返回 `data` 并设 `tooLarge: true`。其他文件按 UTF-8 解码为 `text`，最多返回前 512 KiB（超出时 `truncated: true`，被截断的多字节字符会被丢弃）；包含 NUL 字节或不是合法 UTF-8 的文件为 `binary`，不返回内容（1.7） |
-| `workspace.writeFile` 🔒 | `{ workspaceId, path, text, expectedModifiedAt? }` | `{ path, size, modifiedAt }`；用 UTF-8 文本覆盖工作区中一个已存在的文件（不会新建文件），`path` 与位置的规则同 `workspace.readFile`。文件原地写入，保留权限、属主和硬链接；原文件以 UTF-8 BOM 开头时（`workspace.readFile` 返回的 `text` 不含 BOM）会保留 BOM。`text` 最多 4 MiB（按 UTF-8 字节计）。给出 `expectedModifiedAt`（客户端读取时的 `modifiedAt`）且文件此后被修改过时不写入，返回 `CONFLICT`，`data.modifiedAt` 为磁盘上的当前修改时间；无写权限或只读文件系统时 `FORBIDDEN`（1.8） |
+| `workspace.writeFile` | `{ workspaceId, path, text, expectedModifiedAt? }` | `{ path, size, modifiedAt }`；用 UTF-8 文本覆盖工作区中一个已存在的文件（不会新建文件），`path` 与位置的规则同 `workspace.readFile`。文件原地写入，保留权限、属主和硬链接；原文件以 UTF-8 BOM 开头时（`workspace.readFile` 返回的 `text` 不含 BOM）会保留 BOM。`text` 最多 4 MiB（按 UTF-8 字节计）。给出 `expectedModifiedAt`（客户端读取时的 `modifiedAt`）且文件此后被修改过时不写入，返回 `CONFLICT`，`data.modifiedAt` 为磁盘上的当前修改时间；无写权限或只读文件系统时 `FORBIDDEN`（1.8） |
 
 ### session
 
@@ -140,22 +141,22 @@ pi 终端界面自带的命令（`/model`、`/compact`、`/new`、`/fork`、`/na
 | `model.list` | `{ sessionId? }` | `{ models: ModelInfo[], current? }`（仅列出已配置凭据的模型） |
 | `model.set` | `{ sessionId, provider, modelId, persist? }` | `{ model }`；`persist: true` 写入 pi 全局默认值 |
 | `thinking.set` | `{ sessionId, level, persist? }` | `{ level }`（按模型能力钳制后的实际等级） |
-| `model.setDefault` 🔒 | `{ provider, modelId }` | `{ defaultModel }`；写入 pi 全局 settings，只影响新会话（1.2） |
+| `model.setDefault` | `{ provider, modelId }` | `{ defaultModel }`；写入 pi 全局 settings，只影响新会话（1.2） |
 
 ### 服务商与凭据（1.2）
 
-直接在 Pier 中配置模型，无需安装 pi CLI。凭据写入 pi 的 `auth.json`，自定义接口写入 `models.json`（都在 `agentDir` 中，与终端里的 pi 共用）。所有方法均为 🔒，结果中不包含任何密钥。
+直接在 Pier 中配置模型，无需安装 pi CLI。凭据写入 pi 的 `auth.json`，自定义接口写入 `models.json`（都在 `agentDir` 中，与终端里的 pi 共用）。结果中不包含任何密钥；1.9 及以前所有方法仅限本地连接，1.10 起对已配对设备开放。
 
 | 方法 | 参数 | 结果 |
 |---|---|---|
-| `provider.list` 🔒 | – | `ProviderListResult`：`{ providers: ProviderInfo[], defaultModel?, defaultAvailable, availableCount, agentDir, error? }`。`ProviderInfo` 含登录方式（`apiKey` / `oauth`）、凭据状态与来源、模型数量，自定义接口另有 `custom`（不含密钥，只有 `hasConfiguredKey`） |
-| `provider.login` 🔒 | `{ providerId, method: "api_key"\|"oauth" }` | `{ flowId }`；随后本连接收到 `auth.*` 事件（见 §4.3）。同一连接再次调用会取消之前的登录 |
-| `provider.loginRespond` 🔒 | `{ flowId, promptId, value?, cancelled? }` | `{ accepted }`；回答 `auth.prompt`，`cancelled: true` 取消整个登录 |
-| `provider.loginCancel` 🔒 | `{ flowId }` | `{ cancelled }` |
-| `provider.logout` 🔒 | `{ providerId }` | `{ removed }`；删除 pi 当前使用的凭据：优先删除 `auth.json` 中保存的凭据；没有时，如果密钥来自 `models.json` 里该服务商的 `apiKey`（明文密钥或 `!命令`），则删除这个字段（只剩 `name` 的条目整项删除，pi 无法加载时回滚并返回 `BAD_REQUEST`）。不影响环境变量及 `$VAR` 形式的引用 |
-| `provider.saveCustom` 🔒 | `{ provider: CustomProvider, apiKey?, apiKeyRef?, create? }` | `{ provider, defaultModel? }`；`CustomProvider = { id, name?, api, baseUrl, models: { id, name?, reasoning?, images?, contextWindow?, maxTokens?, api? }[] }`，`api` 为 `openai-completions`、`openai-responses`、`anthropic-messages`、`google-generative-ai` 之一。模型的 `api`（1.7）表示该模型使用与服务商不同的接口：写入 `models.json` 时同时写入该模型的 `api` 和按服务商 Base URL 换算的 `baseUrl`（去掉末尾的 `/v1` / `/v1beta` 得到根地址，OpenAI 类接口加 `/v1`，Anthropic 用根地址，Google 加 `/v1beta`）；改回服务商的接口时一并删除换算出的 `baseUrl`。只改动表单涉及的字段，文件中的其他内容保留（含注释的文件先备份为 `models.json.bak`）；pi 无法加载时回滚并返回 `BAD_REQUEST`。新建时必须提供 `apiKey`（或 1.3 起的 `apiKeyRef`，见下文 NewAPI），编辑时省略则保留原密钥 |
-| `provider.removeCustom` 🔒 | `{ providerId }` | `{ removed }`；同时删除保存的密钥 |
-| `provider.probeModels` 🔒 | `{ api, baseUrl, apiKey?, apiKeyRef?, providerId? }` | `{ models: CustomModel[] }`；请求接口的模型列表（OpenAI：`GET <baseUrl>/models`）。省略 `apiKey` 时使用 `apiKeyRef`（1.3）或 `providerId` 已保存的密钥。1.6 起，pi 内置模型目录认识的模型会带上 `reasoning` / `images` / `contextWindow` / `maxTokens`；1.7 起，NewAPI 站点在模型列表中给出 `supported_endpoint_types` 时，与 `api` 不同的推荐接口会作为模型的 `api` 返回 |
+| `provider.list` | – | `ProviderListResult`：`{ providers: ProviderInfo[], defaultModel?, defaultAvailable, availableCount, agentDir, error? }`。`ProviderInfo` 含登录方式（`apiKey` / `oauth`）、凭据状态与来源、模型数量，自定义接口另有 `custom`（不含密钥，只有 `hasConfiguredKey`） |
+| `provider.login` | `{ providerId, method: "api_key"\|"oauth" }` | `{ flowId }`；随后本连接收到 `auth.*` 事件（见 §4.3）。同一连接再次调用会取消之前的登录 |
+| `provider.loginRespond` | `{ flowId, promptId, value?, cancelled? }` | `{ accepted }`；回答 `auth.prompt`，`cancelled: true` 取消整个登录 |
+| `provider.loginCancel` | `{ flowId }` | `{ cancelled }` |
+| `provider.logout` | `{ providerId }` | `{ removed }`；删除 pi 当前使用的凭据：优先删除 `auth.json` 中保存的凭据；没有时，如果密钥来自 `models.json` 里该服务商的 `apiKey`（明文密钥或 `!命令`），则删除这个字段（只剩 `name` 的条目整项删除，pi 无法加载时回滚并返回 `BAD_REQUEST`）。不影响环境变量及 `$VAR` 形式的引用 |
+| `provider.saveCustom` | `{ provider: CustomProvider, apiKey?, apiKeyRef?, create? }` | `{ provider, defaultModel? }`；`CustomProvider = { id, name?, api, baseUrl, models: { id, name?, reasoning?, images?, contextWindow?, maxTokens?, api? }[] }`，`api` 为 `openai-completions`、`openai-responses`、`anthropic-messages`、`google-generative-ai` 之一。模型的 `api`（1.7）表示该模型使用与服务商不同的接口：写入 `models.json` 时同时写入该模型的 `api` 和按服务商 Base URL 换算的 `baseUrl`（去掉末尾的 `/v1` / `/v1beta` 得到根地址，OpenAI 类接口加 `/v1`，Anthropic 用根地址，Google 加 `/v1beta`）；改回服务商的接口时一并删除换算出的 `baseUrl`。只改动表单涉及的字段，文件中的其他内容保留（含注释的文件先备份为 `models.json.bak`）；pi 无法加载时回滚并返回 `BAD_REQUEST`。新建时必须提供 `apiKey`（或 1.3 起的 `apiKeyRef`，见下文 NewAPI），编辑时省略则保留原密钥 |
+| `provider.removeCustom` | `{ providerId }` | `{ removed }`；同时删除保存的密钥 |
+| `provider.probeModels` | `{ api, baseUrl, apiKey?, apiKeyRef?, providerId? }` | `{ models: CustomModel[] }`；请求接口的模型列表（OpenAI：`GET <baseUrl>/models`）。省略 `apiKey` 时使用 `apiKeyRef`（1.3）或 `providerId` 已保存的密钥。1.6 起，pi 内置模型目录认识的模型会带上 `reasoning` / `images` / `contextWindow` / `maxTokens`；1.7 起，NewAPI 站点在模型列表中给出 `supported_endpoint_types` 时，与 `api` 不同的推荐接口会作为模型的 `api` 返回 |
 
 **模型能力自动识别（1.6）**：`GET /models` 只返回模型 ID，因此 Host 会按 pi 内置的模型目录补全能力。ID 会先规范化再匹配：统一小写，去掉 `anthropic/` 这类前缀和 `:free` 这类标签，忽略日期后缀（`-20250929`）以及 `4.5` / `4-5` 的写法差异；`-thinking` / `-nothinking` 后缀分别视为推理 / 非推理变体。目录里没有的模型，只按常见推理系列的名称推断 `reasoning` 和 `images`，其他仍视为未知。`provider.saveCustom` 保存时，模型中未设置（省略）的字段按此补全；显式传入的值（包括 `reasoning: false`、`images: false`）保持不变，并原样写入 `models.json`。Host 启动时也会为 `models.json` 中自定义服务商（不含内置服务商的覆盖配置）缺少 `reasoning`、`input`、`contextWindow`、`maxTokens` 的模型补全这些字段，已有字段不会改动；pi 因此无法加载时回滚。服务商配置变化后，已打开的会话会重新解析当前模型并发送 `session.model`；如果模型刚被识别为推理模型、而会话的思考等级是 `off`，会改用配置的默认思考等级。
 
@@ -163,7 +164,7 @@ pi 终端界面自带的命令（`/model`、`/compact`、`/new`、`/fork`、`/na
 
 ### NewAPI 登录（1.3）
 
-登录 [NewAPI](https://github.com/QuantumNous/new-api) 中转站，读取令牌和可用模型，再用 `provider.saveCustom` 保存为自定义接口。登录会话只保存在 Host 内存中，只属于发起的连接；连接断开、调用 `newapi.close` 或 30 分钟未使用后丢弃。令牌密钥由 Host 直接读取，客户端只拿到 `keyRef`，可在同一连接的 `provider.saveCustom` / `provider.probeModels` 中代替 `apiKey`。所有方法均为 🔒。
+登录 [NewAPI](https://github.com/QuantumNous/new-api) 中转站，读取令牌和可用模型，再用 `provider.saveCustom` 保存为自定义接口。登录会话只保存在 Host 内存中，只属于发起的连接；连接断开、调用 `newapi.close` 或 30 分钟未使用后丢弃。令牌密钥由 Host 直接读取，客户端只拿到 `keyRef`，可在同一连接的 `provider.saveCustom` / `provider.probeModels` 中代替 `apiKey`。1.9 及以前所有方法仅限本地连接，1.10 起对已配对设备开放（浏览器授权回到 Host 所在电脑的回环地址，只适合在那台电脑上使用）。
 
 **模型接口识别（1.7）**：NewAPI 的 `GET /v1/models` 为每个模型列出 `supported_endpoint_types`（服务该模型的所有渠道的并集：Anthropic 渠道为 `anthropic`、`openai`，Gemini 渠道为 `gemini`、`openai`，Codex 渠道只有 `openai-response`，NewAPI / Sub2API 这类透传渠道为全部类型）。Host 据此给出模型的 `api`：支持 `anthropic` 的 Claude 模型（ID 中含 `claude`），以及只支持 `anthropic` 的模型，用 `anthropic-messages`；其余支持 `openai` 的用 `openai-completions`，只支持 `openai-response` 的用 `openai-responses`，只支持 `gemini` 的用 `google-generative-ai`；都不支持（如嵌入模型）时省略。不返回该字段的旧版本只按名称把 Claude 模型识别为 `anthropic-messages`。客户端保存时，把与服务商 `api` 不同的推荐接口写入模型的 `api`。
 
@@ -171,11 +172,11 @@ pi 终端界面自带的命令（`/model`、`/compact`、`/new`、`/fork`、`/na
 
 | 方法 | 参数 | 结果 |
 |---|---|---|
-| `newapi.login` 🔒 | `{ baseUrl, username, password }` 或 `{ baseUrl, accessToken, userId? }` | `NewApiLoginResult`：`{ status: "ok", sessionId, account }` 或需要两步验证时 `{ status: "verify", sessionId, methods }`。`baseUrl` 可以带 `/v1`、`/console/...` 等路径，Host 会规范为站点根地址。`account = { site: { name, url, version?, logo? }, user: { id?, username, displayName?, group? }, tokens: NewApiToken[], groups: { name, description?, ratio? }[] }`，`NewApiToken = { id, name, maskedKey, status, group?, expiresAt?, unlimitedQuota, remainQuota?, modelLimits? }`（`status`：1 启用、2 禁用、3 过期、4 额度用尽） |
-| `newapi.verify` 🔒 | `{ sessionId, code }` | `NewApiLoginResult`；提交两步验证码（或备用码） |
-| `newapi.createToken` 🔒 | `{ sessionId, name, group? }` | `{ tokenId, tokens }`；新建无限额度、永不过期、不限模型的令牌 |
-| `newapi.useToken` 🔒 | `{ sessionId, tokenId }` | `{ keyRef, models: { id, api? }[], modelsError? }`；读取令牌密钥（`POST /api/token/:id/key`，旧版本从令牌列表读取），并用它请求 `GET /v1/models`。`api`（1.7）是推荐的调用接口，见下文「模型接口识别」 |
-| `newapi.close` 🔒 | `{ sessionId }` | `{ closed }`；丢弃登录，并退出 Host 用密码建立的仪表盘会话（不会吊销用户自己的访问令牌） |
+| `newapi.login` | `{ baseUrl, username, password }` 或 `{ baseUrl, accessToken, userId? }` | `NewApiLoginResult`：`{ status: "ok", sessionId, account }` 或需要两步验证时 `{ status: "verify", sessionId, methods }`。`baseUrl` 可以带 `/v1`、`/console/...` 等路径，Host 会规范为站点根地址。`account = { site: { name, url, version?, logo? }, user: { id?, username, displayName?, group? }, tokens: NewApiToken[], groups: { name, description?, ratio? }[] }`，`NewApiToken = { id, name, maskedKey, status, group?, expiresAt?, unlimitedQuota, remainQuota?, modelLimits? }`（`status`：1 启用、2 禁用、3 过期、4 额度用尽） |
+| `newapi.verify` | `{ sessionId, code }` | `NewApiLoginResult`；提交两步验证码（或备用码） |
+| `newapi.createToken` | `{ sessionId, name, group? }` | `{ tokenId, tokens }`；新建无限额度、永不过期、不限模型的令牌 |
+| `newapi.useToken` | `{ sessionId, tokenId }` | `{ keyRef, models: { id, api? }[], modelsError? }`；读取令牌密钥（`POST /api/token/:id/key`，旧版本从令牌列表读取），并用它请求 `GET /v1/models`。`api`（1.7）是推荐的调用接口，见下文「模型接口识别」 |
+| `newapi.close` | `{ sessionId }` | `{ closed }`；丢弃登录，并退出 Host 用密码建立的仪表盘会话（不会吊销用户自己的访问令牌） |
 
 #### 浏览器授权（1.4）
 
@@ -189,31 +190,31 @@ pi 终端界面自带的命令（`/model`、`/compact`、`/new`、`/fork`、`/na
 
 | 方法 | 参数 | 结果 |
 |---|---|---|
-| `newapi.authorizeStart` 🔒 | `{ baseUrl }` | `{ flowId, authorizeUrl, site, expiresAt }`；站点未开启应用授权时 `BAD_REQUEST` |
-| `newapi.authorizeWait` 🔒 | `{ flowId }` | `{ site, user, token: { id, name, group?, maskedKey }, keyRef, models, modelsError? }`；用户在浏览器中同意后返回，`keyRef` 与 `newapi.useToken` 的相同。拒绝、超时、取消或换取失败时返回错误 |
-| `newapi.authorizeCancel` 🔒 | `{ flowId }` | `{ cancelled }` |
+| `newapi.authorizeStart` | `{ baseUrl }` | `{ flowId, authorizeUrl, site, expiresAt }`；站点未开启应用授权时 `BAD_REQUEST` |
+| `newapi.authorizeWait` | `{ flowId }` | `{ site, user, token: { id, name, group?, maskedKey }, keyRef, models, modelsError? }`；用户在浏览器中同意后返回，`keyRef` 与 `newapi.useToken` 的相同。拒绝、超时、取消或换取失败时返回错误 |
+| `newapi.authorizeCancel` | `{ flowId }` | `{ cancelled }` |
 
 ### 个人中心（1.6）
 
-桌面端「设置 → 个人中心」直连云链API（`https://api.yunnet.top`，协议里的 `YUNLIAN_SITE_URL`；测试时可以用 `PierHostOptions.accountSite` 或 `faux-host --account-site` 换成其他 NewAPI 站点）。与连接绑定的 `newapi.*` 不同，这里的登录属于 Host：所有本地连接共用，并保存在 Pier 目录的 `account.json`（仅当前用户可读），重启后仍然有效。密码登录只保存站点发放的刷新 Cookie（`new_api_refresh`，站点每次刷新都会轮换，登录 30 天后需要重新登录），不保存密码和 15 分钟有效的访问令牌；Host 在访问令牌过期前或被拒绝时用 `POST /api/user/auth/refresh` 自动换新。用系统访问令牌登录时保存该令牌。站点拒绝刷新（已退出、被吊销或账号安全信息改变）时，Host 删除保存的登录，之后的调用返回「请先登录」。所有方法均为 🔒。
+桌面端「设置 → 个人中心」直连云链API（`https://api.yunnet.top`，协议里的 `YUNLIAN_SITE_URL`；测试时可以用 `PierHostOptions.accountSite` 或 `faux-host --account-site` 换成其他 NewAPI 站点）。与连接绑定的 `newapi.*` 不同，这里的登录属于 Host：所有连接共用，并保存在 Pier 目录的 `account.json`（仅当前用户可读），重启后仍然有效。密码登录只保存站点发放的刷新 Cookie（`new_api_refresh`，站点每次刷新都会轮换，登录 30 天后需要重新登录），不保存密码和 15 分钟有效的访问令牌；Host 在访问令牌过期前或被拒绝时用 `POST /api/user/auth/refresh` 自动换新。用系统访问令牌登录时保存该令牌。站点拒绝刷新（已退出、被吊销或账号安全信息改变）时，Host 删除保存的登录，之后的调用返回「请先登录」。1.9 及以前所有方法仅限本地连接，1.10 起对已配对设备开放。
 
 | 方法 | 参数 | 结果 |
 |---|---|---|
-| `account.status` 🔒 | — | `{ site?, siteError?, user? }`；`site = AccountSite = { name, url, version?, logo?, registerEnabled, emailVerification, passwordLogin, turnstile, oauth: string[], quota: { perUnit, type, usdRate?, customSymbol?, customRate? } }`（来自站点的 `/api/status`，`type` 为 `USD`、`CNY`、`CUSTOM` 或 `TOKENS`）；`user` 为保存的登录，没有登录时省略 |
-| `account.login` 🔒 | `{ username, password }` 或 `{ accessToken, userId? }` | `AccountLoginResult`：`{ status: "ok", overview }` 或需要两步验证时 `{ status: "verify", methods }`。站点开启 Turnstile 时密码登录返回 `BAD_REQUEST` |
-| `account.verify` 🔒 | `{ code }` | `AccountLoginResult`；提交两步验证码（或备用码） |
-| `account.sendCode` 🔒 | `{ email }` | `{ sent: true }`；发送注册邮箱验证码（`GET /api/verification`） |
-| `account.register` 🔒 | `{ username, password, email?, code?, affCode? }` | `AccountLoginResult`；注册（`POST /api/user/register`，用户名最多 20 个字符、密码 8–128 位，站点开启邮箱验证时必须提供 `email` 和 `code`，`affCode` 为邀请码）后立即登录。站点关闭注册或开启 Turnstile 时 `BAD_REQUEST` |
-| `account.overview` 🔒 | — | `{ site, user, tokens: NewApiToken[], groups }`；`user = { id?, username, displayName?, email?, group?, quota, usedQuota, requestCount }`，额度为站点单位，按 `site.quota` 换算显示 |
-| `account.createToken` 🔒 | `{ name, group? }` | `{ tokenId, tokens }`；在分组中新建无限额度、永不过期、不限模型的令牌 |
-| `account.useToken` 🔒 | `{ tokenId }` | `{ keyRef, models, modelsError? }`；与 `newapi.useToken` 相同，`keyRef` 属于调用的连接 |
-| `account.logout` 🔒 | — | `{ loggedOut }`；退出站点上的会话（不会吊销用户自己的访问令牌）并删除 `account.json` |
+| `account.status` | — | `{ site?, siteError?, user? }`；`site = AccountSite = { name, url, version?, logo?, registerEnabled, emailVerification, passwordLogin, turnstile, oauth: string[], quota: { perUnit, type, usdRate?, customSymbol?, customRate? } }`（来自站点的 `/api/status`，`type` 为 `USD`、`CNY`、`CUSTOM` 或 `TOKENS`）；`user` 为保存的登录，没有登录时省略 |
+| `account.login` | `{ username, password }` 或 `{ accessToken, userId? }` | `AccountLoginResult`：`{ status: "ok", overview }` 或需要两步验证时 `{ status: "verify", methods }`。站点开启 Turnstile 时密码登录返回 `BAD_REQUEST` |
+| `account.verify` | `{ code }` | `AccountLoginResult`；提交两步验证码（或备用码） |
+| `account.sendCode` | `{ email }` | `{ sent: true }`；发送注册邮箱验证码（`GET /api/verification`） |
+| `account.register` | `{ username, password, email?, code?, affCode? }` | `AccountLoginResult`；注册（`POST /api/user/register`，用户名最多 20 个字符、密码 8–128 位，站点开启邮箱验证时必须提供 `email` 和 `code`，`affCode` 为邀请码）后立即登录。站点关闭注册或开启 Turnstile 时 `BAD_REQUEST` |
+| `account.overview` | — | `{ site, user, tokens: NewApiToken[], groups }`；`user = { id?, username, displayName?, email?, group?, quota, usedQuota, requestCount }`，额度为站点单位，按 `site.quota` 换算显示 |
+| `account.createToken` | `{ name, group? }` | `{ tokenId, tokens }`；在分组中新建无限额度、永不过期、不限模型的令牌 |
+| `account.useToken` | `{ tokenId }` | `{ keyRef, models, modelsError? }`；与 `newapi.useToken` 相同，`keyRef` 属于调用的连接 |
+| `account.logout` | — | `{ loggedOut }`；退出站点上的会话（不会吊销用户自己的访问令牌）并删除 `account.json` |
 
 桌面端把每个分组的令牌保存为自定义服务商 `yunlian-<分组>`（名称为「云链API · 分组」，Base URL 为 `<站点>/v1`）；「模型与服务商」中浏览器授权添加的是 `yunlian`。
 
 ### 扩展与扩展包（1.8）
 
-管理 pi 的扩展包（`packages`：npm、git 或本地目录，可包含扩展、技能、提示词模板与主题）和资源目录中的独立资源，效果与 `pi install` / `pi remove` / `pi update --extensions` / `pi config` 相同：Host 直接使用 pi 的包管理器，读写 pi 的 settings 文件。全局（`scope: "user"`）对应 `<agentDir>/settings.json`，对所有工作区生效；项目（`scope: "project"`）对应 `<工作区>/.pi/settings.json`，需要带 `workspaceId`（Pier 中添加的工作区视为已信任）。所有方法均为 🔒，因为扩展会在 Host 进程中以用户权限执行代码。
+管理 pi 的扩展包（`packages`：npm、git 或本地目录，可包含扩展、技能、提示词模板与主题）和资源目录中的独立资源，效果与 `pi install` / `pi remove` / `pi update --extensions` / `pi config` 相同：Host 直接使用 pi 的包管理器，读写 pi 的 settings 文件。全局（`scope: "user"`）对应 `<agentDir>/settings.json`，对所有工作区生效；项目（`scope: "project"`）对应 `<工作区>/.pi/settings.json`，需要带 `workspaceId`（Pier 中添加的工作区视为已信任）。扩展会在 Host 进程中以用户权限执行代码；1.9 及以前所有方法仅限本地连接，1.10 起对已配对设备开放（配对即完全信任）。
 
 不带 `workspaceId` 时只看全局设置；带上时同时包含该工作区的项目设置（与在该目录运行 pi 时看到的相同，项目中的同名包覆盖全局的）。
 
@@ -221,13 +222,13 @@ pi 终端界面自带的命令（`/model`、`/compact`、`/new`、`/fork`、`/na
 
 | 方法 | 参数 | 结果 |
 |---|---|---|
-| `extension.list` 🔒 | `{ workspaceId? }` | `ExtensionListResult = { agentDir, workspaceId?, packages, resources }`。`packages: ExtensionPackageInfo[] = { source, scope, kind: "npm"\|"git"\|"local", filtered, installedPath?, name?, version?, description? }`：`source` 与 settings 中写的一致（本地路径相对 settings 文件所在目录），`installedPath` 缺失表示没有安装或路径不存在，`name` / `version` / `description` 来自包的 `package.json`。`resources: ExtensionResourceInfo[] = { type: "extensions"\|"skills"\|"prompts"\|"themes", path, name, enabled, scope, origin: "package"\|"top-level", source, deletable }`：已停用的资源也会列出；包内资源的 `source` 为包的 `source`，独立资源为 `auto`（`extensions/`、`skills/` 等资源目录，含 `~/.agents/skills`）或 `local`（settings 中列出的路径）。列出时不会安装缺失的包 |
-| `extension.install` 🔒 | `{ source, scope?("user"), workspaceId? }` | `{ package?, reload }`；安装并写入 settings（`pi install [-l]`）。`source` 为 `npm:<包名>[@版本]`、`git:<主机>/<路径>[@ref]`、Git 仓库 URL，或本地扩展文件 / 扩展包目录的**绝对**路径（支持 `~`；相对路径或不存在时 `BAD_REQUEST`）。npm / git 来源需要 Host 能执行 `npm` / `git`（npm 可用 settings 的 `npmCommand` 指定），找不到命令时 `BAD_REQUEST`。进度以 `extension.progress` 给出，可能耗时较长，客户端应放宽超时。已存在的来源会重新安装 |
-| `extension.remove` 🔒 | `{ source, scope, workspaceId? }` | `{ removed, reload }`；从 settings 移除并卸载 pi 安装的 npm / git 副本（`pi remove`），本地路径只从 settings 移除。`source` 使用 `extension.list` 返回的值；没有匹配的包时 `removed: false` |
-| `extension.update` 🔒 | `{ source?, workspaceId? }` | `{ reload }`；更新一个包，省略 `source` 时更新全部（`pi update --extensions`）。固定版本的 npm 包与固定 ref 的 git 包只会校准到配置的版本。没有匹配的包时 `NOT_FOUND` |
-| `extension.checkUpdates` 🔒 | `{ workspaceId? }` | `{ updates: { source, name, kind: "npm"\|"git", scope }[] }`；列出有新版本的未固定包（需要网络） |
-| `extension.setEnabled` 🔒 | `{ type, path, enabled, workspaceId? }` | `{ resource, reload }`；在资源所属范围的 settings 中启用 / 停用一个已列出的资源（与 `pi config` 相同）：独立资源在 `extensions` / `skills` / `prompts` / `themes` 数组中写入 `+路径` / `-路径`，包内资源写入该包条目的筛选。`path` 与 `type` 必须与 `extension.list` 的某一项一致，否则 `NOT_FOUND` |
-| `extension.delete` 🔒 | `{ path, workspaceId? }` | `{ deleted: true, reload }`；删除一个独立扩展（`deletable: true`）：扩展目录中的文件或带 `index.ts` 的目录移到 Pier 回收站（`~/.pier/trash/extensions`），settings 中列出的路径只从 settings 移除（文件保留）。包内扩展或通过目录条目加载的扩展返回 `BAD_REQUEST`（改为移除包或停用） |
+| `extension.list` | `{ workspaceId? }` | `ExtensionListResult = { agentDir, workspaceId?, packages, resources }`。`packages: ExtensionPackageInfo[] = { source, scope, kind: "npm"\|"git"\|"local", filtered, installedPath?, name?, version?, description? }`：`source` 与 settings 中写的一致（本地路径相对 settings 文件所在目录），`installedPath` 缺失表示没有安装或路径不存在，`name` / `version` / `description` 来自包的 `package.json`。`resources: ExtensionResourceInfo[] = { type: "extensions"\|"skills"\|"prompts"\|"themes", path, name, enabled, scope, origin: "package"\|"top-level", source, deletable }`：已停用的资源也会列出；包内资源的 `source` 为包的 `source`，独立资源为 `auto`（`extensions/`、`skills/` 等资源目录，含 `~/.agents/skills`）或 `local`（settings 中列出的路径）。列出时不会安装缺失的包 |
+| `extension.install` | `{ source, scope?("user"), workspaceId? }` | `{ package?, reload }`；安装并写入 settings（`pi install [-l]`）。`source` 为 `npm:<包名>[@版本]`、`git:<主机>/<路径>[@ref]`、Git 仓库 URL，或本地扩展文件 / 扩展包目录的**绝对**路径（支持 `~`；相对路径或不存在时 `BAD_REQUEST`）。npm / git 来源需要 Host 能执行 `npm` / `git`（npm 可用 settings 的 `npmCommand` 指定），找不到命令时 `BAD_REQUEST`。进度以 `extension.progress` 给出，可能耗时较长，客户端应放宽超时。已存在的来源会重新安装 |
+| `extension.remove` | `{ source, scope, workspaceId? }` | `{ removed, reload }`；从 settings 移除并卸载 pi 安装的 npm / git 副本（`pi remove`），本地路径只从 settings 移除。`source` 使用 `extension.list` 返回的值；没有匹配的包时 `removed: false` |
+| `extension.update` | `{ source?, workspaceId? }` | `{ reload }`；更新一个包，省略 `source` 时更新全部（`pi update --extensions`）。固定版本的 npm 包与固定 ref 的 git 包只会校准到配置的版本。没有匹配的包时 `NOT_FOUND` |
+| `extension.checkUpdates` | `{ workspaceId? }` | `{ updates: { source, name, kind: "npm"\|"git", scope }[] }`；列出有新版本的未固定包（需要网络） |
+| `extension.setEnabled` | `{ type, path, enabled, workspaceId? }` | `{ resource, reload }`；在资源所属范围的 settings 中启用 / 停用一个已列出的资源（与 `pi config` 相同）：独立资源在 `extensions` / `skills` / `prompts` / `themes` 数组中写入 `+路径` / `-路径`，包内资源写入该包条目的筛选。`path` 与 `type` 必须与 `extension.list` 的某一项一致，否则 `NOT_FOUND` |
+| `extension.delete` | `{ path, workspaceId? }` | `{ deleted: true, reload }`；删除一个独立扩展（`deletable: true`）：扩展目录中的文件或带 `index.ts` 的目录移到 Pier 回收站（`~/.pier/trash/extensions`），settings 中列出的路径只从 settings 移除（文件保留）。包内扩展或通过目录条目加载的扩展返回 `BAD_REQUEST`（改为移除包或停用） |
 
 settings 文件无法解析时，修改类方法返回 `CONFLICT`，避免覆盖用户的文件。
 
@@ -312,6 +313,11 @@ Host 保存已配对的电脑于 `~/.pier/peers.json`（0600），每次经代�
 | `pairing.request` | `request: { id, device, fingerprint, address?, createdAt, expiresAt }` | 设备出示了正确的配对码，等待用户用 `pairing.respond` 确认 |
 | `pairing.resolved` | `requestId, resolution: accepted\|rejected\|expired\|cancelled, deviceId?` | 配对请求结束（`cancelled`：设备在等待中断开） |
 | `peer.changed` | – | 已配对的其他电脑增删、改名，或经本机的连接建立 / 断开（1.9）；重新调用 `peer.list` |
+
+发给所有连接（1.9 及以前仅发给本地连接）：
+
+| 事件 | 字段 | 说明 |
+|---|---|---|
 | `extension.progress` | `action: install\|remove\|update\|clone\|pull, phase: start\|progress\|complete\|error, source, message?` | `extension.install` / `remove` / `update` 的进度（1.8） |
 
 服务商登录进度（1.2），只发给调用 `provider.login` 的那个连接；连接断开时登录自动取消：
