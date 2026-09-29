@@ -31,6 +31,7 @@ import type {
 	SessionSummary,
 	WorkspaceFileContent,
 	WorkspaceFilesResult,
+	WorkspaceFileWriteResult,
 	WorkspaceInfo,
 } from "@pier/protocol";
 import { createContext, useContext, useSyncExternalStore } from "react";
@@ -923,6 +924,28 @@ export class PierStore {
 		const client = this.client;
 		if (!client) throw new Error("尚未连接到 Pier Host");
 		return client.request("workspace.readFile", { workspaceId, path });
+	}
+
+	/**
+	 * Overwrite a workspace file with text; rejects with the host's error (`CONFLICT` when the
+	 * file changed since `expectedModifiedAt`). Refreshes the file panel on success.
+	 */
+	async writeFile(
+		workspaceId: string,
+		path: string,
+		text: string,
+		expectedModifiedAt?: string,
+	): Promise<WorkspaceFileWriteResult> {
+		const client = this.client;
+		if (!client) throw new Error("尚未连接到 Pier Host");
+		const result = await client.request("workspace.writeFile", {
+			workspaceId,
+			path,
+			text,
+			...(expectedModifiedAt ? { expectedModifiedAt } : {}),
+		});
+		this.bumpFiles(workspaceId);
+		return result;
 	}
 
 	bumpFiles(workspaceId: string): void {

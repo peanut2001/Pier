@@ -1,11 +1,12 @@
 import type { Dirent } from "node:fs";
-import { lstat, open, readdir, realpath, stat } from "node:fs/promises";
+import { lstat, open, readdir, realpath, stat, writeFile } from "node:fs/promises";
 import { extname, isAbsolute, join, relative, sep } from "node:path";
 import {
 	PierProtocolError,
 	type WorkspaceFileContent,
 	type WorkspaceFileEntry,
 	type WorkspaceFilesResult,
+	type WorkspaceFileWriteResult,
 } from "@pier/protocol";
 
 /** Most entries returned for one directory; the rest are dropped and `truncated` is set. */
@@ -178,6 +179,58 @@ function decodeText(bytes: Buffer, cut: boolean): string | undefined {
 	}
 }
 
+/** Largest text accepted by `workspace.writeFile`, in UTF-8 bytes. */
+export const MAX_TEXT_WRITE_BYTES = 4 * 1024 * 1024;
+
+const UTF8_BOM = Buffer.from([0xef, 0xbb, 0xbf]);
+
+function fsError(error: unknown, relPath: string): never {
+	const code = (error as NodeJS.ErrnoException).code;
+	if (code === "ENOENT") throw new PierProtocolError("NOT_FOUND", `No such file: ${relPath}`);
+	if (code === "EACCES" || code === "EPERM" || code === "EROFS")
+		throw new PierProtocolError("FORBIDDEN", `Permission denied: ${relPath}`);
+	if (code === "EISDIR") throw new PierProtocolError("BAD_REQUEST", `Not a file: ${relPath}`);
+	throw error;
+}
+
+/**
+ * Overwrite an existing workspace file with UTF-8 text. The file must resolve (after symlinks)
+ * to a regular file inside the workspace root; new files are not created. The file is written
+ * in place, so its permissions, owner and hard links are kept, and a UTF-8 byte order mark
+ * the file started with is kept too (`workspace.readFile` strips it). When `expectedModifiedAt` is
+ * given and the file changed since then, nothing is written and `CONFLICT` is thrown.
+ */
+export async function writeWorkspaceFile(
+	workspaceRoot: string,
+	path: string,
+	text: string,
+	expectedModifiedAt?: string,
+): Promise<WorkspaceFileWriteResult> {
+	const relPath = normalizeRelativePath(path);
+	if (!relPath) throw new PierProtocolError("BAD_REQUEST", "Not a file: .");
+	if (Buffer.byteLength(text) > MAX_TEXT_WRITE_BYTES) {
+		throw new PierProtocolError("BAD_REQUEST", `Text is larger than ${MAX_TEXT_WRITE_BYTES} bytes`);
+	}
+	const root = await workspaceRealRoot(workspaceRoot);
+	const real = await resolveInside(root, relPath, "file");
+	try {
+		const before = await stat(real);
+		if (!before.isFile()) throw new PierProtocolError("BAD_REQUEST", `Not a file: ${relPath}`);
+		if (expectedModifiedAt !== undefined && before.mtime.toISOString() !== expectedModifiedAt) {
+			throw new PierProtocolError("CONFLICT", `File changed on disk: ${relPath}`, {
+				modifiedAt: before.mtime.toISOString(),
+			});
+		}
+		const bom = (await readHead(real, 3)).equals(UTF8_BOM) && !text.startsWith("\uFEFF");
+		await writeFile(real, bom ? `\uFEFF${text}` : text, "utf8");
+		const after = await stat(real);
+		return { path: relPath, size: after.size, modifiedAt: after.mtime.toISOString() };
+	} catch (error) {
+		if (error instanceof PierProtocolError) throw error;
+		fsError(error, relPath);
+	}
+}
+
 /**
  * Read one file of a workspace for preview. The file must resolve (after symlinks) to a
  * regular file inside the workspace root. UTF-8 text is returned up to
@@ -211,11 +264,6 @@ export async function readWorkspaceFile(workspaceRoot: string, path: string): Pr
 		if (text === undefined) return { ...base, kind: "binary" };
 		return { ...base, kind: "text", text, ...(truncated ? { truncated: true } : {}) };
 	} catch (error) {
-		const code = (error as NodeJS.ErrnoException).code;
-		if (code === "ENOENT") throw new PierProtocolError("NOT_FOUND", `No such file: ${relPath}`);
-		if (code === "EACCES" || code === "EPERM")
-			throw new PierProtocolError("FORBIDDEN", `Permission denied: ${relPath}`);
-		if (code === "EISDIR") throw new PierProtocolError("BAD_REQUEST", `Not a file: ${relPath}`);
-		throw error;
+		fsError(error, relPath);
 	}
 }

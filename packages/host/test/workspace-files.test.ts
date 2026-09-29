@@ -1,4 +1,15 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	existsSync,
+	linkSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	statSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { PierClient } from "@pier/client";
@@ -9,8 +20,10 @@ import {
 	MAX_DIRECTORY_ENTRIES,
 	MAX_IMAGE_PREVIEW_BYTES,
 	MAX_TEXT_PREVIEW_BYTES,
+	MAX_TEXT_WRITE_BYTES,
 	normalizeRelativePath,
 	readWorkspaceFile,
+	writeWorkspaceFile,
 } from "../src/workspace-files.ts";
 import { startTestHost, type TestHost } from "./helpers.ts";
 
@@ -190,6 +203,76 @@ describe("readWorkspaceFile", () => {
 	});
 });
 
+describe("writeWorkspaceFile", () => {
+	let root: string;
+	let outside: string;
+
+	beforeEach(() => {
+		root = mkdtempSync(join(tmpdir(), "pier-write-"));
+		outside = mkdtempSync(join(tmpdir(), "pier-outside-"));
+		mkdirSync(join(root, "src"));
+		writeFileSync(join(root, "src", "index.ts"), "old\n");
+		writeFileSync(join(outside, "secret.txt"), "secret");
+	});
+	afterEach(() => {
+		rmSync(root, { recursive: true, force: true });
+		rmSync(outside, { recursive: true, force: true });
+	});
+
+	it("overwrites the file in place and returns fresh metadata", async () => {
+		const file = join(root, "src", "index.ts");
+		chmodSync(file, 0o754);
+		linkSync(file, join(root, "hard.ts"));
+		const result = await writeWorkspaceFile(root, "src\\index.ts", "新的内容\n");
+		expect(result).toEqual({
+			path: "src/index.ts",
+			size: Buffer.byteLength("新的内容\n"),
+			modifiedAt: statSync(file).mtime.toISOString(),
+		});
+		expect(readFileSync(file, "utf8")).toBe("新的内容\n");
+		expect(statSync(file).mode & 0o777).toBe(0o754);
+		expect(readFileSync(join(root, "hard.ts"), "utf8")).toBe("新的内容\n");
+	});
+
+	it("refuses to write when the file changed since it was read", async () => {
+		const read = await readWorkspaceFile(root, "src/index.ts");
+		expect((await writeWorkspaceFile(root, "src/index.ts", "mine\n", read.modifiedAt)).path).toBe("src/index.ts");
+		const stale = new Date(Date.parse(read.modifiedAt) - 60_000).toISOString();
+		const error = await writeWorkspaceFile(root, "src/index.ts", "theirs\n", stale).catch((e: unknown) => e);
+		expect(error).toMatchObject({
+			code: "CONFLICT",
+			data: { modifiedAt: statSync(join(root, "src", "index.ts")).mtime.toISOString() },
+		});
+		expect(readFileSync(join(root, "src", "index.ts"), "utf8")).toBe("mine\n");
+	});
+
+	it("keeps a UTF-8 byte order mark", async () => {
+		writeFileSync(join(root, "bom.txt"), "\uFEFFhello");
+		expect((await readWorkspaceFile(root, "bom.txt")).text).toBe("hello");
+		await writeWorkspaceFile(root, "bom.txt", "world");
+		expect(readFileSync(join(root, "bom.txt"))).toEqual(Buffer.from("\uFEFFworld"));
+	});
+
+	it("never creates files or writes outside the workspace", async () => {
+		await expect(writeWorkspaceFile(root, "new.txt", "x")).rejects.toMatchObject({ code: "NOT_FOUND" });
+		expect(existsSync(join(root, "new.txt"))).toBe(false);
+		await expect(writeWorkspaceFile(root, "src", "x")).rejects.toMatchObject({ code: "BAD_REQUEST" });
+		await expect(writeWorkspaceFile(root, "", "x")).rejects.toMatchObject({ code: "BAD_REQUEST" });
+		await expect(writeWorkspaceFile(root, "../x", "x")).rejects.toMatchObject({ code: "BAD_REQUEST" });
+		symlinkSync(join(outside, "secret.txt"), join(root, "leak.txt"));
+		await expect(writeWorkspaceFile(root, "leak.txt", "x")).rejects.toMatchObject({ code: "FORBIDDEN" });
+		expect(readFileSync(join(outside, "secret.txt"), "utf8")).toBe("secret");
+		const big = "a".repeat(MAX_TEXT_WRITE_BYTES + 1);
+		await expect(writeWorkspaceFile(root, "src/index.ts", big)).rejects.toMatchObject({ code: "BAD_REQUEST" });
+	});
+
+	it("reports read-only files as FORBIDDEN", async () => {
+		if (process.getuid?.() === 0) return;
+		chmodSync(join(root, "src", "index.ts"), 0o444);
+		await expect(writeWorkspaceFile(root, "src/index.ts", "x")).rejects.toMatchObject({ code: "FORBIDDEN" });
+	});
+});
+
 describe("workspace.files", () => {
 	let t: TestHost;
 	let client: PierClient;
@@ -224,6 +307,22 @@ describe("workspace.files", () => {
 		await expectCode(
 			client.request("workspace.readFile", { workspaceId: workspace.id, path: "/etc/passwd" }),
 			"BAD_REQUEST",
+		);
+	});
+
+	it("writes a workspace file with workspace.writeFile", async () => {
+		const read = await client.request("workspace.readFile", { workspaceId: workspace.id, path: "docs/guide.md" });
+		const written = await client.request("workspace.writeFile", {
+			workspaceId: workspace.id,
+			path: "docs/guide.md",
+			text: "# Changed\n",
+			expectedModifiedAt: read.modifiedAt,
+		});
+		expect(written).toMatchObject({ path: "docs/guide.md", size: 10 });
+		expect(readFileSync(join(t.workspaceDir, "docs", "guide.md"), "utf8")).toBe("# Changed\n");
+		await expectCode(
+			client.request("workspace.writeFile", { workspaceId: "nope", path: "docs/guide.md", text: "" }),
+			"NOT_FOUND",
 		);
 	});
 });

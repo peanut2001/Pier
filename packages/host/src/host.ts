@@ -40,7 +40,7 @@ import { NewApiManager } from "./pi/newapi.ts";
 import { ProviderManager } from "./pi/providers.ts";
 import { RemoteAccess, type RemoteAccessOptions } from "./remote/remote-access.ts";
 import { SessionPool } from "./session-pool.ts";
-import { listWorkspaceDirectory, readWorkspaceFile } from "./workspace-files.ts";
+import { listWorkspaceDirectory, readWorkspaceFile, writeWorkspaceFile } from "./workspace-files.ts";
 
 export const PIER_HOST_VERSION = "0.2.5";
 
@@ -439,6 +439,13 @@ export class PierHost implements RequestHandler {
 				listWorkspaceDirectory(this.requireWorkspace(params.workspaceId).path, params.path),
 			"workspace.readFile": (_ctx, params) =>
 				readWorkspaceFile(this.requireWorkspace(params.workspaceId).path, params.path),
+			"workspace.writeFile": (_ctx, params) =>
+				writeWorkspaceFile(
+					this.requireWorkspace(params.workspaceId).path,
+					params.path,
+					params.text,
+					params.expectedModifiedAt,
+				),
 
 			"session.list": async (_ctx, params) => ({
 				sessions: await this.pool.list(this.requireWorkspace(params.workspaceId)),
