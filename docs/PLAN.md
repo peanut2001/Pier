@@ -1,6 +1,6 @@
 # Pier 开发计划
 
-> Pier：以 [pi](https://github.com/earendil-works/pi) 作为 Agent 核心的桌面应用（Tauri），并提供可连接桌面端的原生手机 App（Expo / React Native）。
+> Pier：编码 Agent 的桌面停靠点（Tauri）与手机遥控器（Expo / React Native）。首个 Agent 运行时为 [pi](https://github.com/earendil-works/pi)，后续通过 Host 适配层接入 Claude Code 与 Codex。
 >
 > 本文档是项目的总体规划与里程碑，随开发进度持续更新。
 >
@@ -258,6 +258,14 @@ Pier/
 - [ ] 推送：手机上报 Expo push token（经加密通道交给 Host，Host 注册到 relay）；Host 在 `agent_settled`、`ui.request`、错误时触发推送，推送内容不含代码与命令原文。
 - 验收：手机使用移动网络（非同一局域网）可完成配对后的全部操作；锁屏状态下能收到审批通知。
 
+### 多 Agent 运行时（规划）
+
+- [ ] Host 抽象出 Agent 运行时接口，现有 `packages/host/src/pi/` 作为第一个实现；协议事件保持与运行时无关。
+- [ ] 接入 Claude Code（Claude Agent SDK）：会话、流式输出、工具调用与权限审批映射到 Pier 协议。
+- [ ] 接入 Codex（Codex app-server / SDK）：同上，并处理其沙箱与审批模式。
+- [ ] 桌面与手机端：新建会话时选择 Agent，按运行时显示可用的模型、思考等级与能力（压缩、分叉等）。
+- 验收：同一台电脑上 pi、Claude Code、Codex 会话可以并存，手机端均可驱动和审批。
+
 ### M6 发布
 
 - [x] 桌面：Tauri updater 发布通道（签名的更新包 + GitHub Release 上的 `latest.json`，应用内检查、下载、校验、安装并重启；Linux AppImage 已端到端验证）。
@@ -271,6 +279,7 @@ Pier/
 | 风险 | 对策 |
 |---|---|
 | pi SDK API 变动 | 锁定版本；所有 pi 调用集中在 `packages/host/src/pi/` 适配层；升级时跑集成测试 |
+| 多运行时能力不一致（Claude Code / Codex 的会话、审批、压缩模型各不相同） | 协议只暴露公共能力，运行时差异通过能力声明呈现；每个运行时独立适配层与集成测试 |
 | 单文件打包后扩展（运行时加载 TS）无法工作 | M0 Spike 1 优先验证；备选内置 Node 运行时 |
 | iOS 后台会挂起 WebSocket | 不依赖后台长连接：回到前台用 `sinceSeq` 补发，后台靠推送 |
 | 远程执行带来的安全风险 | 默认关闭远程访问、强制配对 + E2E、默认审批策略、审计日志、可吊销 |

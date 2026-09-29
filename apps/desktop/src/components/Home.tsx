@@ -30,7 +30,7 @@ export function Welcome() {
 					<Logo size={56} />
 					<h1>欢迎使用 Pier</h1>
 					<p className="hero-text">
-						Pier 在桌面上运行 pi Agent。关闭窗口后 Agent 会继续在后台运行，之后也可以从手机连接。
+						Pier 在桌面上运行编码 Agent（当前为 pi）。关闭窗口后 Agent 会继续在后台运行，之后也可以从手机连接。
 					</p>
 				</div>
 				<div className="steps">

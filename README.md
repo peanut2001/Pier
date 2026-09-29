@@ -1,8 +1,10 @@
 # Pier
 
-Pi-powered agent desktop app with a native mobile companion that connects to your desktop.
+A desktop dock and mobile remote for coding agents.
 
-- 桌面端：Tauri 2，内置以 [pi](https://github.com/earendil-works/pi) SDK 为核心的 Pier Host
+Pier 是编码 Agent 在桌面上的停靠点：Agent 常驻在你的电脑上运行，桌面端和手机端都能连上去查看、驱动和审批。目前内置 [pi](https://github.com/earendil-works/pi)，计划通过同一套 Host 适配层接入 Claude Code 与 Codex。
+
+- 桌面端：Tauri 2，内置 Pier Host（当前 Agent 运行时为 pi SDK）
 - 手机端：Expo / React Native 原生 App，通过配对后的加密连接驱动桌面 Agent
 
 开发计划见 [docs/PLAN.md](docs/PLAN.md)，协议见 [docs/protocol.md](docs/protocol.md)，远程访问的安全设计见 [docs/security.md](docs/security.md)，技术验证结论见 [docs/spikes.md](docs/spikes.md)。
