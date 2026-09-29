@@ -35,7 +35,9 @@ import {
  * (`authorizeStart` / `authorizeWait`): the OAuth 2.0 authorization code flow for native apps
  * (RFC 8252) with a loopback redirect and PKCE (RFC 7636). The user signs in on the site with
  * any method it offers, approves a new token on its consent page, and the host exchanges the
- * returned code for the token key.
+ * returned code for the token key. Sites that also offer the `account` scope let the user sign
+ * Pier in to the account the same way (`authorizeSessionStart` / `authorizeSessionWait`): the
+ * code exchanges for a login session of Pier's own, used like a password login.
  */
 
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -246,8 +248,14 @@ interface Session extends Conn {
 	expiresAt: number;
 }
 
+/** What a browser authorization asks for: one API token, or a login session for the account. */
+type AuthorizeScope = "token" | "account";
+
+type SessionLoginResult = Extract<NewApiLoginResult, { status: "ok" }>;
+
 interface AuthorizeFlow {
 	id: string;
+	scope: AuthorizeScope;
 	connectionId: string;
 	origin: string;
 	status: Json;
@@ -259,8 +267,8 @@ interface AuthorizeFlow {
 	/** Set once a callback carrying the right state arrived; later callbacks are ignored. */
 	answered: boolean;
 	ended: boolean;
-	result: Promise<NewApiAuthorizeResult>;
-	resolve(result: NewApiAuthorizeResult): void;
+	result: Promise<NewApiAuthorizeResult | SessionLoginResult>;
+	resolve(result: NewApiAuthorizeResult | SessionLoginResult): void;
 	reject(error: Error): void;
 }
 
@@ -284,6 +292,15 @@ function callbackPage(res: ServerResponse, status: number, title: string, detail
 main{max-width:420px;padding:32px;text-align:center}h1{font-size:20px;margin:12px 0 8px}p{color:#57606a;margin:0}
 .mark{font-size:36px;color:${ok ? "#1a7f37" : "#cf222e"}}@media(prefers-color-scheme:dark){body{background:#0d1117;color:#e6edf3}p{color:#8d96a0}}</style>
 </head><body><main><div class="mark">${ok ? "✓" : "✕"}</div><h1>${escapeHtml(title)}</h1><p>${escapeHtml(detail)}</p></main></body></html>`);
+}
+
+/** Whether the site's app authorization can sign apps in to the account (not only hand out tokens). */
+export function supportsAccountScope(status: Json): boolean {
+	return (
+		status.app_authorization_enabled === true &&
+		Array.isArray(status.app_authorization_scopes) &&
+		status.app_authorization_scopes.includes("account")
+	);
 }
 
 const sameSecret = (a: string, b: string) => {
@@ -314,6 +331,8 @@ interface KeyRef {
 
 export interface NewApiManagerOptions {
 	log?: (message: string) => void;
+	/** Sent with every request to the site, e.g. so its login sessions list names Pier. */
+	userAgent?: string;
 	/** Override for tests. */
 	fetch?: typeof fetch;
 	now?: () => number;
@@ -417,6 +436,7 @@ export class NewApiManager {
 		const headers: Record<string, string> = {
 			accept: "application/json",
 			"accept-language": "zh-CN,zh;q=0.9,en;q=0.5",
+			...(this.options.userAgent ? { "user-agent": this.options.userAgent } : {}),
 			...options.headers,
 		};
 		if (body !== undefined) headers["content-type"] = "application/json";
@@ -942,8 +962,18 @@ export class NewApiManager {
 		};
 	}
 
-	/** Start a browser authorization: listen on a loopback port and build the consent page URL. */
-	async authorizeStart(connectionId: string, baseUrl: string): Promise<NewApiAuthorizeStart> {
+	/** Start a browser authorization for a new API token (see `authorizeWait`). */
+	authorizeStart(connectionId: string, baseUrl: string): Promise<NewApiAuthorizeStart> {
+		return this.startFlow(connectionId, baseUrl, "token");
+	}
+
+	/** Start a browser sign-in to the account (see `authorizeSessionWait`). */
+	authorizeSessionStart(connectionId: string, baseUrl: string): Promise<NewApiAuthorizeStart> {
+		return this.startFlow(connectionId, baseUrl, "account");
+	}
+
+	/** Listen on a loopback port and build the consent page URL. */
+	private async startFlow(connectionId: string, baseUrl: string, scope: AuthorizeScope): Promise<NewApiAuthorizeStart> {
 		this.sweep();
 		const origin = normalizeNewApiUrl(baseUrl);
 		const status = await this.siteStatus(origin);
@@ -951,6 +981,9 @@ export class NewApiManager {
 			fail(
 				"该站点没有开启浏览器授权（需要支持应用授权的 NewAPI，并由管理员在「系统设置 → 认证」中开启），请改用账号密码或访问令牌登录",
 			);
+		}
+		if (scope === "account" && !supportsAccountScope(status)) {
+			fail("该站点的 NewAPI 版本还不支持在浏览器中登录账号，请改用账号密码或访问令牌登录");
 		}
 
 		const server = createServer();
@@ -963,9 +996,9 @@ export class NewApiManager {
 		});
 		const { port } = server.address() as AddressInfo;
 		const verifier = randomBytes(32).toString("base64url");
-		let resolve!: (result: NewApiAuthorizeResult) => void;
+		let resolve!: (result: NewApiAuthorizeResult | SessionLoginResult) => void;
 		let reject!: (error: Error) => void;
-		const result = new Promise<NewApiAuthorizeResult>((res, rej) => {
+		const result = new Promise<NewApiAuthorizeResult | SessionLoginResult>((res, rej) => {
 			resolve = res;
 			reject = rej;
 		});
@@ -973,6 +1006,7 @@ export class NewApiManager {
 		result.catch(() => undefined);
 		const flow: AuthorizeFlow = {
 			id: randomUUID(),
+			scope,
 			connectionId,
 			origin,
 			status,
@@ -1000,7 +1034,7 @@ export class NewApiManager {
 			code_challenge: createHash("sha256").update(verifier).digest("base64url"),
 			code_challenge_method: "S256",
 			state: flow.state,
-			key_name: `Pier · ${hostname()}`.slice(0, 40),
+			...(scope === "account" ? { scope } : { key_name: `Pier · ${hostname()}`.slice(0, 40) }),
 		});
 		return {
 			flowId: flow.id,
@@ -1037,6 +1071,14 @@ export class NewApiManager {
 			return;
 		}
 		try {
+			if (flow.scope === "account") {
+				const result = await this.exchangeSession(flow, code);
+				const user = result.account.user;
+				const name = user.displayName && user.displayName !== user.username ? user.displayName : user.username;
+				callbackPage(res, 200, "登录成功", `Pier 已登录 ${name}，可以关闭此页面并回到 Pier。`);
+				this.endFlow(flow, result);
+				return;
+			}
 			const result = await this.exchange(flow, code);
 			callbackPage(res, 200, "授权成功", `令牌「${result.token.name}」已交给 Pier，可以关闭此页面并回到 Pier。`);
 			this.endFlow(flow, result);
@@ -1089,8 +1131,37 @@ export class NewApiManager {
 		};
 	}
 
+	/** Exchange a sign-in code for a login session of Pier's own (like a password login). */
+	private async exchangeSession(flow: AuthorizeFlow, code: string): Promise<SessionLoginResult> {
+		const data = await this.ok({ origin: flow.origin, cookies: new Map() }, "POST", "/api/app-auth/token", {
+			code,
+			code_verifier: flow.verifier,
+			redirect_uri: flow.redirectUri,
+		});
+		const body = isObject(data) ? data : {};
+		const accessToken = str(body.access_token);
+		const refreshToken = str(body.refresh_token);
+		if (!accessToken || !refreshToken) return fail("NewAPI 没有返回登录凭据");
+		const session: Session = {
+			id: randomUUID(),
+			connectionId: flow.connectionId,
+			origin: flow.origin,
+			status: flow.status,
+			ownLogin: true,
+			bearer: accessToken,
+			cookies: new Map([[REFRESH_COOKIE, refreshToken]]),
+			renew: { accessExpiresAt: epochMs(body.access_expires_at) },
+			keys: new Map(),
+			expiresAt: this.now() + SESSION_TTL_MS,
+		};
+		this.setUser(session, isObject(body.user) ? body.user : {});
+		const result = await this.finish(session);
+		if (result.status !== "ok") return fail("NewAPI 登录还需要验证");
+		return result;
+	}
+
 	/** Settle a flow, stop listening and forget it. */
-	private endFlow(flow: AuthorizeFlow, outcome: NewApiAuthorizeResult | Error): void {
+	private endFlow(flow: AuthorizeFlow, outcome: NewApiAuthorizeResult | SessionLoginResult | Error): void {
 		if (flow.ended) return;
 		flow.ended = true;
 		clearTimeout(flow.timer);
@@ -1108,9 +1179,9 @@ export class NewApiManager {
 		}
 	}
 
-	private flow(connectionId: string, flowId: string): AuthorizeFlow {
+	private flow(connectionId: string, flowId: string, scope: AuthorizeScope): AuthorizeFlow {
 		const flow = this.flows.get(flowId);
-		if (!flow || flow.connectionId !== connectionId) {
+		if (!flow || flow.connectionId !== connectionId || flow.scope !== scope) {
 			throw new PierProtocolError("NOT_FOUND", "浏览器授权已结束，请重新授权");
 		}
 		return flow;
@@ -1118,9 +1189,22 @@ export class NewApiManager {
 
 	/** Wait until the user approves or declines in the browser. */
 	async authorizeWait(connectionId: string, flowId: string): Promise<NewApiAuthorizeResult> {
-		const flow = this.flow(connectionId, flowId);
+		const flow = this.flow(connectionId, flowId, "token");
 		try {
-			return await flow.result;
+			return (await flow.result) as NewApiAuthorizeResult;
+		} finally {
+			this.flows.delete(flow.id);
+		}
+	}
+
+	/**
+	 * Wait until the user signs Pier in (or declines) in the browser. The login belongs to
+	 * `connectionId` like one from `login`; take it over with `detach`.
+	 */
+	async authorizeSessionWait(connectionId: string, flowId: string): Promise<SessionLoginResult> {
+		const flow = this.flow(connectionId, flowId, "account");
+		try {
+			return (await flow.result) as SessionLoginResult;
 		} finally {
 			this.flows.delete(flow.id);
 		}

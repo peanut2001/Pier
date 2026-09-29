@@ -111,10 +111,17 @@ describe("personal center site info", () => {
 			registerEnabled: false,
 			emailVerification: true,
 			passwordLogin: true,
+			browserLogin: false,
 			turnstile: false,
 			oauth: ["GitHub", "LinuxDO", "SSO"],
 			quota: { perUnit: 500000, type: "USD", usdRate: 7 },
 		});
+		expect(
+			accountSite("https://x.test", { app_authorization_enabled: true, app_authorization_scopes: ["token", "account"] })
+				.browserLogin,
+		).toBe(true);
+		// Sites whose app authorization only hands out tokens cannot sign Pier in.
+		expect(accountSite("https://x.test", { app_authorization_enabled: true }).browserLogin).toBe(false);
 		expect(accountSite("https://x.test", { display_in_currency: false }).quota).toEqual({
 			perUnit: 500000,
 			type: "TOKENS",
@@ -227,6 +234,84 @@ describe("personal center", () => {
 		});
 		expect((await t.client.request("account.status", {})).user).toBeUndefined();
 		expect(() => statSync(t.accountFile)).toThrow();
+	});
+
+	it("signs in through the browser and keeps the login across restarts", async () => {
+		await start({ variant: "modern", appAuth: true, appAccount: true });
+		expect((await t.client.request("account.status", {})).site?.browserLogin).toBe(true);
+
+		const started = await t.client.request("account.authorizeStart", {});
+		const consent = new URL(started.authorizeUrl);
+		expect(consent.origin).toBe(site.url);
+		expect(consent.pathname).toBe("/app-auth");
+		expect(consent.searchParams.get("scope")).toBe("account");
+		expect(consent.searchParams.get("client_name")).toBe("Pier");
+		expect(consent.searchParams.get("code_challenge_method")).toBe("S256");
+		expect(consent.searchParams.has("key_name")).toBe(false);
+		expect(new URL(consent.searchParams.get("redirect_uri") ?? "").hostname).toBe("127.0.0.1");
+		// The flow belongs to the connection that started it.
+		await expect(t.second.request("account.authorizeWait", { flowId: started.flowId })).rejects.toMatchObject({
+			code: "NOT_FOUND",
+		});
+		await expect(t.client.request("newapi.authorizeWait", { flowId: started.flowId })).rejects.toMatchObject({
+			code: "NOT_FOUND",
+		});
+
+		const waiting = t.client.request("account.authorizeWait", { flowId: started.flowId });
+		const page = await fetch(site.approve(started.authorizeUrl));
+		expect(page.status).toBe(200);
+		expect(await page.text()).toContain("Pier 已登录 Alice");
+		const result = await waiting;
+		if (result.status !== "ok") throw new Error("expected a signed-in account");
+		expect(result.overview.user).toMatchObject({ id: 7, username: "alice", quota: 3_500_000 });
+		// Signing in creates no token.
+		expect(site.tokens).toHaveLength(2);
+		expect(site.requests.find((r) => r.path === "/api/app-auth/token")?.headers["user-agent"]).toMatch(/^Pier\//);
+
+		// Like a password login, only the refresh token is saved.
+		const saved = readFileSync(t.accountFile, "utf8");
+		expect(saved).toContain(site.refreshToken);
+		expect(saved).not.toContain("app-access-1");
+		expect((await t.second.request("account.status", {})).user).toMatchObject({ username: "alice" });
+
+		await t.restart();
+		expect((await t.client.request("account.overview", {})).user.username).toBe("alice");
+		expect(site.refreshes).toBe(1);
+
+		expect(await t.client.request("account.logout", {})).toEqual({ loggedOut: true });
+		expect(site.logouts).toBe(1);
+		expect(() => statSync(t.accountFile)).toThrow();
+	});
+
+	it("reports declined, cancelled and unsupported browser sign-ins", async () => {
+		await start({ variant: "modern", appAuth: true, appAccount: true });
+		const declined = await t.client.request("account.authorizeStart", {});
+		const declinedWait = t.client.request("account.authorizeWait", { flowId: declined.flowId });
+		const params = new URL(declined.authorizeUrl).searchParams;
+		const redirect = new URL(params.get("redirect_uri") ?? "");
+		redirect.searchParams.set("error", "access_denied");
+		redirect.searchParams.set("state", params.get("state") ?? "");
+		expect((await fetch(redirect)).status).toBe(400);
+		await expect(declinedWait).rejects.toMatchObject({ message: expect.stringContaining("取消授权") });
+
+		const cancelled = await t.client.request("account.authorizeStart", {});
+		const cancelledWait = t.client.request("account.authorizeWait", { flowId: cancelled.flowId });
+		expect(await t.client.request("account.authorizeCancel", { flowId: cancelled.flowId })).toEqual({
+			cancelled: true,
+		});
+		await expect(cancelledWait).rejects.toMatchObject({ message: expect.stringContaining("取消") });
+		expect((await t.client.request("account.status", {})).user).toBeUndefined();
+		expect(() => statSync(t.accountFile)).toThrow();
+		await t.close();
+		site.server.close();
+
+		// App authorization that only hands out tokens cannot sign Pier in.
+		await start({ variant: "modern", appAuth: true });
+		expect((await t.client.request("account.status", {})).site?.browserLogin).toBe(false);
+		await expect(t.client.request("account.authorizeStart", {})).rejects.toMatchObject({
+			code: "BAD_REQUEST",
+			message: expect.stringContaining("还不支持"),
+		});
 	});
 
 	it("configures a group's key as a provider and creates keys in groups", async () => {

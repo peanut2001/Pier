@@ -647,6 +647,11 @@ export interface AccountSite {
 	/** Registration needs an email verification code (`account.sendCode`). */
 	emailVerification: boolean;
 	passwordLogin: boolean;
+	/**
+	 * The site can sign Pier in through the browser (NewAPI app authorization with the `account`
+	 * scope, 1.11): `account.authorizeStart`. Every sign-in method of the website works there.
+	 */
+	browserLogin: boolean;
 	/** Password sign-in and registration need a Turnstile check, which only the website can do. */
 	turnstile: boolean;
 	/** Third-party sign-in methods the website offers, e.g. `GitHub`, `LinuxDO`. */
@@ -684,7 +689,16 @@ export interface AccountOverview {
 	groups: NewApiGroup[];
 }
 
-/** Result of `account.login`, `account.verify` and `account.register`. */
+/** Result of `account.authorizeStart` (1.11): open `authorizeUrl` in the user's browser. */
+export interface AccountAuthorizeStart {
+	flowId: string;
+	/** The site's sign-in consent page. The browser returns to a loopback address on the host. */
+	authorizeUrl: string;
+	/** ISO time after which the flow is abandoned. */
+	expiresAt: string;
+}
+
+/** Result of `account.login`, `account.verify`, `account.register` and `account.authorizeWait`. */
 export type AccountLoginResult =
 	| { status: "ok"; overview: AccountOverview }
 	/** The account asks for a two-factor code; answer with `account.verify`. */
