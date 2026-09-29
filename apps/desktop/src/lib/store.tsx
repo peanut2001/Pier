@@ -682,7 +682,11 @@ export class PierStore {
 		let wasOpen = false;
 		client.onState((state) => {
 			if (!current()) return;
-			this.patchNode(LOCAL_NODE, { connection: state });
+			// A reconnect re-runs `host.hello`: keep the host's info (version, name) current.
+			this.patchNode(
+				LOCAL_NODE,
+				state === "open" && client.host ? { connection: state, hostInfo: client.host } : { connection: state },
+			);
 			if (state === "open") {
 				if (wasOpen) {
 					void this.reloadLocal();
@@ -743,7 +747,14 @@ export class PierStore {
 		this.patchNode(node, { connection: "connecting" });
 		client.onState((state) => {
 			if (!current()) return;
-			this.patchNode(node, state === "open" ? { connection: state, connectError: undefined } : { connection: state });
+			// A reconnect re-runs `host.hello`: the computer may have been upgraded meanwhile, so
+			// refresh its info (protocol version, name) instead of keeping the first answer.
+			this.patchNode(
+				node,
+				state === "open"
+					? { connection: state, connectError: undefined, ...(client.host ? { hostInfo: client.host } : {}) }
+					: { connection: state },
+			);
 			if (state === "open") {
 				this.retryAttempts.delete(node);
 				if (wasOpen) void this.loadWorkspaces(node);
