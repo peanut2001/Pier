@@ -42,6 +42,7 @@ import {
 	type WorkspaceFilesResult,
 	type WorkspaceFileWriteResult,
 	type WorkspaceInfo,
+	type WorkspacePathDeleteResult,
 } from "./domain.ts";
 
 const Id = z.string().min(1).max(256);
@@ -96,6 +97,11 @@ export const MethodParamsSchemas = {
 		text: z.string().max(4 * 1024 * 1024),
 		expectedModifiedAt: z.string().max(64).optional(),
 	}),
+	/**
+	 * Permanently delete a workspace file, directory (recursively) or symlink (1.11). A symlink
+	 * is removed itself, never its target; the workspace root cannot be deleted.
+	 */
+	"workspace.deletePath": z.object({ workspaceId: Id, path: z.string().min(1).max(4096) }),
 
 	"session.list": z.object({ workspaceId: Id }),
 	"session.create": z.object({ workspaceId: Id, name: z.string().min(1).max(200).optional() }),
@@ -355,6 +361,7 @@ export interface MethodResults {
 	"workspace.files": WorkspaceFilesResult;
 	"workspace.readFile": WorkspaceFileContent;
 	"workspace.writeFile": WorkspaceFileWriteResult;
+	"workspace.deletePath": WorkspacePathDeleteResult;
 	"session.list": { sessions: SessionSummary[] };
 	"session.create": { session: SessionSummary };
 	"session.open": { session: SessionSummary };

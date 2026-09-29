@@ -1,7 +1,7 @@
 import type { WorkspaceFileEntry, WorkspaceInfo } from "@pier/protocol";
 import { type PointerEvent as ReactPointerEvent, useCallback, useEffect, useRef, useState } from "react";
 import { formatBytes, joinPath, relativeTime } from "../lib/format.ts";
-import { LOCAL_NODE, useAppState, useStore } from "../lib/store.tsx";
+import { hostCanDeleteFiles, LOCAL_NODE, useAppState, useStore } from "../lib/store.tsx";
 import { terminals } from "../lib/terminals.ts";
 import { ContextMenu, type ContextMenuItem, type ContextMenuPosition, contextMenuPosition } from "./ContextMenu.tsx";
 import {
@@ -19,8 +19,10 @@ import {
 	IconPanelRight,
 	IconRefresh,
 	IconTerminal,
+	IconTrash,
 	IconX,
 } from "./Icons.tsx";
+import { Modal } from "./Modal.tsx";
 
 interface DirState {
 	entries?: WorkspaceFileEntry[];
@@ -53,6 +55,70 @@ function errorText(error: unknown): string {
 	if (code === "NOT_FOUND") return "目录不存在";
 	if (code === "FORBIDDEN") return "无权访问该目录";
 	return message;
+}
+
+/** Confirms and performs a permanent delete of one entry of the file panel. */
+function DeleteDialog({
+	workspace,
+	entry,
+	onClose,
+}: {
+	workspace: WorkspaceInfo;
+	entry: WorkspaceFileEntry;
+	onClose: () => void;
+}) {
+	const store = useStore();
+	const [busy, setBusy] = useState(false);
+	const [error, setError] = useState<string>();
+	const isDir = entry.kind === "directory" && !entry.symlink;
+	const what = entry.symlink ? "符号链接" : isDir ? "文件夹" : "文件";
+	const remove = async () => {
+		setBusy(true);
+		setError(undefined);
+		try {
+			await store.deletePath(workspace.id, entry.path);
+			store.toast("info", `已删除${what}「${entry.name}」`);
+			onClose();
+		} catch (e) {
+			const code = (e as { code?: string }).code;
+			setError(
+				code === "NOT_FOUND"
+					? `${what}已不存在`
+					: code === "FORBIDDEN"
+						? "没有权限删除，或它位于工作区之外"
+						: errorText(e),
+			);
+			if (code === "NOT_FOUND") store.bumpFiles(workspace.id);
+			setBusy(false);
+		}
+	};
+	return (
+		<Modal title={`删除${what}`} onClose={onClose}>
+			<p>
+				确定要永久删除{what}「<strong>{entry.name}</strong>」吗？
+			</p>
+			<code className="path">{joinPath(workspace.path, entry.path)}</code>
+			<p className="muted small">
+				{entry.symlink
+					? "只删除这个链接，不影响它指向的内容。"
+					: isDir
+						? "文件夹中的所有文件和子文件夹都会一起删除。"
+						: null}
+				删除不会进入废纸篓 / 回收站，无法撤销。
+			</p>
+			{error ? <p className="error-text small">{error}</p> : null}
+			<div className="modal-actions">
+				{/* biome-ignore lint/a11y/noAutofocus: focus the safe choice so Enter does not delete. */}
+				<button type="button" className="ghost" autoFocus disabled={busy} onClick={onClose}>
+					取消
+				</button>
+				<button type="button" className="danger" disabled={busy} onClick={() => void remove()}>
+					{busy ? <IconLoader size={14} className="spin" /> : <IconTrash size={14} />}
+					{busy ? "正在删除…" : "永久删除"}
+				</button>
+			</div>
+		</Modal>
+	);
 }
 
 function useWorkspaceTree(workspaceId: string) {
@@ -184,6 +250,9 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 	// Terminals and the file manager are on this computer: only for its own workspaces.
 	const local = useAppState((s) => s.node === LOCAL_NODE);
 	const canTerminal = terminals.supported && local;
+	const canDelete = useAppState((s) => hostCanDeleteFiles(s.hostInfo));
+	/** Entry awaiting delete confirmation. */
+	const [deleting, setDeleting] = useState<WorkspaceFileEntry>();
 	const version = useAppState((s) => s.filesVersion[workspace.id] ?? 0);
 	const { dirs, expanded, reload, toggle, collapseAll } = useWorkspaceTree(workspace.id);
 	const [selected, setSelected] = useState<string>();
@@ -289,6 +358,15 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 					terminals.create({ workspace, cwd: isDir ? absolute : joinPath(workspace.path, parentPath(entry.path)) }),
 			},
 			reveal && { label: revealLabel, icon: <IconExternal size={14} />, onSelect: () => store.revealPath(absolute) },
+			"separator",
+			canDelete && {
+				label: "删除…",
+				icon: <IconTrash size={14} />,
+				hint: /Mac/.test(platform) ? "⌘⌫" : "Delete",
+				danger: true,
+				disabled: connection !== "open",
+				onSelect: () => setDeleting(entry),
+			},
 		];
 	};
 
@@ -342,6 +420,13 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 									className="files-entry"
 									title={entryTitle(entry)}
 									{...(isDir ? { "aria-expanded": open } : {})}
+									onKeyDown={(event) => {
+										const del = event.key === "Delete" || (event.key === "Backspace" && event.metaKey);
+										if (!del || !canDelete || connection !== "open") return;
+										event.preventDefault();
+										setSelected(entry.path);
+										setDeleting(entry);
+									}}
 									onClick={(event) => {
 										setSelected(entry.path);
 										if (isDir) {
@@ -446,6 +531,7 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 					onClose={() => setMenu(undefined)}
 				/>
 			) : null}
+			{deleting ? <DeleteDialog workspace={workspace} entry={deleting} onClose={() => setDeleting(undefined)} /> : null}
 		</aside>
 	);
 }

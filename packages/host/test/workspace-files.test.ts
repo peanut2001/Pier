@@ -16,6 +16,7 @@ import type { PierClient } from "@pier/client";
 import { PierProtocolError, type WorkspaceInfo } from "@pier/protocol";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+	deleteWorkspacePath,
 	listWorkspaceDirectory,
 	MAX_DIRECTORY_ENTRIES,
 	MAX_IMAGE_PREVIEW_BYTES,
@@ -274,6 +275,62 @@ describe("writeWorkspaceFile", () => {
 	});
 });
 
+describe("deleteWorkspacePath", () => {
+	let root: string;
+	let outside: string;
+
+	beforeEach(() => {
+		root = mkdtempSync(join(tmpdir(), "pier-delete-"));
+		outside = mkdtempSync(join(tmpdir(), "pier-outside-"));
+		mkdirSync(join(root, "src", "lib"), { recursive: true });
+		writeFileSync(join(root, "src", "index.ts"), "x");
+		writeFileSync(join(root, "src", "lib", "a.ts"), "a");
+		writeFileSync(join(root, "keep.txt"), "keep");
+		writeFileSync(join(outside, "secret.txt"), "secret");
+	});
+	afterEach(() => {
+		rmSync(root, { recursive: true, force: true });
+		rmSync(outside, { recursive: true, force: true });
+	});
+
+	it("deletes files and whole directories", async () => {
+		expect(await deleteWorkspacePath(root, "src\\index.ts")).toEqual({ path: "src/index.ts", kind: "file" });
+		expect(existsSync(join(root, "src", "index.ts"))).toBe(false);
+		expect(await deleteWorkspacePath(root, "src/")).toEqual({ path: "src", kind: "directory" });
+		expect(existsSync(join(root, "src"))).toBe(false);
+		expect(readFileSync(join(root, "keep.txt"), "utf8")).toBe("keep");
+	});
+
+	it("removes symlinks without touching their targets", async () => {
+		symlinkSync(join(outside, "secret.txt"), join(root, "leak.txt"));
+		symlinkSync(outside, join(root, "out"), "dir");
+		symlinkSync(join(root, "src"), join(root, "alias"), "dir");
+		expect(await deleteWorkspacePath(root, "leak.txt")).toEqual({ path: "leak.txt", kind: "other" });
+		expect(await deleteWorkspacePath(root, "out")).toEqual({ path: "out", kind: "other" });
+		expect(await deleteWorkspacePath(root, "alias")).toEqual({ path: "alias", kind: "other" });
+		expect(existsSync(join(root, "leak.txt"))).toBe(false);
+		expect(readFileSync(join(outside, "secret.txt"), "utf8")).toBe("secret");
+		expect(existsSync(join(root, "src", "lib", "a.ts"))).toBe(true);
+		// Deleting through a link to the inside works; through a link to the outside is refused.
+		symlinkSync(join(root, "src"), join(root, "alias"), "dir");
+		expect(await deleteWorkspacePath(root, "alias/index.ts")).toEqual({ path: "alias/index.ts", kind: "file" });
+		expect(existsSync(join(root, "src", "index.ts"))).toBe(false);
+		symlinkSync(outside, join(root, "out"), "dir");
+		await expect(deleteWorkspacePath(root, "out/secret.txt")).rejects.toMatchObject({ code: "FORBIDDEN" });
+		expect(existsSync(join(outside, "secret.txt"))).toBe(true);
+	});
+
+	it("rejects the root, escaping paths and missing entries", async () => {
+		for (const bad of ["", ".", "./", "../x", "/etc/passwd"]) {
+			await expect(deleteWorkspacePath(root, bad), bad).rejects.toMatchObject({ code: "BAD_REQUEST" });
+		}
+		await expect(deleteWorkspacePath(root, "missing.txt")).rejects.toMatchObject({ code: "NOT_FOUND" });
+		await expect(deleteWorkspacePath(root, "nope/x.txt")).rejects.toMatchObject({ code: "NOT_FOUND" });
+		await expect(deleteWorkspacePath(root, "keep.txt/x")).rejects.toMatchObject({ code: "NOT_FOUND" });
+		expect(existsSync(join(root, "keep.txt"))).toBe(true);
+	});
+});
+
 describe("workspace.files", () => {
 	let t: TestHost;
 	let client: PierClient;
@@ -325,5 +382,17 @@ describe("workspace.files", () => {
 			client.request("workspace.writeFile", { workspaceId: "nope", path: "docs/guide.md", text: "" }),
 			"NOT_FOUND",
 		);
+	});
+
+	it("deletes a workspace path with workspace.deletePath", async () => {
+		expect(await client.request("workspace.deletePath", { workspaceId: workspace.id, path: "docs" })).toEqual({
+			path: "docs",
+			kind: "directory",
+		});
+		expect(existsSync(join(t.workspaceDir, "docs"))).toBe(false);
+		expect(existsSync(t.workspaceDir)).toBe(true);
+		await expectCode(client.request("workspace.deletePath", { workspaceId: workspace.id, path: "docs" }), "NOT_FOUND");
+		await expectCode(client.request("workspace.deletePath", { workspaceId: workspace.id, path: "." }), "BAD_REQUEST");
+		await expectCode(client.request("workspace.deletePath", { workspaceId: "nope", path: "docs" }), "NOT_FOUND");
 	});
 });

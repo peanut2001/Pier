@@ -109,6 +109,14 @@ export interface WorkspaceFileWriteResult {
 	modifiedAt: string;
 }
 
+/** Result of `workspace.deletePath` (1.11): what was deleted. */
+export interface WorkspacePathDeleteResult {
+	/** Path relative to the workspace root, normalized and joined with "/". */
+	path: string;
+	/** `directory` was deleted with its contents; `other` covers symbolic links and special files. */
+	kind: "file" | "directory" | "other";
+}
+
 /** Runtime state of a session as seen by clients. */
 export type SessionRunState = "inactive" | "idle" | "streaming" | "compacting" | "retrying";
 
