@@ -10,7 +10,17 @@ import type {
 import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useAppState, useStore } from "../lib/store.tsx";
 import { formatQuota, relayProvider, YUNLIAN_NAME, yunlianGroupId } from "../lib/yunlian.ts";
-import { IconAlert, IconCheck, IconExternal, IconKey, IconLoader, IconPower, IconRefresh } from "./Icons.tsx";
+import {
+	IconAlert,
+	IconCheck,
+	IconExternal,
+	IconKey,
+	IconLoader,
+	IconPlus,
+	IconPower,
+	IconRefresh,
+	IconX,
+} from "./Icons.tsx";
 import { SettingRow, SettingsCard, SettingsGroup } from "./SettingsUi.tsx";
 
 /** 个人中心: the 云链API account behind Pier — sign-in, registration, balance and per-group keys. */
@@ -460,12 +470,15 @@ function GroupRow({
 	overview,
 	provider,
 	onTokens,
+	onRemove,
 }: {
 	entry: GroupEntry;
 	overview: AccountOverview;
 	/** The local provider configured for this group, if any. */
 	provider?: ProviderInfo | undefined;
 	onTokens: (tokens: NewApiToken[]) => void;
+	/** Drop a group that was picked but not configured yet. */
+	onRemove?: (() => void) | undefined;
 }) {
 	const store = useStore();
 	const usable = entry.tokens.filter((t) => t.status === 1);
@@ -537,6 +550,11 @@ function GroupRow({
 						{busy ? <IconLoader size={13} className="spin" /> : null}
 						{provider ? "更新本地配置" : "配置到本地"}
 					</button>
+					{!provider && onRemove ? (
+						<button type="button" className="ghost icon" title="不添加这个分组" disabled={busy} onClick={onRemove}>
+							<IconX size={13} />
+						</button>
+					) : null}
 				</div>
 			</div>
 			{error ? (
@@ -567,6 +585,19 @@ function Dashboard({
 	const { site, user } = overview;
 	const entries = useMemo(() => groupEntries(overview), [overview]);
 	const byId = new Map(providers?.providers.map((p) => [p.id, p]));
+	// Only groups already configured locally are listed; others are added one at a time.
+	const [picked, setPicked] = useState<string[]>([]);
+	const [picking, setPicking] = useState(false);
+	const isConfigured = (entry: GroupEntry) => byId.has(yunlianGroupId(entry.name));
+	const shown = entries.filter((e) => isConfigured(e) || picked.includes(e.name));
+	const addable = entries.filter((e) => !e.unavailable && !isConfigured(e) && !picked.includes(e.name));
+	const [pick, setPick] = useState("");
+	const pickValue = addable.some((e) => e.name === pick) ? pick : (addable[0]?.name ?? "");
+	const addPicked = () => {
+		if (!pickValue) return;
+		setPicked((list) => [...list, pickValue]);
+		setPicking(false);
+	};
 	const quota = (value: number) => formatQuota(value, site.quota);
 	const name = user.displayName && user.displayName !== user.username ? user.displayName : user.username;
 
@@ -642,29 +673,77 @@ function Dashboard({
 				</div>
 			</SettingsGroup>
 			<SettingsGroup
-				title={`分组与令牌（${entries.length}）`}
+				title={`分组与令牌（${shown.length}）`}
 				actions={
-					<button type="button" className="ghost" onClick={() => store.openExternal(`${site.url}/keys`)}>
-						<IconExternal size={13} />
-						管理令牌
-					</button>
+					<>
+						<button
+							type="button"
+							className="ghost"
+							disabled={!addable.length}
+							title={addable.length ? undefined : "所有可用分组都已添加"}
+							onClick={() => setPicking((v) => !v)}
+						>
+							<IconPlus size={13} />
+							添加分组
+						</button>
+						<button type="button" className="ghost" onClick={() => store.openExternal(`${site.url}/keys`)}>
+							<IconExternal size={13} />
+							管理令牌
+						</button>
+					</>
 				}
 			>
 				<p className="muted small settings-note">
-					不同分组可用的模型和倍率不同。选择一个分组的令牌（或新建令牌）后点「配置到本地」，Pier
+					这里只列出已配置到本地的分组。点「添加分组」选择要使用的分组，再选择它的令牌（或新建令牌）后点「配置到本地」，Pier
 					会读取这个令牌可用的全部模型，添加为服务商「{site.name} · 分组名」，可以在「模型与服务商」中查看和编辑。
 				</p>
 				<div className="provider-list">
-					{entries.map((entry) => (
+					{picking && addable.length ? (
+						<div className="account-group">
+							<div className="provider-row">
+								<div className="provider-main">
+									<div className="provider-name">添加分组</div>
+									<div className="muted small">选择一个分组加入列表，然后为它配置令牌。</div>
+								</div>
+								<div className="row-actions">
+									<select
+										className="setting-select compact account-token-select"
+										value={pickValue}
+										onChange={(e) => setPick(e.target.value)}
+									>
+										{addable.map((entry) => (
+											<option key={entry.name} value={entry.name}>
+												{[entry.name, ratioText(entry.ratio), entry.description].filter(Boolean).join(" · ")}
+											</option>
+										))}
+									</select>
+									<button type="button" className="primary" disabled={!pickValue} onClick={addPicked}>
+										添加
+									</button>
+									<button type="button" className="ghost" onClick={() => setPicking(false)}>
+										取消
+									</button>
+								</div>
+							</div>
+						</div>
+					) : null}
+					{shown.map((entry) => (
 						<GroupRow
 							key={entry.name}
 							entry={entry}
 							overview={overview}
 							provider={byId.get(yunlianGroupId(entry.name))}
 							onTokens={onTokens}
+							onRemove={() => setPicked((list) => list.filter((name) => name !== entry.name))}
 						/>
 					))}
-					{!entries.length ? <div className="provider-row muted small">这个账号还没有可用的分组。</div> : null}
+					{!shown.length && !picking ? (
+						<div className="provider-row muted small">
+							{entries.length
+								? "还没有配置到本地的分组，点右上角「添加分组」选择要使用的分组。"
+								: "这个账号还没有可用的分组。"}
+						</div>
+					) : null}
 				</div>
 				<p className="muted small settings-note">令牌密钥由 Pier Host 直接保存在本机，不会显示在界面上。</p>
 			</SettingsGroup>
