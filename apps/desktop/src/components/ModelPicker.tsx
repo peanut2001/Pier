@@ -145,6 +145,8 @@ function ThinkingSlider({
 }
 
 interface ModelMenuProps {
+	/** The computer whose models these are (for "manage models"). */
+	node: string;
 	model?: ModelInfo;
 	thinkingLevel?: string;
 	/** Still resolving which model will be used (the chip shows a placeholder). */
@@ -159,7 +161,7 @@ interface ModelMenuProps {
  * The composer's model chip: a popover with the thinking-level slider and the current model,
  * which opens the model list (as in ChatGPT / Codex).
  */
-function ModelMenu({ model, thinkingLevel, loading, disabled, loadModels, onModel, onThinking }: ModelMenuProps) {
+function ModelMenu({ node, model, thinkingLevel, loading, disabled, loadModels, onModel, onThinking }: ModelMenuProps) {
 	const store = useStore();
 	const [open, setOpen] = useState(false);
 	const [view, setView] = useState<"main" | "models">("main");
@@ -203,7 +205,7 @@ function ModelMenu({ model, thinkingLevel, loading, disabled, loadModels, onMode
 			className="dropdown-item manage-models"
 			onClick={() => {
 				close();
-				store.openModels();
+				store.openModels(node);
 			}}
 		>
 			<span className="menu-label">
@@ -331,8 +333,10 @@ function ModelMenu({ model, thinkingLevel, loading, disabled, loadModels, onMode
 
 /** Model and thinking level of an open session, switched right away. */
 export function SessionModelPicker({ chat, controller }: { chat: ChatState; controller: ChatController }) {
+	const store = useStore();
 	return (
 		<ModelMenu
+			node={store.nodeOf(controller.workspaceId)}
 			model={chat.model}
 			thinkingLevel={chat.thinkingLevel}
 			loading={!chat.loaded}
@@ -396,6 +400,7 @@ export function NewChatModelPicker({ workspace, disabled }: { workspace: Workspa
 
 	return (
 		<ModelMenu
+			node={node}
 			{...(model ? { model } : {})}
 			thinkingLevel={level}
 			loading={!defaults}

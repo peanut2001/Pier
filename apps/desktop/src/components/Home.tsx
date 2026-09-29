@@ -25,7 +25,7 @@ const STEPS = [
 export function Welcome() {
 	const store = useStore();
 	const addWorkspace = useAddWorkspace();
-	const providers = useAppState((s) => s.providers);
+	const providers = useAppState((s) => s.localProviders);
 	return (
 		<div className="home">
 			<SidebarToggle floating />
@@ -60,7 +60,7 @@ export function Welcome() {
 					<p className="muted small hero-note">
 						已有 {providers.availableCount} 个可用模型
 						{providers.defaultModel ? `，默认使用 ${providers.defaultModel.modelId}` : ""}。
-						<button type="button" className="ghost link-button" onClick={() => store.openModels()}>
+						<button type="button" className="ghost link-button" onClick={() => store.openModels(LOCAL_NODE)}>
 							管理模型与服务商
 						</button>
 					</p>

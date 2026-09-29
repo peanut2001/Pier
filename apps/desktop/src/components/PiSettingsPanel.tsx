@@ -16,7 +16,7 @@ import {
 	sameValue,
 	unhandledKeys,
 } from "../lib/pi-settings.ts";
-import { useAppState, useStore } from "../lib/store.tsx";
+import { useAppState, useSettingsTarget, useSettingsWorkspaces, useStore } from "../lib/store.tsx";
 import {
 	IconAlert,
 	IconBraces,
@@ -343,7 +343,7 @@ function detectionError(error: unknown): string {
 	return message;
 }
 
-/** npm / pnpm / bun found on this computer; picking one sets `npmCommand` to its full path. */
+/** npm / pnpm / bun found on the managed computer; picking one sets `npmCommand` to its full path. */
 function PackageManagerPicker({
 	command,
 	disabled,
@@ -355,6 +355,7 @@ function PackageManagerPicker({
 	onPick: (command: string[]) => void;
 }) {
 	const store = useStore();
+	const target = useSettingsTarget();
 	const [detection, setDetection] = useState<Detection>({ status: "loading" });
 	const detect = useCallback(async () => {
 		setDetection((d) => ({ status: "loading", ...(d.status === "ok" ? { managers: d.managers } : {}) }));
@@ -373,7 +374,7 @@ function PackageManagerPicker({
 	return (
 		<div className="pi-pm">
 			<div className="pi-pm-head">
-				<span className="muted small">本机检测到的包管理器</span>
+				<span className="muted small">{target.local ? "本机" : `${target.name} 上`}检测到的包管理器</span>
 				<button
 					type="button"
 					className="ghost small"
@@ -586,7 +587,7 @@ function JsonEditor({
 
 export function PiSettings() {
 	const store = useStore();
-	const workspaces = useAppState((s) => s.localWorkspaces);
+	const workspaces = useSettingsWorkspaces();
 	const version = useAppState((s) => s.piSettingsVersion);
 	const [workspaceId, setWorkspaceId] = useState("");
 	const [mode, setMode] = useState<Mode>("form");

@@ -48,6 +48,7 @@ import { PierProtocolError, parseProtocolVersion } from "@pier/protocol";
 import { createContext, useContext, useMemo, useSyncExternalStore } from "react";
 import type { Bridge, HostStatus, UpdateStatus } from "./bridge.ts";
 import { fileToken } from "./composer-text.ts";
+import { remotePageBlocker } from "./settings-target.ts";
 import { isYunlianProvider, YUNLIAN_SITE, yunlianGroupOf, yunlianProvider } from "./yunlian.ts";
 
 export const APP_VERSION = "0.2.12";
@@ -275,8 +276,21 @@ export interface AppState {
 	pairingRequests: PairingRequest[];
 	/** The pairing code currently shown, if any. */
 	pairing?: { uri: string; expiresAt: string; addresses: string[] };
-	/** Model providers and credentials (undefined until loaded). */
-	providers?: ProviderListResult;
+	/**
+	 * The computer the settings screen manages (`LOCAL_NODE` or a paired computer's id): the
+	 * models, account, extensions and pi settings pages read and write that computer's Pier.
+	 */
+	settingsNode: string;
+	/** Bumped when the settings are synced again: the pages of `settingsNode` reload everything. */
+	settingsSync: number;
+	/** A sync of `settingsNode`'s settings is in flight. */
+	settingsSyncing: boolean;
+	/** When `settingsNode`'s settings were last read (ms since the epoch). */
+	settingsSyncedAt?: number | undefined;
+	/** Model providers and credentials of `settingsNode` (undefined until loaded). */
+	providers?: ProviderListResult | undefined;
+	/** This computer's model providers (the "no models" hints of the main window). */
+	localProviders?: ProviderListResult | undefined;
 	auth?: AuthFlowState;
 	yunlian?: YunlianLoginState;
 	update: UpdateStatus;
@@ -363,7 +377,8 @@ function clampPanelWidth(width: number): number {
 }
 /** Refresh-timer keys for the device and provider lists (workspace ids are UUIDs, so no clash). */
 const DEVICES_KEY = "#devices";
-const PROVIDERS_KEY = "#providers";
+/** Followed by the computer's node id. */
+const PROVIDERS_KEY = "#providers:";
 const PEERS_KEY = "#peers";
 /** Last known workspaces of paired computers, listed while they are offline. */
 const NODE_WORKSPACES_KEY = "pier.nodeWorkspaces";
@@ -436,6 +451,8 @@ export class PierStore {
 	private authBacklog: EventFrame[] = [];
 	private openedAuthUrls = new Set<string>();
 	private authSeq = 0;
+	/** The computer whose host runs the sign-in in `state.auth`. */
+	private authNode = LOCAL_NODE;
 	private yunlianSeq = 0;
 	/** The pending 云链API authorization on the host, if any. */
 	private yunlianFlow: string | undefined;
@@ -505,6 +522,9 @@ export class PierStore {
 			chatsVersion: 0,
 			devices: [],
 			pairingRequests: [],
+			settingsNode: LOCAL_NODE,
+			settingsSync: 0,
+			settingsSyncing: false,
 			update: { state: "idle", currentVersion: APP_VERSION, autoCheck: true, downloaded: 0 },
 			sidebar: sidebar.open !== false,
 			filesPanel: panel.open === true,
@@ -608,9 +628,32 @@ export class PierStore {
 		return this.clients.get(this.state.node);
 	}
 
-	/** This computer's Pier Host (settings, models, pairing, and the proxy to other computers). */
+	/** This computer's Pier Host (pairing, remote access, and the proxy to other computers). */
 	private get localClient(): PierClient | undefined {
 		return this.clients.get(LOCAL_NODE);
+	}
+
+	/**
+	 * The open connection to the computer the settings screen manages (models, account,
+	 * extensions, pi settings), or undefined while it cannot be reached.
+	 */
+	private get settingsClient(): PierClient | undefined {
+		return this.openClient(this.state.settingsNode);
+	}
+
+	/** A computer's client, when this computer's host or the paired computer is connected. */
+	private openClient(node: string): PierClient | undefined {
+		const client = this.clients.get(node);
+		if (!client) return undefined;
+		return node === LOCAL_NODE || this.state.nodes[node]?.connection === "open" ? client : undefined;
+	}
+
+	/** The error for a call to the settings computer while it cannot be reached. */
+	private settingsOffline(): Error {
+		const node = this.state.settingsNode;
+		return new Error(
+			node === LOCAL_NODE ? "尚未连接到本机的 Pier Host" : `尚未连接到 ${this.nodeName(node)} 上的 Pier Host`,
+		);
 	}
 
 	/** Whether the workspace on screen is on this computer (not a paired one). */
@@ -687,6 +730,7 @@ export class PierStore {
 			pairing: undefined,
 			auth: undefined,
 			yunlian: undefined,
+			settingsSyncing: false,
 		});
 		this.yunlianSeq++;
 		this.yunlianFlow = undefined;
@@ -713,6 +757,11 @@ export class PierStore {
 		this.clients.delete(node);
 		client?.close();
 		if (this.state.directoryPicker?.node === node) this.resolveDirectoryPicker(null);
+		// A sign-in belongs to the connection that started it.
+		if (this.state.auth && this.authNode === node) {
+			this.authSeq++;
+			this.set({ auth: undefined });
+		}
 		if (this.state.nodes[node]) this.patchNode(node, { connection: "none" });
 	}
 
@@ -729,6 +778,15 @@ export class PierStore {
 				...(selected ? { selectedWorkspaceId: undefined, selectedSessionId: undefined } : {}),
 				...(target ? { newChat: {} } : {}),
 				...(s.node === node ? { node: LOCAL_NODE } : {}),
+				...(s.settingsNode === node
+					? {
+							settingsNode: LOCAL_NODE,
+							settingsSync: s.settingsSync + 1,
+							providers: s.localProviders,
+							settingsSyncedAt: undefined,
+							extensionProgress: undefined,
+						}
+					: {}),
 				peerUpdates: Object.fromEntries(Object.entries(s.peerUpdates).filter(([id]) => id !== node)),
 			};
 		});
@@ -826,6 +884,7 @@ export class PierStore {
 				if (wasOpen) {
 					void this.loadWorkspaces(node);
 					void this.loadPeerUpdate(node);
+					if (node === this.state.settingsNode) void this.loadProviders(node);
 				}
 				wasOpen = true;
 			}
@@ -841,6 +900,7 @@ export class PierStore {
 			if (!current()) return;
 			this.patchNode(node, { hostInfo: hello.host, revoked: false, connectError: undefined });
 			void this.loadPeerUpdate(node);
+			if (node === this.state.settingsNode) void this.loadProviders(node);
 			await this.loadWorkspaces(node);
 		} catch (error) {
 			if (!current()) return;
@@ -910,22 +970,6 @@ export class PierStore {
 			this.scheduleRefresh(DEVICES_KEY);
 		} else if (event.type === "peer.changed") {
 			this.scheduleRefresh(PEERS_KEY);
-		} else if (event.type === "provider.changed") {
-			this.scheduleRefresh(PROVIDERS_KEY);
-			// Setting the default model writes the user settings.
-			this.set((s) => ({ piSettingsVersion: s.piSettingsVersion + 1 }));
-		} else if (event.type === "extension.changed") {
-			this.set((s) => ({
-				extensionsVersion: s.extensionsVersion + 1,
-				piSettingsVersion: s.piSettingsVersion + 1,
-			}));
-		} else if (event.type === "settings.changed") {
-			this.set((s) => ({ piSettingsVersion: s.piSettingsVersion + 1 }));
-		} else if (event.type === "extension.progress") {
-			const { type: _type, ...progress } = event as unknown as ExtensionProgressState & { type: string };
-			this.set({ extensionProgress: progress });
-		} else if (event.type.startsWith("auth.")) {
-			this.onAuthEvent(frame);
 		} else if (event.type === "pairing.request") {
 			const request = event.request as PairingRequest;
 			this.set((s) => ({
@@ -962,13 +1006,41 @@ export class PierStore {
 				(event.level as Toast["level"]) ?? "info",
 				node === LOCAL_NODE ? message : `${this.nodeName(node)}：${message}`,
 			);
+		} else if (event.type.startsWith("auth.")) {
+			if (node === this.authNode) this.onAuthEvent(frame);
+		} else {
+			this.onSettingsEvent(node, frame);
+		}
+	}
+
+	/** Events about pi's configuration, from this computer or the computer the settings screen manages. */
+	private onSettingsEvent(node: string, frame: EventFrame): void {
+		const event = frame.event;
+		const managed = node === this.state.settingsNode;
+		if (event.type === "provider.changed") {
+			// This computer's providers also drive the main window's "no models" hints.
+			if (managed || node === LOCAL_NODE) this.scheduleRefresh(`${PROVIDERS_KEY}${node}`);
+			// Setting the default model writes the user settings.
+			if (managed) this.set((s) => ({ piSettingsVersion: s.piSettingsVersion + 1 }));
+		} else if (!managed) {
+			return;
+		} else if (event.type === "extension.changed") {
+			this.set((s) => ({
+				extensionsVersion: s.extensionsVersion + 1,
+				piSettingsVersion: s.piSettingsVersion + 1,
+			}));
+		} else if (event.type === "settings.changed") {
+			this.set((s) => ({ piSettingsVersion: s.piSettingsVersion + 1 }));
+		} else if (event.type === "extension.progress") {
+			const { type: _type, ...progress } = event as unknown as ExtensionProgressState & { type: string };
+			this.set({ extensionProgress: progress });
 		}
 	}
 
 	/** This computer's settings: remote access, devices, peers, providers. */
 	private async reloadLocal(): Promise<void> {
 		void this.loadRemote();
-		void this.loadProviders();
+		void this.loadProviders(LOCAL_NODE);
 		void this.loadPeers();
 	}
 
@@ -1043,7 +1115,7 @@ export class PierStore {
 			setTimeout(() => {
 				this.refreshTimers.delete(key);
 				if (key === DEVICES_KEY) void this.loadDevices();
-				else if (key === PROVIDERS_KEY) void this.loadProviders();
+				else if (key.startsWith(PROVIDERS_KEY)) void this.loadProviders(key.slice(PROVIDERS_KEY.length));
 				else if (key === PEERS_KEY) void this.loadPeers();
 				else if (key.startsWith("#workspaces:")) void this.loadWorkspaces(key.slice("#workspaces:".length));
 				else void this.refreshSessions(key);
@@ -1240,21 +1312,35 @@ export class PierStore {
 		}
 	}
 
-	// ---- models and providers (this computer) ------------------------------------------
+	// ---- models and providers (the computer the settings screen manages) ----------------
 
-	async loadProviders(): Promise<void> {
-		const client = this.localClient;
-		if (!client) return;
+	/**
+	 * Read a computer's providers: this computer's feed the main window's hints, the managed
+	 * computer's (`settingsNode`, the default) the settings screen. Resolves to whether it worked.
+	 */
+	async loadProviders(node = this.state.settingsNode, report = false): Promise<boolean> {
+		const client = this.openClient(node);
+		if (!client) return false;
 		try {
 			const providers = await client.request("provider.list");
-			if (this.localClient === client) this.set({ providers });
+			if (this.clients.get(node) !== client) return false;
+			this.set((s) => ({
+				...(node === LOCAL_NODE ? { localProviders: providers } : {}),
+				...(node === s.settingsNode ? { providers, settingsSyncedAt: Date.now() } : {}),
+			}));
+			return true;
 		} catch (error) {
-			if (this.state.settings === "models") this.toast("error", `读取模型配置失败：${errorText(error)}`);
+			if (report || (node === this.state.settingsNode && this.state.settings === "models")) {
+				const where = node === LOCAL_NODE ? "" : `${this.nodeName(node)} 的`;
+				this.toast("error", `读取${where}模型配置失败：${errorText(error)}`);
+			}
+			return false;
 		}
 	}
 
-	openModels(): void {
-		this.openSettings("models");
+	/** Open the models page for a computer (the one the settings screen manages by default). */
+	openModels(node?: string): void {
+		this.openSettings("models", node);
 	}
 
 	/** Models with usable credentials. */
@@ -1265,15 +1351,21 @@ export class PierStore {
 	}
 
 	async setDefaultModel(provider: string, modelId: string): Promise<void> {
-		const result = await this.callLocal("设置默认模型", (c) => c.request("model.setDefault", { provider, modelId }));
-		if (result) void this.loadProviders();
+		const node = this.state.settingsNode;
+		const result = await this.callSettings("设置默认模型", (c) => c.request("model.setDefault", { provider, modelId }));
+		if (result) void this.loadProviders(node);
 	}
 
 	async startLogin(provider: ProviderInfo, method: AuthMethod): Promise<void> {
-		const client = this.localClient;
-		if (!client) return;
+		const node = this.state.settingsNode;
+		const client = this.settingsClient;
+		if (!client) {
+			this.toast("error", `登录失败：${this.settingsOffline().message}`);
+			return;
+		}
 		if (this.state.auth?.flowId) void this.cancelLogin();
 		const seq = ++this.authSeq;
+		this.authNode = node;
 		this.authBacklog = [];
 		this.set({ auth: { providerId: provider.id, providerName: provider.name, method, notices: [] } });
 		try {
@@ -1331,7 +1423,7 @@ export class PierStore {
 				const { prompt: _p, ...rest } = auth;
 				this.set({ auth: { ...rest, error: String(event.error ?? "登录失败") } });
 			}
-			void this.loadProviders();
+			void this.loadProviders(this.authNode);
 		}
 	}
 
@@ -1341,7 +1433,7 @@ export class PierStore {
 		const promptId = auth.prompt.id;
 		const { prompt: _p, ...rest } = auth;
 		this.set({ auth: rest });
-		await this.callLocal("提交", (c) =>
+		await this.callWith(this.clients.get(this.authNode), "提交", (c) =>
 			c.request("provider.loginRespond", { flowId: auth.flowId as string, promptId, value }),
 		);
 	}
@@ -1351,27 +1443,38 @@ export class PierStore {
 		this.authSeq++;
 		this.set({ auth: undefined });
 		if (auth?.flowId && !auth.error) {
-			const client = this.localClient;
+			const client = this.clients.get(this.authNode);
 			await client?.request("provider.loginCancel", { flowId: auth.flowId }).catch(() => undefined);
 		}
 	}
 
 	async logoutProvider(provider: ProviderInfo): Promise<void> {
-		const result = await this.callLocal("移除凭据", (c) => c.request("provider.logout", { providerId: provider.id }));
+		const node = this.state.settingsNode;
+		const result = await this.callSettings("移除凭据", (c) =>
+			c.request("provider.logout", { providerId: provider.id }),
+		);
 		if (result) {
 			this.toast("info", result.removed ? `已移除 ${provider.name} 的凭据` : `${provider.name} 没有可移除的凭据`);
-			void this.loadProviders();
+			void this.loadProviders(node);
 		}
 	}
 
-	/** Save a custom endpoint. Throws so the form can show the error next to the fields. */
+	/**
+	 * Save a custom endpoint on a computer (the one the settings screen manages by default).
+	 * Throws so the form can show the error next to the fields.
+	 */
 	async saveCustomProvider(
 		provider: CustomProvider,
 		key: { apiKey?: string | undefined; apiKeyRef?: string | undefined },
 		create: boolean,
+		node = this.state.settingsNode,
 	): Promise<void> {
-		const client = this.localClient;
-		if (!client) throw new Error("尚未连接到本机的 Pier Host");
+		const client = this.openClient(node);
+		if (!client) {
+			throw new Error(
+				node === LOCAL_NODE ? "尚未连接到本机的 Pier Host" : `尚未连接到 ${this.nodeName(node)} 上的 Pier Host`,
+			);
+		}
 		const result = await client.request("provider.saveCustom", {
 			provider,
 			...(key.apiKeyRef ? { apiKeyRef: key.apiKeyRef } : key.apiKey ? { apiKey: key.apiKey } : {}),
@@ -1381,16 +1484,17 @@ export class PierStore {
 			"info",
 			`已保存 ${result.provider.name}${result.defaultModel ? `，默认模型设为 ${result.defaultModel.modelId}` : ""}`,
 		);
-		await this.loadProviders();
+		await this.loadProviders(node);
 	}
 
 	async removeCustomProvider(provider: ProviderInfo): Promise<void> {
-		const result = await this.callLocal("删除服务商", (c) =>
+		const node = this.state.settingsNode;
+		const result = await this.callSettings("删除服务商", (c) =>
 			c.request("provider.removeCustom", { providerId: provider.id }),
 		);
 		if (result?.removed) {
 			this.toast("info", `已删除 ${provider.name}`);
-			void this.loadProviders();
+			void this.loadProviders(node);
 		}
 	}
 
@@ -1402,8 +1506,8 @@ export class PierStore {
 		apiKeyRef?: string;
 		providerId?: string;
 	}): Promise<CustomModel[]> {
-		const client = this.localClient;
-		if (!client) throw new Error("尚未连接到本机的 Pier Host");
+		const client = this.settingsClient;
+		if (!client) throw this.settingsOffline();
 		return (await client.request("provider.probeModels", params, { timeoutMs: 30_000 })).models;
 	}
 
@@ -1411,7 +1515,8 @@ export class PierStore {
 
 	/**
 	 * Sign in to 云链API: open its authorization page in the browser and, once the user approves,
-	 * save (or refresh) the provider with the new token and every model it can use.
+	 * save (or refresh) the provider with the new token and every model it can use. Always on
+	 * this computer: the browser returns to a loopback address on the host's own computer.
 	 */
 	async loginYunlian(): Promise<void> {
 		const client = this.localClient;
@@ -1441,11 +1546,11 @@ export class PierStore {
 			if (!current()) return;
 			this.yunlianFlow = undefined;
 			this.set({ yunlian: { authorizeUrl: started.authorizeUrl, saving: true } });
-			const existing = this.state.providers?.providers.find(
+			const existing = this.state.localProviders?.providers.find(
 				(p) => p.custom && isYunlianProvider(p) && yunlianGroupOf(p) === undefined,
 			)?.custom;
 			const provider = yunlianProvider(result.models, existing, result.modelsError);
-			await this.saveCustomProvider(provider, { apiKeyRef: result.keyRef }, !existing);
+			await this.saveCustomProvider(provider, { apiKeyRef: result.keyRef }, !existing, LOCAL_NODE);
 			if (current()) this.set({ yunlian: undefined });
 		} catch (error) {
 			if (current()) {
@@ -1455,14 +1560,17 @@ export class PierStore {
 		}
 	}
 
-	/** Call a personal-center method (`account.*`). Throws with the host's message. */
+	/**
+	 * Call a personal-center method (`account.*`) on the computer the settings screen manages.
+	 * Throws with the host's message.
+	 */
 	account<M extends Extract<MethodName, `account.${string}`>>(
 		method: M,
 		params: MethodParams<M>,
 		timeoutMs = 45_000,
 	): Promise<MethodResult<M>> {
-		const client = this.localClient;
-		if (!client) return Promise.reject(new Error("尚未连接到本机的 Pier Host"));
+		const client = this.settingsClient;
+		if (!client) return Promise.reject(this.settingsOffline());
 		return (client.request as (m: M, p: MethodParams<M>, o: { timeoutMs: number }) => Promise<MethodResult<M>>)(
 			method,
 			params,
@@ -1510,9 +1618,19 @@ export class PierStore {
 		this.set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }));
 	}
 
-	/** Call this computer's host (settings), reporting failures as a toast. */
+	/** Call this computer's host (pairing, remote access), reporting failures as a toast. */
 	private callLocal<T>(action: string, fn: (client: PierClient) => Promise<T>): Promise<T | undefined> {
 		return this.callWith(this.localClient, action, fn);
+	}
+
+	/** Call the host of the computer the settings screen manages, reporting failures as a toast. */
+	private async callSettings<T>(action: string, fn: (client: PierClient) => Promise<T>): Promise<T | undefined> {
+		const client = this.settingsClient;
+		if (!client) {
+			this.toast("error", `${action}失败：${this.settingsOffline().message}`);
+			return undefined;
+		}
+		return this.callWith(client, action, fn);
 	}
 
 	private async callWith<T>(
@@ -1536,15 +1654,15 @@ export class PierStore {
 
 	/** Read the user settings, plus a workspace's project settings; rejects with the host's error. */
 	async getPiSettings(workspaceId?: string): Promise<PiSettingsResult> {
-		const client = this.localClient;
-		if (!client) throw new Error("尚未连接到 Pier Host");
+		const client = this.settingsClient;
+		if (!client) throw this.settingsOffline();
 		return client.request("settings.get", workspaceId ? { workspaceId } : {});
 	}
 
-	/** npm, pnpm and bun found on this computer, for pi's `npmCommand`; rejects with the host's error. */
+	/** npm, pnpm and bun found on the managed computer, for pi's `npmCommand`; rejects with the host's error. */
 	async detectPackageManagers(): Promise<PackageManagerInfo[]> {
-		const client = this.localClient;
-		if (!client) throw new Error("尚未连接到 Pier Host");
+		const client = this.settingsClient;
+		if (!client) throw this.settingsOffline();
 		const result = await client.request("host.packageManagers", {}, { timeoutMs: 20_000 });
 		return result.managers;
 	}
@@ -1556,7 +1674,7 @@ export class PierStore {
 		changes: Array<{ path: string[]; value?: unknown }>,
 		reload = true,
 	): Promise<PiSettingsChangeResult | undefined> {
-		const result = await this.callLocal("保存设置", (c) =>
+		const result = await this.callSettings("保存设置", (c) =>
 			c.request("settings.update", {
 				scope,
 				...(scope === "project" && workspaceId ? { workspaceId } : {}),
@@ -1575,8 +1693,8 @@ export class PierStore {
 		text: string,
 		expectedModifiedAt?: string,
 	): Promise<PiSettingsChangeResult> {
-		const client = this.localClient;
-		if (!client) throw new Error("尚未连接到 Pier Host");
+		const client = this.settingsClient;
+		if (!client) throw this.settingsOffline();
 		const result = await client.request("settings.write", {
 			scope,
 			...(scope === "project" && workspaceId ? { workspaceId } : {}),
@@ -1599,8 +1717,8 @@ export class PierStore {
 
 	/** List extensions and packages (user settings, plus a workspace's project settings); rejects with the host's error. */
 	async listExtensions(workspaceId?: string): Promise<ExtensionListResult> {
-		const client = this.localClient;
-		if (!client) throw new Error("尚未连接到 Pier Host");
+		const client = this.settingsClient;
+		if (!client) throw this.settingsOffline();
 		return client.request("extension.list", workspaceId ? { workspaceId } : {});
 	}
 
@@ -1619,7 +1737,7 @@ export class PierStore {
 		fn: (client: PierClient) => Promise<T>,
 	): Promise<T | undefined> {
 		this.set({ extensionProgress: undefined });
-		const result = await this.callLocal(action, fn);
+		const result = await this.callSettings(action, fn);
 		this.set({ extensionProgress: undefined });
 		if (result) this.reportReload(done, result.reload);
 		return result;
@@ -1663,7 +1781,7 @@ export class PierStore {
 	}
 
 	async checkExtensionUpdates(workspaceId?: string): Promise<ExtensionUpdateInfo[] | undefined> {
-		const result = await this.callLocal("检查更新", (c) =>
+		const result = await this.callSettings("检查更新", (c) =>
 			c.request("extension.checkUpdates", workspaceId ? { workspaceId } : {}, { timeoutMs: 5 * 60_000 }),
 		);
 		return result?.updates;
@@ -2228,14 +2346,79 @@ export class PierStore {
 
 	// ---- settings screen ---------------------------------------------------------------
 
-	openSettings(section: SettingsSection = "general"): void {
+	openSettings(section: SettingsSection = "general", node?: string): void {
 		if (section === "about" && this.state.update.version) this.announcedUpdate = this.state.update.version;
+		if (node !== undefined) this.setSettingsNode(node);
 		this.set({ settings: section });
 		if (section === "models" || section === "account") void this.loadProviders();
 	}
 
 	closeSettings(): void {
 		this.set({ settings: undefined });
+	}
+
+	/**
+	 * Choose the computer whose Pier the settings screen manages. Its settings are read afresh
+	 * ("synced"); a sign-in running on the previous computer is cancelled.
+	 */
+	setSettingsNode(node: string): void {
+		const target = node === LOCAL_NODE || this.state.peers.some((p) => p.id === node) ? node : LOCAL_NODE;
+		if (target === this.state.settingsNode) return;
+		if (this.state.auth) void this.cancelLogin();
+		this.set((s) => ({
+			settingsNode: target,
+			settingsSync: s.settingsSync + 1,
+			settingsSyncing: false,
+			settingsSyncedAt: undefined,
+			providers: target === LOCAL_NODE ? s.localProviders : undefined,
+			extensionProgress: undefined,
+		}));
+		if (target !== LOCAL_NODE && this.state.nodes[target]?.connection !== "open") this.retryNode(target);
+		else void this.loadProviders(target);
+	}
+
+	/** Whether the settings screen can manage a page on the chosen computer; the reason when not. */
+	settingsBlocker(page: SettingsSection): string | undefined {
+		const node = this.state.settingsNode;
+		if (node === LOCAL_NODE) return undefined;
+		return remotePageBlocker(page, this.nodeName(node), this.state.nodes[node]?.hostInfo);
+	}
+
+	/**
+	 * Read the managed computer's settings again: its Pier's info (versions, configuration
+	 * directory), providers and workspaces; the pages on screen reload everything else. A paired
+	 * computer that is offline is reconnected first (the pages load once it is back).
+	 */
+	async syncSettings(): Promise<void> {
+		const node = this.state.settingsNode;
+		const name = node === LOCAL_NODE ? "本机" : this.nodeName(node);
+		const client = this.openClient(node);
+		if (!client) {
+			if (node !== LOCAL_NODE) {
+				this.retryNode(node);
+				this.toast("warning", `${name} 暂时无法连接，正在重试；连接后会自动同步设置`);
+			} else {
+				this.toast("error", `同步失败：${this.settingsOffline().message}`);
+			}
+			return;
+		}
+		if (this.state.settingsSyncing) return;
+		this.set((s) => ({ settingsSyncing: true, settingsSync: s.settingsSync + 1 }));
+		const current = () => this.state.settingsNode === node && this.clients.get(node) === client;
+		try {
+			const [info, providers] = await Promise.all([
+				client.request("host.info"),
+				this.loadProviders(node, true),
+				this.loadWorkspaces(node),
+			]);
+			if (!current()) return;
+			this.patchNode(node, { hostInfo: info });
+			if (providers) this.toast("info", `已同步 ${name} 的 Pier 设置`);
+		} catch (error) {
+			if (current()) this.toast("error", `同步 ${name} 的设置失败：${errorText(error)}`);
+		} finally {
+			if (this.state.settingsNode === node) this.set({ settingsSyncing: false });
+		}
 	}
 
 	async checkForUpdates(): Promise<UpdateStatus> {
@@ -2481,6 +2664,48 @@ export function useComputers(): ComputerInfo[] {
 /** Whether any computer other than this one is paired (workspaces then show their computer). */
 export function useHasPeers(): boolean {
 	return useAppState((s) => s.peers.length > 0);
+}
+
+/** Workspaces of the computer the settings screen manages (for project-scoped settings). */
+export function useSettingsWorkspaces(): WorkspaceInfo[] {
+	return useAppState((s) => (s.nodes[s.settingsNode] ?? EMPTY_NODE).workspaces);
+}
+
+/** The computer the settings screen manages, and whether it can be reached. */
+export interface SettingsTarget {
+	node: string;
+	name: string;
+	local: boolean;
+	/** Its Pier Host can be called right now. */
+	online: boolean;
+	connection: ClientState | "none";
+	hostInfo?: HostInfo | undefined;
+	connectError?: string | undefined;
+	revoked: boolean;
+}
+
+export function useSettingsTarget(): SettingsTarget {
+	const store = useStore();
+	const node = useAppState((s) => s.settingsNode);
+	const state = useAppState((s) => s.nodes[s.settingsNode] ?? EMPTY_NODE);
+	const hostReady = useAppState((s) => s.host.state === "ready");
+	const localConnection = useAppState((s) => s.localConnection);
+	const peers = useAppState((s) => s.peers);
+	const localName = useAppState((s) => s.localHostInfo?.hostName);
+	// biome-ignore lint/correctness/useExhaustiveDependencies: the name is derived from these.
+	return useMemo(() => {
+		const local = node === LOCAL_NODE;
+		return {
+			node,
+			name: store.nodeName(node),
+			local,
+			online: hostReady && localConnection === "open" && (local || state.connection === "open"),
+			connection: state.connection,
+			hostInfo: state.hostInfo,
+			connectError: state.connectError,
+			revoked: state.revoked === true,
+		};
+	}, [store, node, state, hostReady, localConnection, peers, localName]);
 }
 
 const EMPTY_VIEW: ChatView | undefined = undefined;
