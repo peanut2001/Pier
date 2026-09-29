@@ -66,7 +66,7 @@ import {
 	writeWorkspaceFile,
 } from "./workspace-files.ts";
 
-export const PIER_HOST_VERSION = "0.2.11";
+export const PIER_HOST_VERSION = "0.2.12";
 
 /** How Pier introduces itself to NewAPI sites (their login sessions list shows the system). */
 function pierUserAgent(): string {
