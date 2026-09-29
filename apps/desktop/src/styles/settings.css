@@ -148,6 +148,64 @@ button.settings-nav-item.selected:hover:not(:disabled) {
 	text-align: center;
 }
 
+.nav-tag {
+	flex: none;
+	padding: 0 6px;
+	border-radius: 999px;
+	background: var(--bg-active);
+	color: var(--text-faint);
+	font-size: 11px;
+	line-height: 18px;
+}
+
+/* ---- managed computer (host switcher) --------------------------------------------- */
+
+.settings-host {
+	margin: 0 12px 10px;
+	padding: 8px 10px;
+	border: 1px solid var(--border);
+	border-radius: 10px;
+	background: var(--bg-input);
+}
+
+.settings-host-label {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin-bottom: 6px;
+	font-size: 12px;
+	color: var(--text-faint);
+}
+
+.settings-host-row {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.settings-host-row .status-dot {
+	flex: none;
+}
+
+select.setting-select.settings-host-select {
+	flex: 1;
+	width: auto;
+}
+
+.settings-host-row .ghost.icon {
+	flex: none;
+	width: 28px;
+	height: 28px;
+}
+
+.settings-target-banner.banner.inline {
+	margin: 0 0 14px;
+}
+
+.settings-target-banner strong {
+	font-weight: 600;
+}
+
 /* ---- page ------------------------------------------------------------------------ */
 
 .settings-scroll {

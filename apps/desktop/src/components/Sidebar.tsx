@@ -455,7 +455,7 @@ export function WorkspaceSettings({ workspace, onClose }: { workspace: Workspace
 export function Sidebar({ open = true }: { open?: boolean }) {
 	const store = useStore();
 	const workspaces = useAppState((s) => s.workspaces);
-	const noModels = useAppState((s) => s.providers?.availableCount === 0);
+	const noModels = useAppState((s) => s.localProviders?.availableCount === 0);
 	const updateReady = updatePending(useAppState((s) => s.update));
 	const addWorkspace = useAddWorkspace();
 	const [settingsFor, setSettingsFor] = useState<string | undefined>();

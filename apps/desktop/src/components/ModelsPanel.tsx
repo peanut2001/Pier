@@ -9,7 +9,14 @@ import {
 	type ProviderInfo,
 } from "@pier/protocol";
 import { type FormEvent, useEffect, useMemo, useState } from "react";
-import { type AuthFlowState, LOCAL_NODE, useAppState, useStore, type YunlianLoginState } from "../lib/store.tsx";
+import {
+	type AuthFlowState,
+	LOCAL_NODE,
+	useAppState,
+	useSettingsTarget,
+	useStore,
+	type YunlianLoginState,
+} from "../lib/store.tsx";
 import { isYunlianProvider, YUNLIAN_NAME, YUNLIAN_SITE, yunlianGroupOf } from "../lib/yunlian.ts";
 import {
 	IconAlert,
@@ -182,6 +189,7 @@ function DefaultModelField() {
 
 function ConfiguredRow({ provider, onEdit }: { provider: ProviderInfo; onEdit: (p: ProviderInfo) => void }) {
 	const store = useStore();
+	const remote = !useSettingsTarget().local;
 	const [confirm, setConfirm] = useState(false);
 	const custom = provider.custom;
 	const removable = provider.stored || MODELS_JSON_SOURCES.has(provider.status.source ?? "");
@@ -215,15 +223,27 @@ function ConfiguredRow({ provider, onEdit }: { provider: ProviderInfo; onEdit: (
 						个人中心
 					</button>
 				) : isYunlianProvider(provider) ? (
-					<button
-						type="button"
-						className="ghost"
-						title="在浏览器中重新授权，更新令牌和模型列表"
-						onClick={() => void store.loginYunlian()}
-					>
-						<IconExternal size={13} />
-						重新登录
-					</button>
+					remote ? (
+						<button
+							type="button"
+							className="ghost"
+							title="浏览器登录只能用于本机；在个人中心登录后按分组更新这台电脑的令牌和模型"
+							onClick={() => store.openSettings("account")}
+						>
+							<IconUser size={13} />
+							个人中心
+						</button>
+					) : (
+						<button
+							type="button"
+							className="ghost"
+							title="在浏览器中重新授权，更新令牌和模型列表"
+							onClick={() => void store.loginYunlian()}
+						>
+							<IconExternal size={13} />
+							重新登录
+						</button>
+					)
 				) : null}
 				{custom ? (
 					<button type="button" className="ghost" onClick={() => onEdit(provider)}>
@@ -291,9 +311,10 @@ function LoginButtons({ provider }: { provider: ProviderInfo }) {
 	);
 }
 
-/** 云链API, listed first: signing in only takes a browser authorization. */
+/** 云链API, listed first: signing in only takes a browser authorization (on this computer). */
 function YunlianRow() {
 	const store = useStore();
+	const { local } = useSettingsTarget();
 	return (
 		<div className="provider-row">
 			<div className="provider-main">
@@ -302,18 +323,26 @@ function YunlianRow() {
 					<span className="mini-tag">推荐</span>
 				</div>
 				<div className="muted small">
-					<span className="mono">{new URL(YUNLIAN_SITE).host}</span> · 在浏览器中登录授权，自动获取令牌和全部模型
+					<span className="mono">{new URL(YUNLIAN_SITE).host}</span> ·{" "}
+					{local ? "在浏览器中登录授权，自动获取令牌和全部模型" : "在个人中心登录账号，按分组把令牌配置到这台电脑"}
 				</div>
 			</div>
 			<div className="row-actions">
-				<button type="button" title="登录账号，查看余额，按分组配置令牌" onClick={() => store.openSettings("account")}>
+				<button
+					type="button"
+					className={local ? undefined : "primary"}
+					title="登录账号，查看余额，按分组配置令牌"
+					onClick={() => store.openSettings("account")}
+				>
 					<IconUser size={13} />
 					个人中心
 				</button>
-				<button type="button" className="primary" onClick={() => void store.loginYunlian()}>
-					<IconExternal size={13} />
-					浏览器登录
-				</button>
+				{local ? (
+					<button type="button" className="primary" onClick={() => void store.loginYunlian()}>
+						<IconExternal size={13} />
+						浏览器登录
+					</button>
+				) : null}
 			</div>
 		</div>
 	);
@@ -369,6 +398,7 @@ function AddProviderList({ providers, yunlian }: { providers: ProviderInfo[]; yu
 
 function ProviderList({ onCustom }: { onCustom: (provider?: ProviderInfo) => void }) {
 	const store = useStore();
+	const target = useSettingsTarget();
 	const providers = useAppState((s) => s.providers);
 	if (!providers) return <p className="muted">正在读取模型配置…</p>;
 	const configured = providers.providers.filter((p) => p.status.configured || p.stored || p.custom);
@@ -377,7 +407,8 @@ function ProviderList({ onCustom }: { onCustom: (provider?: ProviderInfo) => voi
 	return (
 		<>
 			<p className="settings-intro">
-				Pier 使用 pi 的模型配置，凭据保存在这台电脑的 <code>{providers.agentDir}</code> 中，与终端里的 pi 共用。
+				Pier 使用 pi 的模型配置，凭据保存在{target.local ? "这台电脑" : ` ${target.name} `}的{" "}
+				<code>{providers.agentDir}</code> 中，与{target.local ? "" : "那台电脑"}终端里的 pi 共用。
 			</p>
 			{providers.error ? (
 				<div className="banner error inline models-error">
@@ -540,12 +571,20 @@ function PromptForm({ prompt }: { prompt: AuthPromptInfo }) {
 
 function LoginView({ auth }: { auth: AuthFlowState }) {
 	const store = useStore();
+	const target = useSettingsTarget();
 	const waiting = !auth.error && !auth.prompt;
 	return (
 		<div className="login-view">
 			<p className="muted">
 				{auth.method === "oauth" ? "使用账号登录" : "填写 API Key"}：<strong>{auth.providerName}</strong>
+				{target.local ? null : `（保存到 ${target.name}）`}
 			</p>
+			{!target.local && auth.method === "oauth" ? (
+				<p className="muted small">
+					授权页会在这台电脑的浏览器中打开。如果授权后浏览器跳转到 localhost
+					失败，请复制地址栏中的完整网址，粘贴到下方的输入框中（需要服务商支持手动输入）；也可以改用 API Key。
+				</p>
+			) : null}
 			{auth.notices.map((notice, i) => (
 				// biome-ignore lint/suspicious/noArrayIndexKey: notices are append-only.
 				<NoticeView key={i} notice={notice} />
@@ -994,7 +1033,7 @@ export function YunlianDialog() {
 /** Shown on the home screens while no model can be used. */
 export function NoModelsBanner() {
 	const store = useStore();
-	const providers = useAppState((s) => s.providers);
+	const providers = useAppState((s) => s.localProviders);
 	// Another computer's sessions use that computer's models.
 	const local = useAppState((s) => s.node === LOCAL_NODE);
 	if (!local || !providers || providers.availableCount > 0) return null;
@@ -1013,7 +1052,7 @@ export function NoModelsBanner() {
 				<IconExternal size={13} />
 				登录{YUNLIAN_NAME}
 			</button>
-			<button type="button" className="primary" onClick={() => store.openModels()}>
+			<button type="button" className="primary" onClick={() => store.openModels(LOCAL_NODE)}>
 				配置模型
 			</button>
 		</div>

@@ -163,7 +163,7 @@ export function ModelPicker({ chat, controller }: { chat: ChatState; controller:
 						className="dropdown-item manage-models"
 						onClick={() => {
 							setOpen(false);
-							store.openModels();
+							store.openModels(store.nodeOf(controller.workspaceId));
 						}}
 					>
 						<span className="menu-label">
