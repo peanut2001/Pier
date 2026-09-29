@@ -13,7 +13,8 @@
  * `--remote [--remote-port <n>]` also turns on remote access (default port 7433) so the
  * mobile app can pair with it; `--remote-address <host:port>` overrides the addresses
  * put into pairing codes (e.g. `10.0.2.2:7433` for the Android emulator).
- * State lives in a temporary directory that is removed on exit.
+ * `--account-site <url>` points the personal center at another NewAPI site (e.g. a local one)
+ * instead of 云链API. State lives in a temporary directory that is removed on exit.
  *
  * Sample slash commands for the command menu: the extension command `/greet`, the prompt
  * template `/explain <topic>`, and `/skill:faux-skill`.
@@ -147,7 +148,9 @@ function sampleResources(): string {
 const remote = process.argv.includes("--remote");
 const resources = sampleResources();
 const remoteAddress = flag("--remote-address");
+const accountSite = flag("--account-site");
 const t = await startTestHost({
+	...(accountSite ? { accountSite } : {}),
 	tokensPerSecond: Number(process.env.FAUX_TPS ?? 400),
 	log: (message) => process.stderr.write(`[faux-host] ${message}\n`),
 	extraResources: {

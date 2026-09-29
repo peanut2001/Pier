@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { isYunlianProvider, newApiBaseUrl, YUNLIAN_ID, yunlianProvider } from "../src/lib/yunlian.ts";
+import {
+	formatQuota,
+	isYunlianProvider,
+	newApiBaseUrl,
+	relayProvider,
+	YUNLIAN_ID,
+	yunlianGroupId,
+	yunlianGroupOf,
+	yunlianProvider,
+} from "../src/lib/yunlian.ts";
 
 describe("云链API provider", () => {
 	it("recognises the built-in id and entries pointing at the site", () => {
@@ -55,5 +64,45 @@ describe("云链API provider", () => {
 		expect(newApiBaseUrl("https://api.yunnet.top/", "openai-responses")).toBe("https://api.yunnet.top/v1");
 		expect(newApiBaseUrl("https://api.yunnet.top", "anthropic-messages")).toBe("https://api.yunnet.top");
 		expect(newApiBaseUrl("https://api.yunnet.top", "google-generative-ai")).toBe("https://api.yunnet.top/v1beta");
+	});
+});
+
+describe("personal center helpers", () => {
+	it("maps groups to provider ids", () => {
+		expect(yunlianGroupId("vip")).toBe("yunlian-vip");
+		expect(yunlianGroupId("Claude Max")).toBe("yunlian-claude-max");
+		expect(yunlianGroupId("企业")).toMatch(/^yunlian-[a-z0-9]+$/);
+		expect(yunlianGroupId("企业")).not.toBe(yunlianGroupId("默认"));
+		const custom = { api: "openai-completions" as const, baseUrl: "https://api.yunnet.top/v1", models: [] };
+		expect(
+			yunlianGroupOf({ id: "yunlian-vip", custom: { ...custom, id: "yunlian-vip", hasConfiguredKey: true } }),
+		).toBe("vip");
+		expect(yunlianGroupOf({ id: "yunlian", custom: { ...custom, id: "yunlian", hasConfiguredKey: true } })).toBe(
+			undefined,
+		);
+		expect(isYunlianProvider({ id: "yunlian-vip" })).toBe(true);
+	});
+
+	it("builds a group provider", () => {
+		expect(
+			relayProvider({ id: "yunlian-vip", name: "云链API · vip", siteUrl: "https://api.yunnet.top" }, [{ id: "m" }]),
+		).toEqual({
+			id: "yunlian-vip",
+			name: "云链API · vip",
+			api: "openai-completions",
+			baseUrl: "https://api.yunnet.top/v1",
+			models: [{ id: "m" }],
+		});
+	});
+
+	it("formats quota like the site", () => {
+		expect(formatQuota(3_500_000, { perUnit: 500_000, type: "USD" })).toBe("$7.00");
+		expect(formatQuota(3_500_000, { perUnit: 500_000, type: "CNY", usdRate: 7 })).toBe("¥49.00");
+		expect(formatQuota(1_000, { perUnit: 500_000, type: "USD" })).toBe("$0.0020");
+		expect(formatQuota(500_000, { perUnit: 500_000, type: "CUSTOM", customSymbol: "€", customRate: 0.9 })).toBe(
+			"€0.90",
+		);
+		expect(formatQuota(1_234_567, { perUnit: 500_000, type: "TOKENS" })).toBe("1,234,567");
+		expect(formatQuota(-500_000, { perUnit: 500_000, type: "USD" })).toBe("-$1.00");
 	});
 });

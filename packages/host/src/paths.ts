@@ -33,3 +33,8 @@ export function devicesPath(pierDir: string): string {
 export function auditLogPath(pierDir: string): string {
 	return join(pierDir, "audit.log");
 }
+
+/** The saved 云链API personal-center login. */
+export function accountPath(pierDir: string): string {
+	return join(pierDir, "account.json");
+}

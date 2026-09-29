@@ -213,3 +213,9 @@ export const IconLink = make(
 export function Logo({ size = 28 }: { size?: number }) {
 	return <img className="logo" src="/favicon.png" width={size} height={size} alt="" draggable={false} />;
 }
+export const IconUser = make(
+	<>
+		<circle cx="12" cy="8" r="4" />
+		<path d="M4 21a8 8 0 0 1 16 0" />
+	</>,
+);

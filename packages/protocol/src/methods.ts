@@ -1,5 +1,8 @@
 import { z } from "zod";
 import {
+	type AccountLoginResult,
+	type AccountOverview,
+	type AccountStatus,
 	ApprovalPolicySchema,
 	AuthMethodSchema,
 	type ClientInfo,
@@ -172,6 +175,33 @@ export const MethodParamsSchemas = {
 	"newapi.authorizeWait": z.object({ flowId: Id }),
 	"newapi.authorizeCancel": z.object({ flowId: Id }),
 
+	/**
+	 * 云链API personal center (1.6). The host keeps one login for the site (saved in the Pier
+	 * directory, so it survives restarts) and never hands its credentials or token keys to clients.
+	 */
+	"account.status": z.object({}).optional(),
+	"account.login": z.union([
+		z.object({ username: z.string().trim().min(1).max(200), password: z.string().min(1).max(1000) }),
+		z.object({ accessToken: z.string().trim().min(1).max(2000), userId: z.number().int().positive().optional() }),
+	]),
+	"account.verify": z.object({ code: z.string().trim().min(1).max(100) }),
+	/** Email a registration verification code. */
+	"account.sendCode": z.object({ email: z.string().trim().min(3).max(50) }),
+	/** Register with a password, then sign in. */
+	"account.register": z.object({
+		username: z.string().trim().min(1).max(20),
+		password: z.string().min(8).max(128),
+		email: z.string().trim().max(50).optional(),
+		code: z.string().trim().max(100).optional(),
+		/** Inviter's code. */
+		affCode: z.string().trim().max(32).optional(),
+	}),
+	"account.overview": z.object({}).optional(),
+	"account.createToken": z.object({ name: z.string().trim().min(1).max(50), group: z.string().max(100).optional() }),
+	/** Fetch a token's key (kept on the host as `keyRef`, usable in `provider.saveCustom`) and its models. */
+	"account.useToken": z.object({ tokenId: z.number().int().positive() }),
+	"account.logout": z.object({}).optional(),
+
 	"ui.respond": z.object({ ...SessionRef, requestId: Id, response: UiResponseSchema }),
 
 	"device.list": z.object({}).optional(),
@@ -226,6 +256,15 @@ export const LOCAL_ONLY_METHODS: ReadonlySet<MethodName> = new Set([
 	"newapi.authorizeStart",
 	"newapi.authorizeWait",
 	"newapi.authorizeCancel",
+	"account.status",
+	"account.login",
+	"account.verify",
+	"account.sendCode",
+	"account.register",
+	"account.overview",
+	"account.createToken",
+	"account.useToken",
+	"account.logout",
 ]);
 
 export interface HelloResult {
@@ -300,6 +339,19 @@ export interface MethodResults {
 	"newapi.authorizeStart": NewApiAuthorizeStart;
 	"newapi.authorizeWait": NewApiAuthorizeResult;
 	"newapi.authorizeCancel": { cancelled: boolean };
+	"account.status": AccountStatus;
+	"account.login": AccountLoginResult;
+	"account.verify": AccountLoginResult;
+	"account.sendCode": { sent: true };
+	"account.register": AccountLoginResult;
+	"account.overview": AccountOverview;
+	"account.createToken": { tokenId: number; tokens: NewApiToken[] };
+	"account.useToken": {
+		keyRef: string;
+		models: Array<{ id: string; name?: string }>;
+		modelsError?: string;
+	};
+	"account.logout": { loggedOut: boolean };
 	"ui.respond": { accepted: boolean };
 	"device.list": { devices: DeviceInfo[] };
 	"device.revoke": { revoked: boolean };

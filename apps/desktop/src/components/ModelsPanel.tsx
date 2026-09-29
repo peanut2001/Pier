@@ -10,7 +10,7 @@ import {
 } from "@pier/protocol";
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { type AuthFlowState, useAppState, useStore, type YunlianLoginState } from "../lib/store.tsx";
-import { isYunlianProvider, YUNLIAN_NAME, YUNLIAN_SITE } from "../lib/yunlian.ts";
+import { isYunlianProvider, YUNLIAN_NAME, YUNLIAN_SITE, yunlianGroupOf } from "../lib/yunlian.ts";
 import {
 	IconAlert,
 	IconCheck,
@@ -24,6 +24,7 @@ import {
 	IconSearch,
 	IconSparkles,
 	IconTrash,
+	IconUser,
 	IconX,
 } from "./Icons.tsx";
 import { CopyButton } from "./Markdown.tsx";
@@ -195,7 +196,17 @@ function ConfiguredRow({ provider, onEdit }: { provider: ProviderInfo; onEdit: (
 				</div>
 			</div>
 			<div className="row-actions">
-				{isYunlianProvider(provider) ? (
+				{yunlianGroupOf(provider) !== undefined ? (
+					<button
+						type="button"
+						className="ghost"
+						title="在个人中心更新这个分组的令牌和模型"
+						onClick={() => store.openSettings("account")}
+					>
+						<IconUser size={13} />
+						个人中心
+					</button>
+				) : isYunlianProvider(provider) ? (
 					<button
 						type="button"
 						className="ghost"
@@ -287,6 +298,10 @@ function YunlianRow() {
 				</div>
 			</div>
 			<div className="row-actions">
+				<button type="button" title="登录账号，查看余额，按分组配置令牌" onClick={() => store.openSettings("account")}>
+					<IconUser size={13} />
+					个人中心
+				</button>
 				<button type="button" className="primary" onClick={() => void store.loginYunlian()}>
 					<IconExternal size={13} />
 					浏览器登录

@@ -18,7 +18,11 @@ export interface FakeOptions {
 	turnstile?: boolean;
 	/** NewAPI app authorization (`/app-auth` + `POST /api/app-auth/token`). */
 	appAuth?: boolean;
+	/** Registration needs an emailed verification code. */
+	emailVerification?: boolean;
 }
+
+export const EMAIL_CODE = "654321";
 
 /** What the site's consent page received, and the code it issued. */
 export interface FakeGrant {
@@ -35,6 +39,15 @@ export interface FakeNewApi {
 	requests: Array<{ method: string; path: string; headers: IncomingMessage["headers"] }>;
 	tokens: Array<{ id: number; name: string; key: string; group: string; status: number }>;
 	grants: FakeGrant[];
+	/** Dashboard access tokens the site accepts (modern variant). */
+	accessTokens: Set<string>;
+	/** The refresh token of the dashboard login (rotated on every refresh). */
+	refreshToken: string | undefined;
+	refreshes: number;
+	/** Password accounts, `alice` included. */
+	users: Map<string, string>;
+	/** Emails that were sent a verification code. */
+	codesSent: string[];
 	/**
 	 * Play the browser: "sign in" on the consent page of `authorizeUrl`, approve a new token and
 	 * return the loopback URL the site redirects to.
@@ -78,6 +91,11 @@ export function startFakeNewApi(options: FakeOptions): Promise<FakeNewApi> {
 			{ id: 2, name: "main", key: TOKEN_KEY_B, group: "vip", status: 1 },
 		],
 		grants: [],
+		accessTokens: new Set([DASHBOARD_TOKEN]),
+		refreshToken: undefined,
+		refreshes: 0,
+		users: new Map([["alice", PASSWORD]]),
+		codesSent: [],
 		approve(authorizeUrl) {
 			const url = new URL(authorizeUrl);
 			if (url.pathname !== "/app-auth") throw new Error(`unexpected consent page ${url.pathname}`);
@@ -112,13 +130,31 @@ export function startFakeNewApi(options: FakeOptions): Promise<FakeNewApi> {
 		});
 	const authed = (req: IncomingMessage): boolean => {
 		const auth = req.headers.authorization;
-		if (options.variant === "modern") return auth === `Bearer ${DASHBOARD_TOKEN}` || auth === `Bearer ${PAT}`;
+		if (options.variant === "modern") {
+			const bearer = auth?.replace(/^Bearer /, "") ?? "";
+			return fake.accessTokens.has(bearer) || bearer === PAT;
+		}
 		const user = req.headers["new-api-user"] === "7";
 		return user && (req.headers.cookie?.includes("session=S1") === true || auth === `Bearer ${PAT}`);
 	};
+	let refreshCount = 0;
+	const issueRefresh = () => {
+		fake.refreshToken = `sid1.secret${++refreshCount}`;
+		return `new_api_refresh=${fake.refreshToken}; Path=/api/user/auth; Max-Age=2592000; HttpOnly; SameSite=Strict`;
+	};
+	const expiresAt = () => Math.floor(Date.now() / 1000) + 15 * 60;
 	const loginOk = (res: ServerResponse) =>
 		options.variant === "modern"
-			? send(res, { success: true, message: "", data: { access_token: DASHBOARD_TOKEN, user: USER } })
+			? send(
+					res,
+					{
+						success: true,
+						message: "",
+						data: { access_token: DASHBOARD_TOKEN, access_expires_at: expiresAt(), user: USER },
+					},
+					200,
+					{ "set-cookie": issueRefresh() },
+				)
 			: send(res, { success: true, message: "", data: USER }, 200, { "set-cookie": "session=S1; Path=/; HttpOnly" });
 
 	fake.server = createServer(async (req, res) => {
@@ -140,6 +176,13 @@ export function startFakeNewApi(options: FakeOptions): Promise<FakeNewApi> {
 					system_name: "测试站",
 					version: options.variant === "modern" ? "v1.3.19" : "v0.6.0",
 					password_login_enabled: true,
+					register_enabled: true,
+					password_register_enabled: true,
+					email_verification: options.emailVerification === true,
+					github_oauth: true,
+					quota_per_unit: 500000,
+					quota_display_type: "CNY",
+					usd_exchange_rate: 7,
 					password_login_encryption_enabled: options.encryption === true,
 					turnstile_check: options.turnstile === true,
 					...(options.appAuth ? { app_authorization_enabled: true } : {}),
@@ -172,7 +215,7 @@ export function startFakeNewApi(options: FakeOptions): Promise<FakeNewApi> {
 				}
 				password = decryptV2(body.password_encrypted as string, "k1");
 			}
-			if (body.username !== "alice" || password !== PASSWORD) {
+			if (typeof body.username !== "string" || fake.users.get(body.username) !== password) {
 				return send(res, { success: false, message: "用户名或密码错误" });
 			}
 			if (options.twoFA) {
@@ -205,8 +248,51 @@ export function startFakeNewApi(options: FakeOptions): Promise<FakeNewApi> {
 			if (body.code !== TOTP) return send(res, { success: false, message: "验证码错误" });
 			return loginOk(res);
 		}
+		if (path === "/api/user/auth/refresh" && req.method === "POST" && options.variant === "modern") {
+			const cookie = /new_api_refresh=([^;]+)/.exec(req.headers.cookie ?? "")?.[1];
+			if (req.headers.origin !== fake.url) {
+				return send(
+					res,
+					{ success: false, code: "AUTH_ORIGIN_FORBIDDEN", message: "request origin is not allowed" },
+					403,
+				);
+			}
+			if (!cookie || cookie !== fake.refreshToken) {
+				return send(res, { success: false, code: "AUTH_SESSION_REVOKED", message: "Unauthorized" }, 401);
+			}
+			fake.refreshes++;
+			const access = `access-${fake.refreshes}`;
+			fake.accessTokens.add(access);
+			return send(
+				res,
+				{ success: true, data: { access_token: access, access_expires_at: expiresAt(), user: USER } },
+				200,
+				{
+					"set-cookie": issueRefresh(),
+				},
+			);
+		}
+		if (path === "/api/verification") {
+			const email = url.searchParams.get("email") ?? "";
+			if (!email.includes("@")) return send(res, { success: false, message: "邮箱地址无效" });
+			fake.codesSent.push(email);
+			return send(res, { success: true, message: "" });
+		}
+		if (path === "/api/user/register" && req.method === "POST") {
+			const username = String(body.username ?? "");
+			if (fake.users.has(username)) return send(res, { success: false, message: "用户名已存在" });
+			if (
+				options.emailVerification &&
+				(body.verification_code !== EMAIL_CODE || !fake.codesSent.includes(String(body.email)))
+			) {
+				return send(res, { success: false, message: "验证码错误或已过期" });
+			}
+			fake.users.set(username, String(body.password));
+			return send(res, { success: true, message: "" });
+		}
 		if (path === "/api/user/auth/logout" || path === "/api/user/logout") {
 			fake.logouts++;
+			fake.refreshToken = undefined;
 			return send(res, { success: true });
 		}
 		if (path.startsWith("/api/")) {
@@ -215,7 +301,12 @@ export function startFakeNewApi(options: FakeOptions): Promise<FakeNewApi> {
 					? send(res, { success: false, message: "无权进行此操作，未提供 New-Api-User" }, 401)
 					: send(res, { success: false, message: "无权进行此操作，未登录" }, 401);
 			}
-			if (path === "/api/user/self") return send(res, { success: true, data: USER });
+			if (path === "/api/user/self") {
+				return send(res, {
+					success: true,
+					data: { ...USER, email: "alice@example.com", quota: 3_500_000, used_quota: 1_000_000, request_count: 42 },
+				});
+			}
 			if (path === "/api/user/self/groups") {
 				if (options.variant === "legacy") return send(res, { success: false, message: "not found" }, 404);
 				return send(res, {

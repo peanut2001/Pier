@@ -19,6 +19,7 @@ import {
 	parseClientFrame,
 	type ResponseFrame,
 	type WorkspaceInfo,
+	YUNLIAN_SITE_URL,
 } from "@pier/protocol";
 import { ConfigStore } from "./config.ts";
 import {
@@ -30,7 +31,8 @@ import {
 	type Transport,
 } from "./connection.ts";
 import type { ManagedSession } from "./managed-session.ts";
-import { configPath, defaultPierDir, locksDir } from "./paths.ts";
+import { accountPath, configPath, defaultPierDir, locksDir } from "./paths.ts";
+import { AccountManager } from "./pi/account.ts";
 import { PI_VERSION, PiEnvironment, type PiEnvironmentOptions, toModelInfo } from "./pi/environment.ts";
 import { NewApiManager } from "./pi/newapi.ts";
 import { ProviderManager } from "./pi/providers.ts";
@@ -57,6 +59,8 @@ export interface PierHostOptions {
 	remote?: RemoteAccessOptions;
 	/** Diagnostic log sink (stderr in the sidecar). */
 	log?: (message: string) => void;
+	/** Site of the personal center (tests). Defaults to 云链API. */
+	accountSite?: string;
 }
 
 /** Remote methods recorded in the audit log. */
@@ -136,6 +140,7 @@ export class PierHost implements RequestHandler {
 	readonly remote: RemoteAccess;
 	readonly providers: ProviderManager;
 	readonly newapi: NewApiManager;
+	readonly account: AccountManager;
 	private readonly connections = new Set<Connection>();
 	private readonly localToken: string;
 	private readonly handlers: Handlers;
@@ -180,6 +185,11 @@ export class PierHost implements RequestHandler {
 			log,
 		});
 		this.newapi = new NewApiManager({ log });
+		this.account = new AccountManager(this.newapi, {
+			site: options.accountSite ?? YUNLIAN_SITE_URL,
+			file: accountPath(this.pierDir),
+			log,
+		});
 		this.remote = new RemoteAccess(
 			this.pierDir,
 			this.config,
@@ -500,6 +510,15 @@ export class PierHost implements RequestHandler {
 			}),
 			"newapi.authorizeStart": (ctx, params) => this.newapi.authorizeStart(ctx.connection.connectionId, params.baseUrl),
 			"newapi.authorizeWait": (ctx, params) => this.newapi.authorizeWait(ctx.connection.connectionId, params.flowId),
+			"account.status": () => this.account.getStatus(),
+			"account.login": (_ctx, params) => this.account.login(params),
+			"account.verify": (_ctx, params) => this.account.verify(params.code),
+			"account.sendCode": (_ctx, params) => this.account.sendCode(params.email),
+			"account.register": (_ctx, params) => this.account.register(params),
+			"account.overview": () => this.account.overview(),
+			"account.createToken": (_ctx, params) => this.account.createToken(params.name, params.group),
+			"account.useToken": (ctx, params) => this.account.useToken(ctx.connection.connectionId, params.tokenId),
+			"account.logout": () => this.account.logout(),
 			"newapi.authorizeCancel": (ctx, params) => ({
 				cancelled: this.newapi.authorizeCancel(ctx.connection.connectionId, params.flowId),
 			}),
@@ -527,6 +546,7 @@ export class PierHost implements RequestHandler {
 		this.shuttingDown = true;
 		this.broadcast({ type: "host.notice", level: "warning", message: "Pier host is shutting down" });
 		this.providers.shutdown();
+		this.account.shutdown();
 		this.newapi.shutdown();
 		await this.remote.shutdown();
 		await this.pool.disposeAll();

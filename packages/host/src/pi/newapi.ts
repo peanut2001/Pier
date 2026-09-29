@@ -75,6 +75,31 @@ const fail = (message: string): never => {
 	throw new PierProtocolError("BAD_REQUEST", message);
 };
 
+/** The site no longer accepts the login (it expired, was revoked, or the credentials changed). */
+export class NewApiSessionExpired extends PierProtocolError {
+	constructor(message: string) {
+		super("BAD_REQUEST", message);
+	}
+}
+
+/** Cookie holding the rotating refresh token of a dashboard login (current versions). */
+const REFRESH_COOKIE = "new_api_refresh";
+/** Refresh errors meaning the login is gone (expired, revoked, or the credentials changed). */
+const DEAD_LOGIN_CODES: ReadonlySet<string> = new Set([
+	"AUTH_UNAUTHORIZED",
+	"AUTH_SESSION_REVOKED",
+	"AUTH_TOKEN_EXPIRED",
+]);
+/** Renew the dashboard access token this long before it expires. */
+const RENEW_MARGIN_MS = 60_000;
+
+/** Unix seconds (or milliseconds) from the site as milliseconds. */
+const epochMs = (value: unknown): number | undefined => {
+	const n = num(value);
+	if (n === undefined || n <= 0) return undefined;
+	return n < 1e12 ? n * 1000 : n;
+};
+
 /**
  * Normalize what a user may paste as the site address: add a scheme, drop the query, and
  * strip API or dashboard paths such as `/v1`, `/console/token`, or `/login`.
@@ -161,17 +186,30 @@ function toToken(raw: Json): RawToken | undefined {
 	return { token, ...(key && !key.includes("*") ? { key: fullKey(key) } : {}) };
 }
 
-interface Session {
+/** What a request needs from a login. */
+interface Conn {
+	origin: string;
+	bearer?: string | undefined;
+	userId?: number | undefined;
+	cookies: Map<string, string>;
+	/** Set for dashboard logins whose access token can be renewed with the refresh cookie. */
+	renew?: Renewal | undefined;
+}
+
+interface Renewal {
+	/** When the current access token expires (ms), if known. */
+	accessExpiresAt?: number | undefined;
+	pending?: Promise<void> | undefined;
+	/** Called after the tokens changed, e.g. to persist them. */
+	onChange?: (() => void) | undefined;
+}
+
+interface Session extends Conn {
 	id: string;
 	connectionId: string;
-	origin: string;
 	status: Json;
-	/** Dashboard access token (current versions) or the user's system access token. */
-	bearer?: string;
 	/** Whether `bearer` came from our own password login (and may be revoked on close). */
 	ownLogin: boolean;
-	userId?: number;
-	cookies: Map<string, string>;
 	/** Pending two-factor verification. */
 	verify?: { kind: "flow"; flowToken: string } | { kind: "legacy" };
 	user?: NewApiAccount["user"];
@@ -225,6 +263,20 @@ const sameSecret = (a: string, b: string) => {
 	return x.length === y.length && timingSafeEqual(x, y);
 };
 
+/** A login taken over with `detach`, owned by the caller instead of a connection. */
+export type NewApiSession = Session;
+
+/** What `save` returns and `restore` accepts: enough to resume a login after a restart. */
+export interface SavedNewApiSession {
+	origin: string;
+	ownLogin: boolean;
+	userId?: number;
+	user?: NewApiAccount["user"];
+	/** A system access token (never a short-lived dashboard token). */
+	bearer?: string;
+	cookies?: Record<string, string>;
+}
+
 interface KeyRef {
 	key: string;
 	connectionId: string;
@@ -252,8 +304,81 @@ export class NewApiManager {
 
 	// ---- HTTP ------------------------------------------------------------------------------
 
+	/** A request with the login of `session`, renewing its access token when needed. */
 	private async call(
-		session: Pick<Session, "origin" | "bearer" | "userId" | "cookies">,
+		session: Conn,
+		method: "GET" | "POST",
+		path: string,
+		body?: unknown,
+		options: { headers?: Record<string, string>; allowUnauthorized?: boolean } = {},
+	): Promise<Envelope> {
+		const renew = session.renew;
+		if (!renew) return this.send(session, method, path, body, options);
+		if (
+			!session.bearer ||
+			(renew.accessExpiresAt !== undefined && this.now() >= renew.accessExpiresAt - RENEW_MARGIN_MS)
+		) {
+			await this.renew(session, renew);
+		}
+		try {
+			return await this.send(session, method, path, body, options);
+		} catch (error) {
+			if (!(error instanceof NewApiSessionExpired) || session.renew !== renew) throw error;
+			// The access token was rejected early (e.g. the site restarted): renew once and retry.
+			await this.renew(session, renew, true);
+			return this.send(session, method, path, body, options);
+		}
+	}
+
+	/** Get a new access token with the refresh cookie (the site rotates the cookie as well). */
+	private renew(session: Conn, renewal: Renewal, force = false): Promise<void> {
+		if (renewal.pending) return renewal.pending;
+		if (
+			!force &&
+			session.bearer &&
+			renewal.accessExpiresAt !== undefined &&
+			this.now() < renewal.accessExpiresAt - RENEW_MARGIN_MS
+		) {
+			return Promise.resolve();
+		}
+		renewal.pending = (async () => {
+			try {
+				if (!session.cookies.get(REFRESH_COOKIE)) throw new NewApiSessionExpired("NewAPI 登录已失效，请重新登录");
+				const envelope = await this.send(
+					{ origin: session.origin, userId: session.userId, cookies: session.cookies },
+					"POST",
+					"/api/user/auth/refresh",
+					undefined,
+					{ headers: { origin: session.origin }, allowUnauthorized: true },
+				);
+				const data = envelope.success === true && isObject(envelope.data) ? envelope.data : undefined;
+				const token = data ? str(data.access_token) : undefined;
+				if (!data || !token) {
+					// Only these mean the login is gone; others (origin refused, races, server errors) are transient.
+					if (envelope.code && !DEAD_LOGIN_CODES.has(envelope.code)) {
+						fail(
+							`NewAPI：刷新登录失败（${envelope.code}${envelope.message ? `，${envelope.message}` : ""}），请稍后再试`,
+						);
+					}
+					session.renew = undefined;
+					session.bearer = undefined;
+					renewal.onChange?.();
+					throw new NewApiSessionExpired(
+						`NewAPI 登录已失效，请重新登录${envelope.message ? `（${envelope.message}）` : ""}`,
+					);
+				}
+				session.bearer = token;
+				renewal.accessExpiresAt = epochMs(data.access_expires_at);
+				renewal.onChange?.();
+			} finally {
+				renewal.pending = undefined;
+			}
+		})();
+		return renewal.pending;
+	}
+
+	private async send(
+		session: Conn,
 		method: "GET" | "POST",
 		path: string,
 		body?: unknown,
@@ -306,19 +431,16 @@ export class NewApiManager {
 			return fail(`${url} 返回的不是 JSON，请确认这是 NewAPI 站点地址`);
 		}
 		if (response.status === 401 && !options.allowUnauthorized) {
-			fail(`NewAPI 登录已失效，请重新登录${envelope.message ? `（${envelope.message}）` : ""}`);
+			throw new NewApiSessionExpired(
+				`NewAPI 登录已失效，请重新登录${envelope.message ? `（${envelope.message}）` : ""}`,
+			);
 		}
 		if (!response.ok && envelope.success === undefined) fail(`${url} 返回 HTTP ${response.status}`);
 		return { ...envelope, ...(response.ok ? {} : { success: false }) };
 	}
 
 	/** `call` that throws the site's message unless it reports success. */
-	private async ok(
-		session: Pick<Session, "origin" | "bearer" | "userId" | "cookies">,
-		method: "GET" | "POST",
-		path: string,
-		body?: unknown,
-	): Promise<unknown> {
+	private async ok(session: Conn, method: "GET" | "POST", path: string, body?: unknown): Promise<unknown> {
 		const envelope = await this.call(session, method, path, body);
 		if (envelope.success !== true) fail(`NewAPI：${envelope.message || "请求失败"}`);
 		return envelope.data;
@@ -348,7 +470,8 @@ export class NewApiManager {
 		return session;
 	}
 
-	private async siteStatus(origin: string): Promise<Json> {
+	/** The site's public `/api/status`. */
+	async siteStatus(origin: string): Promise<Json> {
 		const envelope = await this.call({ origin, cookies: new Map() }, "GET", "/api/status");
 		if (envelope.success !== true || !isObject(envelope.data)) {
 			fail(`${origin} 不像是 NewAPI 站点（/api/status 没有返回站点信息）`);
@@ -470,6 +593,7 @@ export class NewApiManager {
 		if (accessToken) {
 			session.bearer = accessToken;
 			session.ownLogin = true;
+			if (session.cookies.has(REFRESH_COOKIE)) session.renew = { accessExpiresAt: epochMs(body.access_expires_at) };
 			this.setUser(session, isObject(body.user) ? body.user : {});
 		} else {
 			// Older versions: a cookie session plus the user id in `New-Api-User`.
@@ -500,7 +624,8 @@ export class NewApiManager {
 		}
 	}
 
-	private async account(session: Session): Promise<NewApiAccount> {
+	/** Site, user, tokens and groups of a login. */
+	async account(session: Session): Promise<NewApiAccount> {
 		const [tokens, groups] = await Promise.all([this.tokens(session), this.groups(session)]);
 		return {
 			site: this.siteInfo(session.origin, session.status),
@@ -554,7 +679,15 @@ export class NewApiManager {
 		name: string,
 		group?: string,
 	): Promise<{ tokenId: number; tokens: NewApiToken[] }> {
-		const session = this.session(connectionId, sessionId);
+		return this.createTokenIn(this.session(connectionId, sessionId), name, group);
+	}
+
+	/** Create an unlimited, never expiring token without model limits. */
+	async createTokenIn(
+		session: Session,
+		name: string,
+		group?: string,
+	): Promise<{ tokenId: number; tokens: NewApiToken[] }> {
 		const before = new Set((await this.tokens(session)).map((t) => t.id));
 		await this.ok(session, "POST", "/api/token/", {
 			name,
@@ -578,7 +711,15 @@ export class NewApiManager {
 		sessionId: string,
 		tokenId: number,
 	): Promise<{ keyRef: string; models: Array<{ id: string; name?: string }>; modelsError?: string }> {
-		const session = this.session(connectionId, sessionId);
+		return this.useTokenIn(this.session(connectionId, sessionId), connectionId, tokenId);
+	}
+
+	/** `useToken` for any login; the key reference belongs to `connectionId`. */
+	async useTokenIn(
+		session: Session,
+		connectionId: string,
+		tokenId: number,
+	): Promise<{ keyRef: string; models: Array<{ id: string; name?: string }>; modelsError?: string }> {
 		let key: string | undefined;
 		let problem: string | undefined;
 		try {
@@ -587,14 +728,14 @@ export class NewApiManager {
 				key = fullKey(str(envelope.data.key) as string);
 			} else problem = envelope.message;
 		} catch (error) {
-			if (error instanceof PierProtocolError && error.message.includes("登录已失效")) throw error;
+			if (error instanceof NewApiSessionExpired) throw error;
 			problem = errorText(error);
 		}
 		if (!key) {
 			// Older versions have no key endpoint but return full keys in the list.
 			await this.tokens(session);
 			key = session.keys.get(tokenId);
-			if (!key) fail(`NewAPI：${problem || "读取令牌密钥失败"}`);
+			if (!key) fail(problem?.startsWith("NewAPI") ? problem : `NewAPI：${problem || "读取令牌密钥失败"}`);
 		}
 		const ref = randomUUID();
 		this.keyRefs.set(ref, { key: key as string, connectionId, expiresAt: this.now() + SESSION_TTL_MS });
@@ -645,6 +786,99 @@ export class NewApiManager {
 		return entry.key;
 	}
 
+	// ---- sessions owned by the caller ---------------------------------------------------------
+
+	/**
+	 * Take over a finished login from `login` / `verify`: it no longer expires or belongs to a
+	 * connection, and is not signed out when the connection closes.
+	 */
+	detach(connectionId: string, sessionId: string): NewApiSession {
+		const session = this.session(connectionId, sessionId);
+		if (session.verify) throw new PierProtocolError("CONFLICT", "登录还需要验证码");
+		this.drop(sessionId);
+		return session;
+	}
+
+	/** What to persist to resume `session` later. Short-lived dashboard tokens are left out. */
+	save(session: NewApiSession): SavedNewApiSession {
+		return {
+			origin: session.origin,
+			ownLogin: session.ownLogin,
+			...(session.userId ? { userId: session.userId } : {}),
+			...(session.user ? { user: session.user } : {}),
+			...(session.bearer && !session.ownLogin ? { bearer: session.bearer } : {}),
+			...(session.cookies.size ? { cookies: Object.fromEntries(session.cookies) } : {}),
+		};
+	}
+
+	/** Resume a saved login. Dashboard logins get a new access token on first use. */
+	restore(saved: SavedNewApiSession, status: Json = {}): NewApiSession {
+		const cookies = new Map(Object.entries(saved.cookies ?? {}));
+		return {
+			id: randomUUID(),
+			connectionId: "",
+			origin: saved.origin,
+			status,
+			ownLogin: saved.ownLogin,
+			...(saved.bearer ? { bearer: saved.bearer } : {}),
+			...(saved.userId ? { userId: saved.userId } : {}),
+			...(saved.user ? { user: saved.user } : {}),
+			...(saved.ownLogin && cookies.has(REFRESH_COOKIE) ? { renew: {} } : {}),
+			cookies,
+			keys: new Map(),
+			expiresAt: Number.POSITIVE_INFINITY,
+		};
+	}
+
+	/** Call `onChange` whenever the login's tokens change (renewed or expired). */
+	watch(session: NewApiSession, onChange: () => void): void {
+		if (session.renew) session.renew.onChange = onChange;
+	}
+
+	/** The raw `/api/user/self` of a login (balance, group, email, ...). */
+	async self(session: NewApiSession): Promise<Json> {
+		const data = await this.ok(session, "GET", "/api/user/self");
+		if (!isObject(data)) return fail("NewAPI 没有返回用户信息");
+		this.setUser(session, data);
+		return data;
+	}
+
+	/** Email a registration verification code. */
+	async sendVerification(origin: string, email: string): Promise<void> {
+		await this.ok(
+			{ origin, cookies: new Map() },
+			"GET",
+			`/api/verification?${new URLSearchParams({ email, turnstile: "" })}`,
+		);
+	}
+
+	/** Register a password account (sign in with `login` afterwards). */
+	async register(
+		origin: string,
+		params: { username: string; password: string; email?: string; code?: string; affCode?: string },
+	): Promise<void> {
+		const envelope = await this.call(
+			{ origin, cookies: new Map() },
+			"POST",
+			"/api/user/register",
+			{
+				username: params.username,
+				password: params.password,
+				...(params.email ? { email: params.email } : {}),
+				...(params.code ? { verification_code: params.code } : {}),
+				...(params.affCode ? { aff_code: params.affCode } : {}),
+			},
+			{ allowUnauthorized: true },
+		);
+		if (envelope.success !== true) fail(`NewAPI：${envelope.message || "注册失败"}`);
+	}
+
+	/** End a login taken over with `detach` / `restore`. */
+	async signOut(session: NewApiSession): Promise<void> {
+		session.renew = undefined;
+		await this.revoke(session);
+	}
+
 	async close(connectionId: string, sessionId: string): Promise<boolean> {
 		const session = this.sessions.get(sessionId);
 		if (!session || session.connectionId !== connectionId) return false;
@@ -656,7 +890,7 @@ export class NewApiManager {
 	/** End the dashboard login we created (never the user's own access token). */
 	private async revoke(session: Session): Promise<void> {
 		try {
-			if (session.ownLogin && session.bearer) {
+			if (session.ownLogin && (session.bearer || session.cookies.has(REFRESH_COOKIE))) {
 				await this.call(session, "POST", "/api/user/auth/logout", undefined, { headers: { origin: session.origin } });
 			} else if (!session.bearer && session.cookies.size) {
 				await this.call(session, "GET", "/api/user/logout");
@@ -668,7 +902,7 @@ export class NewApiManager {
 
 	// ---- browser authorization ------------------------------------------------------------
 
-	private siteInfo(origin: string, status: Json): NewApiAccount["site"] {
+	siteInfo(origin: string, status: Json): NewApiAccount["site"] {
 		return {
 			name: str(status.system_name) ?? new URL(origin).host,
 			url: origin,

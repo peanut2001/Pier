@@ -11,6 +11,9 @@ import type {
 	DeviceInfo,
 	EventFrame,
 	HostInfo,
+	MethodName,
+	MethodParams,
+	MethodResult,
 	ModelInfo,
 	PairingRequest,
 	PairingResolution,
@@ -23,7 +26,7 @@ import type {
 } from "@pier/protocol";
 import { createContext, useContext, useSyncExternalStore } from "react";
 import type { Bridge, HostStatus, UpdateStatus } from "./bridge.ts";
-import { isYunlianProvider, YUNLIAN_SITE, yunlianProvider } from "./yunlian.ts";
+import { isYunlianProvider, YUNLIAN_SITE, yunlianGroupOf, yunlianProvider } from "./yunlian.ts";
 
 export const APP_VERSION = "0.2.3";
 
@@ -65,7 +68,7 @@ export interface YunlianLoginState {
 }
 
 /** Pages of the settings screen. */
-export type SettingsSection = "general" | "models" | "workspaces" | "remote" | "logs" | "about";
+export type SettingsSection = "account" | "general" | "models" | "workspaces" | "remote" | "logs" | "about";
 
 export interface AppState {
 	host: HostStatus;
@@ -658,7 +661,9 @@ export class PierStore {
 			if (!current()) return;
 			this.yunlianFlow = undefined;
 			this.set({ yunlian: { authorizeUrl: started.authorizeUrl, saving: true } });
-			const existing = this.state.providers?.providers.find((p) => p.custom && isYunlianProvider(p))?.custom;
+			const existing = this.state.providers?.providers.find(
+				(p) => p.custom && isYunlianProvider(p) && yunlianGroupOf(p) === undefined,
+			)?.custom;
 			const provider = yunlianProvider(result.models, existing, result.modelsError);
 			await this.saveCustomProvider(provider, { apiKeyRef: result.keyRef }, !existing);
 			if (current()) this.set({ yunlian: undefined });
@@ -668,6 +673,21 @@ export class PierStore {
 				this.set({ yunlian: { error: errorText(error) } });
 			}
 		}
+	}
+
+	/** Call a personal-center method (`account.*`). Throws with the host's message. */
+	account<M extends Extract<MethodName, `account.${string}`>>(
+		method: M,
+		params: MethodParams<M>,
+		timeoutMs = 45_000,
+	): Promise<MethodResult<M>> {
+		const client = this.client;
+		if (!client) return Promise.reject(new Error("尚未连接到 Pier Host"));
+		return (client.request as (m: M, p: MethodParams<M>, o: { timeoutMs: number }) => Promise<MethodResult<M>>)(
+			method,
+			params,
+			{ timeoutMs },
+		);
 	}
 
 	/** Close the 云链API sign-in, abandoning a pending authorization. */
@@ -995,7 +1015,7 @@ export class PierStore {
 	openSettings(section: SettingsSection = "general"): void {
 		if (section === "about" && this.state.update.version) this.announcedUpdate = this.state.update.version;
 		this.set({ settings: section });
-		if (section === "models") void this.loadProviders();
+		if (section === "models" || section === "account") void this.loadProviders();
 	}
 
 	closeSettings(): void {

@@ -1,4 +1,4 @@
-# Pier 协议 v1.5
+# Pier 协议 v1.6
 
 > 实现：`packages/protocol`（zod schema + TS 类型，Host 与所有客户端共享）。
 > 本文档描述线上格式与语义；字段的权威定义以 `packages/protocol/src` 为准。
@@ -57,7 +57,7 @@
 
 ```jsonc
 { "type": "req", "id": "h", "method": "host.hello", "params": {
-  "protocolVersion": "1.5",
+  "protocolVersion": "1.6",
   "client": { "name": "pier-desktop", "version": "0.1.0", "platform": "darwin" },
   "token": "<本地 token>",       // 本地连接必填；远程连接由加密通道认证，不需要
   "coalesceMs": 50               // 可选：合并流式增量的窗口（0–1000ms，默认 0）
@@ -183,6 +183,24 @@ pi 终端界面自带的命令（`/model`、`/compact`、`/new`、`/fork`、`/na
 | `newapi.authorizeStart` 🔒 | `{ baseUrl }` | `{ flowId, authorizeUrl, site, expiresAt }`；站点未开启应用授权时 `BAD_REQUEST` |
 | `newapi.authorizeWait` 🔒 | `{ flowId }` | `{ site, user, token: { id, name, group?, maskedKey }, keyRef, models, modelsError? }`；用户在浏览器中同意后返回，`keyRef` 与 `newapi.useToken` 的相同。拒绝、超时、取消或换取失败时返回错误 |
 | `newapi.authorizeCancel` 🔒 | `{ flowId }` | `{ cancelled }` |
+
+### 个人中心（1.6）
+
+桌面端「设置 → 个人中心」直连云链API（`https://api.yunnet.top`，协议里的 `YUNLIAN_SITE_URL`；测试时可以用 `PierHostOptions.accountSite` 或 `faux-host --account-site` 换成其他 NewAPI 站点）。与连接绑定的 `newapi.*` 不同，这里的登录属于 Host：所有本地连接共用，并保存在 Pier 目录的 `account.json`（仅当前用户可读），重启后仍然有效。密码登录只保存站点发放的刷新 Cookie（`new_api_refresh`，站点每次刷新都会轮换，登录 30 天后需要重新登录），不保存密码和 15 分钟有效的访问令牌；Host 在访问令牌过期前或被拒绝时用 `POST /api/user/auth/refresh` 自动换新。用系统访问令牌登录时保存该令牌。站点拒绝刷新（已退出、被吊销或账号安全信息改变）时，Host 删除保存的登录，之后的调用返回「请先登录」。所有方法均为 🔒。
+
+| 方法 | 参数 | 结果 |
+|---|---|---|
+| `account.status` 🔒 | — | `{ site?, siteError?, user? }`；`site = AccountSite = { name, url, version?, logo?, registerEnabled, emailVerification, passwordLogin, turnstile, oauth: string[], quota: { perUnit, type, usdRate?, customSymbol?, customRate? } }`（来自站点的 `/api/status`，`type` 为 `USD`、`CNY`、`CUSTOM` 或 `TOKENS`）；`user` 为保存的登录，没有登录时省略 |
+| `account.login` 🔒 | `{ username, password }` 或 `{ accessToken, userId? }` | `AccountLoginResult`：`{ status: "ok", overview }` 或需要两步验证时 `{ status: "verify", methods }`。站点开启 Turnstile 时密码登录返回 `BAD_REQUEST` |
+| `account.verify` 🔒 | `{ code }` | `AccountLoginResult`；提交两步验证码（或备用码） |
+| `account.sendCode` 🔒 | `{ email }` | `{ sent: true }`；发送注册邮箱验证码（`GET /api/verification`） |
+| `account.register` 🔒 | `{ username, password, email?, code?, affCode? }` | `AccountLoginResult`；注册（`POST /api/user/register`，用户名最多 20 个字符、密码 8–128 位，站点开启邮箱验证时必须提供 `email` 和 `code`，`affCode` 为邀请码）后立即登录。站点关闭注册或开启 Turnstile 时 `BAD_REQUEST` |
+| `account.overview` 🔒 | — | `{ site, user, tokens: NewApiToken[], groups }`；`user = { id?, username, displayName?, email?, group?, quota, usedQuota, requestCount }`，额度为站点单位，按 `site.quota` 换算显示 |
+| `account.createToken` 🔒 | `{ name, group? }` | `{ tokenId, tokens }`；在分组中新建无限额度、永不过期、不限模型的令牌 |
+| `account.useToken` 🔒 | `{ tokenId }` | `{ keyRef, models, modelsError? }`；与 `newapi.useToken` 相同，`keyRef` 属于调用的连接 |
+| `account.logout` 🔒 | — | `{ loggedOut }`；退出站点上的会话（不会吊销用户自己的访问令牌）并删除 `account.json` |
+
+桌面端把每个分组的令牌保存为自定义服务商 `yunlian-<分组>`（名称为「云链API · 分组」，Base URL 为 `<站点>/v1`）；「模型与服务商」中浏览器授权添加的是 `yunlian`。
 
 ### UI
 

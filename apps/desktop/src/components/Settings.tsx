@@ -2,6 +2,7 @@ import type { ApprovalPolicy, WorkspaceInfo } from "@pier/protocol";
 import { type ComponentType, type ReactNode, useEffect, useState } from "react";
 import { POLICY_DESCRIPTION, POLICY_LABEL } from "../lib/format.ts";
 import { type SettingsSection, useAppState, useStore } from "../lib/store.tsx";
+import { AccountSettings } from "./AccountPanel.tsx";
 import { HostBanner, LogsSettings, useHostStatus } from "./HostPanels.tsx";
 import {
 	IconArrowLeft,
@@ -15,6 +16,7 @@ import {
 	IconSettings,
 	IconSmartphone,
 	IconSparkles,
+	IconUser,
 	IconX,
 } from "./Icons.tsx";
 import { CopyButton } from "./Markdown.tsx";
@@ -37,6 +39,18 @@ interface SectionDef {
 }
 
 const GROUPS: Array<{ title: string; items: SectionDef[] }> = [
+	{
+		title: "账号",
+		items: [
+			{
+				id: "account",
+				label: "个人中心",
+				icon: IconUser,
+				keywords: "个人中心 账号 账户 云链 云链api 登录 注册 余额 充值 分组 令牌 key yunlian",
+				online: true,
+			},
+		],
+	},
 	{
 		title: "通用",
 		items: [
@@ -79,7 +93,7 @@ const GROUPS: Array<{ title: string; items: SectionDef[] }> = [
 ];
 
 const SECTIONS = GROUPS.flatMap((group) => group.items);
-const GENERAL = SECTIONS[0] as SectionDef;
+const GENERAL = SECTIONS.find((item) => item.id === "general") as SectionDef;
 
 // ---- pages -----------------------------------------------------------------------------
 
@@ -263,6 +277,7 @@ function WorkspacesSettings() {
 }
 
 const PAGES: Record<SettingsSection, ComponentType> = {
+	account: AccountSettings,
 	general: GeneralSettings,
 	models: ModelsSettings,
 	workspaces: WorkspacesSettings,

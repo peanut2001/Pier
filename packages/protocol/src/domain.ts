@@ -407,6 +407,77 @@ export type NewApiLoginResult =
 	/** The account asks for a two-factor code; answer with `newapi.verify`. */
 	| { status: "verify"; sessionId: string; methods: string[] };
 
+// ---- 云链API account (1.6) ------------------------------------------------------------
+
+/** The 云链API site the personal center connects to. */
+export const YUNLIAN_SITE_URL = "https://api.yunnet.top";
+
+/** How the site shows amounts of quota (NewAPI `quota_per_unit`, `quota_display_type` and friends). */
+export interface AccountQuotaDisplay {
+	/** Quota units per US dollar. */
+	perUnit: number;
+	/** `USD`, `CNY`, `CUSTOM` or `TOKENS` (raw quota). */
+	type: string;
+	/** CNY per US dollar, for `CNY`. */
+	usdRate?: number;
+	/** Symbol and rate per US dollar, for `CUSTOM`. */
+	customSymbol?: string;
+	customRate?: number;
+}
+
+export interface AccountSite {
+	name: string;
+	url: string;
+	version?: string;
+	logo?: string;
+	/** Whether new accounts may be registered with a password. */
+	registerEnabled: boolean;
+	/** Registration needs an email verification code (`account.sendCode`). */
+	emailVerification: boolean;
+	passwordLogin: boolean;
+	/** Password sign-in and registration need a Turnstile check, which only the website can do. */
+	turnstile: boolean;
+	/** Third-party sign-in methods the website offers, e.g. `GitHub`, `LinuxDO`. */
+	oauth: string[];
+	quota: AccountQuotaDisplay;
+}
+
+/** The signed-in user, with the balance from `/api/user/self`. */
+export interface AccountUser {
+	id?: number;
+	username: string;
+	displayName?: string;
+	email?: string;
+	/** The user's own group (tokens without a group use it). */
+	group?: string;
+	/** Remaining quota in site units (see `AccountQuotaDisplay`). */
+	quota: number;
+	usedQuota: number;
+	requestCount: number;
+}
+
+/** Result of `account.status`. */
+export interface AccountStatus {
+	site?: AccountSite;
+	/** Why the site information could not be read, when it could not. */
+	siteError?: string;
+	/** The saved login, if any. Details and balance come from `account.overview`. */
+	user?: NewApiAccount["user"];
+}
+
+export interface AccountOverview {
+	site: AccountSite;
+	user: AccountUser;
+	tokens: NewApiToken[];
+	groups: NewApiGroup[];
+}
+
+/** Result of `account.login`, `account.verify` and `account.register`. */
+export type AccountLoginResult =
+	| { status: "ok"; overview: AccountOverview }
+	/** The account asks for a two-factor code; answer with `account.verify`. */
+	| { status: "verify"; methods: string[] };
+
 /** A question asked during a provider sign-in. */
 export interface AuthPromptInfo {
 	id: string;

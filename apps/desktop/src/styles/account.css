@@ -1,0 +1,170 @@
+/* 个人中心: the 云链API account — sign-in, registration, balance and per-group keys. */
+
+.account-card {
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+	padding: 18px;
+}
+
+.account-hero {
+	display: flex;
+	align-items: center;
+	gap: 14px;
+}
+
+.account-logo {
+	flex: none;
+	width: 40px;
+	height: 40px;
+	border-radius: 10px;
+	background: var(--brand-gradient);
+	object-fit: contain;
+}
+
+img.account-logo {
+	background: transparent;
+}
+
+.account-hero-title {
+	font-size: 15px;
+	font-weight: 600;
+}
+
+.segmented {
+	display: inline-flex;
+	align-self: flex-start;
+	padding: 2px;
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	background: var(--bg);
+}
+
+.segmented button {
+	border: none;
+	border-radius: 6px;
+	background: transparent;
+	padding: 4px 16px;
+	font-size: 12.5px;
+	color: var(--text-muted);
+}
+
+.segmented button.active {
+	background: var(--bg-active);
+	color: var(--text);
+}
+
+.account-form {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+
+.account-form > p {
+	margin: 0;
+}
+
+.account-actions {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+}
+
+.account-actions > button:last-child {
+	margin-left: auto;
+}
+
+.account-links {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 14px;
+}
+
+.account-loading {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.account-user {
+	display: inline-flex;
+	align-items: center;
+	gap: 10px;
+}
+
+.account-avatar {
+	display: grid;
+	flex: none;
+	place-items: center;
+	width: 30px;
+	height: 30px;
+	border-radius: 50%;
+	background: var(--brand-gradient);
+	color: #fff;
+	font-size: 13px;
+	font-weight: 600;
+}
+
+.account-stats {
+	display: grid;
+	grid-template-columns: 1.4fr 1fr 1fr;
+	gap: 12px;
+	margin-top: 12px;
+}
+
+.account-stat {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	padding: 14px 16px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-lg);
+	background: var(--bg-elevated);
+}
+
+.account-stat.primary {
+	position: relative;
+	border-color: var(--accent-ring);
+	background: var(--accent-soft);
+}
+
+.account-stat.primary > button {
+	position: absolute;
+	top: 50%;
+	right: 14px;
+	transform: translateY(-50%);
+}
+
+.account-stat-value {
+	font-size: 20px;
+	font-weight: 600;
+	font-variant-numeric: tabular-nums;
+}
+
+.account-group + .account-group {
+	border-top: 1px solid var(--border);
+}
+
+.account-group .provider-name {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px;
+}
+
+.mini-tag.ok {
+	display: inline-flex;
+	align-items: center;
+	gap: 3px;
+	background: var(--success-soft);
+	color: var(--success);
+}
+
+select.account-token-select {
+	max-width: 260px;
+}
+
+.account-group-error {
+	padding: 0 14px 10px;
+}
