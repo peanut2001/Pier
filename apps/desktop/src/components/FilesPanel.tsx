@@ -1,8 +1,29 @@
 import type { WorkspaceFileEntry, WorkspaceInfo } from "@pier/protocol";
-import { type PointerEvent as ReactPointerEvent, useCallback, useEffect, useRef, useState } from "react";
+import {
+	type DragEvent as ReactDragEvent,
+	type PointerEvent as ReactPointerEvent,
+	useCallback,
+	useEffect,
+	useRef,
+	useState,
+} from "react";
+import {
+	downloadFile,
+	dragHasFiles,
+	dropEntries,
+	type OverwriteAnswer,
+	type OverwriteQuestion,
+	type Transfer,
+	transferFinished,
+	transfers,
+	type UploadItem,
+	uploadFiles,
+	uploadItemsFromInput,
+	useTransfers,
+} from "../lib/file-transfers.ts";
 import { formatBytes, joinPath, relativeTime } from "../lib/format.ts";
 import { useCanOpenTerminal } from "../lib/remote-terminals.ts";
-import { hostCanDeleteFiles, useAppState, useStore } from "../lib/store.tsx";
+import { hostCanDeleteFiles, hostTransfersFiles, useAppState, useStore } from "../lib/store.tsx";
 import { terminals } from "../lib/terminals.ts";
 import { ContextMenu, type ContextMenuItem, type ContextMenuPosition, contextMenuPosition } from "./ContextMenu.tsx";
 import {
@@ -10,6 +31,7 @@ import {
 	IconChevronRight,
 	IconChevronUp,
 	IconCopy,
+	IconDownload,
 	IconExternal,
 	IconFile,
 	IconFolder,
@@ -21,6 +43,7 @@ import {
 	IconRefresh,
 	IconTerminal,
 	IconTrash,
+	IconUpload,
 	IconX,
 } from "./Icons.tsx";
 import { Modal } from "./Modal.tsx";
@@ -121,6 +144,115 @@ function DeleteDialog({
 		</Modal>
 	);
 }
+
+/** Asks whether an upload may replace an existing file. */
+function OverwriteDialog({
+	question,
+	onAnswer,
+}: {
+	question: OverwriteQuestion;
+	onAnswer: (answer: OverwriteAnswer) => void;
+}) {
+	const [all, setAll] = useState(false);
+	return (
+		<Modal title="文件已存在" onClose={() => onAnswer({ choice: "cancel" })}>
+			<p>工作区中已经有同名文件，要用上传的文件替换它吗？</p>
+			<code className="path">{question.path}</code>
+			{question.more ? (
+				<label className="files-overwrite-all muted small">
+					<input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} />
+					对其余同名文件执行相同操作
+				</label>
+			) : null}
+			<div className="modal-actions">
+				<button type="button" className="ghost" onClick={() => onAnswer({ choice: "cancel" })}>
+					{question.more ? "取消其余上传" : "取消"}
+				</button>
+				{/* biome-ignore lint/a11y/noAutofocus: focus the safe choice so Enter does not replace. */}
+				<button type="button" autoFocus onClick={() => onAnswer({ choice: "skip", all })}>
+					跳过
+				</button>
+				<button type="button" className="danger" onClick={() => onAnswer({ choice: "overwrite", all })}>
+					替换
+				</button>
+			</div>
+		</Modal>
+	);
+}
+
+function transferStatus(t: Transfer): string {
+	switch (t.state) {
+		case "queued":
+			return "等待中";
+		case "running":
+			return t.total !== undefined ? `${formatBytes(t.done)} / ${formatBytes(t.total)}` : "准备中…";
+		case "done":
+			return t.kind === "upload" ? "已上传" : "已下载";
+		case "cancelled":
+			return "已取消";
+		case "skipped":
+			return "已跳过";
+		case "error":
+			return t.error ?? "失败";
+	}
+}
+
+/** Uploads and downloads of one workspace, with progress. */
+function TransferList({ workspaceId }: { workspaceId: string }) {
+	const items = useTransfers(workspaceId);
+	if (!items.length) return null;
+	const finished = items.filter(transferFinished).length;
+	return (
+		<section className="files-transfers" aria-label="上传与下载">
+			{items.map((t) => {
+				const percent = t.total ? Math.min(100, (t.done / t.total) * 100) : t.state === "done" ? 100 : 0;
+				const done = transferFinished(t);
+				return (
+					<div
+						key={t.id}
+						className={`files-transfer ${t.state}`}
+						title={`${t.path}${t.savedTo ? ` → ${t.savedTo}` : ""}`}
+					>
+						<span className="files-transfer-icon">
+							{t.kind === "upload" ? <IconUpload size={13} /> : <IconDownload size={13} />}
+						</span>
+						<div className="files-transfer-main">
+							<div className="files-transfer-line">
+								<span className="files-transfer-name">{t.name}</span>
+								<span className="files-transfer-status">{transferStatus(t)}</span>
+							</div>
+							{t.state === "running" || t.state === "queued" ? (
+								<div className="files-transfer-bar">
+									<span className="files-transfer-fill" style={{ width: `${percent}%` }} />
+								</div>
+							) : null}
+						</div>
+						<button
+							type="button"
+							className="ghost icon"
+							title={done ? "移除" : "取消"}
+							onClick={() => (done ? transfers.dismiss(t.id) : transfers.cancel(t.id))}
+						>
+							<IconX size={12} />
+						</button>
+					</div>
+				);
+			})}
+			{finished > 1 ? (
+				<button
+					type="button"
+					className="ghost files-transfers-clear"
+					onClick={() => transfers.clearFinished(workspaceId)}
+				>
+					清除已结束的
+				</button>
+			) : null}
+		</section>
+	);
+}
+
+/** `webkitdirectory` is not in React's input attribute types. */
+const folderInputProps = { webkitdirectory: "", directory: "" } as Record<string, string>;
 
 function useWorkspaceTree(workspaceId: string) {
 	const store = useStore();
@@ -251,6 +383,21 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 	// Terminals open on the workspace's computer (this one, or a paired one that runs them).
 	const canTerminal = useCanOpenTerminal(workspace);
 	const canDelete = useAppState((s) => hostCanDeleteFiles(s.hostInfo));
+	const canTransfer = useAppState(
+		(s) =>
+			s.nodes[s.workspaceNodes[workspace.id] ?? s.node]?.connection === "open" &&
+			hostTransfersFiles(s.nodes[s.workspaceNodes[workspace.id] ?? s.node]?.hostInfo),
+	);
+	const fileInput = useRef<HTMLInputElement>(null);
+	const folderInput = useRef<HTMLInputElement>(null);
+	/** Workspace directory the next picked files go to. */
+	const uploadDir = useRef("");
+	/** Directory highlighted while files are dragged over the tree. */
+	const [dropDir, setDropDir] = useState<string>();
+	const [overwrite, setOverwrite] = useState<{
+		question: OverwriteQuestion;
+		resolve: (answer: OverwriteAnswer) => void;
+	}>();
 	/** Entry awaiting delete confirmation. */
 	const [deleting, setDeleting] = useState<WorkspaceFileEntry>();
 	const version = useAppState((s) => s.filesVersion[workspace.id] ?? 0);
@@ -302,6 +449,75 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 		reload();
 	};
 
+	const upload = (items: UploadItem[]) => {
+		void uploadFiles(
+			store,
+			workspace,
+			items,
+			(question) => new Promise((resolve) => setOverwrite({ question, resolve })),
+		);
+	};
+	const answerOverwrite = (answer: OverwriteAnswer) => {
+		overwrite?.resolve(answer);
+		setOverwrite(undefined);
+	};
+	// A question left open when the panel closes cancels the rest of its uploads.
+	const overwriteRef = useRef(overwrite);
+	overwriteRef.current = overwrite;
+	useEffect(() => () => overwriteRef.current?.resolve({ choice: "cancel" }), []);
+	const pickUpload = (dir: string, folder: boolean) => {
+		uploadDir.current = dir;
+		const input = folder ? folderInput.current : fileInput.current;
+		if (!input) return;
+		input.value = "";
+		input.click();
+	};
+	const uploadItems = (dir: string): ContextMenuItem[] => [
+		{
+			label: dir ? "上传文件到此处…" : "上传文件…",
+			icon: <IconUpload size={14} />,
+			disabled: !canTransfer,
+			onSelect: () => pickUpload(dir, false),
+		},
+		{
+			label: dir ? "上传文件夹到此处…" : "上传文件夹…",
+			icon: <IconFolderOpen size={14} />,
+			disabled: !canTransfer,
+			onSelect: () => pickUpload(dir, true),
+		},
+	];
+
+	/** The directory a drop at `event` goes to: a folder row, a file's folder, or the root. */
+	const dropTarget = (event: ReactDragEvent): string => {
+		const row = (event.target as Element).closest?.("[data-drop-dir]");
+		return row?.getAttribute("data-drop-dir") ?? "";
+	};
+	const onDragOver = (event: ReactDragEvent<HTMLDivElement>) => {
+		if (!canTransfer || !dragHasFiles(event.dataTransfer)) return;
+		event.preventDefault();
+		event.dataTransfer.dropEffect = "copy";
+		const dir = dropTarget(event);
+		if (dir !== dropDir) setDropDir(dir);
+	};
+	const onDragLeave = (event: ReactDragEvent<HTMLDivElement>) => {
+		if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropDir(undefined);
+	};
+	const onDrop = (event: ReactDragEvent<HTMLDivElement>) => {
+		setDropDir(undefined);
+		if (!canTransfer || !dragHasFiles(event.dataTransfer)) return;
+		event.preventDefault();
+		const dir = dropTarget(event);
+		const list = dropEntries(event.dataTransfer);
+		void list(dir).then(
+			(items) => {
+				if (items.length) upload(items);
+				else store.toast("info", "没有可上传的文件（空文件夹不会上传）");
+			},
+			(error: unknown) =>
+				store.toast("error", `读取拖入的文件失败：${error instanceof Error ? error.message : String(error)}`),
+		);
+	};
+
 	const menuItems = (entry?: WorkspaceFileEntry): ContextMenuItem[] => {
 		const reveal = store.canRevealPaths;
 		if (!entry) {
@@ -310,6 +526,8 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 				{ label: "全部折叠", icon: <IconChevronUp size={14} />, disabled: !expanded.size, onSelect: collapseAll },
 				"separator",
 				{ label: "复制工作区路径", icon: <IconCopy size={14} />, onSelect: () => copyText(workspace.path) },
+				"separator",
+				...uploadItems(""),
 				"separator",
 				canTerminal && {
 					label: "在终端中打开",
@@ -350,6 +568,17 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 				onSelect: () => copyText(absolute, entry.path),
 			},
 			{ label: "复制名称", icon: <IconCopy size={14} />, onSelect: () => copyText(entry.name, entry.path) },
+			"separator",
+			...(isDir
+				? uploadItems(entry.path)
+				: [
+						{
+							label: "下载…",
+							icon: <IconDownload size={14} />,
+							disabled: !canTransfer || entry.kind !== "file",
+							onSelect: () => void downloadFile(store, workspace, entry.path),
+						},
+					]),
 			"separator",
 			canTerminal && {
 				label: isDir ? "在终端中打开" : "在所在目录打开终端",
@@ -405,8 +634,9 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 						<div key={entry.path}>
 							{/* biome-ignore lint/a11y/noStaticElementInteractions: the row's button is the focusable control; this only adds its context menu. */}
 							<div
-								className={`files-row${selected === entry.path ? " selected" : ""}${menu?.entry?.path === entry.path ? " menu-open" : ""}${entry.kind === "other" ? " dim" : ""}`}
+								className={`files-row${selected === entry.path ? " selected" : ""}${menu?.entry?.path === entry.path ? " menu-open" : ""}${entry.kind === "other" ? " dim" : ""}${isDir && dropDir === entry.path ? " drop-target" : ""}`}
 								style={{ paddingLeft: 6 + depth * 14 }}
+								data-drop-dir={isDir ? entry.path : parentPath(entry.path)}
 								onContextMenu={(event) => {
 									event.preventDefault();
 									event.stopPropagation();
@@ -512,17 +742,35 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 			</header>
 			{/* biome-ignore lint/a11y/noStaticElementInteractions: context menu for the blank area; every action is also in the header. */}
 			<div
-				className="files-tree"
+				className={`files-tree${dropDir === "" ? " drop-target" : ""}`}
 				onContextMenu={(event) => {
 					event.preventDefault();
 					setMenu({ position: contextMenuPosition(event) });
 				}}
+				onDragOver={onDragOver}
+				onDragLeave={onDragLeave}
+				onDrop={onDrop}
 			>
 				{connection === "open" || dirs[""] ? renderDir("", 0) : <div className="files-note">正在连接 Pier Host…</div>}
 			</div>
+			<TransferList workspaceId={workspace.id} />
 			<div className="files-hint">
 				{composerKey ? "单击查看内容，双击插入路径，右键更多操作" : "单击查看内容，右键更多操作"}
 			</div>
+			<input
+				ref={fileInput}
+				type="file"
+				multiple
+				hidden
+				onChange={(e) => upload(uploadItemsFromInput(e.target.files, uploadDir.current))}
+			/>
+			<input
+				ref={folderInput}
+				type="file"
+				hidden
+				{...folderInputProps}
+				onChange={(e) => upload(uploadItemsFromInput(e.target.files, uploadDir.current))}
+			/>
 			{menu ? (
 				<ContextMenu
 					position={menu.position}
@@ -531,6 +779,7 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 					onClose={() => setMenu(undefined)}
 				/>
 			) : null}
+			{overwrite ? <OverwriteDialog question={overwrite.question} onAnswer={answerOverwrite} /> : null}
 			{deleting ? <DeleteDialog workspace={workspace} entry={deleting} onClose={() => setDeleting(undefined)} /> : null}
 		</aside>
 	);

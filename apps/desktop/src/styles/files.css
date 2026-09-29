@@ -576,3 +576,120 @@ body.resizing-panel {
 	font-size: 11.5px;
 	color: var(--text-faint);
 }
+
+/* Uploads and downloads (drop target, transfer list, overwrite prompt). */
+
+.files-tree.drop-target,
+.files-row.drop-target {
+	background: var(--accent-soft);
+	box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.files-tree.drop-target {
+	border-radius: 8px;
+}
+
+.files-transfers {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	max-height: 180px;
+	overflow: auto;
+	padding: 6px 8px;
+	border-top: 1px solid var(--border);
+}
+
+.files-transfer {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-height: 30px;
+	padding: 2px 2px 2px 4px;
+	border-radius: 6px;
+	font-size: 12px;
+}
+
+.files-transfer .ghost.icon {
+	flex: none;
+	width: 22px;
+	height: 22px;
+}
+
+.files-transfer-icon {
+	flex: none;
+	display: inline-flex;
+	color: var(--accent-text);
+}
+
+.files-transfer-main {
+	flex: 1;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+}
+
+.files-transfer-line {
+	display: flex;
+	align-items: baseline;
+	gap: 8px;
+	min-width: 0;
+}
+
+.files-transfer-name {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+}
+
+.files-transfer-status {
+	flex: none;
+	max-width: 60%;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+	font-size: 11px;
+	color: var(--text-faint);
+	font-variant-numeric: tabular-nums;
+}
+
+.files-transfer-bar {
+	height: 3px;
+	border-radius: 999px;
+	background: var(--bg-active);
+	overflow: hidden;
+}
+
+.files-transfer-fill {
+	display: block;
+	height: 100%;
+	border-radius: inherit;
+	background: var(--accent);
+	transition: width 0.2s var(--ease);
+}
+
+.files-transfers-clear {
+	align-self: flex-end;
+	height: 22px;
+	padding: 0 8px;
+	font-size: 11.5px;
+}
+
+.files-overwrite-all {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin-top: 10px;
+}
+
+.files-transfer.error .files-transfer-icon,
+.files-transfer.error .files-transfer-status {
+	color: var(--danger);
+}
+
+.files-transfer.cancelled .files-transfer-icon,
+.files-transfer.skipped .files-transfer-icon {
+	color: var(--text-faint);
+}

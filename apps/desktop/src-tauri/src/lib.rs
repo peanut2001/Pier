@@ -1,11 +1,13 @@
 mod host;
 mod terminal;
+mod transfer;
 mod tray;
 mod updater;
 
 use host::HostManager;
 use tauri::{AppHandle, Manager, RunEvent, WindowEvent};
 use terminal::TerminalManager;
+use transfer::DownloadManager;
 use updater::UpdateManager;
 
 pub(crate) fn show_main_window(app: &AppHandle) {
@@ -45,12 +47,17 @@ pub fn run() {
             terminal::terminal_resize,
             terminal::terminal_kill,
             terminal::terminal_kill_all,
+            transfer::download_begin,
+            transfer::download_write,
+            transfer::download_finish,
+            transfer::download_abort,
             quit_app
         ])
         .setup(|app| {
             let manager = HostManager::new(app.handle().clone());
             app.manage(manager.clone());
             app.manage(TerminalManager::default());
+            app.manage(DownloadManager::default());
             let updates = UpdateManager::new(app.handle().clone());
             app.manage(updates.clone());
             let update_item = tray::create(app.handle())?;
