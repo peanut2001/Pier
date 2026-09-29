@@ -61,63 +61,6 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
 
-  sidecar:
-    name: sidecar ${{ matrix.platform }}
-    needs: verify
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: true
-      matrix:
-        include:
-          - { platform: linux-x64, runner: ubuntu-latest, target: bun-linux-x64 }
-          - { platform: linux-arm64, runner: ubuntu-24.04-arm, target: bun-linux-arm64 }
-          - { platform: darwin-arm64, runner: macos-latest, target: bun-darwin-arm64 }
-          - { platform: darwin-x64, runner: macos-15-intel, target: bun-darwin-x64 }
-          - { platform: windows-x64, runner: windows-latest, target: bun-windows-x64 }
-    env:
-      NAME: pier-host-${{ github.ref_name }}-${{ matrix.platform }}
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - uses: actions/checkout@v5
-
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 24
-          # pnpm is enabled through Corepack in the next step; setup-node's automatic
-          # package-manager cache would otherwise look for pnpm before it exists.
-          package-manager-cache: false
-
-      - uses: oven-sh/setup-bun@v2
-
-      - name: Enable pnpm via Corepack
-        run: corepack enable
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build sidecar
-        run: pnpm build:sidecar --target ${{ matrix.target }} --outdir "dist/${NAME}"
-
-      - name: Smoke test the binary on its native runner
-        run: node packages/host/scripts/smoke-sidecar.mjs "dist/${NAME}/pier-host${{ runner.os == 'Windows' && '.exe' || '' }}" "${{ needs.verify.outputs.version }}"
-
-      - name: Package (tar.gz)
-        if: runner.os != 'Windows'
-        run: tar -czf "dist/${NAME}.tar.gz" -C dist "${NAME}"
-
-      - name: Package (zip)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: Compress-Archive -Path "dist/$env:NAME" -DestinationPath "dist/$env:NAME.zip"
-
-      - uses: actions/upload-artifact@v5
-        with:
-          name: ${{ env.NAME }}
-          path: dist/${{ env.NAME }}.*
-          if-no-files-found: error
-
   desktop:
     name: desktop ${{ matrix.platform }}
     needs: verify
@@ -195,6 +138,17 @@ jobs:
           # Pier.app ships pi's assets as a resource; the desktop passes them through PI_PACKAGE_DIR.
           PI_PACKAGE_DIR="$app/Contents/Resources/pi-assets" \
             node packages/host/scripts/smoke-sidecar.mjs "$app/Contents/MacOS/pier-host" "${{ needs.verify.outputs.version }}"
+
+      # The bundles ship the sidecar that beforeBuildCommand prepared; smoke-test that exact binary
+      # (macOS tests it inside the signed .app above). Pier Host is not published on its own.
+      - name: Smoke test the bundled sidecar
+        if: runner.os != 'macOS'
+        run: |
+          tauri=apps/desktop/src-tauri
+          exe=$(ls "$tauri"/binaries/pier-host-* | head -1)
+          [ -f "$exe" ] || { echo "::error::No sidecar in $tauri/binaries"; exit 1; }
+          PI_PACKAGE_DIR="$tauri/pi-assets" \
+            node packages/host/scripts/smoke-sidecar.mjs "$exe" "${{ needs.verify.outputs.version }}"
 
       - name: Collect bundles
         run: |
@@ -354,7 +308,7 @@ jobs:
 
   publish:
     name: publish GitHub release
-    needs: [verify, sidecar, desktop, android, updater-manifest]
+    needs: [verify, desktop, android, updater-manifest]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
