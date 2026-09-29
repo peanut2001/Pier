@@ -1,4 +1,4 @@
-# Pier 协议 v1.19
+# Pier 协议 v1.20
 
 > 实现：`packages/protocol`（zod schema + TS 类型，Host 与所有客户端共享）。
 > 本文档描述线上格式与语义；字段的权威定义以 `packages/protocol/src` 为准。
@@ -59,7 +59,7 @@
 
 ```jsonc
 { "type": "req", "id": "h", "method": "host.hello", "params": {
-  "protocolVersion": "1.19",
+  "protocolVersion": "1.20",
   "client": { "name": "pier-desktop", "version": "0.1.0", "platform": "darwin" },
   "token": "<本地 token>",       // 本地连接必填；远程连接由加密通道认证，不需要
   "coalesceMs": 50               // 可选：合并流式增量的窗口（0–1000ms，默认 0）
@@ -273,6 +273,7 @@ pi 终端界面自带的命令（`/model`、`/compact`、`/new`、`/fork`、`/na
 | `extension.checkUpdates` | `{ workspaceId? }` | `{ updates: { source, name, kind: "npm"\|"git", scope }[] }`；列出有新版本的未固定包（需要网络） |
 | `extension.setEnabled` | `{ type, path, enabled, workspaceId? }` | `{ resource, reload }`；在资源所属范围的 settings 中启用 / 停用一个已列出的资源（与 `pi config` 相同）：独立资源在 `extensions` / `skills` / `prompts` / `themes` 数组中写入 `+路径` / `-路径`，包内资源写入该包条目的筛选。`path` 与 `type` 必须与 `extension.list` 的某一项一致，否则 `NOT_FOUND` |
 | `extension.delete` | `{ path, workspaceId? }` | `{ deleted: true, reload }`；删除一个独立扩展（`deletable: true`）：扩展目录中的文件或带 `index.ts` 的目录移到 Pier 回收站（`~/.pier/trash/extensions`），settings 中列出的路径只从 settings 移除（文件保留）。包内扩展或通过目录条目加载的扩展返回 `BAD_REQUEST`（改为移除包或停用） |
+| `extension.search` | `{ query?, type?: "extension"\|"skill"\|"theme"\|"prompt", sort?: "downloads"\|"recent"\|"name"("downloads"), page?(1) }` | `ExtensionCatalogResult = { origin: "pi.dev"\|"npm", packages, total, page, pageSize, hasMore, notice? }`（1.20）；在 Host 所在电脑上搜索 pi 官方扩展仓库 [pi.dev/packages](https://pi.dev/packages)（发布到 npm、带 `pi-package` 关键词的包），每页 50 个。`packages: ExtensionCatalogPackage[] = { name, source, description?, version?, author?, types, monthlyDownloads?, publishedAt?, npmUrl, repositoryUrl?, galleryUrl? }`，`source`（`npm:<包名>`）可直接传给 `extension.install`；`types` 为空表示仓库没有标注类型。仓库无法访问时改用 npm registry 搜索（`keywords:pi-package`），此时 `origin: "npm"`、`notice` 说明原因，`type` 与 `sort` 不生效。结果在 Host 中缓存 5 分钟；只读，不写审计日志。两者都无法访问时返回 `INTERNAL` |
 
 settings 文件无法解析时，修改类方法返回 `CONFLICT`，避免覆盖用户的文件。
 
