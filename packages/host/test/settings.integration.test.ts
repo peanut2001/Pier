@@ -56,9 +56,10 @@ describe("pi settings files", () => {
 	beforeEach(async () => {
 		t = await startTestHost({ fileSettings: true });
 		userPath = join(t.root, "agent", "settings.json");
-		projectPath = join(t.workspaceDir, ".pi", "settings.json");
 		client = await t.connect();
 		workspace = (await client.request("workspace.add", { path: t.workspaceDir })).workspace;
+		// The Host reports the workspace's real path (macOS tmpdir lives behind /var -> /private/var).
+		projectPath = join(workspace.path, ".pi", "settings.json");
 	});
 	afterEach(async () => {
 		await t.close();
