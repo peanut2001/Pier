@@ -204,6 +204,25 @@ export const IconExternal = make(
 export const IconTrash = make(
 	<path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />,
 );
+export const IconArchive = make(
+	<>
+		<rect x="2" y="3" width="20" height="5" rx="1" />
+		<path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8M10 12h4" />
+	</>,
+);
+export const IconArchiveRestore = make(
+	<>
+		<rect x="2" y="3" width="20" height="5" rx="1" />
+		<path d="M4 8v11a2 2 0 0 0 2 2h2M20 8v11a2 2 0 0 1-2 2h-2M9 15l3-3 3 3M12 12v9" />
+	</>,
+);
+export const IconBroom = make(
+	<>
+		<path d="m16 22-1-4M8 22l1-4" />
+		<path d="M19 14a1 1 0 0 0 1-1v-1a2 2 0 0 0-2-2h-3a1 1 0 0 1-1-1V4a2 2 0 0 0-4 0v5a1 1 0 0 1-1 1H6a2 2 0 0 0-2 2v1a1 1 0 0 0 1 1" />
+		<path d="M5 14h14l1.97 6.77A1 1 0 0 1 20 22H4a1 1 0 0 1-.97-1.23z" />
+	</>,
+);
 export const IconDownload = make(<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />);
 export const IconPanelRight = make(
 	<>

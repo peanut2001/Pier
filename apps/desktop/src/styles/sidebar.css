@@ -260,12 +260,18 @@
 	color: var(--text-faint);
 }
 
-.session-delete {
+.session-actions {
 	position: absolute;
 	top: 50%;
 	right: 4px;
 	transform: translateY(-50%);
 	display: none;
+	align-items: center;
+	gap: 2px;
+}
+
+.session-action {
+	display: inline-flex;
 	align-items: center;
 	justify-content: center;
 	min-width: 22px;
@@ -279,31 +285,81 @@
 	font-weight: 500;
 }
 
-.session-item:hover .session-delete,
-.session-delete:focus-visible,
-.session-item.confirming .session-delete {
+.session-item:hover .session-actions,
+.session-item:has(:focus-visible) .session-actions,
+.session-item.confirming .session-actions {
 	display: inline-flex;
 }
 
 .session-item:hover .session-row-time,
-.session-item:focus-within .session-row-time,
+.session-item:has(:focus-visible) .session-row-time,
 .session-item.confirming .session-row-time {
-	visibility: hidden;
+	display: none;
 }
 
-.session-delete:hover:not(:disabled) {
+/* Room for the action buttons over the end of the title. */
+.session-item:hover .session-row,
+.session-item:has(:focus-visible) .session-row,
+.session-item.confirming .session-row {
+	padding-right: 56px;
+}
+
+.session-action:hover:not(:disabled) {
+	background: var(--bg-active);
+	color: var(--text);
+}
+
+.session-action.delete:hover:not(:disabled) {
 	background: var(--danger-soft);
 	color: var(--danger);
 }
 
-.session-delete.confirm {
+.session-action.delete.confirm {
 	border-color: var(--danger-line);
 	background: var(--bg);
 	color: var(--danger);
 }
 
-.session-delete.confirm:hover:not(:disabled) {
+.session-action.delete.confirm:hover:not(:disabled) {
 	background: var(--danger-soft);
+}
+
+.session-item.archived .session-row:not(.selected) {
+	color: var(--text-faint);
+}
+
+.session-archived-toggle {
+	display: flex;
+	align-items: center;
+	justify-content: flex-start;
+	gap: 4px;
+	width: 100%;
+	margin-top: 2px;
+	padding: 5px 8px;
+	border: none;
+	border-radius: 8px;
+	background: transparent;
+	color: var(--text-faint);
+	font-size: 12px;
+	font-weight: 400;
+	text-align: left;
+}
+
+.session-archived-toggle:hover:not(:disabled) {
+	background: var(--bg-hover);
+	color: var(--text);
+}
+
+.session-archived-toggle .icon-svg:first-child {
+	transition: transform 0.12s;
+}
+
+.session-archived-toggle.open .icon-svg:first-child {
+	transform: rotate(90deg);
+}
+
+.session-archived-list {
+	margin-left: 8px;
 }
 
 .session-empty,

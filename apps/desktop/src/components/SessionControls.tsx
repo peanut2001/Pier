@@ -2,8 +2,10 @@ import type { ChatController, ChatState } from "@pier/chat-state";
 import type { ApprovalPolicy, ForkPoint, ModelInfo, ThinkingLevel, WorkspaceInfo } from "@pier/protocol";
 import { useEffect, useRef, useState } from "react";
 import { POLICY_LABEL, POLICY_SUMMARY } from "../lib/format.ts";
-import { useCanManageWorkspace, useStore } from "../lib/store.tsx";
+import { useAppState, useCanArchiveSessions, useCanManageWorkspace, useStore } from "../lib/store.tsx";
 import {
+	IconArchive,
+	IconArchiveRestore,
 	IconCheck,
 	IconChevronDown,
 	IconChevronUp,
@@ -309,6 +311,11 @@ export function SessionMenu({ chat, controller }: { chat: ChatState; controller:
 	});
 	const session = chat.session;
 	const idle = chat.runState === "idle";
+	const canArchive = useCanArchiveSessions(session?.workspaceId);
+	// The sidebar list knows the current archive state; the chat's copy is from its snapshot.
+	const archived = useAppState((s) =>
+		session ? (s.sessions[session.workspaceId]?.find((x) => x.id === session.id)?.archived ?? session.archived) : false,
+	);
 	return (
 		<>
 			<div className="dropdown" ref={ref}>
@@ -365,6 +372,23 @@ export function SessionMenu({ chat, controller }: { chat: ChatState; controller:
 								{confirmClose ? "Agent 仍在运行：再次点击以中止并关闭" : "关闭会话"}
 							</span>
 						</button>
+						{canArchive ? (
+							<button
+								type="button"
+								className="dropdown-item"
+								disabled={!session}
+								onClick={() => {
+									if (!session) return;
+									setOpen(false);
+									void store.archiveSession(session, !archived);
+								}}
+							>
+								<span className="menu-label">
+									{archived ? <IconArchiveRestore size={14} /> : <IconArchive size={14} />}
+									{archived ? "取消归档" : "归档会话"}
+								</span>
+							</button>
+						) : null}
 						<button
 							type="button"
 							className="dropdown-item danger"

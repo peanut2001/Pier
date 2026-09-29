@@ -7,6 +7,10 @@
 //! no agent is cut off halfway through writing a file and the Windows installer can replace
 //! the sidecar), installs, and relaunches Pier.
 //!
+//! Paired computers and phones can drive the same flow through the Pier Host (`update.*` in
+//! the protocol, relayed over the sidecar's stdio by `host.rs`); every status change is also
+//! pushed to the host.
+//!
 //! Development builds and unpackaged binaries cannot update themselves; their state is
 //! `unsupported`. `PIER_UPDATER_ENDPOINT` points a packaged build at another manifest (for
 //! testing); signatures are still verified against the built-in public key.
@@ -67,6 +71,8 @@ pub struct UpdateStatus {
     pub error: Option<String>,
     /// Unix time (ms) of the last successful check.
     pub last_checked: Option<u64>,
+    /// Installing asks for an administrator password on this computer (Linux .deb / .rpm).
+    pub install_needs_auth: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -99,6 +105,15 @@ fn supported() -> bool {
     !cfg!(debug_assertions) && tauri::utils::platform::bundle_type().is_some()
 }
 
+/// The updater installs .deb / .rpm packages through pkexec or sudo, which prompt for a password.
+fn install_needs_auth() -> bool {
+    use tauri::utils::config::BundleType;
+    matches!(
+        tauri::utils::platform::bundle_type(),
+        Some(BundleType::Deb | BundleType::Rpm)
+    )
+}
+
 fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -125,6 +140,7 @@ impl UpdateManager {
             total: None,
             error: None,
             last_checked: None,
+            install_needs_auth: supported() && install_needs_auth(),
         };
         Self {
             app,
@@ -156,7 +172,11 @@ impl UpdateManager {
             change(&mut inner.status);
         }
         self.refresh_tray();
-        let _ = self.app.emit(STATUS_EVENT, self.status());
+        let status = self.status();
+        if let Some(host) = self.app.try_state::<HostManager>() {
+            host.send_update_status(&status);
+        }
+        let _ = self.app.emit(STATUS_EVENT, status);
     }
 
     fn refresh_tray(&self) {
@@ -266,6 +286,44 @@ impl UpdateManager {
     /// Download, verify, and install the pending update, then relaunch Pier.
     /// Returns only on failure (the host is started again in that case).
     pub async fn install(&self) -> Result<(), String> {
+        let update = self.begin_install()?;
+        self.run_install(update).await
+    }
+
+    /// Install the newest release for a remote request: check first unless an update is
+    /// already known, then start installing in the background. Returns the status right after
+    /// the install started, or after a check that found nothing to install (or failed).
+    pub async fn install_latest(&self) -> UpdateStatus {
+        let known = {
+            let inner = self.lock();
+            match inner.status.state {
+                UpdateState::Unsupported
+                | UpdateState::Checking
+                | UpdateState::Downloading
+                | UpdateState::Installing => return inner.status.clone(),
+                UpdateState::Available | UpdateState::Error => inner.pending.is_some(),
+                _ => false,
+            }
+        };
+        if !known {
+            let status = self.check().await;
+            if status.state != UpdateState::Available {
+                return status;
+            }
+        }
+        // Fails only when another install claimed the update meanwhile.
+        if let Ok(update) = self.begin_install() {
+            let manager = self.clone();
+            tauri::async_runtime::spawn(async move {
+                // Failures are reported through the status (state `error`).
+                let _ = manager.run_install(update).await;
+            });
+        }
+        self.status()
+    }
+
+    /// Claim the pending update for installing (state `downloading`).
+    fn begin_install(&self) -> Result<Update, String> {
         let update = {
             let mut inner = self.lock();
             match inner.status.state {
@@ -285,7 +343,10 @@ impl UpdateManager {
             update
         };
         self.update(|_| {});
+        Ok(update)
+    }
 
+    async fn run_install(&self, update: Update) -> Result<(), String> {
         let mut downloaded: u64 = 0;
         let mut last_emit = Instant::now();
         let bytes = update

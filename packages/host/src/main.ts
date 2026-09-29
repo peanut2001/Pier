@@ -15,6 +15,7 @@ import { DEFAULT_ALLOWED_ORIGINS, startLocalGateway } from "./gateway/local-gate
 import { PIER_HOST_VERSION, PierHost } from "./host.ts";
 import { defaultPierDir, runtimeFilePath } from "./paths.ts";
 import { checkImageSupport, installPhotonWasmRedirect } from "./pi/photon-wasm.ts";
+import { StdioShell } from "./shell.ts";
 
 const HELP = `pier-host ${PIER_HOST_VERSION}
 
@@ -32,7 +33,9 @@ Options:
                       Address to put into pairing codes instead of the detected LAN
                       addresses (repeatable; e.g. a Tailscale name or a forwarded port)
   --no-mdns           Do not advertise _pier._tcp over mDNS
-  --watch-stdin       Exit when stdin closes (sidecar mode: exit with the parent)
+  --watch-stdin       Exit when stdin closes (sidecar mode: exit with the parent). The
+                      desktop app also talks to the host over stdin / stdout then (its
+                      updater, see src/shell.ts)
   --check-images      Resize a sample image through pi (Photon), print the result, and exit
   -h, --help          Show this help
 
@@ -85,8 +88,12 @@ async function main(): Promise<void> {
 		throw new Error(`Invalid --remote-port ${values["remote-port"]}`);
 	}
 
+	// Sidecar mode: the desktop app answers on stdin (its updater). Requests only go out on
+	// stdout after the `pier.ready` line.
+	const shell = values["watch-stdin"] ? new StdioShell(process.stdin, process.stdout, { log }) : undefined;
 	const host = await PierHost.create({
 		pierDir,
+		...(shell ? { shell } : {}),
 		localToken: token,
 		env: values["agent-dir"] ? { agentDir: values["agent-dir"] } : {},
 		log,

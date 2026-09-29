@@ -1,4 +1,4 @@
-# Pier 协议 v1.13
+# Pier 协议 v1.15
 
 > 实现：`packages/protocol`（zod schema + TS 类型，Host 与所有客户端共享）。
 > 本文档描述线上格式与语义；字段的权威定义以 `packages/protocol/src` 为准。
@@ -59,7 +59,7 @@
 
 ```jsonc
 { "type": "req", "id": "h", "method": "host.hello", "params": {
-  "protocolVersion": "1.13",
+  "protocolVersion": "1.15",
   "client": { "name": "pier-desktop", "version": "0.1.0", "platform": "darwin" },
   "token": "<本地 token>",       // 本地连接必填；远程连接由加密通道认证，不需要
   "coalesceMs": 50               // 可选：合并流式增量的窗口（0–1000ms，默认 0）
@@ -85,6 +85,20 @@
 | `host.listDirectories` | `{ path?(绝对路径) }` | `HostDirectoryListing`：`{ path, parent?, home, separator, entries: { name, path, symlink? }[], truncated?, total? }`；列出 Host 上一个目录的子目录（含指向目录的符号链接），用于在其他电脑上选择工作区（1.10）。省略 `path` 时为用户主目录；`path` 不做 realpath，`parent` 在文件系统根目录时省略。按名称自然排序，最多 2000 项，超出时 `truncated: true` 并给出 `total`。相对路径或不是目录时 `BAD_REQUEST`，不存在时 `NOT_FOUND`，无权限时 `FORBIDDEN` |
 | `host.stats` | – | `HostStats`：`{ sampledAt, platform, uptime(秒), cpu: { usage(0–1), cores, model?, loadAverage?[1/5/15 分钟] }, memory: { total, used }, disk?: { path, total, used, available }, network?: { rxRate, txRate, rxTotal, txTotal }, hostRss }`；Host 所在电脑的资源占用（1.12），大小单位为字节，速率为字节/秒。`cpu.usage` 与网络速率按与上一次采样的差值计算（上一次采样超过 10 秒时先取 0.4 秒的基线），1 秒内的重复调用共用一次采样。内存 `used` 不含可回收的缓存（Linux 为 `MemTotal - MemAvailable`，macOS 按 `vm_stat` 计算）；`disk` 为用户主目录所在的文件系统；`network` 统计物理网卡（Linux 上没有物理网卡时统计除回环外的全部网卡，macOS 为 `en*`，Windows 为 `netstat -e` 的总计），无法读取时省略；Windows 上没有 `loadAverage`；`hostRss` 为 Pier Host 进程的常驻内存。对已配对设备开放 |
 
+### 应用更新（1.13）
+
+Host 在桌面端中运行时（Tauri 以 `--watch-stdin` 启动 sidecar），通过 sidecar 的 stdio 驱动桌面端的更新器，让已配对的电脑和手机可以远程更新这台电脑上的 Pier。只会安装 GitHub 最新正式版中、用桌面端内置公钥校验过签名的更新包，更新地址不能由客户端指定。这些方法对已配对设备开放，远程调用 `update.install` 写入审计日志。
+
+| 方法 | 参数 | 结果 |
+|---|---|---|
+| `update.status` | – | `AppUpdateStatus`：`{ state, currentVersion, autoCheck, version?, notes?, date?, downloaded, total?, error?, lastChecked?, installNeedsAuth? }`。`state` 为 `unsupported`（开发版本、未打包的构建、独立运行的 `pier-host`，或桌面端没有上报更新器）\|`idle`\|`checking`\|`upToDate`\|`available`\|`downloading`\|`installing`\|`error`；`version` / `notes` / `date` 为可安装的新版本（安装失败后仍保留，可重试）；`installNeedsAuth` 表示安装时需要有人在那台电脑上输入管理员密码（Linux `.deb` / `.rpm`） |
+| `update.check` | – | `AppUpdateStatus`：立即检查一次（最长约 30 秒，客户端请放宽超时）。检查失败时返回 `state: "error"` 而不是错误响应 |
+| `update.install` | – | `AppUpdateStatus`：还没有已知的新版本时先检查；有新版本时在后台开始下载，返回 `downloading`，之后 Host 与所有连接会随安装断开，桌面端安装完成后自动重启，客户端重连后在 `host.hello` 中看到新版本。已是最新版本时返回 `upToDate`，检查失败时返回 `error`，已在更新时返回当前状态。由远程设备发起时，Host 同时向本地连接发出 `host.notice`，告知谁在更新 |
+
+没有可驱动的更新器时，`update.check` / `update.install` 返回 `UNSUPPORTED`，`update.status` 返回 `state: "unsupported"`；桌面端无法回答时返回 `INTERNAL`。更新器的每次状态变化（下载进度约每 200ms 一次）都以 `update.status` 事件发给所有连接。
+
+sidecar 的 stdio 协议（每行一个 JSON 对象，stdout 上 `pier.ready` 之后）：Host 在 stdout 写 `{"type":"pier.shell.request","id","method":"update.check"|"update.install"}`，桌面端在 stdin 回 `{"type":"pier.shell.response","id","ok":true,"result":AppUpdateStatus}` 或 `{"type":"pier.shell.response","id","ok":false,"error"}`，并在 Host 就绪时和每次状态变化时推送 `{"type":"pier.shell.updateStatus","status":AppUpdateStatus}`（缺省字段为 `null`）。
+
 ### workspace
 
 | 方法 | 参数 | 结果 |
@@ -102,11 +116,13 @@
 
 | 方法 | 参数 | 结果 |
 |---|---|---|
-| `session.list` | `{ workspaceId }` | `{ sessions: SessionSummary[] }`，按修改时间倒序；活跃会话 `active: true` 并带实时 `state` 与 `pendingUi`（待回答的对话框 / 审批数，1.1） |
+| `session.list` | `{ workspaceId }` | `{ sessions: SessionSummary[] }`，按修改时间倒序；活跃会话 `active: true` 并带实时 `state` 与 `pendingUi`（待回答的对话框 / 审批数，1.1）；已归档的会话带 `archived: true`（1.14），未归档时省略该字段 |
 | `session.create` | `{ workspaceId, name? }` | `{ session }`（已进入活跃池） |
 | `session.open` | `{ workspaceId, sessionId }` 或 `{ workspaceId, path }` | `{ session }`；`path` 必须出现在该工作区的会话列表中 |
 | `session.close` | `{ sessionId, force? }` | `{ closed }`；运行中且未 `force` → `CONFLICT` |
 | `session.delete` | `{ workspaceId, sessionId, force? }` | `{ deleted }`；关闭会话（`session.closed { reason: "deleted" }`）并把会话文件移到 `~/.pier/trash/sessions/<时间戳>-<文件名>`（可手动移回恢复）。活跃会话属于其他工作区 → `NOT_FOUND`；工作区中没有该会话 → `{ deleted: false }`；运行中且未 `force`，或会话正被其他 Pier Host 打开 → `CONFLICT`。从未写入磁盘的新会话只会被关闭；分叉出的子会话不受影响（1.6） |
+| `session.archive` | `{ workspaceId, sessionId, archived }` | `{ session }`；归档（`archived: true`）或取消归档会话（1.14）。归档只是 Host 记录在 `~/.pier/archived-sessions.json` 中的标记，不修改会话文件，也不关闭会话，归档后的会话照常可以打开和继续对话；分叉出的新会话不继承归档状态，`session.delete` 会同时清除标记。会话既不在活跃池中也不在该工作区的会话列表中 → `NOT_FOUND`（属于其他工作区的活跃会话同样）。成功后广播 `session.listChanged` |
+| `session.cleanup` | `{ workspaceId, action: "archive"\|"delete", modifiedBefore?, scope?: "all"\|"archived"\|"unarchived", dryRun? }` | `{ sessionIds, skipped: { sessionId, reason: "running"\|"locked"\|"error", message? }[] }`；批量归档或删除工作区中的会话（1.14）。选中 `modifiedAt` 早于 `modifiedBefore`（带时区的 ISO 8601 时间，省略时不限时间）且符合 `scope`（默认 `all`）的会话；`archive` 时已归档的会话不计入。`delete` 与 `session.delete` 相同（移到 `~/.pier/trash/sessions`），但运行中或有待回答请求的会话一律跳过（`running`），被其他 Pier Host 打开的会话跳过（`locked`）；`archive` 不跳过运行中的会话。`sessionIds` 为已处理的会话，`dryRun: true` 时只返回将要处理和将被跳过的会话而不做修改（`locked` 只有实际执行时才能发现）。有会话被处理时广播 `session.listChanged` |
 | `session.forkPoints` | `{ sessionId }` | `{ points: { entryId, text }[] }`（可 fork 的用户消息） |
 | `session.fork` | `{ sessionId, entryId, position?: "before"\|"at" }` | `{ session, selectedText? }`；生成**新**会话，原会话不变 |
 | `session.rename` | `{ sessionId, name }` | `{ session }` |
@@ -234,7 +250,7 @@ pi 终端界面自带的命令（`/model`、`/compact`、`/new`、`/fork`、`/na
 
 settings 文件无法解析时，修改类方法返回 `CONFLICT`，避免覆盖用户的文件。
 
-### pi 设置（1.13）
+### pi 设置（1.15）
 
 直接读写 pi 的 settings 文件，供「设置 → pi 配置」可视化编辑（终端里的 pi 读取同一份文件）。与 `extension.*` 相同，`scope: "user"` 为 `<agentDir>/settings.json`，`scope: "project"` 为 `<工作区>/.pi/settings.json`，需要带 `workspaceId`。Host 不校验各设置项的含义，只保证文件是 JSON 对象；写入时与 pi 使用同一把文件锁（`proper-lockfile`），不会与正在保存设置的 pi 进程交错。对已配对设备开放，远程调用写入审计日志（只记录修改的键名和字节数，不记录值）。
 
@@ -317,7 +333,8 @@ Host 保存已配对的电脑于 `~/.pier/peers.json`（0600），每次经代�
 | `session.activity` | `workspaceId, sessionId, state, pendingUi` | 活跃会话的运行状态或待回答请求数变化（1.1）。列表页据此显示“运行中 / 待批准”，无需订阅每个会话 |
 | `provider.changed` | – | 服务商、凭据、`models.json` 或默认模型变化（1.2）；重新调用 `provider.list` / `model.list` |
 | `extension.changed` | `workspaceId?` | 扩展或扩展包设置变化（1.8）；只改了某个工作区的项目设置时带 `workspaceId`。重新调用 `extension.list`，会话的斜杠命令也可能变化 |
-| `settings.changed` | `scope, workspaceId?` | 通过 `settings.update` / `settings.write` 修改了 pi 的 settings 文件（1.13）；`scope: "project"` 时带 `workspaceId`。重新调用 `settings.get`。在 Pier 之外修改文件（终端 pi、手动编辑）不会触发 |
+| `update.status` | `status: AppUpdateStatus` | 桌面端更新器的状态或下载进度变化（1.13），见「应用更新」 |
+| `settings.changed` | `scope, workspaceId?` | 通过 `settings.update` / `settings.write` 修改了 pi 的 settings 文件（1.15）；`scope: "project"` 时带 `workspaceId`。重新调用 `settings.get`。在 Pier 之外修改文件（终端 pi、手动编辑）不会触发 |
 
 仅发给本地（桌面）连接（`LOCAL_ONLY_EVENTS`）：
 

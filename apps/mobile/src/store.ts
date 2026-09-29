@@ -8,7 +8,14 @@ import {
 	pairWithHost,
 } from "@pier/client";
 import { ChannelError, fromBase64Url, type KeyPair, PairingUriError, parsePairingUri, toBase64Url } from "@pier/crypto";
-import type { EventFrame, HostInfo, SessionRunState, SessionSummary, WorkspaceInfo } from "@pier/protocol";
+import {
+	type EventFrame,
+	type HostInfo,
+	parseProtocolVersion,
+	type SessionRunState,
+	type SessionSummary,
+	type WorkspaceInfo,
+} from "@pier/protocol";
 import { createContext, useContext, useSyncExternalStore } from "react";
 import { Platform } from "react-native";
 import { loadHosts, type PairedHost, removeHost, saveHost } from "./hosts.ts";
@@ -449,6 +456,37 @@ export class MobileStore {
 			this.toast("error", `分叉会话失败：${errorText(error)}`);
 			return undefined;
 		}
+	}
+
+	/** Whether the connected computer can archive sessions (`session.archive`, protocol 1.14). */
+	canArchive(): boolean {
+		const version = this.state.host.info ? parseProtocolVersion(this.state.host.info.protocolVersion) : undefined;
+		return version !== undefined && (version.major > 1 || (version.major === 1 && version.minor >= 14));
+	}
+
+	/** Archive or unarchive a session. Resolves to whether it worked. */
+	async archiveSession(session: SessionSummary, archived: boolean): Promise<boolean> {
+		const client = this.client;
+		if (!client) return false;
+		try {
+			await client.request("session.archive", { workspaceId: session.workspaceId, sessionId: session.id, archived });
+		} catch (error) {
+			this.toast("error", `${archived ? "归档" : "取消归档"}失败：${errorText(error)}`);
+			return false;
+		}
+		const workspaceId = session.workspaceId;
+		this.setHost((h) => ({
+			sessions: {
+				...h.sessions,
+				[workspaceId]: (h.sessions[workspaceId] ?? []).map((s) => {
+					if (s.id !== session.id) return s;
+					const { archived: _previous, ...rest } = s;
+					return archived ? { ...rest, archived: true } : rest;
+				}),
+			},
+		}));
+		this.scheduleRefresh(workspaceId);
+		return true;
 	}
 
 	/** Delete a session (moved to the computer's Pier trash). `force` aborts a running agent first. */

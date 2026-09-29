@@ -1,4 +1,5 @@
 import type {
+	AppUpdateStatus,
 	AuthNotice,
 	AuthPromptInfo,
 	DefaultModelRef,
@@ -105,7 +106,12 @@ export type PierHostEvent =
 	 */
 	| { type: "extension.changed"; workspaceId?: string }
 	/**
-	 * A pi settings file was changed through `settings.update` / `settings.write` (1.13).
+	 * The desktop app's updater on the host's computer changed state or made progress (1.13).
+	 * Sent to every connection.
+	 */
+	| { type: "update.status"; status: AppUpdateStatus }
+	/**
+	 * A pi settings file was changed through `settings.update` / `settings.write` (1.15).
 	 * `workspaceId` is set for a workspace's project settings. Sent to every connection.
 	 */
 	| { type: "settings.changed"; scope: "user" | "project"; workspaceId?: string }

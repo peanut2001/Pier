@@ -2,6 +2,7 @@ import { ChatController, type ChatView } from "@pier/chat-state";
 import { CLOSE_DEVICE_REVOKED, type ClientState, PierClient } from "@pier/client";
 import type {
 	ApprovalPolicy,
+	AppUpdateStatus,
 	AuthMethod,
 	AuthNotice,
 	AuthPromptInfo,
@@ -33,6 +34,7 @@ import type {
 	ProviderInfo,
 	ProviderListResult,
 	RemoteAccessStatus,
+	SessionCleanupResult,
 	SessionSummary,
 	WorkspaceFileContent,
 	WorkspaceFilesResult,
@@ -100,6 +102,35 @@ export function hostCanDeleteFiles(info: HostInfo | undefined): boolean {
 /** Whether a host reports its resource usage (`host.stats`, 1.12). */
 export function hostReportsStats(info: HostInfo | undefined): boolean {
 	return hostSpeaks(info, 12);
+}
+
+/** Whether Pier on a computer can be updated from here (`update.*`, 1.13). */
+export function hostUpdatesRemotely(info: HostInfo | undefined): boolean {
+	return hostSpeaks(info, 13);
+}
+
+/** Pier's updater on a paired computer, driven through its host. */
+export interface PeerUpdateEntry {
+	/** The updater's last known status there. */
+	status?: AppUpdateStatus;
+	/** That computer's Pier is too old to be updated from here. */
+	tooOld?: boolean;
+	/** A request from this computer is in flight. */
+	busy?: "check" | "install";
+	/** An install this computer started, announced once the computer is back. */
+	installing?: { from: string; to?: string };
+}
+
+/** Whether a host can archive and bulk-clean sessions (`session.archive` / `session.cleanup`, 1.14). */
+export function hostCanArchiveSessions(info: HostInfo | undefined): boolean {
+	return hostSpeaks(info, 14);
+}
+
+/** Parameters of `session.cleanup` the desktop chooses. */
+export interface SessionCleanupRequest {
+	action: "archive" | "delete";
+	modifiedBefore?: string;
+	scope?: "all" | "archived" | "unarchived";
 }
 
 /** How often the status bar samples host usage while the window is visible. */
@@ -254,6 +285,8 @@ export interface AppState {
 	directoryPicker?: { title: string; node: string } | undefined;
 	/** Resource usage per computer (`LOCAL_NODE` or a paired computer's id), while sampled. */
 	hostStats: Record<string, HostStatsEntry>;
+	/** Pier's updater on each paired computer. */
+	peerUpdates: Record<string, PeerUpdateEntry>;
 }
 
 /** Recompute the lists that combine every computer (after `nodes` or `peers` changed). */
@@ -461,6 +494,7 @@ export class PierStore {
 			extensionsVersion: 0,
 			piSettingsVersion: 0,
 			hostStats: {},
+			peerUpdates: {},
 		};
 		this.state = { ...state, ...deriveWorkspaces(state), ...deriveShown(state) };
 	}
@@ -670,6 +704,7 @@ export class PierStore {
 				...(selected ? { selectedWorkspaceId: undefined, selectedSessionId: undefined } : {}),
 				...(target ? { newChat: {} } : {}),
 				...(s.node === node ? { node: LOCAL_NODE } : {}),
+				peerUpdates: Object.fromEntries(Object.entries(s.peerUpdates).filter(([id]) => id !== node)),
 			};
 		});
 		this.saveNodeCache();
@@ -763,7 +798,10 @@ export class PierStore {
 			);
 			if (state === "open") {
 				this.retryAttempts.delete(node);
-				if (wasOpen) void this.loadWorkspaces(node);
+				if (wasOpen) {
+					void this.loadWorkspaces(node);
+					void this.loadPeerUpdate(node);
+				}
 				wasOpen = true;
 			}
 		});
@@ -777,6 +815,7 @@ export class PierStore {
 			const hello = await client.connect();
 			if (!current()) return;
 			this.patchNode(node, { hostInfo: hello.host, revoked: false, connectError: undefined });
+			void this.loadPeerUpdate(node);
 			await this.loadWorkspaces(node);
 		} catch (error) {
 			if (!current()) return;
@@ -890,6 +929,8 @@ export class PierStore {
 		else if (event.type === "session.activity") {
 			// A run that ends (or pauses for an answer) has likely written files.
 			if (event.state === "idle" || Number(event.pendingUi) > 0) this.bumpFiles(String(event.workspaceId));
+		} else if (event.type === "update.status") {
+			if (node !== LOCAL_NODE) this.onPeerUpdateStatus(node, event.status as AppUpdateStatus);
 		} else if (event.type === "host.notice") {
 			const message = String(event.message ?? "");
 			this.toast(
@@ -2013,6 +2054,71 @@ export class PierStore {
 		if (result) this.upsertSession(result.session);
 	}
 
+	/** Whether the computer of a workspace can archive and bulk-clean sessions (protocol 1.14). */
+	canArchiveSessions(workspaceId: string): boolean {
+		return hostCanArchiveSessions(this.state.nodes[this.nodeOf(workspaceId)]?.hostInfo);
+	}
+
+	/** Archive or unarchive a session; it stays where it is in the list. Resolves to whether it worked. */
+	async archiveSession(session: SessionSummary, archived: boolean): Promise<boolean> {
+		const result = await this.callWith(this.clientFor(session.workspaceId), archived ? "归档会话" : "取消归档", (c) =>
+			c.request("session.archive", { workspaceId: session.workspaceId, sessionId: session.id, archived }),
+		);
+		if (!result) return false;
+		this.set((s) => {
+			const list = s.sessions[session.workspaceId];
+			if (!list) return {};
+			const next = list.map((x) => {
+				if (x.id !== session.id) return x;
+				const { archived: _previous, ...rest } = x;
+				return archived ? { ...rest, archived: true } : rest;
+			});
+			return { sessions: { ...s.sessions, [session.workspaceId]: next } };
+		});
+		return true;
+	}
+
+	/**
+	 * Archive or delete many sessions of a workspace (`session.cleanup`). With `dryRun` only
+	 * reports what would happen and rejects with the host's error; otherwise errors are toasted
+	 * and resolve to undefined.
+	 */
+	async cleanupSessions(
+		workspaceId: string,
+		request: SessionCleanupRequest,
+		dryRun = false,
+	): Promise<SessionCleanupResult | undefined> {
+		const client = this.clientFor(workspaceId);
+		const params = { workspaceId, ...request, ...(dryRun ? { dryRun: true } : {}) };
+		if (dryRun) {
+			if (!client) throw new Error("尚未连接到 Pier Host");
+			return client.request("session.cleanup", params);
+		}
+		const label = request.action === "archive" ? "归档会话" : "删除会话";
+		const result = await this.callWith(client, label, (c) => c.request("session.cleanup", params));
+		if (!result) return undefined;
+		if (request.action === "delete") {
+			const deleted = new Set(result.sessionIds);
+			for (const id of deleted) {
+				this.dropChat(id);
+				this.drafts.delete(id);
+				this.autoSend.delete(id);
+			}
+			this.set((s) => ({
+				sessions: {
+					...s.sessions,
+					[workspaceId]: (s.sessions[workspaceId] ?? []).filter((x) => !deleted.has(x.id)),
+				},
+				...(s.selectedSessionId && deleted.has(s.selectedSessionId) ? { selectedSessionId: undefined } : {}),
+			}));
+		}
+		await this.refreshSessions(workspaceId);
+		const verb = request.action === "archive" ? "归档" : "删除";
+		const skipped = result.skipped.length ? `，跳过 ${result.skipped.length} 个运行中或被占用的会话` : "";
+		this.toast("info", `已${verb} ${result.sessionIds.length} 个会话${skipped}`);
+		return result;
+	}
+
 	/** Fork into a new session and open it. Resolves to whether it succeeded. */
 	async forkSession(session: SessionSummary, entryId: string): Promise<boolean> {
 		const result = await this.callWith(this.clientFor(session.workspaceId), "分叉会话", (c) =>
@@ -2091,12 +2197,15 @@ export class PierStore {
 		}
 	}
 
-	/** Sessions that are working or waiting for an answer; installing an update stops them. */
-	async busySessionCount(): Promise<number> {
-		const client = this.localClient;
+	/**
+	 * Sessions on a computer (this one by default) that are working or waiting for an answer;
+	 * installing an update there stops them.
+	 */
+	async busySessionCount(node = LOCAL_NODE): Promise<number> {
+		const client = this.clients.get(node);
 		if (!client) return 0;
 		const lists = await Promise.all(
-			this.state.localWorkspaces.map((w) =>
+			(this.state.nodes[node]?.workspaces ?? []).map((w) =>
 				client.request("session.list", { workspaceId: w.id }).then(
 					(r) => r.sessions,
 					() => this.state.sessions[w.id] ?? [],
@@ -2107,6 +2216,112 @@ export class PierStore {
 			.flat()
 			.filter((s) => s.state === "streaming" || s.state === "retrying" || s.state === "compacting" || s.pendingUi)
 			.length;
+	}
+
+	// ---- updates on paired computers ---------------------------------------------------
+
+	private patchPeerUpdate(node: string, patch: Partial<PeerUpdateEntry>): void {
+		this.set((s) => {
+			const entry: PeerUpdateEntry = { ...s.peerUpdates[node], ...patch };
+			for (const key of Object.keys(patch) as Array<keyof PeerUpdateEntry>) {
+				if (patch[key] === undefined) delete entry[key];
+			}
+			return { peerUpdates: { ...s.peerUpdates, [node]: entry } };
+		});
+	}
+
+	private onPeerUpdateStatus(node: string, status: AppUpdateStatus): void {
+		// A download or verification failure there leaves Pier running: report it right away.
+		const failed = status.state === "error" && this.state.peerUpdates[node]?.installing;
+		this.patchPeerUpdate(node, { status, ...(failed ? { installing: undefined } : {}) });
+		if (failed) this.toast("error", `${this.nodeName(node)}：${status.error ?? "更新失败"}`);
+	}
+
+	/** The open connection to a paired computer, or undefined while it is offline. */
+	private openPeerClient(node: string): PierClient | undefined {
+		const client = this.clients.get(node);
+		return node !== LOCAL_NODE && client && this.state.nodes[node]?.connection === "open" ? client : undefined;
+	}
+
+	/**
+	 * Read Pier's updater state on a paired computer (after every (re)connect), and announce the
+	 * result of an install this computer started there.
+	 */
+	async loadPeerUpdate(node: string): Promise<void> {
+		const client = this.openPeerClient(node);
+		if (!client) return;
+		const info = this.state.nodes[node]?.hostInfo;
+		const installing = this.state.peerUpdates[node]?.installing;
+		if (installing && info && info.version !== installing.from) {
+			this.patchPeerUpdate(node, { installing: undefined });
+			this.toast("info", `${this.nodeName(node)} 已更新到 Pier v${info.version}`);
+		}
+		if (!hostUpdatesRemotely(info)) {
+			this.patchPeerUpdate(node, { tooOld: true, status: undefined });
+			return;
+		}
+		try {
+			const status = await client.request("update.status");
+			if (this.clients.get(node) !== client) return;
+			this.patchPeerUpdate(node, { status, tooOld: undefined });
+			// Back on the old version without installing: the install failed there.
+			if (installing && info?.version === installing.from && status.state === "error") {
+				this.patchPeerUpdate(node, { installing: undefined });
+				this.toast("error", `${this.nodeName(node)}：${status.error ?? "更新失败"}`);
+			}
+		} catch {
+			// Transient; the next reconnect reads it again.
+		}
+	}
+
+	/** Check for a new Pier release on a paired computer. */
+	async checkPeerUpdate(node: string): Promise<void> {
+		const client = this.openPeerClient(node);
+		if (!client || this.state.peerUpdates[node]?.busy) return;
+		this.patchPeerUpdate(node, { busy: "check" });
+		try {
+			const status = await client.request("update.check", {}, { timeoutMs: 120_000 });
+			this.patchPeerUpdate(node, { status });
+			if (status.state === "error") this.toast("error", `${this.nodeName(node)}：${status.error ?? "检查更新失败"}`);
+		} catch (error) {
+			this.toast("error", `${this.nodeName(node)} 检查更新失败：${errorText(error)}`);
+		} finally {
+			this.patchPeerUpdate(node, { busy: undefined });
+		}
+	}
+
+	/**
+	 * Install the newest Pier release on a paired computer; Pier restarts there, and this
+	 * computer reconnects once it is back.
+	 */
+	async installPeerUpdate(node: string): Promise<void> {
+		const client = this.openPeerClient(node);
+		if (!client || this.state.peerUpdates[node]?.busy) return;
+		const from = this.state.nodes[node]?.hostInfo?.version ?? "";
+		const name = this.nodeName(node);
+		this.patchPeerUpdate(node, { busy: "install" });
+		try {
+			const status = await client.request("update.install", {}, { timeoutMs: 120_000 });
+			const started = status.state === "downloading" || status.state === "installing";
+			this.patchPeerUpdate(node, {
+				status,
+				...(started ? { installing: { from, ...(status.version ? { to: status.version } : {}) } } : {}),
+			});
+			if (started) {
+				this.toast(
+					"info",
+					`正在更新 ${name}${status.version ? ` 到 Pier v${status.version}` : ""}，完成后会自动重新连接`,
+				);
+			} else if (status.state === "upToDate") {
+				this.toast("info", `${name} 的 Pier v${status.currentVersion} 已是最新版本`);
+			} else if (status.state === "error") {
+				this.toast("error", `${name}：${status.error ?? "更新失败"}`);
+			}
+		} catch (error) {
+			this.toast("error", `${name} 更新失败：${errorText(error)}`);
+		} finally {
+			this.patchPeerUpdate(node, { busy: undefined });
+		}
 	}
 
 	// ---- misc --------------------------------------------------------------------------
@@ -2172,6 +2387,14 @@ export function useCanManageWorkspace(workspaceId: string | undefined): boolean 
 	return useAppState((s) => {
 		const node = (workspaceId && s.workspaceNodes[workspaceId]) || s.node;
 		return node === LOCAL_NODE || hostAllowsRemoteManagement(s.nodes[node]?.hostInfo);
+	});
+}
+
+/** Whether the computer of a workspace can archive and bulk-clean sessions (protocol 1.14). */
+export function useCanArchiveSessions(workspaceId: string | undefined): boolean {
+	return useAppState((s) => {
+		const node = (workspaceId && s.workspaceNodes[workspaceId]) || s.node;
+		return hostCanArchiveSessions(s.nodes[node]?.hostInfo);
 	});
 }
 

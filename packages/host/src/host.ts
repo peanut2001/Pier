@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, realpathSync, statSync } from "node:fs";
 import { platform } from "node:os";
 import { basename, isAbsolute, resolve } from "node:path";
 import {
+	type AppUpdateStatus,
 	type EventFrame,
 	type ExtensionReloadSummary,
 	type ExtensionScope,
@@ -37,6 +38,7 @@ import { HostStatsSampler } from "./host-stats.ts";
 import type { ManagedSession } from "./managed-session.ts";
 import {
 	accountPath,
+	archivedSessionsPath,
 	configPath,
 	defaultPierDir,
 	extensionTrashDir,
@@ -52,7 +54,9 @@ import { NewApiManager } from "./pi/newapi.ts";
 import { ProviderManager } from "./pi/providers.ts";
 import { PiSettingsFiles } from "./pi/settings-files.ts";
 import { RemoteAccess, type RemoteAccessOptions } from "./remote/remote-access.ts";
+import { SessionArchiveStore } from "./session-archive.ts";
 import { SessionPool } from "./session-pool.ts";
+import type { AppShell, ShellMethod } from "./shell.ts";
 import {
 	deleteWorkspacePath,
 	listWorkspaceDirectory,
@@ -83,6 +87,8 @@ export interface PierHostOptions {
 	log?: (message: string) => void;
 	/** Site of the personal center (tests). Defaults to 云链API. */
 	accountSite?: string;
+	/** The desktop app the host runs in (its updater), when there is one. */
+	shell?: AppShell;
 }
 
 /** Remote methods recorded in the audit log. */
@@ -91,6 +97,8 @@ const AUDITED_METHODS = new Set<MethodName>([
 	"session.open",
 	"session.close",
 	"session.delete",
+	"session.archive",
+	"session.cleanup",
 	"session.fork",
 	"session.rename",
 	"session.prompt",
@@ -124,6 +132,7 @@ const AUDITED_METHODS = new Set<MethodName>([
 	"extension.update",
 	"extension.setEnabled",
 	"extension.delete",
+	"update.install",
 	"settings.update",
 	"settings.write",
 ]);
@@ -154,6 +163,16 @@ function auditDetail(method: MethodName, params: Record<string, unknown>): Recor
 			return { path: params.path, ...(params.policy ? { policy: params.policy } : {}) };
 		case "workspace.remove":
 			return { workspaceId: params.workspaceId };
+		case "session.archive":
+			return { workspaceId: params.workspaceId, archived: params.archived };
+		case "session.cleanup":
+			return {
+				workspaceId: params.workspaceId,
+				action: params.action,
+				...(params.modifiedBefore ? { modifiedBefore: params.modifiedBefore } : {}),
+				...(params.scope ? { scope: params.scope } : {}),
+				...(params.dryRun ? { dryRun: true } : {}),
+			};
 		case "workspace.setPolicy":
 			return { workspaceId: params.workspaceId, policy: params.policy };
 		case "workspace.writeFile":
@@ -244,6 +263,8 @@ export class PierHost implements RequestHandler {
 	private readonly localToken: string;
 	private readonly handlers: Handlers;
 	private readonly stats = new HostStatsSampler();
+	private readonly shell: AppShell | undefined;
+	private readonly offShellStatus: (() => void) | undefined;
 	private shuttingDown = false;
 
 	private constructor(options: PierHostOptions, env: PiEnvironment) {
@@ -260,6 +281,7 @@ export class PierHost implements RequestHandler {
 			config: this.config,
 			locksDir: locksDir(this.pierDir),
 			trashDir: sessionTrashDir(this.pierDir),
+			archive: new SessionArchiveStore(archivedSessionsPath(this.pierDir), options.log),
 			...(options.uiTimeoutMs === undefined ? {} : { uiTimeoutMs: options.uiTimeoutMs }),
 			...(options.idleTimeoutMs === undefined ? {} : { idleTimeoutMs: options.idleTimeoutMs }),
 			...(options.eventLogCapacity === undefined ? {} : { eventLogCapacity: options.eventLogCapacity }),
@@ -329,6 +351,8 @@ export class PierHost implements RequestHandler {
 			},
 			options.peers,
 		);
+		this.shell = options.shell;
+		this.offShellStatus = this.shell?.onUpdateStatus((status) => this.broadcast({ type: "update.status", status }));
 		this.handlers = this.createHandlers();
 	}
 
@@ -351,6 +375,41 @@ export class PierHost implements RequestHandler {
 			piVersion: PI_VERSION,
 			agentDir: this.env.agentDir,
 		};
+	}
+
+	/** The desktop app's updater status; `unsupported` without a desktop app that reports one. */
+	updateStatus(): AppUpdateStatus {
+		return (
+			this.shell?.updateStatus ?? {
+				state: "unsupported",
+				currentVersion: PIER_HOST_VERSION,
+				autoCheck: false,
+				downloaded: 0,
+			}
+		);
+	}
+
+	private async updateRequest(method: ShellMethod): Promise<AppUpdateStatus> {
+		const shell = this.shell;
+		if (!shell?.updateStatus || shell.updateStatus.state === "unsupported") {
+			throw new PierProtocolError(
+				"UNSUPPORTED",
+				"Pier on this computer cannot update itself: it is not an installed release of the desktop app",
+			);
+		}
+		try {
+			return await shell.request(method);
+		} catch (error) {
+			throw new PierProtocolError("INTERNAL", error instanceof Error ? error.message : String(error));
+		}
+	}
+
+	/** Send a host-scoped event to local connections only. */
+	private broadcastLocal(event: PierHostEvent): void {
+		const frame: EventFrame = { type: "evt", event };
+		for (const connection of this.connections) {
+			if (connection.authenticated && connection.kind === "local") connection.send(frame);
+		}
 	}
 
 	/** Whether `token` is this host's local token (the desktop UI and local tools). */
@@ -550,6 +609,22 @@ export class PierHost implements RequestHandler {
 			"host.listDirectories": (_ctx, params) => listHostDirectories(params?.path),
 			"host.stats": () => this.stats.sample(),
 
+			"update.status": () => this.updateStatus(),
+			"update.check": () => this.updateRequest("update.check"),
+			"update.install": async (ctx) => {
+				const status = await this.updateRequest("update.install");
+				const device = ctx.connection.device;
+				if (device && (status.state === "downloading" || status.state === "installing")) {
+					// Tell whoever sits at this computer why Pier is about to restart.
+					this.broadcastLocal({
+						type: "host.notice",
+						level: "info",
+						message: `${device.name} 正在远程更新 Pier${status.version ? ` 到 v${status.version}` : ""}，完成后 Pier 会自动重启`,
+					});
+				}
+				return status;
+			},
+
 			"workspace.list": () => ({ workspaces: this.config.listWorkspaces() }),
 			"workspace.add": (_ctx, params) => {
 				if (!isAbsolute(params.path)) throw new PierProtocolError("BAD_REQUEST", "Workspace path must be absolute");
@@ -615,6 +690,25 @@ export class PierHost implements RequestHandler {
 				const deleted = await this.pool.delete(workspace, params.sessionId, params.force);
 				if (deleted) this.broadcast({ type: "session.listChanged", workspaceId: workspace.id });
 				return { deleted };
+			},
+			"session.archive": async (_ctx, params) => {
+				const workspace = this.requireWorkspace(params.workspaceId);
+				const session = await this.pool.setArchived(workspace, params.sessionId, params.archived);
+				this.broadcast({ type: "session.listChanged", workspaceId: workspace.id });
+				return { session };
+			},
+			"session.cleanup": async (_ctx, params) => {
+				const workspace = this.requireWorkspace(params.workspaceId);
+				const result = await this.pool.cleanup(workspace, {
+					action: params.action,
+					...(params.modifiedBefore ? { modifiedBefore: new Date(params.modifiedBefore) } : {}),
+					...(params.scope ? { scope: params.scope } : {}),
+					...(params.dryRun ? { dryRun: true } : {}),
+				});
+				if (!params.dryRun && result.sessionIds.length) {
+					this.broadcast({ type: "session.listChanged", workspaceId: workspace.id });
+				}
+				return result;
 			},
 			"session.forkPoints": (_ctx, params) => ({ points: this.pool.require(params.sessionId).forkPoints() }),
 			"session.fork": async (_ctx, params) => {
@@ -829,6 +923,7 @@ export class PierHost implements RequestHandler {
 	async shutdown(): Promise<void> {
 		if (this.shuttingDown) return;
 		this.shuttingDown = true;
+		this.offShellStatus?.();
 		this.broadcast({ type: "host.notice", level: "warning", message: "Pier host is shutting down" });
 		this.providers.shutdown();
 		this.account.shutdown();

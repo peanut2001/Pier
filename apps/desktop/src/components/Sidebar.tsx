@@ -5,12 +5,16 @@ import {
 	type ComputerInfo,
 	LOCAL_NODE,
 	useAppState,
+	useCanArchiveSessions,
 	useCanManageWorkspace,
 	useComputers,
 	useStore,
 } from "../lib/store.tsx";
 import { useHostStatus } from "./HostPanels.tsx";
 import {
+	IconArchive,
+	IconArchiveRestore,
+	IconBroom,
 	IconChevronRight,
 	IconFolder,
 	IconFolderPlus,
@@ -24,6 +28,7 @@ import {
 } from "./Icons.tsx";
 import { Modal } from "./Modal.tsx";
 import { platformName } from "./RemotePanel.tsx";
+import { SessionCleanupDialog } from "./SessionCleanup.tsx";
 import { useOutsideClick } from "./SessionControls.tsx";
 import { updatePending } from "./UpdatePanel.tsx";
 
@@ -177,15 +182,24 @@ function isRunning(state: SessionSummary["state"]): boolean {
 	return state === "streaming" || state === "retrying" || state === "compacting";
 }
 
-function SessionItem({ session, selected }: { session: SessionSummary; selected: boolean }) {
+function SessionItem({
+	session,
+	selected,
+	canArchive,
+}: {
+	session: SessionSummary;
+	selected: boolean;
+	canArchive: boolean;
+}) {
 	const store = useStore();
 	useAppState((s) => s.chatsVersion);
 	const [confirm, setConfirm] = useState(false);
-	const [deleting, setDeleting] = useState(false);
+	const [busy, setBusy] = useState(false);
 	const live = store.liveChat(session.id)?.chat;
 	const running = isRunning(live?.loaded ? live.runState : session.state);
+	const archived = !!session.archived;
 	return (
-		<div className={`session-item${confirm ? " confirming" : ""}`}>
+		<div className={`session-item${confirm ? " confirming" : ""}${archived ? " archived" : ""}`}>
 			<button
 				type="button"
 				className={`session-row${selected ? " selected" : ""}`}
@@ -196,29 +210,47 @@ function SessionItem({ session, selected }: { session: SessionSummary; selected:
 				<SessionBadge session={session} />
 				<span className="session-row-time">{relativeTime(session.modifiedAt)}</span>
 			</button>
-			<button
-				type="button"
-				className={`session-delete${confirm ? " confirm" : ""}`}
-				disabled={deleting}
-				title={confirm ? undefined : "删除会话"}
-				aria-label={confirm ? "确认删除会话" : "删除会话"}
-				onBlur={() => setConfirm(false)}
-				onMouseLeave={() => setConfirm(false)}
-				onClick={async () => {
-					if (!confirm) {
-						setConfirm(true);
-						return;
-					}
-					setDeleting(true);
-					const deleted = await store.deleteSession(session, running);
-					if (!deleted) {
-						setDeleting(false);
-						setConfirm(false);
-					}
-				}}
-			>
-				{confirm ? running ? "中止并删除" : "删除" : <IconTrash size={13} />}
-			</button>
+			<span className="session-actions">
+				{canArchive && !confirm ? (
+					<button
+						type="button"
+						className="session-action"
+						disabled={busy}
+						title={archived ? "取消归档" : "归档会话"}
+						aria-label={archived ? "取消归档" : "归档会话"}
+						onClick={async () => {
+							setBusy(true);
+							await store.archiveSession(session, !archived);
+							setBusy(false);
+						}}
+					>
+						{archived ? <IconArchiveRestore size={13} /> : <IconArchive size={13} />}
+					</button>
+				) : null}
+				<button
+					type="button"
+					className={`session-action delete${confirm ? " confirm" : ""}`}
+					disabled={busy}
+					title={confirm ? undefined : "删除会话"}
+					aria-label={confirm ? "确认删除会话" : "删除会话"}
+					onBlur={() => setConfirm(false)}
+					onMouseLeave={() => setConfirm(false)}
+					onClick={async () => {
+						if (!confirm) {
+							setConfirm(true);
+							return;
+						}
+						setBusy(true);
+						const deleted = await store.deleteSession(session, running);
+						if (!deleted) {
+							setBusy(false);
+							setConfirm(false);
+						}
+					}}
+				>
+					{confirm ? running ? "中止并删除" : "删除" : <IconTrash size={13} />}
+				</button>
+			</span>
 		</div>
 	);
 }
@@ -238,8 +270,16 @@ function WorkspaceGroup({ workspace, onSettings }: { workspace: WorkspaceInfo; o
 	const selectedSessionId = useAppState((s) => s.selectedSessionId);
 	const selectedWorkspaceId = useAppState((s) => s.selectedWorkspaceId);
 	const newChat = useAppState((s) => !!s.newChat);
+	const canArchive = useCanArchiveSessions(workspace.id);
 	const [limit, setLimit] = useState(SESSION_PAGE);
+	const [archivedLimit, setArchivedLimit] = useState(SESSION_PAGE);
+	const [showArchived, setShowArchived] = useState(false);
+	const [cleanup, setCleanup] = useState(false);
 	const selected = selectedWorkspaceId === workspace.id && !selectedSessionId && !newChat;
+	const current = sessions?.filter((s) => !s.archived);
+	const archived = sessions?.filter((s) => s.archived) ?? [];
+	// An archived session that is open keeps the archive expanded, so it stays visible.
+	const archivedOpen = showArchived || archived.some((s) => s.id === selectedSessionId);
 	return (
 		<div className="workspace-group">
 			<div className={`workspace-row${selected ? " selected" : ""}${online ? "" : " offline"}`}>
@@ -272,6 +312,11 @@ function WorkspaceGroup({ workspace, onSettings }: { workspace: WorkspaceInfo; o
 						</span>
 					)}
 				</button>
+				{canArchive && online && sessions?.length ? (
+					<button type="button" className="ghost icon" title="清理会话…" onClick={() => setCleanup(true)}>
+						<IconBroom size={14} />
+					</button>
+				) : null}
 				{canManage && online ? (
 					<button type="button" className="ghost icon" title="工作区设置" onClick={onSettings}>
 						<IconSettings size={14} />
@@ -292,16 +337,58 @@ function WorkspaceGroup({ workspace, onSettings }: { workspace: WorkspaceInfo; o
 						<div className="session-empty">{online || local ? "加载中…" : `${nodeName} 未连接，连接后显示会话`}</div>
 					) : null}
 					{sessions && !sessions.length ? <div className="session-empty">还没有会话</div> : null}
-					{sessions?.slice(0, limit).map((session) => (
-						<SessionItem key={session.id} session={session} selected={session.id === selectedSessionId} />
+					{sessions?.length && !current?.length ? <div className="session-empty">没有未归档的会话</div> : null}
+					{current?.slice(0, limit).map((session) => (
+						<SessionItem
+							key={session.id}
+							session={session}
+							selected={session.id === selectedSessionId}
+							canArchive={canArchive}
+						/>
 					))}
-					{sessions && sessions.length > limit ? (
+					{current && current.length > limit ? (
 						<button type="button" className="session-more" onClick={() => setLimit(limit + SESSION_PAGE)}>
-							显示更多（还有 {sessions.length - limit} 个）
+							显示更多（还有 {current.length - limit} 个）
 						</button>
+					) : null}
+					{archived.length ? (
+						<>
+							<button
+								type="button"
+								className={`session-archived-toggle${archivedOpen ? " open" : ""}`}
+								onClick={() => setShowArchived(!archivedOpen)}
+								aria-expanded={archivedOpen}
+							>
+								<IconChevronRight size={12} />
+								<IconArchive size={12} />
+								<span>已归档（{archived.length}）</span>
+							</button>
+							{archivedOpen ? (
+								<div className="session-archived-list">
+									{archived.slice(0, archivedLimit).map((session) => (
+										<SessionItem
+											key={session.id}
+											session={session}
+											selected={session.id === selectedSessionId}
+											canArchive={canArchive}
+										/>
+									))}
+									{archived.length > archivedLimit ? (
+										<button
+											type="button"
+											className="session-more"
+											onClick={() => setArchivedLimit(archivedLimit + SESSION_PAGE)}
+										>
+											显示更多（还有 {archived.length - archivedLimit} 个）
+										</button>
+									) : null}
+								</div>
+							) : null}
+						</>
 					) : null}
 				</div>
 			) : null}
+			{cleanup ? <SessionCleanupDialog workspace={workspace} onClose={() => setCleanup(false)} /> : null}
 		</div>
 	);
 }

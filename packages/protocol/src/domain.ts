@@ -51,6 +51,51 @@ export interface HostDirectoryListing {
 	total?: number;
 }
 
+/**
+ * State of the desktop app's updater (`update.*`, 1.13):
+ * - `unsupported`: the host does not run inside a packaged desktop app (a development build,
+ *   a standalone `pier-host`, or a desktop app too old to be driven by its host).
+ * - `idle`: not checked yet. `upToDate` / `available`: result of the last check.
+ * - `downloading` / `installing`: an update is being installed; the app restarts when done.
+ * - `error`: the last check or install failed (`error`); with `version` the update is still
+ *   pending and installing can be retried.
+ */
+export type AppUpdateState =
+	| "unsupported"
+	| "idle"
+	| "checking"
+	| "upToDate"
+	| "available"
+	| "downloading"
+	| "installing"
+	| "error";
+
+/** The desktop app's updater on the host's computer (1.13). */
+export interface AppUpdateStatus {
+	state: AppUpdateState;
+	/** Version of the desktop app (the host's version when there is no desktop app). */
+	currentVersion: string;
+	/** The app checks for updates on its own. */
+	autoCheck: boolean;
+	/** The available (or still pending, after a failed install) version. */
+	version?: string;
+	/** Release notes of `version` (Markdown). */
+	notes?: string;
+	/** Publication date of `version` (ISO 8601). */
+	date?: string;
+	/** Bytes downloaded so far while `downloading`. */
+	downloaded: number;
+	total?: number;
+	error?: string;
+	/** Unix time (ms) of the last successful check. */
+	lastChecked?: number;
+	/**
+	 * Installing asks for an administrator password on that computer (Linux `.deb` / `.rpm`
+	 * installs), so someone has to be there to finish it.
+	 */
+	installNeedsAuth?: boolean;
+}
+
 /** Resource usage of the computer a host runs on (`host.stats`, 1.12). Sizes are bytes. */
 export interface HostStats {
 	/** When the host took the sample (ISO 8601). */
@@ -183,6 +228,25 @@ export interface SessionSummary {
 	state: SessionRunState;
 	/** Dialogs / approvals waiting for an answer (active sessions only). Added in 1.1. */
 	pendingUi?: number;
+	/** Set when the session was archived with `session.archive` (1.14); absent otherwise. */
+	archived?: boolean;
+}
+
+/** Which sessions `session.cleanup` affects by archive state (1.14). */
+export type SessionCleanupScope = "all" | "archived" | "unarchived";
+
+/** A session `session.cleanup` left alone (1.14). */
+export interface SessionCleanupSkip {
+	sessionId: string;
+	/** `running`: busy or waiting for an answer. `locked`: open in another Pier host. `error`: see `message`. */
+	reason: "running" | "locked" | "error";
+	message?: string;
+}
+
+export interface SessionCleanupResult {
+	/** Sessions that were (or, with `dryRun`, would be) archived or deleted. */
+	sessionIds: string[];
+	skipped: SessionCleanupSkip[];
 }
 
 export interface ModelInfo {
@@ -718,7 +782,7 @@ export interface ExtensionReloadSummary {
 	failed: number;
 }
 
-// ---- pi settings files (1.13) -------------------------------------------------------------
+// ---- pi settings files (1.15) -------------------------------------------------------------
 
 /** One pi settings file: `<agentDir>/settings.json` (`user`) or `<workspace>/.pi/settings.json` (`project`). */
 export interface PiSettingsFile {

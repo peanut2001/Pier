@@ -4,6 +4,7 @@ import {
 	type AccountOverview,
 	type AccountStatus,
 	ApprovalPolicySchema,
+	type AppUpdateStatus,
 	AuthMethodSchema,
 	type ClientInfo,
 	type CustomModel,
@@ -35,6 +36,7 @@ import {
 	type ProviderListResult,
 	type QueueState,
 	type RemoteAccessStatus,
+	type SessionCleanupResult,
 	type SessionCommandInfo,
 	type SessionSnapshot,
 	type SessionSummary,
@@ -91,6 +93,20 @@ export const MethodParamsSchemas = {
 	/** CPU, memory, disk and network usage of the host's computer (1.12). */
 	"host.stats": z.object({}).optional(),
 
+	/**
+	 * The desktop app's updater on the host's computer (1.13), so a paired computer or phone can
+	 * update Pier there. Only signed official releases are installed.
+	 */
+	"update.status": z.object({}).optional(),
+	/** Check for a new release now. */
+	"update.check": z.object({}).optional(),
+	/**
+	 * Download and install the newest release (checking first when needed), then restart Pier on
+	 * that computer. Resolves once the install started; the host and every connection to it go
+	 * down while it installs. Progress arrives as `update.status` events.
+	 */
+	"update.install": z.object({}).optional(),
+
 	"workspace.list": z.object({}).optional(),
 	"workspace.add": z.object({
 		path: z.string().min(1).max(4096),
@@ -128,6 +144,23 @@ export const MethodParamsSchemas = {
 	"session.close": z.object({ ...SessionRef, force: z.boolean().optional() }),
 	/** Close the session and move its file to Pier's trash (1.6). Running sessions need `force`. */
 	"session.delete": z.object({ workspaceId: Id, sessionId: Id, force: z.boolean().optional() }),
+	/**
+	 * Archive or unarchive a session (1.14). Archiving only marks it on the host; the session
+	 * file stays and the session keeps working.
+	 */
+	"session.archive": z.object({ workspaceId: Id, sessionId: Id, archived: z.boolean() }),
+	/**
+	 * Archive or delete (to Pier's trash) many sessions of a workspace at once (1.14). Selects
+	 * sessions last modified before `modifiedBefore` (all when omitted) in `scope` (default
+	 * `all`). Running sessions and ones waiting for an answer are skipped. `dryRun` only reports.
+	 */
+	"session.cleanup": z.object({
+		workspaceId: Id,
+		action: z.enum(["archive", "delete"]),
+		modifiedBefore: z.iso.datetime({ offset: true }).optional(),
+		scope: z.enum(["all", "archived", "unarchived"]).optional(),
+		dryRun: z.boolean().optional(),
+	}),
 	"session.forkPoints": z.object(SessionRef),
 	"session.fork": z.object({ ...SessionRef, entryId: Id, position: z.enum(["before", "at"]).optional() }),
 	"session.rename": z.object({ ...SessionRef, name: z.string().min(1).max(200) }),
@@ -292,7 +325,7 @@ export const MethodParamsSchemas = {
 	"extension.delete": z.object({ path: z.string().min(1).max(4096), workspaceId: Id.optional() }),
 
 	/**
-	 * pi settings files (1.13): the user settings (`<agentDir>/settings.json`) and, with
+	 * pi settings files (1.15): the user settings (`<agentDir>/settings.json`) and, with
 	 * `workspaceId`, that workspace's `.pi/settings.json`, as stored (not merged).
 	 */
 	"settings.get": z.object({ workspaceId: Id.optional() }).optional(),
@@ -401,6 +434,9 @@ export interface MethodResults {
 	"host.info": HostInfo;
 	"host.listDirectories": HostDirectoryListing;
 	"host.stats": HostStats;
+	"update.status": AppUpdateStatus;
+	"update.check": AppUpdateStatus;
+	"update.install": AppUpdateStatus;
 	"workspace.list": { workspaces: WorkspaceInfo[] };
 	"workspace.add": { workspace: WorkspaceInfo };
 	"workspace.remove": { removed: boolean };
@@ -414,6 +450,8 @@ export interface MethodResults {
 	"session.open": { session: SessionSummary };
 	"session.close": { closed: boolean };
 	"session.delete": { deleted: boolean };
+	"session.archive": { session: SessionSummary };
+	"session.cleanup": SessionCleanupResult;
 	"session.forkPoints": { points: ForkPoint[] };
 	"session.fork": { session: SessionSummary; selectedText?: string };
 	"session.rename": { session: SessionSummary };
