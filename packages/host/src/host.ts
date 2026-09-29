@@ -64,9 +64,11 @@ import { HostTerminals } from "./terminals.ts";
 import {
 	deleteWorkspacePath,
 	listWorkspaceDirectory,
+	readWorkspaceBytes,
 	readWorkspaceFile,
 	writeWorkspaceFile,
 } from "./workspace-files.ts";
+import { WorkspaceUploads } from "./workspace-uploads.ts";
 
 export const PIER_HOST_VERSION = "0.2.13";
 
@@ -128,6 +130,8 @@ const AUDITED_METHODS = new Set<MethodName>([
 	"workspace.setPolicy",
 	"workspace.writeFile",
 	"workspace.deletePath",
+	"workspace.uploadStart",
+	"workspace.uploadFinish",
 	"model.setDefault",
 	"provider.login",
 	"provider.logout",
@@ -198,6 +202,15 @@ function auditDetail(method: MethodName, params: Record<string, unknown>): Recor
 			};
 		case "workspace.deletePath":
 			return { workspaceId: params.workspaceId, path: params.path };
+		case "workspace.uploadStart":
+			return {
+				workspaceId: params.workspaceId,
+				path: params.path,
+				bytes: params.size,
+				...(params.overwrite ? { overwrite: true } : {}),
+			};
+		case "workspace.uploadFinish":
+			return { uploadId: params.uploadId };
 		case "model.setDefault":
 			return { provider: params.provider, modelId: params.modelId };
 		case "provider.login":
@@ -283,6 +296,7 @@ export class PierHost implements RequestHandler {
 	private readonly stats = new HostStatsSampler();
 	private readonly shell: AppShell | undefined;
 	private readonly terminals: HostTerminals;
+	private readonly uploads: WorkspaceUploads;
 	private readonly offShellStatus: (() => void) | undefined;
 	private shuttingDown = false;
 
@@ -373,6 +387,7 @@ export class PierHost implements RequestHandler {
 		);
 		this.shell = options.shell;
 		this.terminals = new HostTerminals(this.shell, { log });
+		this.uploads = new WorkspaceUploads({ log });
 		this.offShellStatus = this.shell?.onUpdateStatus((status) => this.broadcast({ type: "update.status", status }));
 		this.handlers = this.createHandlers();
 	}
@@ -459,6 +474,7 @@ export class PierHost implements RequestHandler {
 		this.providers.connectionClosed(connection.connectionId);
 		this.newapi.connectionClosed(connection.connectionId);
 		this.terminals.connectionClosed(connection);
+		this.uploads.connectionClosed(connection.connectionId);
 		for (const session of connection.subscriptions) session.unsubscribe(connection.connectionId);
 		connection.subscriptions.clear();
 	}
@@ -693,6 +709,20 @@ export class PierHost implements RequestHandler {
 				),
 			"workspace.deletePath": (_ctx, params) =>
 				deleteWorkspacePath(this.requireWorkspace(params.workspaceId).path, params.path),
+			"workspace.readBytes": (_ctx, params) =>
+				readWorkspaceBytes(this.requireWorkspace(params.workspaceId).path, params.path, params.offset, params.length),
+			"workspace.uploadStart": (ctx, params) =>
+				this.uploads.start(
+					ctx.connection.connectionId,
+					this.requireWorkspace(params.workspaceId).path,
+					params.path,
+					params.size,
+					params.overwrite ?? false,
+				),
+			"workspace.uploadChunk": (ctx, params) =>
+				this.uploads.chunk(ctx.connection.connectionId, params.uploadId, params.offset, params.data),
+			"workspace.uploadFinish": (ctx, params) => this.uploads.finish(ctx.connection.connectionId, params.uploadId),
+			"workspace.uploadCancel": (ctx, params) => this.uploads.cancel(ctx.connection.connectionId, params.uploadId),
 
 			"session.list": async (_ctx, params) => ({
 				sessions: await this.pool.list(this.requireWorkspace(params.workspaceId)),
@@ -982,6 +1012,7 @@ export class PierHost implements RequestHandler {
 		this.newapi.shutdown();
 		this.peers.shutdown();
 		this.terminals.shutdown();
+		await this.uploads.shutdown();
 		await this.remote.shutdown();
 		await this.pool.disposeAll();
 		for (const connection of [...this.connections]) connection.close(1001, "Host shutting down");

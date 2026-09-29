@@ -3,6 +3,7 @@ import { lstat, open, readdir, realpath, rm, stat, writeFile } from "node:fs/pro
 import { extname, isAbsolute, join, relative, sep } from "node:path";
 import {
 	PierProtocolError,
+	type WorkspaceFileBytes,
 	type WorkspaceFileContent,
 	type WorkspaceFileEntry,
 	type WorkspaceFilesResult,
@@ -77,7 +78,7 @@ async function describe(root: string, dir: string, relDir: string, dirent: Diren
 	return entry;
 }
 
-async function workspaceRealRoot(workspaceRoot: string): Promise<string> {
+export async function workspaceRealRoot(workspaceRoot: string): Promise<string> {
 	try {
 		return await realpath(workspaceRoot);
 	} catch {
@@ -86,7 +87,7 @@ async function workspaceRealRoot(workspaceRoot: string): Promise<string> {
 }
 
 /** Resolve a normalized relative path (following symlinks) and require it to stay inside `root`. */
-async function resolveInside(root: string, relPath: string, what: string): Promise<string> {
+export async function resolveInside(root: string, relPath: string, what: string): Promise<string> {
 	const target = relPath ? join(root, ...relPath.split("/")) : root;
 	let real: string;
 	try {
@@ -185,7 +186,7 @@ export const MAX_TEXT_WRITE_BYTES = 4 * 1024 * 1024;
 
 const UTF8_BOM = Buffer.from([0xef, 0xbb, 0xbf]);
 
-function fsError(error: unknown, relPath: string): never {
+export function fsError(error: unknown, relPath: string): never {
 	const code = (error as NodeJS.ErrnoException).code;
 	if (code === "ENOENT" || code === "ENOTDIR") throw new PierProtocolError("NOT_FOUND", `No such file: ${relPath}`);
 	if (code === "EACCES" || code === "EPERM" || code === "EROFS" || code === "EBUSY")
@@ -252,6 +253,60 @@ export async function deleteWorkspacePath(workspaceRoot: string, path: string): 
 		await rm(target, { recursive: kind === "directory", maxRetries: 2 });
 		return { path: relPath, kind };
 	} catch (error) {
+		fsError(error, relPath);
+	}
+}
+
+/** Largest range returned by one `workspace.readBytes` call. */
+export const MAX_READ_BYTES = 4 * 1024 * 1024;
+
+/**
+ * Read a byte range of a workspace file, e.g. to download it in chunks. The file must resolve
+ * (after symlinks) to a regular file inside the workspace root. Returns at most `length` bytes
+ * from `offset` (fewer at the end of the file), base64-encoded, with the file's current size and
+ * modification time so a client can notice the file changing between chunks.
+ */
+export async function readWorkspaceBytes(
+	workspaceRoot: string,
+	path: string,
+	offset: number,
+	length: number,
+): Promise<WorkspaceFileBytes> {
+	const relPath = normalizeRelativePath(path);
+	if (!relPath) throw new PierProtocolError("BAD_REQUEST", "Not a file: .");
+	if (!Number.isSafeInteger(offset) || offset < 0) throw new PierProtocolError("BAD_REQUEST", "Invalid offset");
+	if (!Number.isSafeInteger(length) || length < 1 || length > MAX_READ_BYTES) {
+		throw new PierProtocolError("BAD_REQUEST", `Length must be between 1 and ${MAX_READ_BYTES} bytes`);
+	}
+	const root = await workspaceRealRoot(workspaceRoot);
+	const real = await resolveInside(root, relPath, "file");
+	try {
+		if (!(await stat(real)).isFile()) throw new PierProtocolError("BAD_REQUEST", `Not a file: ${relPath}`);
+		const handle = await open(real, "r");
+		try {
+			const info = await handle.stat();
+			if (!info.isFile()) throw new PierProtocolError("BAD_REQUEST", `Not a file: ${relPath}`);
+			const want = Math.max(0, Math.min(length, info.size - offset));
+			const buffer = Buffer.alloc(want);
+			let filled = 0;
+			while (filled < want) {
+				const { bytesRead } = await handle.read(buffer, filled, want - filled, offset + filled);
+				if (!bytesRead) break;
+				filled += bytesRead;
+			}
+			return {
+				path: relPath,
+				size: info.size,
+				modifiedAt: info.mtime.toISOString(),
+				offset,
+				data: buffer.subarray(0, filled).toString("base64"),
+				eof: offset + filled >= info.size,
+			};
+		} finally {
+			await handle.close();
+		}
+	} catch (error) {
+		if (error instanceof PierProtocolError) throw error;
 		fsError(error, relPath);
 	}
 }

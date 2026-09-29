@@ -231,6 +231,31 @@ export interface WorkspacePathDeleteResult {
 	kind: "file" | "directory" | "other";
 }
 
+/** A byte range of a workspace file (`workspace.readBytes`, 1.21), e.g. one download chunk. */
+export interface WorkspaceFileBytes {
+	/** Path relative to the workspace root, normalized and joined with "/". */
+	path: string;
+	/** Size in bytes of the whole file right now. */
+	size: number;
+	modifiedAt: string;
+	/** Where `data` starts in the file. */
+	offset: number;
+	/** The bytes read, base64-encoded; empty at or past the end of the file. */
+	data: string;
+	/** Whether `data` reaches the end of the file. */
+	eof: boolean;
+}
+
+/** Result of `workspace.uploadStart` (1.21). */
+export interface WorkspaceUploadStart {
+	/** Pass to `workspace.uploadChunk` / `uploadFinish` / `uploadCancel` on the same connection. */
+	uploadId: string;
+	/** Destination path relative to the workspace root, normalized and joined with "/". */
+	path: string;
+	/** Largest `data` (decoded bytes) accepted by one `workspace.uploadChunk`. */
+	chunkBytes: number;
+}
+
 /** Runtime state of a session as seen by clients. */
 export type SessionRunState = "inactive" | "idle" | "streaming" | "compacting" | "retrying";
 

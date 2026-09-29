@@ -49,7 +49,7 @@ import type {
 } from "@pier/protocol";
 import { PierProtocolError, parseProtocolVersion } from "@pier/protocol";
 import { createContext, useContext, useMemo, useSyncExternalStore } from "react";
-import type { Bridge, HostStatus, UpdateStatus } from "./bridge.ts";
+import type { Bridge, HostStatus, LocalFileSink, UpdateStatus } from "./bridge.ts";
 import { fileToken } from "./composer-text.ts";
 import { remotePageBlocker } from "./settings-target.ts";
 import { isYunlianProvider, YUNLIAN_SITE, yunlianGroupOf, yunlianProvider } from "./yunlian.ts";
@@ -103,6 +103,11 @@ function hostSpeaks(info: HostInfo | undefined, minor: number): boolean {
 /** Whether the shown host can delete workspace files and directories (`workspace.deletePath`, 1.11). */
 export function hostCanDeleteFiles(info: HostInfo | undefined): boolean {
 	return hostSpeaks(info, 11);
+}
+
+/** Whether a host can upload and download workspace files in chunks (`workspace.readBytes` / `upload*`, 1.21). */
+export function hostTransfersFiles(info: HostInfo | undefined): boolean {
+	return hostSpeaks(info, 21);
 }
 
 /** Whether a host reports its resource usage (`host.stats`, 1.12). */
@@ -1907,6 +1912,19 @@ export class PierStore {
 		return result;
 	}
 
+	/**
+	 * The client for uploading to or downloading from a workspace's computer; throws when it is
+	 * not connected or its Pier is too old.
+	 */
+	fileTransferClient(workspaceId: string): PierClient {
+		const client = this.clientFor(workspaceId);
+		if (!client) throw new Error("尚未连接到 Pier Host");
+		if (!hostTransfersFiles(this.state.nodes[this.nodeOf(workspaceId)]?.hostInfo)) {
+			throw new Error("那台电脑的 Pier 版本过旧，不支持上传和下载文件，请先更新它");
+		}
+		return client;
+	}
+
 	bumpFiles(workspaceId: string): void {
 		this.set((s) => ({ filesVersion: { ...s.filesVersion, [workspaceId]: (s.filesVersion[workspaceId] ?? 0) + 1 } }));
 	}
@@ -2606,6 +2624,11 @@ export class PierStore {
 
 	pickDirectory(): Promise<string | null> {
 		return this.bridge.pickDirectory();
+	}
+
+	/** Ask where to save a download named `name` on this computer; null when cancelled. */
+	saveLocalFile(name: string): Promise<LocalFileSink | null> {
+		return this.bridge.saveFile(name);
 	}
 
 	openExternal(url: string): void {

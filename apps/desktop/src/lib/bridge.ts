@@ -32,10 +32,27 @@ export interface Bridge {
 	openExternal(url: string): Promise<void>;
 	/** Show a local file or directory in the system file manager; only the desktop app can. */
 	revealPath?(path: string): Promise<void>;
+	/**
+	 * Ask where to save a downloaded file named `name` and open it for writing. Resolves to null
+	 * when the user cancels.
+	 */
+	saveFile(name: string): Promise<LocalFileSink | null>;
 	quit(): Promise<void>;
 	updates: UpdateBridge;
 	/** Integrated terminals; only the desktop app can run local shells. */
 	terminal?: TerminalBridge;
+}
+
+/** A local file being written by a download. */
+export interface LocalFileSink {
+	/** Where the file will be saved, when known (the desktop app). */
+	path?: string;
+	/** Append base64-encoded bytes. */
+	write(base64: string): Promise<void>;
+	/** Save the complete file; resolves to where it was saved, when known. */
+	finish(): Promise<string | undefined>;
+	/** Discard what was written. */
+	abort(): Promise<void>;
 }
 
 /** Mirrors `SpawnedTerminal` in `src-tauri/src/terminal.rs`. */
@@ -149,6 +166,18 @@ function tauriBridge(): Bridge {
 			const { revealItemInDir } = await import("@tauri-apps/plugin-opener");
 			await revealItemInDir(path);
 		},
+		saveFile: async (name) => {
+			const { invoke } = await core;
+			const target = await invoke<{ id: number; path: string } | null>("download_begin", { name });
+			if (!target) return null;
+			const { id } = target;
+			return {
+				path: target.path,
+				write: (data) => invoke("download_write", { id, data }),
+				finish: () => invoke<string>("download_finish", { id }),
+				abort: () => invoke("download_abort", { id }),
+			};
+		},
 		quit: async () => (await core).invoke("quit_app"),
 		updates: {
 			status: async () => (await core).invoke<UpdateStatus>("update_status"),
@@ -198,9 +227,35 @@ function browserBridge(): Bridge {
 		openExternal: async (target) => {
 			window.open(target, "_blank", "noopener,noreferrer");
 		},
+		saveFile: async (name) => browserDownload(name),
 		quit: async () => window.close(),
 		updates: params.get("updates") === "demo" ? demoUpdates() : unsupportedUpdates,
 		...(params.get("terminal") === "demo" ? { terminal: demoTerminal() } : {}),
+	};
+}
+
+/** Collect a download in memory and hand it to the browser's own download. */
+function browserDownload(name: string): LocalFileSink {
+	const parts: Uint8Array<ArrayBuffer>[] = [];
+	return {
+		write: async (data) => {
+			const binary = atob(data);
+			const bytes = new Uint8Array(binary.length);
+			for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+			parts.push(bytes);
+		},
+		finish: async () => {
+			const url = URL.createObjectURL(new Blob(parts));
+			const link = document.createElement("a");
+			link.href = url;
+			link.download = name;
+			link.click();
+			setTimeout(() => URL.revokeObjectURL(url), 60_000);
+			return undefined;
+		},
+		abort: async () => {
+			parts.length = 0;
+		},
 	};
 }
 

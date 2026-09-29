@@ -50,11 +50,13 @@ import {
 	type ThinkingLevel,
 	ThinkingLevelSchema,
 	UiResponseSchema,
+	type WorkspaceFileBytes,
 	type WorkspaceFileContent,
 	type WorkspaceFilesResult,
 	type WorkspaceFileWriteResult,
 	type WorkspaceInfo,
 	type WorkspacePathDeleteResult,
+	type WorkspaceUploadStart,
 } from "./domain.ts";
 
 const Id = z.string().min(1).max(256);
@@ -143,6 +145,40 @@ export const MethodParamsSchemas = {
 	 * is removed itself, never its target; the workspace root cannot be deleted.
 	 */
 	"workspace.deletePath": z.object({ workspaceId: Id, path: z.string().min(1).max(4096) }),
+	/**
+	 * Read up to `length` bytes of a workspace file from `offset` (1.21), base64-encoded, e.g.
+	 * to download it in chunks.
+	 */
+	"workspace.readBytes": z.object({
+		workspaceId: Id,
+		path: z.string().min(1).max(4096),
+		offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+		length: z
+			.number()
+			.int()
+			.min(1)
+			.max(4 * 1024 * 1024),
+	}),
+	/**
+	 * Begin uploading a file of `size` bytes to `path` in a workspace (1.21). Missing parent
+	 * directories are created. An existing file is only replaced with `overwrite`.
+	 */
+	"workspace.uploadStart": z.object({
+		workspaceId: Id,
+		path: z.string().min(1).max(4096),
+		size: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+		overwrite: z.boolean().optional(),
+	}),
+	/** Append base64 `data` at `offset` (the bytes received so far) to an upload (1.21). */
+	"workspace.uploadChunk": z.object({
+		uploadId: Id,
+		offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+		data: z.string().max(6 * 1024 * 1024),
+	}),
+	/** Move a complete upload into place (1.21). */
+	"workspace.uploadFinish": z.object({ uploadId: Id }),
+	/** Abandon an upload and delete what was received (1.21). */
+	"workspace.uploadCancel": z.object({ uploadId: Id }),
 
 	"session.list": z.object({ workspaceId: Id }),
 	"session.create": z.object({ workspaceId: Id, name: z.string().min(1).max(200).optional() }),
@@ -506,6 +542,11 @@ export interface MethodResults {
 	"workspace.readFile": WorkspaceFileContent;
 	"workspace.writeFile": WorkspaceFileWriteResult;
 	"workspace.deletePath": WorkspacePathDeleteResult;
+	"workspace.readBytes": WorkspaceFileBytes;
+	"workspace.uploadStart": WorkspaceUploadStart;
+	"workspace.uploadChunk": { received: number };
+	"workspace.uploadFinish": WorkspaceFileWriteResult;
+	"workspace.uploadCancel": { cancelled: boolean };
 	"session.list": { sessions: SessionSummary[] };
 	"session.create": { session: SessionSummary };
 	"session.open": { session: SessionSummary };
