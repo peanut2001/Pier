@@ -39,6 +39,9 @@ Options:
                       updater, see src/shell.ts). On macOS / Linux the host then also
                       adds the login shell's PATH (npm, pnpm, bun, git from nvm,
                       Homebrew, ...), which apps started outside a terminal lack
+  --shell-terminals   With --watch-stdin: the desktop app runs terminals for the host's
+                      clients (terminal.*), declared up front so clients that connect
+                      before its first stdin message already see them
   --no-login-shell-path
                       Do not ask the login shell for its PATH in sidecar mode
   --check-images      Resize a sample image through pi (Photon), print the result, and exit
@@ -68,6 +71,7 @@ async function main(): Promise<void> {
 			"remote-address": { type: "string", multiple: true },
 			"no-mdns": { type: "boolean" },
 			"watch-stdin": { type: "boolean" },
+			"shell-terminals": { type: "boolean" },
 			"no-login-shell-path": { type: "boolean" },
 			"check-images": { type: "boolean" },
 			help: { type: "boolean", short: "h" },
@@ -96,7 +100,9 @@ async function main(): Promise<void> {
 
 	// Sidecar mode: the desktop app answers on stdin (its updater). Requests only go out on
 	// stdout after the `pier.ready` line.
-	const shell = values["watch-stdin"] ? new StdioShell(process.stdin, process.stdout, { log }) : undefined;
+	const shell = values["watch-stdin"]
+		? new StdioShell(process.stdin, process.stdout, { log, terminals: values["shell-terminals"] === true })
+		: undefined;
 	// An app started from the Dock / a launcher lacks the terminal's PATH; ask the login shell
 	// while the host starts, so pi finds npm / pnpm / bun / git as it would in a terminal.
 	const loginPath =

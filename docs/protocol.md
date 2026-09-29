@@ -116,7 +116,7 @@ Host 在桌面端中运行时，可以在它所在的电脑上用桌面端的伪
 
 输出有流量控制：某个连接待发送的数据超过约 2 MB 时（网络较慢），Host 让桌面端暂停读取该连接终端的输出（shell 写满伪终端缓冲区后阻塞），降到约 512 KB 以下再恢复，因此输出大量内容不会撑爆连接。
 
-sidecar 的 stdio 协议：桌面端在 Host 就绪时推送 `{"type":"pier.shell.capabilities","terminals":true}`。Host 用 `{"type":"pier.shell.request","id","method":"terminal.spawn","params":{"key","cwd"?,"cols","rows"}}` 启动 shell，桌面端回 `{"type":"pier.shell.response","id","ok":true,"result":{"id","shell","cwd"}}`；之后 Host 写 `{"type":"pier.shell.terminal","op":"write"|"resize"|"pause"|"resume"|"kill","id",…}`，桌面端推送 `{"type":"pier.shell.terminalOutput","key","data":"<base64>"}` 与最后一条 `{"type":"pier.shell.terminalExit","key","code"}`。`key` 由 Host 选定，所以在响应之前到达的输出也能对上终端；数字 `id` 用来发送输入。这些 shell 属于启动它们的那次 Host 运行，Host 停止、重启或崩溃时桌面端会把它们全部挂断。桌面窗口自己的内置终端与此无关，不经过 Host。
+sidecar 的 stdio 协议：桌面端用 `--shell-terminals` 启动 Host，声明它能运行终端（这样在 Host 刚开始监听时就重连上来的电脑，`host.hello` 中也已经带有 `terminals`），并在 Host 就绪时再推送一次 `{"type":"pier.shell.capabilities","terminals":true}`。Host 用 `{"type":"pier.shell.request","id","method":"terminal.spawn","params":{"key","cwd"?,"cols","rows"}}` 启动 shell，桌面端回 `{"type":"pier.shell.response","id","ok":true,"result":{"id","shell","cwd"}}`；之后 Host 写 `{"type":"pier.shell.terminal","op":"write"|"resize"|"pause"|"resume"|"kill","id",…}`，桌面端推送 `{"type":"pier.shell.terminalOutput","key","data":"<base64>"}` 与最后一条 `{"type":"pier.shell.terminalExit","key","code"}`。`key` 由 Host 选定，所以在响应之前到达的输出也能对上终端；数字 `id` 用来发送输入。这些 shell 属于启动它们的那次 Host 运行，Host 停止、重启或崩溃时桌面端会把它们全部挂断。桌面窗口自己的内置终端与此无关，不经过 Host。
 
 ### workspace
 
