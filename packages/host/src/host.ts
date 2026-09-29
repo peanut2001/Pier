@@ -37,6 +37,7 @@ import { HostStatsSampler } from "./host-stats.ts";
 import type { ManagedSession } from "./managed-session.ts";
 import {
 	accountPath,
+	archivedSessionsPath,
 	configPath,
 	defaultPierDir,
 	extensionTrashDir,
@@ -51,6 +52,7 @@ import { ExtensionManager, type ExtensionTarget } from "./pi/extensions.ts";
 import { NewApiManager } from "./pi/newapi.ts";
 import { ProviderManager } from "./pi/providers.ts";
 import { RemoteAccess, type RemoteAccessOptions } from "./remote/remote-access.ts";
+import { SessionArchiveStore } from "./session-archive.ts";
 import { SessionPool } from "./session-pool.ts";
 import type { AppShell, ShellMethod } from "./shell.ts";
 import {
@@ -93,6 +95,8 @@ const AUDITED_METHODS = new Set<MethodName>([
 	"session.open",
 	"session.close",
 	"session.delete",
+	"session.archive",
+	"session.cleanup",
 	"session.fork",
 	"session.rename",
 	"session.prompt",
@@ -155,6 +159,16 @@ function auditDetail(method: MethodName, params: Record<string, unknown>): Recor
 			return { path: params.path, ...(params.policy ? { policy: params.policy } : {}) };
 		case "workspace.remove":
 			return { workspaceId: params.workspaceId };
+		case "session.archive":
+			return { workspaceId: params.workspaceId, archived: params.archived };
+		case "session.cleanup":
+			return {
+				workspaceId: params.workspaceId,
+				action: params.action,
+				...(params.modifiedBefore ? { modifiedBefore: params.modifiedBefore } : {}),
+				...(params.scope ? { scope: params.scope } : {}),
+				...(params.dryRun ? { dryRun: true } : {}),
+			};
 		case "workspace.setPolicy":
 			return { workspaceId: params.workspaceId, policy: params.policy };
 		case "workspace.writeFile":
@@ -248,6 +262,7 @@ export class PierHost implements RequestHandler {
 			config: this.config,
 			locksDir: locksDir(this.pierDir),
 			trashDir: sessionTrashDir(this.pierDir),
+			archive: new SessionArchiveStore(archivedSessionsPath(this.pierDir), options.log),
 			...(options.uiTimeoutMs === undefined ? {} : { uiTimeoutMs: options.uiTimeoutMs }),
 			...(options.idleTimeoutMs === undefined ? {} : { idleTimeoutMs: options.idleTimeoutMs }),
 			...(options.eventLogCapacity === undefined ? {} : { eventLogCapacity: options.eventLogCapacity }),
@@ -625,6 +640,25 @@ export class PierHost implements RequestHandler {
 				const deleted = await this.pool.delete(workspace, params.sessionId, params.force);
 				if (deleted) this.broadcast({ type: "session.listChanged", workspaceId: workspace.id });
 				return { deleted };
+			},
+			"session.archive": async (_ctx, params) => {
+				const workspace = this.requireWorkspace(params.workspaceId);
+				const session = await this.pool.setArchived(workspace, params.sessionId, params.archived);
+				this.broadcast({ type: "session.listChanged", workspaceId: workspace.id });
+				return { session };
+			},
+			"session.cleanup": async (_ctx, params) => {
+				const workspace = this.requireWorkspace(params.workspaceId);
+				const result = await this.pool.cleanup(workspace, {
+					action: params.action,
+					...(params.modifiedBefore ? { modifiedBefore: new Date(params.modifiedBefore) } : {}),
+					...(params.scope ? { scope: params.scope } : {}),
+					...(params.dryRun ? { dryRun: true } : {}),
+				});
+				if (!params.dryRun && result.sessionIds.length) {
+					this.broadcast({ type: "session.listChanged", workspaceId: workspace.id });
+				}
+				return result;
 			},
 			"session.forkPoints": (_ctx, params) => ({ points: this.pool.require(params.sessionId).forkPoints() }),
 			"session.fork": async (_ctx, params) => {

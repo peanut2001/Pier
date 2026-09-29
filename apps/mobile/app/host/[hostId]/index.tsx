@@ -1,7 +1,17 @@
 import type { SessionSummary, WorkspaceInfo } from "@pier/protocol";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, RefreshControl, SectionList, StyleSheet, Text, View } from "react-native";
+import {
+	ActivityIndicator,
+	Alert,
+	Platform,
+	Pressable,
+	RefreshControl,
+	SectionList,
+	StyleSheet,
+	Text,
+	View,
+} from "react-native";
 import { Button, Card, confirmDestructive, Muted, Pill, Screen, Title } from "../../../src/components/ui.tsx";
 import { isBusy, RUN_STATE_LABEL, relativeTime, sessionTitle } from "../../../src/format.ts";
 import { useMobileState, useStore } from "../../../src/store.ts";
@@ -67,12 +77,26 @@ function SessionRow({ session, hostId }: { session: SessionSummary; hostId: stri
 			}
 			onLongPress={() => {
 				const running = isBusy(session.state);
-				confirmDestructive(
-					`删除“${sessionTitle(session)}”？`,
-					`${running ? "Agent 正在运行，会先中止。" : ""}会话文件会移到电脑上的 Pier 回收站（~/.pier/trash/sessions）。`,
-					"删除",
-					() => void store.deleteSession(session, running),
-				);
+				const remove = () =>
+					confirmDestructive(
+						`删除“${sessionTitle(session)}”？`,
+						`${running ? "Agent 正在运行，会先中止。" : ""}会话文件会移到电脑上的 Pier 回收站（~/.pier/trash/sessions）。`,
+						"删除",
+						() => void store.deleteSession(session, running),
+					);
+				// Older computers cannot archive; web has no action sheet.
+				if (!store.canArchive() || Platform.OS === "web") {
+					remove();
+					return;
+				}
+				Alert.alert(sessionTitle(session), undefined, [
+					{
+						text: session.archived ? "取消归档" : "归档",
+						onPress: () => void store.archiveSession(session, !session.archived),
+					},
+					{ text: "删除…", style: "destructive", onPress: remove },
+					{ text: "取消", style: "cancel" },
+				]);
 			}}
 		>
 			<View style={styles.sessionMain}>
@@ -80,6 +104,7 @@ function SessionRow({ session, hostId }: { session: SessionSummary; hostId: stri
 					{sessionTitle(session)}
 				</Text>
 				<Text style={[styles.sessionMeta, { color: p.muted }]}>
+					{session.archived ? "已归档 · " : ""}
 					{relativeTime(session.modifiedAt)} · {session.messageCount} 条消息
 				</Text>
 			</View>
@@ -100,6 +125,7 @@ export default function HostScreen() {
 	const host = useMobileState((s) => s.hosts.find((h) => h.hostId === hostId));
 	const view = useMobileState((s) => s.host);
 	const [limits, setLimits] = useState<Record<string, number>>({});
+	const [showArchived, setShowArchived] = useState<Record<string, boolean>>({});
 	const [refreshing, setRefreshing] = useState(false);
 
 	useEffect(() => {
@@ -109,11 +135,24 @@ export default function HostScreen() {
 	const sections = useMemo(
 		() =>
 			(view.hostId === hostId ? (view.workspaces ?? []) : []).map((workspace: WorkspaceInfo) => {
-				const sessions = view.sessions[workspace.id] ?? [];
+				const all = view.sessions[workspace.id] ?? [];
+				const archived = all.filter((s) => s.archived).length;
+				const withArchived = !!showArchived[workspace.id];
+				// Archived sessions are listed after the others once shown.
+				const sessions = withArchived
+					? [...all.filter((s) => !s.archived), ...all.filter((s) => s.archived)]
+					: all.filter((s) => !s.archived);
 				const limit = limits[workspace.id] ?? SESSIONS_PER_WORKSPACE;
-				return { workspace, total: sessions.length, limit, data: sessions.slice(0, limit) };
+				return {
+					workspace,
+					total: sessions.length,
+					archived,
+					withArchived,
+					limit,
+					data: sessions.slice(0, limit),
+				};
 			}),
-		[view, hostId, limits],
+		[view, hostId, limits, showArchived],
 	);
 
 	const pendingTotal = sections.reduce(
@@ -178,18 +217,30 @@ export default function HostScreen() {
 					</View>
 				)}
 				renderItem={({ item }) => <SessionRow session={item} hostId={hostId} />}
-				renderSectionFooter={({ section }) =>
-					section.total > section.limit ? (
-						<Pressable
-							style={styles.more}
-							onPress={() => setLimits({ ...limits, [section.workspace.id]: section.limit + SESSIONS_PER_WORKSPACE })}
-						>
-							<Text style={{ color: p.accent }}>显示更多（还有 {section.total - section.limit} 个）</Text>
-						</Pressable>
-					) : section.total === 0 ? (
-						<Muted style={styles.none}>还没有会话</Muted>
-					) : null
-				}
+				renderSectionFooter={({ section }) => (
+					<>
+						{section.total > section.limit ? (
+							<Pressable
+								style={styles.more}
+								onPress={() => setLimits({ ...limits, [section.workspace.id]: section.limit + SESSIONS_PER_WORKSPACE })}
+							>
+								<Text style={{ color: p.accent }}>显示更多（还有 {section.total - section.limit} 个）</Text>
+							</Pressable>
+						) : section.total === 0 ? (
+							<Muted style={styles.none}>{section.archived ? "没有未归档的会话" : "还没有会话"}</Muted>
+						) : null}
+						{section.archived ? (
+							<Pressable
+								style={styles.more}
+								onPress={() => setShowArchived({ ...showArchived, [section.workspace.id]: !section.withArchived })}
+							>
+								<Text style={{ color: p.muted }}>
+									{section.withArchived ? "隐藏已归档的会话" : `显示已归档的会话（${section.archived} 个）`}
+								</Text>
+							</Pressable>
+						) : null}
+					</>
+				)}
 			/>
 		</Screen>
 	);

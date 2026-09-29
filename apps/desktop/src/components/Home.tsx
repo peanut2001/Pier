@@ -78,6 +78,9 @@ export function WorkspaceHome({ workspaceId }: { workspaceId: string }) {
 	const nodeOnline = useAppState((s) => node === LOCAL_NODE || s.nodes[node]?.connection === "open");
 	useAppState((s) => s.peers);
 	if (!workspace) return null;
+	// Archived sessions are only listed in the sidebar's archive.
+	const recent = sessions?.filter((s) => !s.archived);
+	const archivedCount = (sessions?.length ?? 0) - (recent?.length ?? 0);
 	return (
 		<div className="home">
 			<SidebarToggle floating />
@@ -115,11 +118,21 @@ export function WorkspaceHome({ workspaceId }: { workspaceId: string }) {
 				<div className="recent">
 					<div className="section-heading">
 						<h3>最近的会话</h3>
-						{sessions?.length ? <span className="muted small">共 {sessions.length} 个</span> : null}
+						{sessions?.length ? (
+							<span className="muted small">
+								共 {recent?.length ?? 0} 个{archivedCount ? `，另有 ${archivedCount} 个已归档` : ""}
+							</span>
+						) : null}
 					</div>
 					{!sessions ? (
 						<div className="recent-empty">
 							{nodeOnline ? "加载中…" : `${store.nodeName(node)} 未连接，连接后显示会话`}
+						</div>
+					) : null}
+					{sessions?.length && !recent?.length ? (
+						<div className="recent-empty">
+							<IconMessage size={22} />
+							<span>会话都已归档，可以在侧边栏的「已归档」中找到。</span>
 						</div>
 					) : null}
 					{sessions && !sessions.length ? (
@@ -128,9 +141,9 @@ export function WorkspaceHome({ workspaceId }: { workspaceId: string }) {
 							<span>还没有会话，点击「新建会话」开始第一个任务。</span>
 						</div>
 					) : null}
-					{sessions?.length ? (
+					{recent?.length ? (
 						<div className="recent-list">
-							{sessions.slice(0, 10).map((session) => (
+							{recent.slice(0, 10).map((session) => (
 								<button
 									type="button"
 									key={session.id}

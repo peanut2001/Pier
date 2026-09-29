@@ -24,6 +24,11 @@ export function sessionTrashDir(pierDir: string): string {
 	return join(pierDir, "trash", "sessions");
 }
 
+/** Ids of archived sessions. */
+export function archivedSessionsPath(pierDir: string): string {
+	return join(pierDir, "archived-sessions.json");
+}
+
 /** Host static key for the remote secure channel. */
 export function identityPath(pierDir: string): string {
 	return join(pierDir, "identity.json");

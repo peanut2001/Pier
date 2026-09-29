@@ -503,6 +503,106 @@ describe("sessions end to end", () => {
 		expect((await client.request("session.list", { workspaceId: workspace.id })).sessions).toEqual([]);
 	});
 
+	it("archives and unarchives sessions", async () => {
+		t.faux.setResponses([fauxAssistantMessage("one")]);
+		const { session, rec } = await newSession();
+		await client.request("session.prompt", { sessionId: session.id, text: "archive me" });
+		await rec.waitForType("agent_settled");
+		const ref = { workspaceId: workspace.id, sessionId: session.id };
+
+		// Active session: the live summary carries the flag.
+		const archived = await client.request("session.archive", { ...ref, archived: true });
+		expect(archived.session).toMatchObject({ id: session.id, archived: true, active: true });
+		expect((await client.request("session.snapshot", { sessionId: session.id })).session.archived).toBe(true);
+
+		// Inactive session: listed with the flag, which survives a host restart via the file.
+		await client.request("session.close", { sessionId: session.id });
+		const listed = (await client.request("session.list", { workspaceId: workspace.id })).sessions;
+		expect(listed[0]).toMatchObject({ id: session.id, archived: true, active: false });
+		expect(existsSync(join(t.root, "pier", "archived-sessions.json"))).toBe(true);
+		const reopened = await client.request("session.open", ref);
+		expect(reopened.session.archived).toBe(true);
+		await client.request("session.close", { sessionId: session.id });
+
+		const restored = await client.request("session.archive", { ...ref, archived: false });
+		expect(restored.session.archived).toBeUndefined();
+		expect((await client.request("session.list", { workspaceId: workspace.id })).sessions[0]?.archived).toBeUndefined();
+
+		await expectError(
+			client.request("session.archive", { workspaceId: workspace.id, sessionId: "missing", archived: true }),
+			"NOT_FOUND",
+		);
+
+		// Deleting forgets the archive marker.
+		await client.request("session.archive", { ...ref, archived: true });
+		await client.request("session.delete", ref);
+		expect(t.host.pool.size).toBe(0);
+	});
+
+	it("cleans up old or archived sessions, skipping running ones", async () => {
+		const gate = deferred<void>();
+		t.faux.setResponses([
+			fauxAssistantMessage("a"),
+			fauxAssistantMessage("b"),
+			async () => {
+				await gate.promise;
+				return fauxAssistantMessage("late");
+			},
+		]);
+		const first = await newSession();
+		await client.request("session.prompt", { sessionId: first.session.id, text: "first" });
+		await first.rec.waitForType("agent_settled");
+		await client.request("session.close", { sessionId: first.session.id });
+		const second = await newSession();
+		await client.request("session.prompt", { sessionId: second.session.id, text: "second" });
+		await second.rec.waitForType("agent_settled");
+		await client.request("session.close", { sessionId: second.session.id });
+		const running = await newSession();
+		await client.request("session.prompt", { sessionId: running.session.id, text: "busy" });
+		await running.rec.waitFor((f) => f.event.type === "session.status" && f.event.state === "streaming");
+		const ws = { workspaceId: workspace.id };
+
+		// Nothing is older than a time in the past.
+		const past = new Date(Date.now() - 24 * 3600_000).toISOString();
+		expect(
+			await client.request("session.cleanup", { ...ws, action: "delete", modifiedBefore: past, dryRun: true }),
+		).toEqual({ sessionIds: [], skipped: [] });
+
+		// Archive everything but the running session... archiving does not skip it.
+		const future = new Date(Date.now() + 60_000).toISOString();
+		const archived = await client.request("session.cleanup", { ...ws, action: "archive", modifiedBefore: future });
+		expect(new Set(archived.sessionIds)).toEqual(new Set([first.session.id, second.session.id, running.session.id]));
+		const listed = (await client.request("session.list", ws)).sessions;
+		expect(listed.every((s) => s.archived)).toBe(true);
+		await client.request("session.archive", { ...ws, sessionId: second.session.id, archived: false });
+
+		// Dry run of deleting archived sessions reports the running one as skipped.
+		const preview = await client.request("session.cleanup", {
+			...ws,
+			action: "delete",
+			scope: "archived",
+			dryRun: true,
+		});
+		expect(preview).toEqual({
+			sessionIds: [first.session.id],
+			skipped: [{ sessionId: running.session.id, reason: "running" }],
+		});
+		expect(existsSync(first.session.path ?? "")).toBe(true);
+
+		const done = await client.request("session.cleanup", { ...ws, action: "delete", scope: "archived" });
+		expect(done.sessionIds).toEqual([first.session.id]);
+		expect(existsSync(first.session.path ?? "")).toBe(false);
+		const remaining = (await client.request("session.list", ws)).sessions.map((s) => s.id);
+		expect(new Set(remaining)).toEqual(new Set([second.session.id, running.session.id]));
+
+		gate.resolve();
+		await running.rec.waitForType("agent_settled");
+		const all = await client.request("session.cleanup", { ...ws, action: "delete" });
+		expect(new Set(all.sessionIds)).toEqual(new Set([second.session.id, running.session.id]));
+		expect((await client.request("session.list", ws)).sessions).toEqual([]);
+		expect(t.host.pool.size).toBe(0);
+	});
+
 	it("refuses to write after the session file changed outside Pier", async () => {
 		t.faux.setResponses([fauxAssistantMessage("one")]);
 		const { session, rec } = await newSession();
