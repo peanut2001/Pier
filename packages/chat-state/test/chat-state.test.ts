@@ -171,6 +171,30 @@ describe("reduceChat", () => {
 		expect(sessionUsage(state)).toMatchObject({ input: 10, output: 5, cacheRead: 0, cacheHitRate: 0, lastContext: 15 });
 	});
 
+	it("keeps an empty in-progress thinking block visible while streaming", () => {
+		let state = run(loaded(), [
+			{ type: "session.status", state: "streaming" },
+			{ type: "message_start", message: { role: "assistant", content: [], timestamp: 2 } },
+		]);
+		let item = buildTranscript(state).at(-1);
+		// Nothing visible yet: the UI keeps its typing indicator.
+		expect(item?.kind === "assistant" && item.blocks).toEqual([]);
+
+		state = run(state, [
+			{ type: "message_update", assistantMessageEvent: { type: "thinking_start", contentIndex: 0 } },
+		]);
+		item = buildTranscript(state).at(-1);
+		expect(item?.kind === "assistant" && item.blocks).toEqual([{ kind: "thinking", text: "", redacted: false }]);
+
+		state = run(state, [
+			{ type: "message_update", assistantMessageEvent: { type: "thinking_end", contentIndex: 0, content: "" } },
+			{ type: "message_update", assistantMessageEvent: { type: "text_start", contentIndex: 1 } },
+			{ type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 1, delta: "Hi" } },
+		]);
+		item = buildTranscript(state).at(-1);
+		expect(item?.kind === "assistant" && item.blocks).toEqual([{ kind: "text", text: "Hi" }]);
+	});
+
 	it("marks tool calls without a result as interrupted once idle", () => {
 		const state = loaded({
 			messages: [

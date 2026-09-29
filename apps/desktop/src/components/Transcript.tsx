@@ -199,7 +199,12 @@ export function Transcript({ chat }: { chat: ChatState }) {
 
 	const running = chat.runState === "streaming" || chat.runState === "retrying";
 	const lastItem = items.at(-1);
-	const waitingForModel = running && !chat.pendingUi.length && !(lastItem?.kind === "assistant" && lastItem.streaming);
+	// Keep the typing indicator until the streaming reply has something visible;
+	// `message_start` arrives with empty content well before the first delta.
+	const waitingForModel =
+		running &&
+		!chat.pendingUi.length &&
+		!(lastItem?.kind === "assistant" && lastItem.streaming && lastItem.blocks.length > 0);
 
 	return (
 		<div

@@ -216,7 +216,10 @@ export function Transcript({ chat }: { chat: ChatState }) {
 	const p = usePalette();
 	const items = useMemo(() => buildTranscript(chat), [chat]);
 	const last = items[items.length - 1];
-	const waiting = isBusy(chat.runState) && !chat.pendingUi.length && !(last?.kind === "assistant" && last.streaming);
+	const waiting =
+		isBusy(chat.runState) &&
+		!chat.pendingUi.length &&
+		!(last?.kind === "assistant" && last.streaming && last.blocks.length > 0);
 	return (
 		<View style={styles.transcript}>
 			{items.map((item) => (

@@ -64,7 +64,11 @@ function assistantBlocks(
 		if (part.type === "text") {
 			if (part.text) blocks.push({ kind: "text", text: part.text });
 		} else if (part.type === "thinking") {
-			if (part.thinking || part.redacted) {
+			// Keep the in-progress thinking part even before (or without) any text: some
+			// providers stream only an empty/encrypted thinking block for a long time,
+			// and dropping it would leave the reply blank while the model is working.
+			const live = streaming && index === content.length - 1;
+			if (part.thinking || part.redacted || live) {
 				blocks.push({ kind: "thinking", text: part.thinking, redacted: !!part.redacted });
 			}
 		} else if (part.type === "toolCall") {
