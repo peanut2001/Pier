@@ -4,7 +4,14 @@ import { join } from "node:path";
 import type { PierClient } from "@pier/client";
 import { PierProtocolError, type WorkspaceInfo } from "@pier/protocol";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { listWorkspaceDirectory, MAX_DIRECTORY_ENTRIES, normalizeRelativePath } from "../src/workspace-files.ts";
+import {
+	listWorkspaceDirectory,
+	MAX_DIRECTORY_ENTRIES,
+	MAX_IMAGE_PREVIEW_BYTES,
+	MAX_TEXT_PREVIEW_BYTES,
+	normalizeRelativePath,
+	readWorkspaceFile,
+} from "../src/workspace-files.ts";
 import { startTestHost, type TestHost } from "./helpers.ts";
 
 async function expectCode(promise: Promise<unknown>, code: string): Promise<void> {
@@ -113,6 +120,76 @@ describe("listWorkspaceDirectory", () => {
 	});
 });
 
+describe("readWorkspaceFile", () => {
+	let root: string;
+	let outside: string;
+
+	beforeEach(() => {
+		root = mkdtempSync(join(tmpdir(), "pier-read-"));
+		outside = mkdtempSync(join(tmpdir(), "pier-outside-"));
+		mkdirSync(join(root, "src"));
+		writeFileSync(join(root, "src", "index.ts"), 'export const x = "你好";\n');
+		writeFileSync(join(outside, "secret.txt"), "secret");
+	});
+	afterEach(() => {
+		rmSync(root, { recursive: true, force: true });
+		rmSync(outside, { recursive: true, force: true });
+	});
+
+	it("returns UTF-8 text with metadata", async () => {
+		const result = await readWorkspaceFile(root, "src\\index.ts");
+		expect(result).toMatchObject({ path: "src/index.ts", kind: "text", text: 'export const x = "你好";\n' });
+		expect(result.size).toBe(Buffer.byteLength('export const x = "你好";\n'));
+		expect(result.truncated).toBeUndefined();
+		expect(typeof result.modifiedAt).toBe("string");
+	});
+
+	it("truncates long text without splitting a character", async () => {
+		// "é" is two bytes, so the limit falls in the middle of one.
+		writeFileSync(join(root, "long.txt"), `a${"é".repeat(MAX_TEXT_PREVIEW_BYTES)}`);
+		const result = await readWorkspaceFile(root, "long.txt");
+		expect(result.kind).toBe("text");
+		expect(result.truncated).toBe(true);
+		expect(result.text).toBe(`a${"é".repeat(MAX_TEXT_PREVIEW_BYTES / 2 - 1)}`);
+	});
+
+	it("reports binary files without content", async () => {
+		writeFileSync(join(root, "blob.bin"), Buffer.from([0x7f, 0x45, 0x4c, 0x46, 0x00, 0x01]));
+		writeFileSync(join(root, "latin1.txt"), Buffer.from([0x63, 0x61, 0x66, 0xe9]));
+		expect(await readWorkspaceFile(root, "blob.bin")).toMatchObject({ kind: "binary", size: 6 });
+		expect((await readWorkspaceFile(root, "blob.bin")).text).toBeUndefined();
+		expect((await readWorkspaceFile(root, "latin1.txt")).kind).toBe("binary");
+	});
+
+	it("returns images as base64 and skips oversized ones", async () => {
+		const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+		writeFileSync(join(root, "logo.PNG"), png);
+		expect(await readWorkspaceFile(root, "logo.PNG")).toMatchObject({
+			kind: "image",
+			mimeType: "image/png",
+			data: png.toString("base64"),
+		});
+		writeFileSync(join(root, "huge.jpg"), Buffer.alloc(MAX_IMAGE_PREVIEW_BYTES + 1));
+		const huge = await readWorkspaceFile(root, "huge.jpg");
+		expect(huge).toMatchObject({ kind: "image", mimeType: "image/jpeg", tooLarge: true });
+		expect(huge.data).toBeUndefined();
+	});
+
+	it("rejects directories, missing files and paths outside the workspace", async () => {
+		await expect(readWorkspaceFile(root, "src")).rejects.toMatchObject({ code: "BAD_REQUEST" });
+		await expect(readWorkspaceFile(root, "")).rejects.toMatchObject({ code: "BAD_REQUEST" });
+		await expect(readWorkspaceFile(root, "../x")).rejects.toMatchObject({ code: "BAD_REQUEST" });
+		await expect(readWorkspaceFile(root, "missing.txt")).rejects.toMatchObject({ code: "NOT_FOUND" });
+		symlinkSync(join(outside, "secret.txt"), join(root, "leak.txt"));
+		await expect(readWorkspaceFile(root, "leak.txt")).rejects.toMatchObject({ code: "FORBIDDEN" });
+	});
+
+	it("follows symlinks that stay inside the workspace", async () => {
+		symlinkSync(join(root, "src", "index.ts"), join(root, "alias.ts"));
+		expect(await readWorkspaceFile(root, "alias.ts")).toMatchObject({ path: "alias.ts", kind: "text" });
+	});
+});
+
 describe("workspace.files", () => {
 	let t: TestHost;
 	let client: PierClient;
@@ -137,5 +214,16 @@ describe("workspace.files", () => {
 	it("rejects unknown workspaces and escaping paths", async () => {
 		await expectCode(client.request("workspace.files", { workspaceId: "nope" }), "NOT_FOUND");
 		await expectCode(client.request("workspace.files", { workspaceId: workspace.id, path: "../" }), "BAD_REQUEST");
+	});
+
+	it("reads a workspace file with workspace.readFile", async () => {
+		const file = await client.request("workspace.readFile", { workspaceId: workspace.id, path: "docs/guide.md" });
+		expect(file).toMatchObject({ path: "docs/guide.md", kind: "text", text: "# Guide\n", size: 8 });
+		await expectCode(client.request("workspace.readFile", { workspaceId: "nope", path: "docs/guide.md" }), "NOT_FOUND");
+		await expectCode(client.request("workspace.readFile", { workspaceId: workspace.id, path: "docs" }), "BAD_REQUEST");
+		await expectCode(
+			client.request("workspace.readFile", { workspaceId: workspace.id, path: "/etc/passwd" }),
+			"BAD_REQUEST",
+		);
 	});
 });

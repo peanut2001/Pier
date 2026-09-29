@@ -22,6 +22,7 @@ import type {
 	ProviderListResult,
 	RemoteAccessStatus,
 	SessionSummary,
+	WorkspaceFileContent,
 	WorkspaceFilesResult,
 	WorkspaceInfo,
 } from "@pier/protocol";
@@ -775,6 +776,13 @@ export class PierStore {
 		const client = this.client;
 		if (!client) throw new Error("尚未连接到 Pier Host");
 		return client.request("workspace.files", path ? { workspaceId, path } : { workspaceId });
+	}
+
+	/** Read one workspace file for preview; rejects with the host's error. */
+	async readFile(workspaceId: string, path: string): Promise<WorkspaceFileContent> {
+		const client = this.client;
+		if (!client) throw new Error("尚未连接到 Pier Host");
+		return client.request("workspace.readFile", { workspaceId, path });
 	}
 
 	bumpFiles(workspaceId: string): void {

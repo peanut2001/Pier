@@ -54,6 +54,28 @@ export interface WorkspaceFilesResult {
 	total?: number;
 }
 
+/** A workspace file read for preview (`workspace.readFile`, 1.7). */
+export interface WorkspaceFileContent {
+	/** Path relative to the workspace root, normalized and joined with "/". */
+	path: string;
+	/** Size in bytes of the file on disk. */
+	size: number;
+	modifiedAt: string;
+	/**
+	 * `text`: UTF-8 text in `text`. `image`: a common image format (by extension), base64 in
+	 * `data` unless `tooLarge`. `binary`: anything else; no content is returned.
+	 */
+	kind: "text" | "image" | "binary";
+	text?: string;
+	/** Set when only the first part of a text file is returned in `text`. */
+	truncated?: boolean;
+	/** Base64 image data without the `data:` prefix. */
+	data?: string;
+	mimeType?: string;
+	/** Set when an image is too large to return. */
+	tooLarge?: boolean;
+}
+
 /** Runtime state of a session as seen by clients. */
 export type SessionRunState = "inactive" | "idle" | "streaming" | "compacting" | "retrying";
 

@@ -1,4 +1,4 @@
-# Pier 协议 v1.6
+# Pier 协议 v1.7
 
 > 实现：`packages/protocol`（zod schema + TS 类型，Host 与所有客户端共享）。
 > 本文档描述线上格式与语义；字段的权威定义以 `packages/protocol/src` 为准。
@@ -57,7 +57,7 @@
 
 ```jsonc
 { "type": "req", "id": "h", "method": "host.hello", "params": {
-  "protocolVersion": "1.6",
+  "protocolVersion": "1.7",
   "client": { "name": "pier-desktop", "version": "0.1.0", "platform": "darwin" },
   "token": "<本地 token>",       // 本地连接必填；远程连接由加密通道认证，不需要
   "coalesceMs": 50               // 可选：合并流式增量的窗口（0–1000ms，默认 0）
@@ -90,6 +90,7 @@
 | `workspace.remove` 🔒 | `{ workspaceId }` | `{ removed }`；先强制关闭该工作区的活跃会话 |
 | `workspace.setPolicy` 🔒 | `{ workspaceId, policy: "ask"\|"smart"\|"auto" }` | `{ workspace }`；立即对活跃会话生效 |
 | `workspace.files` | `{ workspaceId, path? }` | `WorkspaceFilesResult`：`{ path, entries: { name, path, kind: "file"\|"directory"\|"other", symlink?, size?, modifiedAt? }[], truncated?, total? }`；列出工作区中的一个目录（不递归）。`path` 为相对工作区根目录的路径（`/` 分隔，省略或 `""` 为根目录），绝对路径或含 `..` 时 `BAD_REQUEST`，目录（跟随符号链接后）位于工作区之外时 `FORBIDDEN`，不存在时 `NOT_FOUND`。目录在前、再按名称自然排序，不列出 `.git`、`.hg`、`.svn`；每个目录最多返回 2000 项，超出时 `truncated: true` 并给出 `total`。指向工作区外目录的符号链接和失效链接为 `other`（1.5） |
+| `workspace.readFile` | `{ workspaceId, path }` | `WorkspaceFileContent`：`{ path, size, modifiedAt, kind: "text"\|"image"\|"binary", text?, truncated?, data?, mimeType?, tooLarge? }`；读取工作区中的一个文件用于预览。`path` 的规则与 `workspace.files` 相同；文件（跟随符号链接后）位于工作区之外时 `FORBIDDEN`，不存在时 `NOT_FOUND`，是目录或特殊文件时 `BAD_REQUEST`。`.png`/`.jpg`/`.jpeg`/`.gif`/`.webp`/`.bmp`/`.ico`/`.avif`/`.svg` 为 `image`，`data` 为 Base64（不含 `data:` 前缀），超过 8 MiB 时不返回 `data` 并设 `tooLarge: true`。其他文件按 UTF-8 解码为 `text`，最多返回前 512 KiB（超出时 `truncated: true`，被截断的多字节字符会被丢弃）；包含 NUL 字节或不是合法 UTF-8 的文件为 `binary`，不返回内容（1.7） |
 
 ### session
 

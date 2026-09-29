@@ -1,7 +1,9 @@
 import type { WorkspaceFileEntry, WorkspaceInfo } from "@pier/protocol";
 import { type PointerEvent as ReactPointerEvent, useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { formatBytes, relativeTime } from "../lib/format.ts";
 import { useAppState, useStore } from "../lib/store.tsx";
+import { FileViewer } from "./FileViewer.tsx";
 import {
 	IconAlert,
 	IconChevronRight,
@@ -168,7 +170,13 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 	const { dirs, expanded, reload, toggle, collapseAll } = useWorkspaceTree(workspace.id);
 	const [selected, setSelected] = useState<string>();
 	const [copied, setCopied] = useState<string>();
+	const [viewing, setViewing] = useState<string>();
 	const lastReload = useRef(0);
+	/** Pending single-click preview, cancelled when the click turns out to be a double click. */
+	const clickTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+	useEffect(() => () => clearTimeout(clickTimer.current), []);
+	// biome-ignore lint/correctness/useExhaustiveDependencies: close the preview when the workspace changes.
+	useEffect(() => setViewing(undefined), [workspace.id]);
 
 	// Reload when opened, reconnected, or after an agent run in this workspace.
 	// biome-ignore lint/correctness/useExhaustiveDependencies: `version` is the trigger.
@@ -198,7 +206,7 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 			() => store.toast("error", "复制失败"),
 		);
 	};
-	const insert = (entry: WorkspaceFileEntry) => {
+	const insert = (entry: Pick<WorkspaceFileEntry, "kind" | "path">) => {
 		if (composerKey) store.insertIntoComposer(composerKey, entry.kind === "directory" ? `${entry.path}/` : entry.path);
 	};
 
@@ -244,11 +252,21 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 									className="files-entry"
 									title={entryTitle(entry)}
 									{...(isDir ? { "aria-expanded": open } : {})}
-									onClick={() => {
+									onClick={(event) => {
 										setSelected(entry.path);
-										if (isDir) toggle(entry.path);
+										if (isDir) {
+											toggle(entry.path);
+											return;
+										}
+										clearTimeout(clickTimer.current);
+										if (entry.kind !== "file" || event.detail > 1) return;
+										// With a composer, wait briefly so a double click inserts the path instead.
+										const open = () => setViewing(entry.path);
+										if (composerKey && event.detail === 1) clickTimer.current = setTimeout(open, 250);
+										else open();
 									}}
 									onDoubleClick={() => {
+										clearTimeout(clickTimer.current);
 										if (!isDir) insert(entry);
 									}}
 								>
@@ -319,7 +337,19 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 			<div className="files-tree">
 				{connection === "open" || dirs[""] ? renderDir("", 0) : <div className="files-note">正在连接 Pier Host…</div>}
 			</div>
-			{composerKey ? <div className="files-hint">双击文件把路径插入输入框</div> : null}
+			<div className="files-hint">{composerKey ? "单击文件查看内容，双击把路径插入输入框" : "单击文件查看内容"}</div>
+			{viewing
+				? createPortal(
+						<FileViewer
+							key={`${workspace.id}:${viewing}`}
+							workspaceId={workspace.id}
+							path={viewing}
+							onClose={() => setViewing(undefined)}
+							onInsert={composerKey ? () => insert({ kind: "file", path: viewing }) : undefined}
+						/>,
+						document.body,
+					)
+				: null}
 		</aside>
 	);
 }

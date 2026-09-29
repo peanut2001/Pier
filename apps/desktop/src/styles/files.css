@@ -234,3 +234,214 @@ body.resizing-panel {
 	right: auto;
 	left: 14px;
 }
+
+/* ---- file viewer ----------------------------------------------------------------- */
+
+.modal.file-viewer {
+	width: min(1100px, calc(100vw - 48px));
+	height: calc(100vh - 64px);
+}
+
+.file-viewer .modal-body {
+	display: flex;
+	flex: 1;
+	flex-direction: column;
+	min-height: 0;
+	padding-bottom: 18px;
+	overflow: hidden;
+}
+
+.file-viewer-toolbar {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	margin-bottom: 10px;
+}
+
+.file-viewer-meta {
+	display: flex;
+	flex: 1;
+	flex-direction: column;
+	gap: 2px;
+	min-width: 0;
+	font-size: 11.5px;
+	color: var(--text-faint);
+}
+
+.file-viewer-path {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-family: var(--mono);
+	font-size: 12px;
+	color: var(--text-muted);
+}
+
+.file-viewer-actions {
+	display: flex;
+	flex-shrink: 0;
+	align-items: center;
+	gap: 4px;
+}
+
+.file-viewer-actions .segmented {
+	margin-right: 6px;
+}
+
+.file-viewer-actions .segmented button {
+	padding: 3px 12px;
+}
+
+.file-viewer-body {
+	display: flex;
+	flex: 1;
+	flex-direction: column;
+	min-height: 0;
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	background: var(--bg);
+	overflow: hidden;
+}
+
+.file-viewer-banner {
+	flex-shrink: 0;
+	padding: 6px 14px;
+	border-bottom: 1px solid var(--border);
+	background: var(--warning-soft);
+	font-size: 12px;
+	color: var(--warning);
+}
+
+.file-viewer-code {
+	display: flex;
+	flex: 1;
+	align-items: flex-start;
+	min-height: 0;
+	overflow: auto;
+	background: var(--bg-code);
+}
+
+.file-viewer-code pre {
+	margin: 0;
+	padding: 12px 14px;
+	font-family: var(--mono);
+	font-size: 12.5px;
+	line-height: 1.6;
+	white-space: pre;
+	background: transparent;
+}
+
+.file-viewer-code pre.file-viewer-gutter {
+	position: sticky;
+	left: 0;
+	flex-shrink: 0;
+	min-height: 100%;
+	padding-right: 12px;
+	border-right: 1px solid rgba(255, 255, 255, 0.05);
+	background: var(--bg-code);
+	text-align: right;
+	color: #5c606c;
+	user-select: none;
+}
+
+.file-viewer-text {
+	flex: 1;
+	color: #e6e8eb;
+}
+
+.file-viewer-text code {
+	font-size: inherit;
+	line-height: inherit;
+	tab-size: 4;
+}
+
+.file-viewer-text code.hljs {
+	background: transparent;
+	padding: 0;
+}
+
+.file-viewer-markdown {
+	flex: 1;
+	min-height: 0;
+	padding: 4px 22px 16px;
+	overflow: auto;
+}
+
+.file-viewer-image {
+	display: flex;
+	flex: 1;
+	align-items: center;
+	justify-content: center;
+	min-height: 0;
+	padding: 16px;
+	overflow: auto;
+	background-color: var(--bg-code);
+	background-image:
+		linear-gradient(45deg, rgba(255, 255, 255, 0.04) 25%, transparent 25%),
+		linear-gradient(-45deg, rgba(255, 255, 255, 0.04) 25%, transparent 25%),
+		linear-gradient(45deg, transparent 75%, rgba(255, 255, 255, 0.04) 75%),
+		linear-gradient(-45deg, transparent 75%, rgba(255, 255, 255, 0.04) 75%);
+	background-size: 20px 20px;
+	background-position:
+		0 0,
+		0 10px,
+		10px -10px,
+		-10px 0;
+}
+
+.file-viewer-image img {
+	max-width: 100%;
+	max-height: 100%;
+	object-fit: contain;
+}
+
+.file-viewer-empty {
+	display: flex;
+	flex: 1;
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
+	font-size: 13px;
+	color: var(--text-faint);
+}
+
+.file-viewer-notice {
+	display: flex;
+	align-items: center;
+	gap: 14px;
+	margin: auto;
+	max-width: 520px;
+	padding: 16px 18px;
+	border-radius: var(--radius);
+	background: var(--bg-raised);
+	border: 1px solid var(--border-strong);
+}
+
+.file-viewer-notice > svg {
+	flex-shrink: 0;
+}
+
+.file-viewer-notice.warning > svg {
+	color: var(--warning);
+}
+
+.file-viewer-notice.error > svg {
+	color: var(--danger);
+}
+
+.file-viewer-notice div {
+	flex: 1;
+	min-width: 0;
+}
+
+.file-viewer-notice strong {
+	font-size: 13.5px;
+}
+
+.file-viewer-notice p {
+	margin: 4px 0 0;
+	font-size: 12.5px;
+	line-height: 1.6;
+	color: var(--text-muted);
+	overflow-wrap: anywhere;
+}

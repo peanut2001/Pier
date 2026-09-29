@@ -6,11 +6,13 @@ export function Modal({
 	onClose,
 	children,
 	wide,
+	className,
 }: {
 	title: string;
 	onClose: () => void;
 	children: ReactNode;
 	wide?: boolean;
+	className?: string;
 }) {
 	useEffect(() => {
 		const onKey = (e: KeyboardEvent) => {
@@ -25,7 +27,10 @@ export function Modal({
 		<div className="modal-backdrop" onClick={onClose}>
 			{/* biome-ignore lint/a11y/useKeyWithClickEvents: only stops propagation. */}
 			{/* biome-ignore lint/a11y/noStaticElementInteractions: only stops propagation. */}
-			<div className={`modal${wide ? " wide" : ""}`} onClick={(e) => e.stopPropagation()}>
+			<div
+				className={`modal${wide ? " wide" : ""}${className ? ` ${className}` : ""}`}
+				onClick={(e) => e.stopPropagation()}
+			>
 				<div className="modal-header">
 					<h3>{title}</h3>
 					<button type="button" className="ghost icon" onClick={onClose} title="关闭">

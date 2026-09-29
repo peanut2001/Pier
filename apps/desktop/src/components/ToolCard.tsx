@@ -69,7 +69,7 @@ function StatusIcon({ status, awaiting }: { status: ToolBlock["status"]; awaitin
 	}
 }
 
-function Highlighted({ code, language }: { code: string; language?: string | undefined }) {
+export function Highlighted({ code, language }: { code: string; language?: string | undefined }) {
 	const html = useMemo(() => {
 		if (!language || !hljs.getLanguage(language) || code.length > 200_000) return undefined;
 		try {
