@@ -16,11 +16,11 @@ M0–M2（Host 核心、桌面端 MVP）已完成；M3（手机端 MVP，局域�
 | 包 | 说明 |
 |---|---|
 | `packages/protocol` | 协议 schema（zod）、类型、`PROTOCOL_VERSION` |
-| `packages/host` | Pier Host：工作区配置、会话池、pi SDK 适配层、UI 桥接、`pier-approval` 审批扩展、EventLog、本地 WebSocket Gateway、sidecar 入口 |
+| `packages/host` | Pier Host：工作区配置、会话池、pi SDK 适配层、UI 桥接、`pier-approval` 审批扩展、pi 扩展包管理、EventLog、本地 WebSocket Gateway、sidecar 入口 |
 | `packages/crypto` | Noise XX / IK（X25519、ChaCha20‑Poly1305、SHA‑256，纯 JS）、加密通道帧、配对链接、性能测试 |
 | `packages/client` | 通用客户端（握手、请求关联、自动重连、按 seq 恢复）、加密 WebSocket 与配对，以及调试 CLI `pier-cli` |
 | `packages/chat-state` | 快照 + 事件 → 聊天视图状态的纯逻辑 reducer、会话控制器与斜杠命令解析执行（桌面端与手机端共用） |
-| `apps/desktop` | Tauri 2 桌面应用：管理 Host sidecar（启动、崩溃重启、日志）、托盘常驻、单实例；React 界面含工作区与会话管理、流式聊天、工具卡片（终端输出、diff、文件预览）、审批、模型与思考等级切换、压缩、分叉、斜杠命令菜单、右侧工作区文件面板、底部内置终端（xterm.js + 本机 PTY，只在桌面端可用），以及远程访问、配对二维码与设备管理 |
+| `apps/desktop` | Tauri 2 桌面应用：管理 Host sidecar（启动、崩溃重启、日志）、托盘常驻、单实例；React 界面含工作区与会话管理、流式聊天、工具卡片（终端输出、diff、文件预览）、审批、模型与思考等级切换、压缩、分叉、斜杠命令菜单、右侧工作区文件面板、底部内置终端（xterm.js + 本机 PTY，只在桌面端可用）、pi 扩展与扩展包管理（安装、移除、更新、启用 / 停用），以及远程访问、配对二维码与设备管理 |
 | `apps/mobile` | Expo（SDK 57）手机 App：扫码配对、多台电脑、会话列表、流式聊天、工具卡片、审批、steer / follow-up / 中止、附图、模型切换、斜杠命令、断线重连补发 |
 
 ## 开发

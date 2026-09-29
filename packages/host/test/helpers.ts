@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -35,6 +35,11 @@ export async function startTestHost(
 	options: Partial<Omit<PierHostOptions, "env" | "localToken">> & {
 		tokensPerSecond?: number;
 		extraResources?: PiEnvironmentOptions["extraResources"];
+		/**
+		 * Use pi's file-backed settings in `<root>/agent` and discover resources (extensions,
+		 * packages) instead of in-memory settings with discovery disabled.
+		 */
+		fileSettings?: boolean;
 	} = {},
 ): Promise<TestHost> {
 	const root = mkdtempSync(join(tmpdir(), "pier-it-"));
@@ -55,15 +60,24 @@ export async function startTestHost(
 		refreshOnCreate: false,
 	});
 	modelRuntime.registerNativeProvider(faux.provider);
+	const agentDir = join(root, "agent");
+	if (options.fileSettings) {
+		mkdirSync(agentDir, { recursive: true });
+		writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ defaultProvider: "faux", defaultModel: "faux-1" }));
+	}
 	const env = await PiEnvironment.create({
-		agentDir: join(root, "agent"),
+		agentDir,
 		modelRuntime,
-		settingsManager: () => SettingsManager.inMemory({ defaultProvider: "faux", defaultModel: "faux-1" }),
+		...(options.fileSettings
+			? {}
+			: {
+					settingsManager: () => SettingsManager.inMemory({ defaultProvider: "faux", defaultModel: "faux-1" }),
+					isolated: true,
+				}),
 		sessionDir: join(root, "sessions"),
-		isolated: true,
 		...(options.extraResources ? { extraResources: options.extraResources } : {}),
 	});
-	const { tokensPerSecond: _ignored, extraResources: _extra, ...hostOptions } = options;
+	const { tokensPerSecond: _ignored, extraResources: _extra, fileSettings: _file, ...hostOptions } = options;
 	const host = await PierHost.create({ pierDir: join(root, "pier"), env, localToken: TOKEN, ...hostOptions });
 	const gateway = await startLocalGateway(host);
 	const clients: PierClient[] = [];

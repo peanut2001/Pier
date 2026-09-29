@@ -11,6 +11,13 @@ import {
 	CustomProviderSchema,
 	type DefaultModelRef,
 	type DeviceInfo,
+	type ExtensionListResult,
+	type ExtensionPackageInfo,
+	type ExtensionReloadSummary,
+	type ExtensionResourceInfo,
+	ExtensionResourceTypeSchema,
+	ExtensionScopeSchema,
+	type ExtensionUpdateInfo,
 	type HostInfo,
 	ImageInputSchema,
 	type ModelInfo,
@@ -209,6 +216,41 @@ export const MethodParamsSchemas = {
 	"account.useToken": z.object({ tokenId: z.number().int().positive() }),
 	"account.logout": z.object({}).optional(),
 
+	/**
+	 * pi extensions and packages (1.8). Without `workspaceId` only user settings
+	 * (`<agentDir>/settings.json`) apply; with it, also that workspace's `.pi/settings.json`.
+	 */
+	"extension.list": z.object({ workspaceId: Id.optional() }).optional(),
+	/** Install a pi package (`npm:<name>[@version]`, `git:<host>/<path>[@ref]`, a git URL, or an absolute path). */
+	"extension.install": z.object({
+		source: z.string().trim().min(1).max(4096),
+		scope: ExtensionScopeSchema.optional(),
+		workspaceId: Id.optional(),
+	}),
+	/** Remove a package from settings and uninstall it (npm / git). `source` as listed. */
+	"extension.remove": z.object({
+		source: z.string().min(1).max(4096),
+		scope: ExtensionScopeSchema,
+		workspaceId: Id.optional(),
+	}),
+	/** Update one package, or every unpinned package when `source` is omitted. */
+	"extension.update": z
+		.object({ source: z.string().min(1).max(4096).optional(), workspaceId: Id.optional() })
+		.optional(),
+	"extension.checkUpdates": z.object({ workspaceId: Id.optional() }).optional(),
+	/** Enable or disable one listed resource in the settings of its own scope. */
+	"extension.setEnabled": z.object({
+		type: ExtensionResourceTypeSchema,
+		path: z.string().min(1).max(4096),
+		enabled: z.boolean(),
+		workspaceId: Id.optional(),
+	}),
+	/**
+	 * Delete a top-level extension: a file or directory in an `extensions` directory moves to
+	 * Pier's trash; a settings path entry is removed from settings (the files stay).
+	 */
+	"extension.delete": z.object({ path: z.string().min(1).max(4096), workspaceId: Id.optional() }),
+
 	"ui.respond": z.object({ ...SessionRef, requestId: Id, response: UiResponseSchema }),
 
 	"device.list": z.object({}).optional(),
@@ -272,6 +314,13 @@ export const LOCAL_ONLY_METHODS: ReadonlySet<MethodName> = new Set([
 	"account.createToken",
 	"account.useToken",
 	"account.logout",
+	"extension.list",
+	"extension.install",
+	"extension.remove",
+	"extension.update",
+	"extension.checkUpdates",
+	"extension.setEnabled",
+	"extension.delete",
 ]);
 
 export interface HelloResult {
@@ -362,6 +411,13 @@ export interface MethodResults {
 		modelsError?: string;
 	};
 	"account.logout": { loggedOut: boolean };
+	"extension.list": ExtensionListResult;
+	"extension.install": { package?: ExtensionPackageInfo; reload: ExtensionReloadSummary };
+	"extension.remove": { removed: boolean; reload: ExtensionReloadSummary };
+	"extension.update": { reload: ExtensionReloadSummary };
+	"extension.checkUpdates": { updates: ExtensionUpdateInfo[] };
+	"extension.setEnabled": { resource: ExtensionResourceInfo; reload: ExtensionReloadSummary };
+	"extension.delete": { deleted: boolean; reload: ExtensionReloadSummary };
 	"ui.respond": { accepted: boolean };
 	"device.list": { devices: DeviceInfo[] };
 	"device.revoke": { revoked: boolean };

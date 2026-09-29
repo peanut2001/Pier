@@ -4,6 +4,7 @@ import { platform } from "node:os";
 import { basename, isAbsolute, resolve } from "node:path";
 import {
 	type EventFrame,
+	type ExtensionReloadSummary,
 	type HostInfo,
 	isMethodName,
 	isProtocolCompatible,
@@ -31,9 +32,10 @@ import {
 	type Transport,
 } from "./connection.ts";
 import type { ManagedSession } from "./managed-session.ts";
-import { accountPath, configPath, defaultPierDir, locksDir, sessionTrashDir } from "./paths.ts";
+import { accountPath, configPath, defaultPierDir, extensionTrashDir, locksDir, sessionTrashDir } from "./paths.ts";
 import { AccountManager } from "./pi/account.ts";
 import { PI_VERSION, PiEnvironment, type PiEnvironmentOptions, toModelInfo } from "./pi/environment.ts";
+import { ExtensionManager, type ExtensionTarget } from "./pi/extensions.ts";
 import { NewApiManager } from "./pi/newapi.ts";
 import { ProviderManager } from "./pi/providers.ts";
 import { RemoteAccess, type RemoteAccessOptions } from "./remote/remote-access.ts";
@@ -142,6 +144,8 @@ export class PierHost implements RequestHandler {
 	readonly providers: ProviderManager;
 	readonly newapi: NewApiManager;
 	readonly account: AccountManager;
+	readonly extensions: ExtensionManager;
+	private readonly log: (message: string) => void;
 	private readonly connections = new Set<Connection>();
 	private readonly localToken: string;
 	private readonly handlers: Handlers;
@@ -182,6 +186,13 @@ export class PierHost implements RequestHandler {
 			},
 		});
 		const log = options.log ?? (() => {});
+		this.log = log;
+		this.extensions = new ExtensionManager({
+			agentDir: env.agentDir,
+			trashDir: extensionTrashDir(this.pierDir),
+			onProgress: (progress) => this.broadcast({ type: "extension.progress", ...progress }),
+			log,
+		});
 		this.providers = new ProviderManager(env, {
 			onChanged: () => {
 				// Open sessions keep the model object they resolved; pick up edited capabilities.
@@ -320,6 +331,39 @@ export class PierHost implements RequestHandler {
 		const workspace = this.config.getWorkspace(workspaceId);
 		if (!workspace) throw new PierProtocolError("NOT_FOUND", `Workspace ${workspaceId} not found`);
 		return workspace;
+	}
+
+	private extensionTarget(workspaceId: string | undefined): ExtensionTarget | undefined {
+		if (!workspaceId) return undefined;
+		const workspace = this.requireWorkspace(workspaceId);
+		return { id: workspace.id, path: workspace.path };
+	}
+
+	/**
+	 * Apply an extension change to open sessions: idle ones reload right away (like `/reload`),
+	 * busy ones are left for the user to reload. `workspaceId` limits it to one workspace
+	 * (project settings changed).
+	 */
+	private async applyExtensionChange(workspaceId?: string): Promise<ExtensionReloadSummary> {
+		const summary: ExtensionReloadSummary = { reloaded: 0, pending: 0, failed: 0 };
+		for (const session of this.pool.all()) {
+			if (workspaceId && session.workspaceId !== workspaceId) continue;
+			if (session.busy) {
+				summary.pending++;
+				continue;
+			}
+			try {
+				await session.reload();
+				summary.reloaded++;
+			} catch (error) {
+				summary.failed++;
+				this.log(
+					`reload after extension change failed for ${session.id}: ${error instanceof Error ? error.message : error}`,
+				);
+			}
+		}
+		this.broadcast({ type: "extension.changed", ...(workspaceId ? { workspaceId } : {}) });
+		return summary;
 	}
 
 	private subscribeConnection(ctx: HandlerContext, session: ManagedSession, sinceSeq?: number, epoch?: string) {
@@ -537,6 +581,45 @@ export class PierHost implements RequestHandler {
 			"newapi.authorizeCancel": (ctx, params) => ({
 				cancelled: this.newapi.authorizeCancel(ctx.connection.connectionId, params.flowId),
 			}),
+
+			"extension.list": (_ctx, params) => this.extensions.list(this.extensionTarget(params?.workspaceId)),
+			"extension.install": async (_ctx, params) => {
+				const scope = params.scope ?? "user";
+				const target = this.extensionTarget(params.workspaceId);
+				const pkg = await this.extensions.install(params.source, scope, target);
+				const reload = await this.applyExtensionChange(scope === "project" ? target?.id : undefined);
+				return pkg ? { package: pkg, reload } : { reload };
+			},
+			"extension.remove": async (_ctx, params) => {
+				const target = this.extensionTarget(params.workspaceId);
+				const removed = await this.extensions.remove(params.source, params.scope, target);
+				const reload = removed
+					? await this.applyExtensionChange(params.scope === "project" ? target?.id : undefined)
+					: { reloaded: 0, pending: 0, failed: 0 };
+				return { removed, reload };
+			},
+			"extension.update": async (_ctx, params) => {
+				const target = this.extensionTarget(params?.workspaceId);
+				await this.extensions.update(params?.source, target);
+				return { reload: await this.applyExtensionChange() };
+			},
+			"extension.checkUpdates": async (_ctx, params) => ({
+				updates: await this.extensions.checkUpdates(this.extensionTarget(params?.workspaceId)),
+			}),
+			"extension.setEnabled": async (_ctx, params) => {
+				const target = this.extensionTarget(params.workspaceId);
+				const resource = await this.extensions.setEnabled(params.type, params.path, params.enabled, target);
+				const reload = await this.applyExtensionChange(resource.scope === "project" ? target?.id : undefined);
+				return { resource, reload };
+			},
+			"extension.delete": async (_ctx, params) => {
+				const target = this.extensionTarget(params.workspaceId);
+				const scope = await this.extensions.delete(params.path, target);
+				return {
+					deleted: true,
+					reload: await this.applyExtensionChange(scope === "project" ? target?.id : undefined),
+				};
+			},
 
 			"ui.respond": (ctx, params) => ({
 				accepted: this.pool

@@ -43,3 +43,8 @@ export function auditLogPath(pierDir: string): string {
 export function accountPath(pierDir: string): string {
 	return join(pierDir, "account.json");
 }
+
+/** Deleted pi extensions (files or directories), kept so they can be restored by hand. */
+export function extensionTrashDir(pierDir: string): string {
+	return join(pierDir, "trash", "extensions");
+}

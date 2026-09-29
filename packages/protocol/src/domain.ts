@@ -534,3 +534,74 @@ export type AuthNotice =
 			expiresInSeconds?: number;
 	  }
 	| { type: "progress"; message: string };
+
+// ---- pi extensions and packages (1.8) ---------------------------------------------------
+
+/** Resource kinds pi loads from packages and resource directories. */
+export const ExtensionResourceTypeSchema = z.enum(["extensions", "skills", "prompts", "themes"]);
+export type ExtensionResourceType = z.infer<typeof ExtensionResourceTypeSchema>;
+
+/** `user`: `<agentDir>/settings.json` (every workspace). `project`: `<workspace>/.pi/settings.json`. */
+export const ExtensionScopeSchema = z.enum(["user", "project"]);
+export type ExtensionScope = z.infer<typeof ExtensionScopeSchema>;
+
+/** A pi package declared in `packages` of a settings file. */
+export interface ExtensionPackageInfo {
+	/** The source exactly as written in settings (`npm:…`, `git:…`, a URL, or a path). */
+	source: string;
+	scope: ExtensionScope;
+	kind: "npm" | "git" | "local";
+	/** The settings entry narrows which resources load (object form with filters). */
+	filtered: boolean;
+	/** Where the package lives on disk; undefined when it is not installed (or the path is missing). */
+	installedPath?: string;
+	/** From the package's `package.json`, when it has one. */
+	name?: string;
+	version?: string;
+	description?: string;
+}
+
+/** One extension, skill, prompt template, or theme that pi discovers. */
+export interface ExtensionResourceInfo {
+	type: ExtensionResourceType;
+	/** Absolute path of the resource file (`SKILL.md` for skills, `index.ts` for directory extensions). */
+	path: string;
+	/** Short display name (file name, `dir/index.ts`, or the skill directory). */
+	name: string;
+	/** Whether pi loads it. Disabled resources are listed so they can be enabled again. */
+	enabled: boolean;
+	/** Settings file the resource belongs to. */
+	scope: ExtensionScope;
+	/** `package`: from a pi package. `top-level`: a resource directory or a settings path entry. */
+	origin: "package" | "top-level";
+	/** Package source for `package`; `auto` (resource directory) or `local` (settings entry) for `top-level`. */
+	source: string;
+	/** Can be removed with `extension.delete` (top-level extensions only). */
+	deletable: boolean;
+}
+
+export interface ExtensionListResult {
+	/** The pi agent directory holding the user settings. */
+	agentDir: string;
+	/** The workspace whose project settings were included, if any. */
+	workspaceId?: string;
+	packages: ExtensionPackageInfo[];
+	resources: ExtensionResourceInfo[];
+}
+
+export interface ExtensionUpdateInfo {
+	source: string;
+	name: string;
+	kind: "npm" | "git";
+	scope: ExtensionScope;
+}
+
+/** How open sessions picked up an extension change (1.8). */
+export interface ExtensionReloadSummary {
+	/** Idle sessions that were reloaded. */
+	reloaded: number;
+	/** Busy sessions left alone; they need `/reload` (`session.reload`) once idle. */
+	pending: number;
+	/** Sessions whose reload failed (see the host log). */
+	failed: number;
+}

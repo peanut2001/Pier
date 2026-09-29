@@ -1,4 +1,4 @@
-# Pier 协议 v1.7
+# Pier 协议 v1.8
 
 > 实现：`packages/protocol`（zod schema + TS 类型，Host 与所有客户端共享）。
 > 本文档描述线上格式与语义；字段的权威定义以 `packages/protocol/src` 为准。
@@ -57,7 +57,7 @@
 
 ```jsonc
 { "type": "req", "id": "h", "method": "host.hello", "params": {
-  "protocolVersion": "1.7",
+  "protocolVersion": "1.8",
   "client": { "name": "pier-desktop", "version": "0.1.0", "platform": "darwin" },
   "token": "<本地 token>",       // 本地连接必填；远程连接由加密通道认证，不需要
   "coalesceMs": 50               // 可选：合并流式增量的窗口（0–1000ms，默认 0）
@@ -208,6 +208,26 @@ pi 终端界面自带的命令（`/model`、`/compact`、`/new`、`/fork`、`/na
 
 桌面端把每个分组的令牌保存为自定义服务商 `yunlian-<分组>`（名称为「云链API · 分组」，Base URL 为 `<站点>/v1`）；「模型与服务商」中浏览器授权添加的是 `yunlian`。
 
+### 扩展与扩展包（1.8）
+
+管理 pi 的扩展包（`packages`：npm、git 或本地目录，可包含扩展、技能、提示词模板与主题）和资源目录中的独立资源，效果与 `pi install` / `pi remove` / `pi update --extensions` / `pi config` 相同：Host 直接使用 pi 的包管理器，读写 pi 的 settings 文件。全局（`scope: "user"`）对应 `<agentDir>/settings.json`，对所有工作区生效；项目（`scope: "project"`）对应 `<工作区>/.pi/settings.json`，需要带 `workspaceId`（Pier 中添加的工作区视为已信任）。所有方法均为 🔒，因为扩展会在 Host 进程中以用户权限执行代码。
+
+不带 `workspaceId` 时只看全局设置；带上时同时包含该工作区的项目设置（与在该目录运行 pi 时看到的相同，项目中的同名包覆盖全局的）。
+
+修改设置后，Host 对受影响的活跃会话（全局改动为所有会话，项目改动为该工作区的会话）执行 `session.reload` 的效果：空闲会话立即重新加载，运行中或有待回答对话框的会话保持不变，需要之后自行 `/reload`。结果中的 `reload = ExtensionReloadSummary = { reloaded, pending, failed }` 给出三类会话的数量，随后向所有连接广播 `extension.changed`。修改操作在 Host 内按顺序执行。
+
+| 方法 | 参数 | 结果 |
+|---|---|---|
+| `extension.list` 🔒 | `{ workspaceId? }` | `ExtensionListResult = { agentDir, workspaceId?, packages, resources }`。`packages: ExtensionPackageInfo[] = { source, scope, kind: "npm"\|"git"\|"local", filtered, installedPath?, name?, version?, description? }`：`source` 与 settings 中写的一致（本地路径相对 settings 文件所在目录），`installedPath` 缺失表示没有安装或路径不存在，`name` / `version` / `description` 来自包的 `package.json`。`resources: ExtensionResourceInfo[] = { type: "extensions"\|"skills"\|"prompts"\|"themes", path, name, enabled, scope, origin: "package"\|"top-level", source, deletable }`：已停用的资源也会列出；包内资源的 `source` 为包的 `source`，独立资源为 `auto`（`extensions/`、`skills/` 等资源目录，含 `~/.agents/skills`）或 `local`（settings 中列出的路径）。列出时不会安装缺失的包 |
+| `extension.install` 🔒 | `{ source, scope?("user"), workspaceId? }` | `{ package?, reload }`；安装并写入 settings（`pi install [-l]`）。`source` 为 `npm:<包名>[@版本]`、`git:<主机>/<路径>[@ref]`、Git 仓库 URL，或本地扩展文件 / 扩展包目录的**绝对**路径（支持 `~`；相对路径或不存在时 `BAD_REQUEST`）。npm / git 来源需要 Host 能执行 `npm` / `git`（npm 可用 settings 的 `npmCommand` 指定），找不到命令时 `BAD_REQUEST`。进度以 `extension.progress` 给出，可能耗时较长，客户端应放宽超时。已存在的来源会重新安装 |
+| `extension.remove` 🔒 | `{ source, scope, workspaceId? }` | `{ removed, reload }`；从 settings 移除并卸载 pi 安装的 npm / git 副本（`pi remove`），本地路径只从 settings 移除。`source` 使用 `extension.list` 返回的值；没有匹配的包时 `removed: false` |
+| `extension.update` 🔒 | `{ source?, workspaceId? }` | `{ reload }`；更新一个包，省略 `source` 时更新全部（`pi update --extensions`）。固定版本的 npm 包与固定 ref 的 git 包只会校准到配置的版本。没有匹配的包时 `NOT_FOUND` |
+| `extension.checkUpdates` 🔒 | `{ workspaceId? }` | `{ updates: { source, name, kind: "npm"\|"git", scope }[] }`；列出有新版本的未固定包（需要网络） |
+| `extension.setEnabled` 🔒 | `{ type, path, enabled, workspaceId? }` | `{ resource, reload }`；在资源所属范围的 settings 中启用 / 停用一个已列出的资源（与 `pi config` 相同）：独立资源在 `extensions` / `skills` / `prompts` / `themes` 数组中写入 `+路径` / `-路径`，包内资源写入该包条目的筛选。`path` 与 `type` 必须与 `extension.list` 的某一项一致，否则 `NOT_FOUND` |
+| `extension.delete` 🔒 | `{ path, workspaceId? }` | `{ deleted: true, reload }`；删除一个独立扩展（`deletable: true`）：扩展目录中的文件或带 `index.ts` 的目录移到 Pier 回收站（`~/.pier/trash/extensions`），settings 中列出的路径只从 settings 移除（文件保留）。包内扩展或通过目录条目加载的扩展返回 `BAD_REQUEST`（改为移除包或停用） |
+
+settings 文件无法解析时，修改类方法返回 `CONFLICT`，避免覆盖用户的文件。
+
 ### UI
 
 | 方法 | 参数 | 结果 |
@@ -266,6 +286,7 @@ pi 终端界面自带的命令（`/model`、`/compact`、`/new`、`/fork`、`/na
 | `session.listChanged` | `workspaceId` | 会话列表变化（新建、分叉、关闭、重命名…） |
 | `session.activity` | `workspaceId, sessionId, state, pendingUi` | 活跃会话的运行状态或待回答请求数变化（1.1）。列表页据此显示“运行中 / 待批准”，无需订阅每个会话 |
 | `provider.changed` | – | 服务商、凭据、`models.json` 或默认模型变化（1.2）；重新调用 `provider.list` / `model.list` |
+| `extension.changed` | `workspaceId?` | 扩展或扩展包设置变化（1.8）；只改了某个工作区的项目设置时带 `workspaceId`。重新调用 `extension.list`，会话的斜杠命令也可能变化 |
 
 仅发给本地（桌面）连接（`LOCAL_ONLY_EVENTS`）：
 
@@ -275,6 +296,7 @@ pi 终端界面自带的命令（`/model`、`/compact`、`/new`、`/fork`、`/na
 | `device.changed` | – | 设备登记、吊销、改名，或连接状态变化；重新调用 `device.list` |
 | `pairing.request` | `request: { id, device, fingerprint, address?, createdAt, expiresAt }` | 设备出示了正确的配对码，等待用户用 `pairing.respond` 确认 |
 | `pairing.resolved` | `requestId, resolution: accepted\|rejected\|expired\|cancelled, deviceId?` | 配对请求结束（`cancelled`：设备在等待中断开） |
+| `extension.progress` | `action: install\|remove\|update\|clone\|pull, phase: start\|progress\|complete\|error, source, message?` | `extension.install` / `remove` / `update` 的进度（1.8） |
 
 服务商登录进度（1.2），只发给调用 `provider.login` 的那个连接；连接断开时登录自动取消：
 

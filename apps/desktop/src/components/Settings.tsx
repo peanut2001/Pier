@@ -3,6 +3,7 @@ import { type ComponentType, type ReactNode, useEffect, useState } from "react";
 import { POLICY_DESCRIPTION, POLICY_LABEL } from "../lib/format.ts";
 import { type SettingsSection, useAppState, useStore } from "../lib/store.tsx";
 import { AccountSettings } from "./AccountPanel.tsx";
+import { ExtensionsSettings } from "./ExtensionsPanel.tsx";
 import { HostBanner, LogsSettings, useHostStatus } from "./HostPanels.tsx";
 import {
 	IconArrowLeft,
@@ -12,6 +13,7 @@ import {
 	IconLogs,
 	IconPlus,
 	IconPower,
+	IconPuzzle,
 	IconSearch,
 	IconSettings,
 	IconSmartphone,
@@ -67,6 +69,13 @@ const GROUPS: Array<{ title: string; items: SectionDef[] }> = [
 				label: "工作区",
 				icon: IconFolder,
 				keywords: "工作区 目录 审批 策略 权限 逐项审批 智能 自动放行 移除",
+				online: true,
+			},
+			{
+				id: "extensions",
+				label: "扩展",
+				icon: IconPuzzle,
+				keywords: "扩展 插件 extension package 扩展包 npm git 安装 卸载 更新 启用 停用 技能 skill 提示词 prompt 主题",
 				online: true,
 			},
 		],
@@ -281,6 +290,7 @@ const PAGES: Record<SettingsSection, ComponentType> = {
 	general: GeneralSettings,
 	models: ModelsSettings,
 	workspaces: WorkspacesSettings,
+	extensions: ExtensionsSettings,
 	remote: RemoteSettings,
 	logs: LogsSettings,
 	about: UpdateSettings,
