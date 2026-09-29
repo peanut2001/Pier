@@ -318,8 +318,10 @@ code {
 /* ---- app layout ------------------------------------------------------------------ */
 
 .app {
+	--sidebar-duration: 0.3s;
+	--sidebar-ease: cubic-bezier(0.4, 0, 0.2, 1);
 	display: grid;
-	grid-template-columns: 264px 1fr;
+	grid-template-columns: auto 1fr;
 	height: 100%;
 	background: var(--bg-app);
 }
@@ -337,13 +339,57 @@ code {
 	overflow: hidden;
 }
 
-/* Collapsed sidebar: the main panel takes its column and needs its own left gap. */
-.app.no-sidebar .main {
-	margin-left: 8px;
+/*
+ * The sidebar stays mounted inside a shell whose width animates; collapsed it keeps an 8px
+ * strip as the main panel's left gap. The sidebar itself slides and fades out meanwhile.
+ */
+.sidebar-shell {
+	display: flex;
+	width: 264px;
+	min-width: 0;
+	min-height: 0;
+	overflow: hidden;
+	transition: width var(--sidebar-duration) var(--sidebar-ease);
+}
+
+.sidebar-shell.collapsed {
+	width: 8px;
+}
+
+.sidebar-shell > .sidebar {
+	flex: none;
+	width: 264px;
+	/* `transform: none` when open so fixed-position dialogs inside are not contained. */
+	transform: none;
+	transition:
+		opacity 0.22s var(--ease) 0.04s,
+		transform var(--sidebar-duration) var(--sidebar-ease);
+}
+
+.sidebar-shell.collapsed > .sidebar {
+	opacity: 0;
+	transform: translateX(-28px);
+	visibility: hidden;
+	transition:
+		opacity 0.14s ease-out,
+		transform var(--sidebar-duration) var(--sidebar-ease),
+		visibility 0s linear var(--sidebar-duration);
 }
 
 .app.no-sidebar .session-header {
 	padding-left: 14px;
+}
+
+/* The "show sidebar" button fades in as the sidebar finishes collapsing. */
+.sidebar-open-button {
+	animation: sidebar-open-in 0.22s var(--ease) 0.1s both;
+}
+
+@keyframes sidebar-open-in {
+	from {
+		opacity: 0;
+		transform: translateX(-6px);
+	}
 }
 
 .placeholder {

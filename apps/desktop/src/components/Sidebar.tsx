@@ -1,5 +1,5 @@
 import type { ApprovalPolicy, SessionSummary, WorkspaceInfo } from "@pier/protocol";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { POLICY_DESCRIPTION, POLICY_LABEL, relativeTime, sessionTitle } from "../lib/format.ts";
 import { useAppState, useStore } from "../lib/store.tsx";
 import { useHostStatus } from "./HostPanels.tsx";
@@ -32,7 +32,7 @@ export function SidebarToggle({ floating = false }: { floating?: boolean }) {
 	const button = (
 		<button
 			type="button"
-			className="chip icon-chip"
+			className="chip icon-chip sidebar-open-button"
 			title={`显示侧边栏（${SIDEBAR_SHORTCUT}）`}
 			aria-label="显示侧边栏"
 			onClick={() => store.toggleSidebar(true)}
@@ -231,7 +231,7 @@ export function WorkspaceSettings({ workspace, onClose }: { workspace: Workspace
 	);
 }
 
-export function Sidebar() {
+export function Sidebar({ open = true }: { open?: boolean }) {
 	const store = useStore();
 	const workspaces = useAppState((s) => s.workspaces);
 	const noModels = useAppState((s) => s.providers?.availableCount === 0);
@@ -239,6 +239,10 @@ export function Sidebar() {
 	const addWorkspace = useAddWorkspace();
 	const [settingsFor, setSettingsFor] = useState<string | undefined>();
 	const settingsWorkspace = workspaces.find((w) => w.id === settingsFor);
+	// Collapsing the sidebar dismisses its workspace-settings dialog instead of hiding it.
+	useEffect(() => {
+		if (!open) setSettingsFor(undefined);
+	}, [open]);
 	const newChat = useAppState((s) => !!s.newChat);
 	const status = useHostStatus();
 	const online = status.online;
