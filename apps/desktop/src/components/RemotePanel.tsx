@@ -205,39 +205,25 @@ function DeviceRow({ device }: { device: DeviceInfo }) {
 
 function PeerRow({ peer }: { peer: PeerInfo }) {
 	const store = useStore();
-	const node = useAppState((s) => s.node);
+	const workspaces = useAppState((s) => s.nodes[peer.id]?.workspaces.length ?? 0);
 	const [confirm, setConfirm] = useState(false);
-	const shown = node === peer.id;
 	const details = [
 		peer.platform ? `${platformName(peer.platform)} 电脑` : "",
 		peer.version ? `Pier ${peer.version}` : "",
 		peer.lastConnectedAt ? `最近连接 ${relativeTime(peer.lastConnectedAt)}` : `配对于 ${relativeTime(peer.pairedAt)}`,
+		workspaces ? `${workspaces} 个工作区` : "",
 	].filter(Boolean);
 	return (
 		<div className="device-row">
 			<span className={`status-dot ${peer.connected ? "ok" : "idle"}`} title={peer.connected ? "已连接" : "未连接"} />
 			<IconMonitor size={16} className="device-kind" />
 			<div className="device-main">
-				<div className="device-name">
-					{peer.name}
-					{shown ? <span className="pill">正在查看</span> : null}
-				</div>
+				<div className="device-name">{peer.name}</div>
 				<div className="muted small">{details.join(" · ")}</div>
 				<div className="muted small mono" title="那台电脑的密钥指纹 · 地址">
 					{peer.fingerprint} · {peer.addresses.join("、")}
 				</div>
 			</div>
-			{shown ? null : (
-				<button
-					type="button"
-					onClick={() => {
-						store.closeSettings();
-						store.switchNode(peer.id);
-					}}
-				>
-					切换到这台
-				</button>
-			)}
 			<button
 				type="button"
 				className={confirm ? "danger" : "ghost"}
@@ -279,7 +265,7 @@ function PeersSection() {
 			) : (
 				<SettingsCard>
 					<div className="settings-empty">
-						还没有添加其他电脑。添加后可以在左上角切换，直接查看和驱动那台电脑上的会话。
+						还没有添加其他电脑。添加后，那台电脑的工作区和会话会和本机的一起出现在左侧列表中，可以直接查看和驱动。
 					</div>
 				</SettingsCard>
 			)}

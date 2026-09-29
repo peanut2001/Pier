@@ -3,7 +3,7 @@ import { type ChatState, contentText, sessionUsage } from "@pier/chat-state";
 import type { SessionSummary } from "@pier/protocol";
 import { useState } from "react";
 import { formatCost, formatPercent, formatTokens, RUN_STATE_LABEL, sessionTitle } from "../lib/format.ts";
-import { useAppState, useChatView, useStore } from "../lib/store.tsx";
+import { LOCAL_NODE, useAppState, useChatView, useStore } from "../lib/store.tsx";
 import { Composer } from "./Composer.tsx";
 import { FilesPanelToggle } from "./FilesPanel.tsx";
 import { IconAlert, IconFolder, IconInfo, IconLoader, IconX } from "./Icons.tsx";
@@ -214,9 +214,20 @@ export function SessionView({ session }: { session: SessionSummary }) {
 	const controller = store.chat(session);
 	const view = useChatView(controller);
 	const workspace = useAppState((s) => s.workspaces).find((w) => w.id === session.workspaceId);
+	const node = useAppState((s) => s.workspaceNodes[session.workspaceId] ?? LOCAL_NODE);
+	const nodeOnline = useAppState((s) => s.nodes[node]?.connection === "open");
+	useAppState((s) => s.peers);
 
 	if (!controller || !view) {
-		return <div className="placeholder center">正在连接 Pier Host…</div>;
+		return (
+			<div className="placeholder center">
+				{node === LOCAL_NODE
+					? "正在连接 Pier Host…"
+					: nodeOnline
+						? "正在打开会话…"
+						: `正在连接 ${store.nodeName(node)}…`}
+			</div>
+		);
 	}
 	const { chat, error } = view;
 	return (
@@ -229,6 +240,7 @@ export function SessionView({ session }: { session: SessionSummary }) {
 						<span className="session-crumb" title={workspace.path}>
 							<IconFolder size={12} />
 							{workspace.name}
+							{node === LOCAL_NODE ? null : <span className="session-crumb-node"> · {store.nodeName(node)}</span>}
 						</span>
 					) : null}
 				</div>

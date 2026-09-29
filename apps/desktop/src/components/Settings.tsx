@@ -1,7 +1,7 @@
 import type { ApprovalPolicy, WorkspaceInfo } from "@pier/protocol";
 import { type ComponentType, type ReactNode, useEffect, useState } from "react";
 import { POLICY_DESCRIPTION, POLICY_LABEL } from "../lib/format.ts";
-import { type SettingsSection, useAppState, useStore } from "../lib/store.tsx";
+import { type SettingsSection, useAppState, useComputers, useStore } from "../lib/store.tsx";
 import { AccountSettings } from "./AccountPanel.tsx";
 import { ExtensionsSettings } from "./ExtensionsPanel.tsx";
 import { HostBanner, LogsSettings, useHostStatus } from "./HostPanels.tsx";
@@ -25,7 +25,7 @@ import { CopyButton } from "./Markdown.tsx";
 import { ModelsSettings } from "./ModelsPanel.tsx";
 import { RemoteSettings } from "./RemotePanel.tsx";
 import { SettingRow, SettingsCard, SettingsGroup } from "./SettingsUi.tsx";
-import { useAddWorkspace } from "./Sidebar.tsx";
+import { addWorkspaceBlocker } from "./Sidebar.tsx";
 import { UpdateSettings, updatePending } from "./UpdatePanel.tsx";
 
 type IconComponent = ComponentType<{ size?: number; className?: string }>;
@@ -195,7 +195,7 @@ function GeneralSettings() {
 	);
 }
 
-function WorkspaceCard({ workspace }: { workspace: WorkspaceInfo }) {
+function WorkspaceCard({ workspace, readOnly = false }: { workspace: WorkspaceInfo; readOnly?: boolean }) {
 	const store = useStore();
 	const [confirmRemove, setConfirmRemove] = useState(false);
 	return (
@@ -212,13 +212,14 @@ function WorkspaceCard({ workspace }: { workspace: WorkspaceInfo }) {
 				<button
 					type="button"
 					className={confirmRemove ? "danger" : "ghost"}
+					disabled={readOnly}
 					onBlur={() => setConfirmRemove(false)}
 					onClick={() => {
 						if (!confirmRemove) {
 							setConfirmRemove(true);
 							return;
 						}
-						void store.removeWorkspace(workspace.id, "local");
+						void store.removeWorkspace(workspace.id);
 					}}
 					title="从 Pier 移除工作区（不会删除任何文件）"
 				>
@@ -236,7 +237,8 @@ function WorkspaceCard({ workspace }: { workspace: WorkspaceInfo }) {
 				<select
 					className="setting-select compact"
 					value={workspace.policy}
-					onChange={(e) => void store.setPolicy(workspace.id, e.target.value as ApprovalPolicy, "local")}
+					disabled={readOnly}
+					onChange={(e) => void store.setPolicy(workspace.id, e.target.value as ApprovalPolicy)}
 				>
 					{(["ask", "smart", "auto"] as ApprovalPolicy[]).map((policy) => (
 						<option key={policy} value={policy}>
@@ -251,36 +253,58 @@ function WorkspaceCard({ workspace }: { workspace: WorkspaceInfo }) {
 }
 
 function WorkspacesSettings() {
-	const workspaces = useAppState((s) => s.localWorkspaces);
-	const addWorkspace = useAddWorkspace("local");
+	const store = useStore();
+	const computers = useComputers();
+	const hasPeers = computers.length > 1;
 	return (
 		<>
 			<p className="settings-intro">
-				这里管理本机的工作区。每个工作区可以单独设置 Agent 调用工具时的审批策略。危险命令（rm -r、sudo、git push --force
+				{hasPeers
+					? "这里管理本机和已配对电脑上的工作区，它们都列在左侧边栏中；新建会话时选择工作区，就决定了 Agent 在哪台电脑上运行。"
+					: "这里管理本机的工作区。"}
+				每个工作区可以单独设置 Agent 调用工具时的审批策略。危险命令（rm -r、sudo、git push --force
 				等）在“逐项审批”和“智能”策略下总是需要批准。移除工作区不会删除任何文件。
 			</p>
-			<SettingsGroup
-				title={`工作区（${workspaces.length}）`}
-				actions={
-					<button type="button" onClick={() => void addWorkspace()}>
-						<IconPlus size={14} />
-						添加工作区
-					</button>
-				}
-			>
-				{workspaces.length ? (
-					<div className="settings-stack">
-						{workspaces.map((workspace) => (
-							<WorkspaceCard key={workspace.id} workspace={workspace} />
-						))}
-					</div>
-				) : (
-					<button type="button" className="add-first" onClick={() => void addWorkspace()}>
-						<IconFolderPlus size={16} />
-						添加第一个工作区
-					</button>
-				)}
-			</SettingsGroup>
+			{computers.map((computer) => {
+				const { workspaces } = computer.state;
+				const blocker = addWorkspaceBlocker(computer);
+				const manageable = computer.online && computer.canManage;
+				return (
+					<SettingsGroup
+						key={computer.id}
+						title={
+							hasPeers
+								? `${computer.name}${computer.local ? "（本机）" : ""} · ${workspaces.length} 个工作区`
+								: `工作区（${workspaces.length}）`
+						}
+						actions={
+							<button
+								type="button"
+								disabled={blocker !== undefined}
+								title={blocker}
+								onClick={() => void store.pickAndAddWorkspace(computer.id)}
+							>
+								<IconPlus size={14} />
+								添加工作区
+							</button>
+						}
+					>
+						{!computer.local && blocker ? <p className="muted small settings-note">{blocker}</p> : null}
+						{workspaces.length ? (
+							<div className="settings-stack">
+								{workspaces.map((workspace) => (
+									<WorkspaceCard key={workspace.id} workspace={workspace} readOnly={!manageable} />
+								))}
+							</div>
+						) : blocker === undefined ? (
+							<button type="button" className="add-first" onClick={() => void store.pickAndAddWorkspace(computer.id)}>
+								<IconFolderPlus size={16} />
+								添加第一个工作区
+							</button>
+						) : null}
+					</SettingsGroup>
+				);
+			})}
 		</>
 	);
 }

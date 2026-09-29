@@ -38,7 +38,7 @@ import type {
 	WorkspacePathDeleteResult,
 } from "@pier/protocol";
 import { PierProtocolError, parseProtocolVersion } from "@pier/protocol";
-import { createContext, useContext, useSyncExternalStore } from "react";
+import { createContext, useContext, useMemo, useSyncExternalStore } from "react";
 import type { Bridge, HostStatus, UpdateStatus } from "./bridge.ts";
 import { fileToken } from "./composer-text.ts";
 import { isYunlianProvider, YUNLIAN_SITE, yunlianGroupOf, yunlianProvider } from "./yunlian.ts";
@@ -48,8 +48,32 @@ export const APP_VERSION = "0.2.7";
 /** Node id of this computer; any other node is a paired computer's host id. */
 export const LOCAL_NODE = "local";
 
-/** Where a workspace change applies: the shown computer, or this one (the settings screen). */
-export type WorkspaceTarget = "node" | "local";
+/** One computer (node) whose workspaces and sessions the sidebar lists. */
+export interface NodeState {
+	/** Connection to that computer's Pier Host (through this computer's host for paired ones). */
+	connection: ClientState | "none";
+	hostInfo?: HostInfo;
+	connectError?: string;
+	/** The computer no longer accepts this one (removed there); pairing again is needed. */
+	revoked?: boolean;
+	/** Its workspaces; the last known list while a paired computer is offline. */
+	workspaces: WorkspaceInfo[];
+	/** `workspaces` came from the host in this run (not only from the offline cache). */
+	workspacesLoaded: boolean;
+}
+
+const EMPTY_NODE: NodeState = { connection: "none", workspaces: [], workspacesLoaded: false };
+
+/** A computer as shown in workspace pickers. */
+export interface ComputerInfo {
+	id: string;
+	name: string;
+	local: boolean;
+	online: boolean;
+	/** Workspaces can be added, removed and configured there from this computer. */
+	canManage: boolean;
+	state: NodeState;
+}
 
 /**
  * Whether a host lets paired devices manage it (workspaces, policies, file edits): hosts
@@ -129,28 +153,36 @@ export interface ExtensionProgressState {
 export interface AppState {
 	host: HostStatus;
 	/**
-	 * The computer the main window shows and drives: this one (`LOCAL_NODE`) or a paired
-	 * computer's id. `connection`, `hostInfo`, `workspaces` and `sessions` belong to it; the
-	 * settings screen (models, extensions, pairing, remote access) always manages this computer.
+	 * Every computer whose workspaces the sidebar lists: this one (`LOCAL_NODE`) and each paired
+	 * computer, all connected at the same time. Workspaces and sessions are not tied to a shown
+	 * computer: each one is driven through its own computer's connection.
+	 */
+	nodes: Record<string, NodeState>;
+	/**
+	 * The computer of the workspace on screen (derived from the selection). `connection`,
+	 * `hostInfo`, `connectError` and `nodeRevoked` mirror it; the settings screen (models,
+	 * extensions, pairing, remote access) always manages this computer.
 	 */
 	node: string;
-	/** Connection to the shown computer. */
+	/** Connection to the computer of the workspace on screen (mirrors `nodes[node]`). */
 	connection: ClientState | "none";
 	hostInfo?: HostInfo;
 	connectError?: string;
-	/** The shown computer no longer accepts this one (removed there); pairing again is needed. */
 	nodeRevoked?: boolean;
-	/** Connection to this computer's own Pier Host. */
+	/** Connection to this computer's own Pier Host (mirrors `nodes[LOCAL_NODE]`). */
 	localConnection: ClientState | "none";
 	localHostInfo?: HostInfo;
-	/** This computer's workspaces (managed on the settings screen). */
+	/** This computer's workspaces (mirrors `nodes[LOCAL_NODE]`). */
 	localWorkspaces: WorkspaceInfo[];
 	/** Other computers this one paired with. */
 	peers: PeerInfo[];
 	/** The "add a computer" (pair with a link) dialog is open. */
 	addPeerOpen: boolean;
-	/** Workspaces of the shown computer. */
+	/** Workspaces of every computer: this one's first, then each paired computer's. */
 	workspaces: WorkspaceInfo[];
+	/** The computer each workspace in `workspaces` belongs to. */
+	workspaceNodes: Record<string, string>;
+	/** This computer's workspaces were loaded (the main area can decide what to show). */
 	workspacesLoaded: boolean;
 	sessions: Record<string, SessionSummary[] | undefined>;
 	expanded: Record<string, boolean>;
@@ -193,8 +225,41 @@ export interface AppState {
 	/** Bumped when pi extension or package settings changed, so the extensions page reloads. */
 	extensionsVersion: number;
 	extensionProgress?: ExtensionProgressState | undefined;
-	/** The directory picker for the shown (paired) computer is open. */
-	directoryPicker?: { title: string } | undefined;
+	/** The directory picker for a paired computer is open. */
+	directoryPicker?: { title: string; node: string } | undefined;
+}
+
+/** Recompute the lists that combine every computer (after `nodes` or `peers` changed). */
+function deriveWorkspaces(state: AppState): Partial<AppState> {
+	const workspaces: WorkspaceInfo[] = [];
+	const workspaceNodes: Record<string, string> = {};
+	for (const node of [LOCAL_NODE, ...state.peers.map((p) => p.id)]) {
+		for (const workspace of state.nodes[node]?.workspaces ?? []) {
+			if (workspace.id in workspaceNodes) continue;
+			workspaceNodes[workspace.id] = node;
+			workspaces.push(workspace);
+		}
+	}
+	const local = state.nodes[LOCAL_NODE] ?? EMPTY_NODE;
+	return {
+		workspaces,
+		workspaceNodes,
+		workspacesLoaded: local.workspacesLoaded,
+		localWorkspaces: local.workspaces,
+		localConnection: local.connection,
+		localHostInfo: local.hostInfo,
+	};
+}
+
+/** Mirror the computer of the workspace on screen into the top-level connection fields. */
+function deriveShown(state: AppState): Partial<AppState> {
+	const shown = state.nodes[state.node] ?? EMPTY_NODE;
+	return {
+		connection: shown.connection,
+		hostInfo: shown.hostInfo,
+		connectError: shown.connectError,
+		nodeRevoked: shown.revoked,
+	};
 }
 
 const PAIRING_RESULT_TEXT: Record<PairingResolution, string> = {
@@ -221,18 +286,20 @@ function clampPanelWidth(width: number): number {
 const DEVICES_KEY = "#devices";
 const PROVIDERS_KEY = "#providers";
 const PEERS_KEY = "#peers";
-const LOCAL_WORKSPACES_KEY = "#localWorkspaces";
+/** Last known workspaces of paired computers, listed while they are offline. */
+const NODE_WORKSPACES_KEY = "pier.nodeWorkspaces";
 
-/** Selection remembered per computer. */
+/** Selection remembered per computer (before workspaces of all computers were listed together). */
 interface NodeSelection {
 	workspaceId?: string;
 	sessionId?: string;
 }
 
-/** `localStorage[SELECTION_KEY]`: this computer's selection at the top level (as before 0.2.7). */
+/** `localStorage[SELECTION_KEY]`: the selection, and the computer of its workspace. */
 interface SavedSelection extends NodeSelection {
 	expanded?: Record<string, boolean>;
 	node?: string;
+	/** Written by 0.2.7: the selection of each computer shown then. */
 	nodes?: Record<string, NodeSelection>;
 }
 
@@ -268,18 +335,18 @@ function errorText(error: unknown): string {
 export class PierStore {
 	private state: AppState;
 	private readonly listeners = new Set<() => void>();
-	/** The shown computer's client (the local client when this computer is shown). */
-	client: PierClient | undefined;
-	/** This computer's Pier Host (settings, models, pairing, and the proxy to other computers). */
-	private localClient: PierClient | undefined;
+	/** One client per computer: this one's Pier Host, and each paired computer through it. */
+	private readonly clients = new Map<string, PierClient>();
 	private directoryPickerResolve: ((path: string | null) => void) | undefined;
 	private clientKey: string | undefined;
 	private localUrl: string | undefined;
 	private localToken: string | undefined;
-	private nodeRetryTimer: ReturnType<typeof setTimeout> | undefined;
-	private nodeRetryAttempt = 0;
-	private selections: Record<string, NodeSelection> = {};
+	/** Pending reconnects to offline paired computers, and their attempt counts. */
+	private readonly retryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+	private readonly retryAttempts = new Map<string, number>();
 	private readonly chats = new Map<string, ChatController>();
+	/** The computer each live chat runs on. */
+	private readonly chatNodes = new WeakMap<ChatController, string>();
 	private recent: string[] = [];
 	private readonly drafts = new Map<string, Draft>();
 	/** Sessions created from the new-chat screen whose draft is sent as soon as they load. */
@@ -307,14 +374,19 @@ export class PierStore {
 			}
 		})();
 		const node = typeof saved.node === "string" && saved.node ? saved.node : LOCAL_NODE;
-		this.selections = {
-			...(saved.nodes ?? {}),
-			[LOCAL_NODE]: {
-				...(saved.workspaceId ? { workspaceId: saved.workspaceId } : {}),
-				...(saved.sessionId ? { sessionId: saved.sessionId } : {}),
-			},
-		};
-		const selection = this.selections[node] ?? {};
+		// 0.2.7 kept a selection per shown computer, with this computer's at the top level.
+		const selection: NodeSelection = node !== LOCAL_NODE && saved.nodes?.[node] ? saved.nodes[node] : saved;
+		const cached = (() => {
+			try {
+				return JSON.parse(localStorage.getItem(NODE_WORKSPACES_KEY) ?? "{}") as Record<string, WorkspaceInfo[]>;
+			} catch {
+				return {};
+			}
+		})();
+		const nodes: Record<string, NodeState> = { [LOCAL_NODE]: EMPTY_NODE };
+		for (const [id, workspaces] of Object.entries(cached)) {
+			if (id !== LOCAL_NODE && Array.isArray(workspaces)) nodes[id] = { ...EMPTY_NODE, workspaces };
+		}
 		const panel = (() => {
 			try {
 				return JSON.parse(localStorage.getItem(FILES_PANEL_KEY) ?? "{}") as { open?: boolean; width?: number };
@@ -329,8 +401,9 @@ export class PierStore {
 				return {};
 			}
 		})();
-		this.state = {
+		const state: AppState = {
 			host: { state: "starting", restarts: 0, generation: 0 },
+			nodes,
 			node,
 			connection: "none",
 			localConnection: "none",
@@ -338,6 +411,7 @@ export class PierStore {
 			peers: [],
 			addPeerOpen: false,
 			workspaces: [],
+			workspaceNodes: {},
 			workspacesLoaded: false,
 			sessions: {},
 			expanded: saved.expanded ?? {},
@@ -354,6 +428,7 @@ export class PierStore {
 			filesVersion: {},
 			extensionsVersion: 0,
 		};
+		this.state = { ...state, ...deriveWorkspaces(state), ...deriveShown(state) };
 	}
 
 	// ---- external store plumbing -------------------------------------------------------
@@ -367,20 +442,30 @@ export class PierStore {
 
 	private set(patch: Partial<AppState> | ((state: AppState) => Partial<AppState>)): void {
 		const next = typeof patch === "function" ? patch(this.state) : patch;
-		this.state = { ...this.state, ...next };
-		if ("selectedWorkspaceId" in next || "selectedSessionId" in next || "expanded" in next || "node" in next) {
-			this.selections[this.state.node] = {
-				...(this.state.selectedWorkspaceId ? { workspaceId: this.state.selectedWorkspaceId } : {}),
-				...(this.state.selectedSessionId ? { sessionId: this.state.selectedSessionId } : {}),
-			};
-			const { [LOCAL_NODE]: local, ...nodes } = this.selections;
+		const previousNode = this.state.node;
+		let state: AppState = { ...this.state, ...next };
+		if ("nodes" in next || "peers" in next) state = { ...state, ...deriveWorkspaces(state) };
+		// The computer on screen follows the workspace on screen.
+		const screen = state.newChat ? state.newChat.workspaceId : state.selectedWorkspaceId;
+		const owner = screen ? state.workspaceNodes[screen] : undefined;
+		if (owner) state.node = owner;
+		const nodeChanged = state.node !== previousNode;
+		if (nodeChanged || "nodes" in next) state = { ...state, ...deriveShown(state) };
+		this.state = state;
+		if (
+			nodeChanged ||
+			"selectedWorkspaceId" in next ||
+			"selectedSessionId" in next ||
+			"expanded" in next ||
+			"newChat" in next
+		) {
 			localStorage.setItem(
 				SELECTION_KEY,
 				JSON.stringify({
-					...local,
-					expanded: this.state.expanded,
-					node: this.state.node,
-					nodes,
+					...(state.selectedWorkspaceId ? { workspaceId: state.selectedWorkspaceId } : {}),
+					...(state.selectedSessionId ? { sessionId: state.selectedSessionId } : {}),
+					expanded: state.expanded,
+					node: state.node,
 				} satisfies SavedSelection),
 			);
 		}
@@ -393,7 +478,19 @@ export class PierStore {
 				JSON.stringify({ open: this.state.filesPanel, width: this.state.filesPanelWidth }),
 			);
 		}
+		if (nodeChanged) {
+			// Opening a workspace of an offline computer tries to reach it right away.
+			const node = this.state.node;
+			if (node !== LOCAL_NODE && this.state.nodes[node]?.connection !== "open") {
+				queueMicrotask(() => this.retryNode(node));
+			}
+		}
 		for (const listener of [...this.listeners]) listener();
+	}
+
+	/** Update one computer's state. */
+	private patchNode(node: string, patch: Partial<NodeState>): void {
+		this.set((s) => ({ nodes: { ...s.nodes, [node]: { ...(s.nodes[node] ?? EMPTY_NODE), ...patch } } }));
 	}
 
 	get bridgeKind(): Bridge["kind"] {
@@ -410,24 +507,64 @@ export class PierStore {
 			off();
 			offUpdate();
 			offOpen();
-			this.teardownNode();
-			this.teardownLocal();
+			this.teardownAll();
 		};
 	}
 
-	// ---- host / connection -------------------------------------------------------------
+	// ---- host / connections ------------------------------------------------------------
 
-	/** Whether the main window shows this computer (not a paired one). */
+	/** The client of the computer of the workspace on screen. */
+	get client(): PierClient | undefined {
+		return this.clients.get(this.state.node);
+	}
+
+	/** This computer's Pier Host (settings, models, pairing, and the proxy to other computers). */
+	private get localClient(): PierClient | undefined {
+		return this.clients.get(LOCAL_NODE);
+	}
+
+	/** Whether the workspace on screen is on this computer (not a paired one). */
 	get isLocalNode(): boolean {
 		return this.state.node === LOCAL_NODE;
 	}
 
-	/** Display name of a computer (the shown one by default). */
+	/** The computer a workspace belongs to (the one on screen when unknown). */
+	nodeOf(workspaceId: string | undefined): string {
+		return (workspaceId && this.state.workspaceNodes[workspaceId]) || this.state.node;
+	}
+
+	/** The client of the computer a workspace belongs to. */
+	private clientFor(workspaceId: string): PierClient | undefined {
+		return this.clients.get(this.nodeOf(workspaceId));
+	}
+
+	/** Display name of a computer (the one on screen by default). */
 	nodeName(node = this.state.node): string {
 		if (node === LOCAL_NODE) return this.state.localHostInfo?.hostName ?? "本机";
 		const peer = this.state.peers.find((p) => p.id === node);
 		if (peer) return peer.name;
-		return node === this.state.node && this.state.hostInfo ? this.state.hostInfo.hostName : "另一台电脑";
+		return this.state.nodes[node]?.hostInfo?.hostName ?? "另一台电脑";
+	}
+
+	/** Whether this computer may manage a computer's workspaces, policies and files. */
+	canManage(node: string): boolean {
+		return node === LOCAL_NODE || hostAllowsRemoteManagement(this.state.nodes[node]?.hostInfo);
+	}
+
+	/** This computer and every paired computer, for workspace pickers. */
+	computers(): ComputerInfo[] {
+		const { nodes, peers } = this.state;
+		return [LOCAL_NODE, ...peers.map((p) => p.id)].map((id) => {
+			const state = nodes[id] ?? EMPTY_NODE;
+			return {
+				id,
+				name: this.nodeName(id),
+				local: id === LOCAL_NODE,
+				online: state.connection === "open" && this.state.host.state === "ready",
+				canManage: this.canManage(id),
+				state,
+			};
+		});
 	}
 
 	private onHostStatus(status: HostStatus): void {
@@ -435,26 +572,22 @@ export class PierStore {
 		const key = status.state === "ready" && status.url ? `${status.generation}|${status.url}` : undefined;
 		if (key === this.clientKey) return;
 		// Keep the lists on screen while the host restarts; they reload once it is back.
-		this.teardownNode(true);
-		this.teardownLocal();
+		this.teardownAll();
 		if (key && status.url) {
 			this.localUrl = status.url;
 			this.localToken = status.token ?? undefined;
 			this.clientKey = key;
 			void this.connectLocal(status.url, status.token ?? undefined);
-			this.openNode();
 		}
 	}
 
-	private teardownLocal(): void {
-		const local = this.localClient;
-		this.localClient = undefined;
+	/** Close every connection (the host stopped or restarted), keeping the lists on screen. */
+	private teardownAll(): void {
+		for (const node of [...this.clients.keys(), ...this.retryTimers.keys()]) this.closeNode(node);
 		this.clientKey = undefined;
 		this.localUrl = undefined;
 		this.localToken = undefined;
-		local?.close();
 		this.set({
-			localConnection: "none",
 			pairingRequests: [],
 			pairing: undefined,
 			auth: undefined,
@@ -464,35 +597,47 @@ export class PierStore {
 		this.yunlianFlow = undefined;
 	}
 
-	/**
-	 * Drop the shown computer's connection and live chats. `keepData` leaves its workspace and
-	 * session lists on screen (reconnecting to the same computer).
-	 */
-	private teardownNode(keepData = false): void {
-		if (!keepData && this.state.directoryPicker) this.resolveDirectoryPicker(null);
-		for (const chat of this.chats.values()) chat.dispose();
-		this.chats.clear();
-		this.recent = [];
-		if (this.nodeRetryTimer) clearTimeout(this.nodeRetryTimer);
-		this.nodeRetryTimer = undefined;
-		this.nodeRetryAttempt = 0;
-		for (const [key, timer] of this.refreshTimers) {
-			if (key.startsWith("#")) continue;
-			clearTimeout(timer);
-			this.refreshTimers.delete(key);
+	/** Dispose the live chats running on a computer. */
+	private dropNodeChats(node: string): void {
+		let dropped = false;
+		for (const [id, chat] of this.chats) {
+			if (this.chatNodes.get(chat) !== node) continue;
+			this.dropChat(id);
+			dropped = true;
 		}
-		const client = this.client;
-		this.client = undefined;
-		if (client && client !== this.localClient) client.close();
-		const { connectError: _c, nodeRevoked: _r, ...rest } = this.state;
-		this.state = rest as AppState;
-		this.set((s) => ({
-			connection: "none",
-			chatsVersion: s.chatsVersion + 1,
-			...(keepData
-				? {}
-				: { hostInfo: undefined, workspaces: [], workspacesLoaded: false, sessions: {}, filePreview: undefined }),
-		}));
+		if (dropped) this.set((s) => ({ chatsVersion: s.chatsVersion + 1 }));
+	}
+
+	/** Drop a computer's connection and live chats; its workspace list stays (last known). */
+	private closeNode(node: string): void {
+		clearTimeout(this.retryTimers.get(node));
+		this.retryTimers.delete(node);
+		this.retryAttempts.delete(node);
+		this.dropNodeChats(node);
+		const client = this.clients.get(node);
+		this.clients.delete(node);
+		client?.close();
+		if (this.state.directoryPicker?.node === node) this.resolveDirectoryPicker(null);
+		if (this.state.nodes[node]) this.patchNode(node, { connection: "none" });
+	}
+
+	/** Forget a computer that is no longer paired: its connection, workspaces and selection. */
+	private forgetNode(node: string): void {
+		this.closeNode(node);
+		const workspaceIds = new Set((this.state.nodes[node]?.workspaces ?? []).map((w) => w.id));
+		this.set((s) => {
+			const { [node]: _gone, ...nodes } = s.nodes;
+			const selected = s.selectedWorkspaceId !== undefined && workspaceIds.has(s.selectedWorkspaceId);
+			const target = s.newChat?.workspaceId !== undefined && workspaceIds.has(s.newChat.workspaceId);
+			return {
+				nodes,
+				...(selected ? { selectedWorkspaceId: undefined, selectedSessionId: undefined } : {}),
+				...(target ? { newChat: {} } : {}),
+				...(s.node === node ? { node: LOCAL_NODE } : {}),
+			};
+		});
+		this.saveNodeCache();
+		this.fixSelection();
 	}
 
 	private async connectLocal(url: string, token: string | undefined): Promise<void> {
@@ -502,48 +647,46 @@ export class PierStore {
 			client: { name: "pier-desktop", version: APP_VERSION, platform: navigator.platform || "desktop" },
 			requestTimeoutMs: 60_000,
 		});
-		this.localClient = client;
-		if (this.isLocalNode) this.client = client;
+		this.clients.set(LOCAL_NODE, client);
+		const current = () => this.localClient === client;
 		let wasOpen = false;
 		client.onState((state) => {
-			if (this.localClient !== client) return;
-			this.set(this.isLocalNode ? { localConnection: state, connection: state } : { localConnection: state });
+			if (!current()) return;
+			this.patchNode(LOCAL_NODE, { connection: state });
 			if (state === "open") {
 				if (wasOpen) {
 					void this.reloadLocal();
-					if (this.isLocalNode && this.client === client) void this.reloadNode();
+					void this.loadWorkspaces(LOCAL_NODE);
 				}
 				wasOpen = true;
 			}
 		});
 		client.onEvent((frame) => {
-			if (this.localClient === client && !frame.sessionId) this.onLocalEvent(frame);
+			if (current() && !frame.sessionId) this.onLocalEvent(frame);
 		});
 		try {
 			const hello = await client.connect();
-			if (this.localClient !== client) return;
-			this.set(this.isLocalNode ? { localHostInfo: hello.host, hostInfo: hello.host } : { localHostInfo: hello.host });
+			if (!current()) return;
+			this.patchNode(LOCAL_NODE, { hostInfo: hello.host, connectError: undefined });
 			void this.reloadLocal();
-			if (this.isLocalNode && this.client === client) await this.reloadNode();
+			await this.loadWorkspaces(LOCAL_NODE);
 		} catch (error) {
-			if (this.localClient !== client) return;
-			if (this.isLocalNode) this.set({ connectError: errorText(error) });
-			else this.toast("error", `无法连接到本机的 Pier Host：${errorText(error)}`);
+			if (current()) this.patchNode(LOCAL_NODE, { connectError: errorText(error) });
 		}
 	}
 
-	/** Connect the main window to the selected computer (the local client is already set up). */
-	private openNode(): void {
-		const local = this.localClient;
-		if (!local) return;
-		if (this.isLocalNode) {
-			this.client = local;
-			const { localConnection, localHostInfo } = this.state;
-			this.set({ connection: localConnection, ...(localHostInfo ? { hostInfo: localHostInfo } : {}) });
-			if (localConnection === "open") void this.reloadNode();
-			return;
+	/** Connect to every paired computer, and forget the ones no longer paired. */
+	private syncPeers(): void {
+		if (!this.localUrl || !this.localClient) return;
+		const ids = new Set(this.state.peers.map((p) => p.id));
+		for (const node of Object.keys(this.state.nodes)) {
+			if (node !== LOCAL_NODE && !ids.has(node)) this.forgetNode(node);
 		}
-		void this.connectPeer(this.state.node);
+		for (const id of ids) {
+			if (!this.clients.has(id) && !this.retryTimers.has(id) && !this.state.nodes[id]?.revoked) {
+				void this.connectPeer(id);
+			}
+		}
 	}
 
 	/**
@@ -553,6 +696,9 @@ export class PierStore {
 	private async connectPeer(node: string): Promise<void> {
 		const url = this.localUrl;
 		if (!url) return;
+		// Chats on an earlier (failed) connection cannot recover: they reopen on the new one.
+		this.dropNodeChats(node);
+		this.clients.get(node)?.close();
 		const client = new PierClient({
 			url: `${url.replace(/\/+$/, "")}/peer/${encodeURIComponent(node)}`,
 			...(this.localToken ? { token: this.localToken } : {}),
@@ -561,100 +707,91 @@ export class PierStore {
 			heartbeatMs: 25_000,
 			reconnect: { initialDelayMs: 500, maxDelayMs: 10_000 },
 		});
-		this.client = client;
+		this.clients.set(node, client);
+		const current = () => this.clients.get(node) === client;
 		let wasOpen = false;
-		this.set({ connection: "connecting" });
+		this.patchNode(node, { connection: "connecting" });
 		client.onState((state) => {
-			if (this.client !== client) return;
-			this.set(state === "open" ? { connection: state, connectError: undefined } : { connection: state });
+			if (!current()) return;
+			this.patchNode(node, state === "open" ? { connection: state, connectError: undefined } : { connection: state });
 			if (state === "open") {
-				this.nodeRetryAttempt = 0;
-				if (wasOpen) void this.reloadNode();
+				this.retryAttempts.delete(node);
+				if (wasOpen) void this.loadWorkspaces(node);
 				wasOpen = true;
 			}
 		});
 		client.onEvent((frame) => {
-			if (this.client === client && !frame.sessionId) this.onNodeEvent(frame);
+			if (current() && !frame.sessionId) this.onNodeEvent(node, frame);
 		});
 		client.onError(() => {
-			if (this.client === client && client.terminalClose?.code === CLOSE_DEVICE_REVOKED) this.markNodeRevoked();
+			if (current() && client.terminalClose?.code === CLOSE_DEVICE_REVOKED) this.markNodeRevoked(node);
 		});
 		try {
 			const hello = await client.connect();
-			if (this.client !== client) return;
-			this.set({ hostInfo: hello.host });
-			await this.reloadNode();
+			if (!current()) return;
+			this.patchNode(node, { hostInfo: hello.host, revoked: false, connectError: undefined });
+			await this.loadWorkspaces(node);
 		} catch (error) {
-			if (this.client !== client) return;
+			if (!current()) return;
 			if (client.terminalClose?.code === CLOSE_DEVICE_REVOKED) {
-				this.markNodeRevoked();
+				this.markNodeRevoked(node);
 				return;
 			}
 			if (error instanceof PierProtocolError && error.code === "NOT_FOUND") {
-				this.toast("warning", "这台电脑已不在已配对列表中，已切换回本机");
-				this.switchNode(LOCAL_NODE);
+				// No longer paired on this computer: reloading the list forgets it.
+				this.patchNode(node, { connection: "closed", connectError: errorText(error) });
+				void this.loadPeers();
 				return;
 			}
-			// The computer may be asleep or offline: keep trying while it is shown.
-			this.set({ connection: "reconnecting", connectError: errorText(error) });
-			const delay = Math.min(15_000, 1000 * 2 ** this.nodeRetryAttempt);
-			this.nodeRetryAttempt += 1;
-			this.nodeRetryTimer = setTimeout(() => {
-				this.nodeRetryTimer = undefined;
-				if (this.client === client) void this.connectPeer(node);
-			}, delay);
+			// The computer may be asleep or offline: keep trying, more often while it is on screen.
+			this.patchNode(node, { connection: "reconnecting", connectError: errorText(error) });
+			const attempt = this.retryAttempts.get(node) ?? 0;
+			const cap = node === this.state.node ? 15_000 : 60_000;
+			this.retryAttempts.set(node, attempt + 1);
+			this.retryTimers.set(
+				node,
+				setTimeout(
+					() => {
+						this.retryTimers.delete(node);
+						if (current()) void this.connectPeer(node);
+					},
+					Math.min(cap, 1000 * 2 ** attempt),
+				),
+			);
 		}
 	}
 
-	private markNodeRevoked(): void {
-		if (this.nodeRetryTimer) clearTimeout(this.nodeRetryTimer);
-		this.nodeRetryTimer = undefined;
-		this.client?.close();
-		this.set({
-			nodeRevoked: true,
+	private markNodeRevoked(node: string): void {
+		clearTimeout(this.retryTimers.get(node));
+		this.retryTimers.delete(node);
+		this.clients.get(node)?.close();
+		this.patchNode(node, {
+			revoked: true,
 			connection: "closed",
-			connectError: `${this.nodeName()} 已移除这台电脑（或重置了 Pier），需要重新配对。`,
+			connectError: `${this.nodeName(node)} 已移除这台电脑（或重置了 Pier），需要重新配对。`,
 		});
 	}
 
-	/** Reconnect to the shown computer right away (after an error or while it is retrying). */
-	retryNode(): void {
-		if (this.isLocalNode || !this.localClient) return;
-		const client = this.client;
-		if (client && client.state === "reconnecting" && !this.nodeRetryTimer) {
+	/** Reconnect to a paired computer right away (the one on screen by default). */
+	retryNode(node = this.state.node): void {
+		if (node === LOCAL_NODE || !this.localClient || !this.state.peers.some((p) => p.id === node)) return;
+		const state = this.state.nodes[node];
+		if (state?.connection === "open" || state?.connection === "connecting") return;
+		const client = this.clients.get(node);
+		if (client && client.state === "reconnecting" && !this.retryTimers.has(node)) {
 			client.reconnectNow();
 			return;
 		}
-		this.teardownNode(true);
-		this.openNode();
-	}
-
-	/** Show another computer (or this one) in the main window. */
-	switchNode(node: string): void {
-		if (node === this.state.node) {
-			if (this.state.connection !== "open") this.retryNode();
-			return;
-		}
-		this.teardownNode();
-		const selection = this.selections[node] ?? {};
-		this.set({
-			node,
-			selectedWorkspaceId: selection.workspaceId,
-			selectedSessionId: selection.sessionId,
-			newChat: undefined,
-			settings: undefined,
-		});
-		this.openNode();
+		clearTimeout(this.retryTimers.get(node));
+		this.retryTimers.delete(node);
+		this.retryAttempts.delete(node);
+		void this.connectPeer(node);
 	}
 
 	/** Events of this computer's host. */
 	private onLocalEvent(frame: EventFrame): void {
 		const event = frame.event;
-		if (this.isLocalNode) this.onNodeEvent(frame);
-		else if (event.type === "workspace.changed") this.scheduleRefresh(LOCAL_WORKSPACES_KEY);
-		else if (event.type === "host.notice") {
-			this.toast((event.level as Toast["level"]) ?? "info", String(event.message ?? ""));
-		}
+		this.onNodeEvent(LOCAL_NODE, frame);
 		if (event.type === "remote.changed") {
 			const remote = event.status as RemoteAccessStatus;
 			this.set(remote.pairingActive ? { remote } : { remote, pairing: undefined });
@@ -691,10 +828,10 @@ export class PierStore {
 		}
 	}
 
-	/** Events of the shown computer's host that concern the main window. */
-	private onNodeEvent(frame: EventFrame): void {
+	/** Events of any computer's host that concern its workspaces and sessions. */
+	private onNodeEvent(node: string, frame: EventFrame): void {
 		const event = frame.event;
-		if (event.type === "workspace.changed") void this.loadWorkspaces();
+		if (event.type === "workspace.changed") this.scheduleRefresh(`#workspaces:${node}`);
 		else if (event.type === "session.listChanged") this.scheduleRefresh(String(event.workspaceId));
 		else if (event.type === "session.activity") {
 			// A run that ends (or pauses for an answer) has likely written files.
@@ -703,90 +840,93 @@ export class PierStore {
 			const message = String(event.message ?? "");
 			this.toast(
 				(event.level as Toast["level"]) ?? "info",
-				this.isLocalNode ? message : `${this.nodeName()}：${message}`,
+				node === LOCAL_NODE ? message : `${this.nodeName(node)}：${message}`,
 			);
 		}
 	}
 
-	/** This computer's settings: remote access, devices, peers, providers, workspaces. */
+	/** This computer's settings: remote access, devices, peers, providers. */
 	private async reloadLocal(): Promise<void> {
 		void this.loadRemote();
 		void this.loadProviders();
 		void this.loadPeers();
-		if (!this.isLocalNode) void this.loadLocalWorkspaces();
 	}
 
-	/** The shown computer's workspaces and sessions. */
-	private async reloadNode(): Promise<void> {
-		const client = this.client;
-		await this.loadWorkspaces();
-		if (this.client !== client) return;
-		const { selectedSessionId, selectedWorkspaceId } = this.state;
-		if (selectedSessionId && selectedWorkspaceId) {
-			const known = this.state.sessions[selectedWorkspaceId]?.some((s) => s.id === selectedSessionId);
-			if (!known) this.set({ selectedSessionId: undefined });
+	/** Remember paired computers' workspaces, to list them while those computers are offline. */
+	private saveNodeCache(): void {
+		const cache: Record<string, WorkspaceInfo[]> = {};
+		for (const [node, state] of Object.entries(this.state.nodes)) {
+			if (node !== LOCAL_NODE && state.workspaces.length) cache[node] = state.workspaces;
 		}
+		localStorage.setItem(NODE_WORKSPACES_KEY, JSON.stringify(cache));
 	}
 
-	/** Keep the new-chat target pointing at an existing workspace. */
-	private fixNewChatTarget(workspaces: WorkspaceInfo[]): Partial<AppState> {
-		const newChat = this.state.newChat;
-		if (!newChat || workspaces.some((w) => w.id === newChat.workspaceId)) return {};
-		const fallback = workspaces.find((w) => w.id === this.state.selectedWorkspaceId) ?? workspaces[0];
-		return { newChat: fallback ? { workspaceId: fallback.id } : {} };
+	/**
+	 * Keep the selection and the new-chat target on existing workspaces. A workspace whose
+	 * computer has not answered yet (offline, still connecting) stays selected.
+	 */
+	private fixSelection(): void {
+		const { workspaces, workspaceNodes, nodes, selectedWorkspaceId, newChat } = this.state;
+		const gone = (id: string | undefined) => {
+			if (!id) return true;
+			if (id in workspaceNodes) return false;
+			// Unknown: gone once every computer that could have it has answered.
+			return Object.values(nodes).every((n) => n.workspacesLoaded || n.connection === "closed");
+		};
+		const patch: Partial<AppState> = {};
+		const fallback = workspaces[0]?.id;
+		if (selectedWorkspaceId && gone(selectedWorkspaceId)) {
+			patch.selectedWorkspaceId = fallback;
+			patch.selectedSessionId = undefined;
+		} else if (!selectedWorkspaceId && fallback) patch.selectedWorkspaceId = fallback;
+		if (newChat?.workspaceId && gone(newChat.workspaceId)) {
+			const selected = patch.selectedWorkspaceId ?? selectedWorkspaceId;
+			const target = selected && selected in workspaceNodes ? selected : fallback;
+			patch.newChat = target ? { workspaceId: target } : {};
+		}
+		const selected = patch.selectedWorkspaceId;
+		if (selected && this.state.expanded[selected] === undefined) {
+			patch.expanded = { ...this.state.expanded, [selected]: true };
+		}
+		if (Object.keys(patch).length) this.set(patch);
 	}
 
-	async loadWorkspaces(): Promise<void> {
-		const client = this.client;
+	/** Load a computer's workspaces (the one on screen by default) and their open session lists. */
+	async loadWorkspaces(node = this.state.node): Promise<void> {
+		const client = this.clients.get(node);
 		if (!client) return;
 		try {
 			const { workspaces } = await client.request("workspace.list");
-			if (this.client !== client) return;
-			let selected = this.state.selectedWorkspaceId;
-			if (!selected || !workspaces.some((w) => w.id === selected)) selected = workspaces[0]?.id;
-			const expanded = { ...this.state.expanded };
-			if (selected && expanded[selected] === undefined) expanded[selected] = true;
-			this.set({
-				workspaces,
-				...(client === this.localClient ? { localWorkspaces: workspaces } : {}),
-				workspacesLoaded: true,
-				expanded,
-				...(selected ? { selectedWorkspaceId: selected } : { selectedWorkspaceId: undefined }),
-				...this.fixNewChatTarget(workspaces),
-			});
+			if (this.clients.get(node) !== client) return;
+			this.patchNode(node, { workspaces, workspacesLoaded: true });
+			if (node !== LOCAL_NODE) this.saveNodeCache();
+			this.fixSelection();
+			const expanded = this.state.expanded;
 			await Promise.all(workspaces.filter((w) => expanded[w.id]).map((w) => this.refreshSessions(w.id)));
+			if (this.clients.get(node) !== client) return;
+			const { selectedSessionId, selectedWorkspaceId, sessions } = this.state;
+			if (selectedSessionId && selectedWorkspaceId && workspaces.some((w) => w.id === selectedWorkspaceId)) {
+				const list = sessions[selectedWorkspaceId];
+				if (list && !list.some((s) => s.id === selectedSessionId)) this.set({ selectedSessionId: undefined });
+			}
 		} catch (error) {
-			if (this.client === client) this.toast("error", `加载工作区失败：${errorText(error)}`);
+			if (this.clients.get(node) !== client) return;
+			const where = node === LOCAL_NODE ? "" : `${this.nodeName(node)} 的`;
+			this.toast("error", `加载${where}工作区失败：${errorText(error)}`);
 		}
 	}
 
-	/** This computer's workspaces while another computer is shown (for the settings screen). */
-	private async loadLocalWorkspaces(): Promise<void> {
-		const client = this.localClient;
-		if (!client) return;
-		if (this.client === client) {
-			await this.loadWorkspaces();
-			return;
-		}
-		try {
-			const { workspaces } = await client.request("workspace.list");
-			if (this.localClient === client) this.set({ localWorkspaces: workspaces });
-		} catch {
-			// Transient; refreshed on the next workspace.changed or reconnect.
-		}
-	}
-
-	private scheduleRefresh(workspaceId: string): void {
-		clearTimeout(this.refreshTimers.get(workspaceId));
+	private scheduleRefresh(key: string): void {
+		clearTimeout(this.refreshTimers.get(key));
 		this.refreshTimers.set(
-			workspaceId,
+			key,
 			setTimeout(() => {
-				this.refreshTimers.delete(workspaceId);
-				if (workspaceId === DEVICES_KEY) void this.loadDevices();
-				else if (workspaceId === PROVIDERS_KEY) void this.loadProviders();
-				else if (workspaceId === PEERS_KEY) void this.loadPeers();
-				else if (workspaceId === LOCAL_WORKSPACES_KEY) void this.loadLocalWorkspaces();
-				else void this.refreshSessions(workspaceId);
+				this.refreshTimers.delete(key);
+				if (key === DEVICES_KEY) void this.loadDevices();
+				else if (key === PROVIDERS_KEY) void this.loadProviders();
+				else if (key === PEERS_KEY) void this.loadPeers();
+				else if (key.startsWith("#workspaces:")) void this.loadWorkspaces(key.slice("#workspaces:".length));
+				else void this.refreshSessions(key);
 			}, 150),
 		);
 	}
@@ -854,15 +994,18 @@ export class PierStore {
 		if (!client) return;
 		try {
 			const { peers } = await client.request("peer.list");
-			if (this.localClient === client) this.set({ peers });
+			if (this.localClient !== client) return;
+			this.set({ peers });
+			this.syncPeers();
 		} catch {
 			// Transient; the next peer.changed or reconnect refreshes it.
 		}
 	}
 
 	/**
-	 * Pair with another computer from the link its Pier shows, then show it. Resolves once the
-	 * other computer's user allowed it; rejects with a user-facing message otherwise.
+	 * Pair with another computer from the link its Pier shows; its workspaces then appear in the
+	 * sidebar. Resolves once the other computer's user allowed it; rejects with a user-facing
+	 * message otherwise.
 	 */
 	async pairPeer(uri: string): Promise<PeerInfo> {
 		const client = this.localClient;
@@ -874,13 +1017,12 @@ export class PierStore {
 			throw new Error(peerPairingErrorText(error));
 		}
 		this.set((s) => ({ peers: [...s.peers.filter((p) => p.id !== peer.id), peer] }));
-		void this.loadPeers();
-		this.toast("info", `已与 ${peer.name} 配对`);
+		this.toast("info", `已与 ${peer.name} 配对，它的工作区会出现在左侧列表中`);
 		// Paired again after being removed there: connect afresh.
-		if (this.state.node === peer.id) {
-			this.teardownNode(true);
-			this.openNode();
-		} else this.switchNode(peer.id);
+		this.closeNode(peer.id);
+		this.patchNode(peer.id, { revoked: false, connectError: undefined });
+		void this.connectPeer(peer.id);
+		void this.loadPeers();
 		return peer;
 	}
 
@@ -894,11 +1036,10 @@ export class PierStore {
 
 	/** Forget a paired computer here (it keeps this computer in its device list until removed there). */
 	async removePeer(peerId: string): Promise<void> {
-		if (this.state.node === peerId) this.switchNode(LOCAL_NODE);
 		const result = await this.callLocal("移除电脑", (c) => c.request("peer.remove", { peerId }));
 		if (!result) return;
-		delete this.selections[peerId];
 		this.set((s) => ({ peers: s.peers.filter((p) => p.id !== peerId) }));
+		this.forgetNode(peerId);
 	}
 
 	// ---- models and providers (this computer) ------------------------------------------
@@ -1141,14 +1282,17 @@ export class PierStore {
 	}
 
 	async refreshSessions(workspaceId: string): Promise<void> {
-		const client = this.client;
-		if (!client) return;
+		const node = this.nodeOf(workspaceId);
+		const client = this.clients.get(node);
+		// An offline computer's lists load once it is connected again.
+		if (!client || this.state.nodes[node]?.connection !== "open") return;
+		const current = () => this.clients.get(node) === client;
 		try {
 			const { sessions } = await client.request("session.list", { workspaceId });
-			if (this.client !== client) return;
+			if (!current()) return;
 			this.set((s) => ({ sessions: { ...s.sessions, [workspaceId]: sessions } }));
 		} catch (error) {
-			if (this.client === client) this.toast("error", `加载会话列表失败：${errorText(error)}`);
+			if (current()) this.toast("error", `加载会话列表失败：${errorText(error)}`);
 		}
 	}
 
@@ -1166,11 +1310,6 @@ export class PierStore {
 
 	dismissToast(id: number): void {
 		this.set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }));
-	}
-
-	/** Call the shown computer's host, reporting failures as a toast. */
-	private call<T>(action: string, fn: (client: PierClient) => Promise<T>): Promise<T | undefined> {
-		return this.callWith(this.client, action, fn);
 	}
 
 	/** Call this computer's host (settings), reporting failures as a toast. */
@@ -1314,14 +1453,14 @@ export class PierStore {
 
 	/** List one directory of a workspace; rejects with the host's error. */
 	async listFiles(workspaceId: string, path: string): Promise<WorkspaceFilesResult> {
-		const client = this.client;
+		const client = this.clientFor(workspaceId);
 		if (!client) throw new Error("尚未连接到 Pier Host");
 		return client.request("workspace.files", path ? { workspaceId, path } : { workspaceId });
 	}
 
 	/** Read one workspace file for preview; rejects with the host's error. */
 	async readFile(workspaceId: string, path: string): Promise<WorkspaceFileContent> {
-		const client = this.client;
+		const client = this.clientFor(workspaceId);
 		if (!client) throw new Error("尚未连接到 Pier Host");
 		return client.request("workspace.readFile", { workspaceId, path });
 	}
@@ -1336,9 +1475,9 @@ export class PierStore {
 		text: string,
 		expectedModifiedAt?: string,
 	): Promise<WorkspaceFileWriteResult> {
-		const client = this.client;
+		const client = this.clientFor(workspaceId);
 		if (!client) throw new Error("尚未连接到 Pier Host");
-		if (!this.canManageNode) throw new Error("那台电脑的 Pier 版本过旧，不支持远程编辑文件");
+		if (!this.canManage(this.nodeOf(workspaceId))) throw new Error("那台电脑的 Pier 版本过旧，不支持远程编辑文件");
 		const result = await client.request("workspace.writeFile", {
 			workspaceId,
 			path,
@@ -1354,9 +1493,11 @@ export class PierStore {
 	 * host's error. Closes a preview of the deleted path and refreshes the file panel.
 	 */
 	async deletePath(workspaceId: string, path: string): Promise<WorkspacePathDeleteResult> {
-		const client = this.client;
+		const client = this.clientFor(workspaceId);
 		if (!client) throw new Error("尚未连接到 Pier Host");
-		if (!hostCanDeleteFiles(this.state.hostInfo)) throw new Error("这台电脑的 Pier 版本过旧，不支持删除文件");
+		if (!hostCanDeleteFiles(this.state.nodes[this.nodeOf(workspaceId)]?.hostInfo)) {
+			throw new Error("这台电脑的 Pier 版本过旧，不支持删除文件");
+		}
 		const result = await client.request("workspace.deletePath", { workspaceId, path });
 		const preview = this.state.filePreview;
 		if (
@@ -1404,102 +1545,97 @@ export class PierStore {
 		this.saveDraft(sessionId, { ...draft, text: `${draft.text}${sep}${fileToken(path, directory)} ` });
 	}
 
-	/** The client that a workspace change goes to. */
-	private workspaceClient(target: WorkspaceTarget): PierClient | undefined {
-		return target === "node" ? this.client : this.localClient;
-	}
-
-	/** Reload the workspace lists after a change made through `client`. */
-	private async afterWorkspaceChange(client: PierClient): Promise<void> {
-		if (client === this.client) await this.loadWorkspaces();
-		else if (client === this.localClient) await this.loadLocalWorkspaces();
-	}
-
 	/**
-	 * Add a workspace on the shown computer (`node`, the default) or on this one (`local`,
-	 * the settings screen). Paired computers accept this from hosts speaking protocol 1.10.
+	 * Add a workspace on a computer (this one by default). Paired computers accept this from
+	 * hosts speaking protocol 1.10. The new workspace is selected.
 	 */
-	async addWorkspace(
-		path: string,
-		policy?: ApprovalPolicy,
-		target: WorkspaceTarget = "node",
-	): Promise<WorkspaceInfo | undefined> {
-		const client = this.workspaceClient(target);
-		const result = await this.callWith(client, "添加工作区", (c) =>
+	async addWorkspace(path: string, policy?: ApprovalPolicy, node = LOCAL_NODE): Promise<WorkspaceInfo | undefined> {
+		const client = this.clients.get(node);
+		const where = node === LOCAL_NODE ? "" : `（${this.nodeName(node)}）`;
+		const result = await this.callWith(client, `添加工作区${where}`, (c) =>
 			c.request("workspace.add", { path, ...(policy ? { policy } : {}) }),
 		);
 		if (!result || !client) return undefined;
-		await this.afterWorkspaceChange(client);
-		if (client !== this.client) return result.workspace;
+		await this.loadWorkspaces(node);
+		const id = result.workspace.id;
+		if (!(id in this.state.workspaceNodes)) return result.workspace;
 		this.set((s) => ({
-			selectedWorkspaceId: result.workspace.id,
-			expanded: { ...s.expanded, [result.workspace.id]: true },
-			...(s.newChat ? { newChat: { workspaceId: result.workspace.id } } : {}),
+			selectedWorkspaceId: id,
+			selectedSessionId: undefined,
+			expanded: { ...s.expanded, [id]: true },
+			...(s.newChat ? { newChat: { workspaceId: id } } : {}),
 		}));
-		await this.refreshSessions(result.workspace.id);
+		await this.refreshSessions(id);
 		return result.workspace;
 	}
 
-	async removeWorkspace(workspaceId: string, target: WorkspaceTarget = "node"): Promise<void> {
-		const client = this.workspaceClient(target);
+	/** Remove a workspace from its computer's Pier (no files are deleted). */
+	async removeWorkspace(workspaceId: string): Promise<void> {
+		const node = this.nodeOf(workspaceId);
+		const client = this.clients.get(node);
 		const result = await this.callWith(client, "移除工作区", (c) => c.request("workspace.remove", { workspaceId }));
 		if (!result || !client) return;
-		if (client === this.client) {
-			for (const [id, chat] of this.chats) {
-				if (chat.workspaceId === workspaceId) this.dropChat(id);
-			}
-			if (this.state.selectedWorkspaceId === workspaceId) {
-				this.set({ selectedWorkspaceId: undefined, selectedSessionId: undefined });
-			}
+		for (const [id, chat] of this.chats) {
+			if (chat.workspaceId === workspaceId) this.dropChat(id);
 		}
-		await this.afterWorkspaceChange(client);
+		if (this.state.selectedWorkspaceId === workspaceId) {
+			this.set({ selectedWorkspaceId: undefined, selectedSessionId: undefined });
+		}
+		await this.loadWorkspaces(node);
 	}
 
-	async setPolicy(workspaceId: string, policy: ApprovalPolicy, target: WorkspaceTarget = "node"): Promise<void> {
-		const client = this.workspaceClient(target);
-		const result = await this.callWith(client, "修改审批策略", (c) =>
+	async setPolicy(workspaceId: string, policy: ApprovalPolicy): Promise<void> {
+		const node = this.nodeOf(workspaceId);
+		const result = await this.callWith(this.clients.get(node), "修改审批策略", (c) =>
 			c.request("workspace.setPolicy", { workspaceId, policy }),
 		);
 		if (!result) return;
-		const replace = (list: WorkspaceInfo[]) => list.map((w) => (w.id === workspaceId ? result.workspace : w));
-		const shown = client === this.client;
-		const local = client === this.localClient;
-		this.set((s) => ({
-			...(shown ? { workspaces: replace(s.workspaces) } : {}),
-			...(local ? { localWorkspaces: replace(s.localWorkspaces) } : {}),
-		}));
+		const workspaces = (this.state.nodes[node]?.workspaces ?? []).map((w) =>
+			w.id === workspaceId ? result.workspace : w,
+		);
+		this.patchNode(node, { workspaces });
+		if (node !== LOCAL_NODE) this.saveNodeCache();
 	}
 
-	/** Whether the shown computer lets this one manage it (always true for this computer). */
+	/** Whether the computer of the workspace on screen lets this one manage it. */
 	get canManageNode(): boolean {
-		return this.isLocalNode || hostAllowsRemoteManagement(this.state.hostInfo);
+		return this.canManage(this.state.node);
 	}
 
-	/** Subdirectories of a directory on the shown computer (its home directory by default). */
-	async listDirectories(path?: string): Promise<HostDirectoryListing> {
-		const client = this.client;
+	/** Subdirectories of a directory on a computer (its home directory by default). */
+	async listDirectories(
+		path?: string,
+		node = this.state.directoryPicker?.node ?? LOCAL_NODE,
+	): Promise<HostDirectoryListing> {
+		const client = this.clients.get(node);
 		if (!client) throw new Error("尚未连接到 Pier Host");
 		return client.request("host.listDirectories", path ? { path } : {});
 	}
 
 	/**
-	 * Pick a directory on the shown computer: the system dialog for this computer, or Pier's
-	 * directory browser for a paired one. Resolves to `null` when cancelled.
+	 * Pick a directory on a computer: the system dialog for this computer, or Pier's directory
+	 * browser for a paired one. Resolves to `null` when cancelled.
 	 */
-	pickNodeDirectory(title = "选择工作区目录"): Promise<string | null> {
-		if (this.isLocalNode) return this.pickDirectory();
+	pickNodeDirectory(node = LOCAL_NODE, title = "选择工作区目录"): Promise<string | null> {
+		if (node === LOCAL_NODE) return this.pickDirectory();
 		this.directoryPickerResolve?.(null);
 		return new Promise((resolve) => {
 			this.directoryPickerResolve = resolve;
-			this.set({ directoryPicker: { title } });
+			this.set({ directoryPicker: { title, node } });
 		});
+	}
+
+	/** Pick a directory on a computer and add it as a workspace there. */
+	async pickAndAddWorkspace(node = LOCAL_NODE): Promise<void> {
+		const path = await this.pickNodeDirectory(node);
+		if (path) await this.addWorkspace(path, undefined, node);
 	}
 
 	/** Close the paired computer's directory picker with a path, or `null` when cancelled. */
 	resolveDirectoryPicker(path: string | null): void {
 		const resolve = this.directoryPickerResolve;
 		this.directoryPickerResolve = undefined;
-		this.set({ directoryPicker: undefined });
+		if (this.state.directoryPicker) this.set({ directoryPicker: undefined });
 		resolve?.(path);
 	}
 
@@ -1549,7 +1685,9 @@ export class PierStore {
 			this.toast("warning", "请先选择一个工作区");
 			return false;
 		}
-		const result = await this.call("新建会话", (c) => c.request("session.create", { workspaceId }));
+		const result = await this.callWith(this.clientFor(workspaceId), "新建会话", (c) =>
+			c.request("session.create", { workspaceId }),
+		);
 		if (!result) return false;
 		const session = result.session;
 		this.drafts.delete(NEW_CHAT_DRAFT);
@@ -1595,10 +1733,11 @@ export class PierStore {
 
 	/** Live controller for a session (created and subscribed on first use). */
 	chat(session: SessionSummary): ChatController | undefined {
-		const client = this.client;
-		if (!client || this.state.connection === "none") return undefined;
 		let chat = this.chats.get(session.id);
 		if (!chat) {
+			const node = this.nodeOf(session.workspaceId);
+			const client = this.clients.get(node);
+			if (!client || this.state.nodes[node]?.connection !== "open") return undefined;
 			chat = new ChatController(client, session, {
 				onReplaced: (previousId, next) => this.onReplaced(previousId, next),
 				onSettled: (c) => this.scheduleRefresh(c.workspaceId),
@@ -1606,6 +1745,7 @@ export class PierStore {
 				onError: (m) => this.toast("error", m),
 			});
 			this.chats.set(session.id, chat);
+			this.chatNodes.set(chat, node);
 			void chat.start();
 		}
 		this.touch(session.id);
@@ -1647,7 +1787,9 @@ export class PierStore {
 	}
 
 	async closeSession(session: SessionSummary, force = false): Promise<void> {
-		const result = await this.call("关闭会话", (c) => c.request("session.close", { sessionId: session.id, force }));
+		const result = await this.callWith(this.clientFor(session.workspaceId), "关闭会话", (c) =>
+			c.request("session.close", { sessionId: session.id, force }),
+		);
 		if (!result) return;
 		this.dropChat(session.id);
 		if (this.state.selectedSessionId === session.id) this.set({ selectedSessionId: undefined });
@@ -1659,7 +1801,7 @@ export class PierStore {
 	 * running agent first. Resolves to whether it was deleted.
 	 */
 	async deleteSession(session: SessionSummary, force = false): Promise<boolean> {
-		const result = await this.call("删除会话", (c) =>
+		const result = await this.callWith(this.clientFor(session.workspaceId), "删除会话", (c) =>
 			c.request("session.delete", { workspaceId: session.workspaceId, sessionId: session.id, force }),
 		);
 		if (!result) return false;
@@ -1678,13 +1820,17 @@ export class PierStore {
 	}
 
 	async renameSession(session: SessionSummary, name: string): Promise<void> {
-		const result = await this.call("重命名", (c) => c.request("session.rename", { sessionId: session.id, name }));
+		const result = await this.callWith(this.clientFor(session.workspaceId), "重命名", (c) =>
+			c.request("session.rename", { sessionId: session.id, name }),
+		);
 		if (result) this.upsertSession(result.session);
 	}
 
 	/** Fork into a new session and open it. Resolves to whether it succeeded. */
 	async forkSession(session: SessionSummary, entryId: string): Promise<boolean> {
-		const result = await this.call("分叉会话", (c) => c.request("session.fork", { sessionId: session.id, entryId }));
+		const result = await this.callWith(this.clientFor(session.workspaceId), "分叉会话", (c) =>
+			c.request("session.fork", { sessionId: session.id, entryId }),
+		);
 		if (!result) return false;
 		if (result.selectedText) this.saveDraft(result.session.id, { text: result.selectedText, images: [] });
 		this.upsertSession(result.session);
@@ -1832,6 +1978,30 @@ export function useAppState<T>(selector: (state: AppState) => T): T {
  */
 export function useCanManageNode(): boolean {
 	return useAppState((s) => s.node === LOCAL_NODE || hostAllowsRemoteManagement(s.hostInfo));
+}
+
+/** Whether this computer may manage the computer a workspace belongs to. */
+export function useCanManageWorkspace(workspaceId: string | undefined): boolean {
+	return useAppState((s) => {
+		const node = (workspaceId && s.workspaceNodes[workspaceId]) || s.node;
+		return node === LOCAL_NODE || hostAllowsRemoteManagement(s.nodes[node]?.hostInfo);
+	});
+}
+
+/** This computer and every paired computer, with their connection and workspaces. */
+export function useComputers(): ComputerInfo[] {
+	const store = useStore();
+	const nodes = useAppState((s) => s.nodes);
+	const peers = useAppState((s) => s.peers);
+	const localName = useAppState((s) => s.localHostInfo?.hostName);
+	const hostReady = useAppState((s) => s.host.state === "ready");
+	// biome-ignore lint/correctness/useExhaustiveDependencies: the list is derived from these.
+	return useMemo(() => store.computers(), [store, nodes, peers, localName, hostReady]);
+}
+
+/** Whether any computer other than this one is paired (workspaces then show their computer). */
+export function useHasPeers(): boolean {
+	return useAppState((s) => s.peers.length > 0);
 }
 
 const EMPTY_VIEW: ChatView | undefined = undefined;

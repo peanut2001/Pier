@@ -14,20 +14,22 @@ function baseName(path: string, separator: string): string {
 }
 
 /**
- * Browse the directories of the shown (paired) computer and pick one, e.g. as a workspace.
+ * Browse the directories of a paired computer and pick one, e.g. as a workspace.
  * Opened with `store.pickNodeDirectory()`; this computer uses the system dialog instead.
  */
 export function DirectoryPicker() {
 	const store = useStore();
 	const picker = useAppState((s) => s.directoryPicker);
-	const online = useAppState((s) => s.connection === "open");
+	const node = picker?.node;
+	const online = useAppState((s) => !!node && s.nodes[node]?.connection === "open");
 	const [listing, setListing] = useState<HostDirectoryListing>();
 	const [input, setInput] = useState("");
 	const [error, setError] = useState<string>();
 	const [loading, setLoading] = useState(false);
 	const [showHidden, setShowHidden] = useState(false);
 	const request = useRef(0);
-	const name = store.nodeName();
+	useAppState((s) => s.peers);
+	const name = node ? store.nodeName(node) : "";
 
 	const load = useCallback(
 		async (path?: string) => {

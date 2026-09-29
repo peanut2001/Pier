@@ -1,5 +1,5 @@
 import { POLICY_LABEL, relativeTime, sessionTitle } from "../lib/format.ts";
-import { LOCAL_NODE, useAppState, useCanManageNode, useStore } from "../lib/store.tsx";
+import { LOCAL_NODE, useAppState, useStore } from "../lib/store.tsx";
 import { FilesPanelToggle } from "./FilesPanel.tsx";
 import {
 	IconChevronRight,
@@ -22,56 +22,10 @@ const STEPS = [
 	{ icon: IconShield, title: "审批操作", text: "执行命令或修改工作区外的文件前，Pier 会先征求你的同意。" },
 ];
 
-/** A paired computer without workspaces. */
-function RemoteWelcome() {
-	const store = useStore();
-	const addWorkspace = useAddWorkspace();
-	const canAdd = useCanManageNode();
-	useAppState((s) => s.peers);
-	const name = store.nodeName();
-	return (
-		<div className="home">
-			<SidebarToggle floating />
-			<div className="home-inner">
-				<div className="hero">
-					<div className="workspace-hero-icon">
-						<IconMonitor size={26} />
-					</div>
-					<h1>{name} 上还没有工作区</h1>
-					{canAdd ? (
-						<p className="hero-text">
-							选择 {name} 上的一个项目目录作为工作区，之后就可以在这台电脑上新建会话、查看输出和审批命令，Agent 在{" "}
-							{name} 上运行。
-						</p>
-					) : (
-						<p className="hero-text">
-							{name} 上的 Pier 版本较旧，不支持从这里添加工作区。请升级那台电脑上的
-							Pier，或在那台电脑上添加（「添加工作区」或「设置 → 工作区」），添加后会自动出现在这里。
-						</p>
-					)}
-				</div>
-				<div className="hero-actions">
-					{canAdd ? (
-						<button type="button" className="primary large" onClick={() => void addWorkspace()}>
-							<IconFolderPlus size={17} />
-							添加工作区
-						</button>
-					) : null}
-					<button type="button" onClick={() => store.switchNode(LOCAL_NODE)}>
-						切换回本机
-					</button>
-				</div>
-			</div>
-		</div>
-	);
-}
-
 export function Welcome() {
 	const store = useStore();
 	const addWorkspace = useAddWorkspace();
 	const providers = useAppState((s) => s.providers);
-	const local = useAppState((s) => s.node === LOCAL_NODE);
-	if (!local) return <RemoteWelcome />;
 	return (
 		<div className="home">
 			<SidebarToggle floating />
@@ -120,6 +74,9 @@ export function WorkspaceHome({ workspaceId }: { workspaceId: string }) {
 	const store = useStore();
 	const workspace = useAppState((s) => s.workspaces).find((w) => w.id === workspaceId);
 	const sessions = useAppState((s) => s.sessions[workspaceId]);
+	const node = useAppState((s) => s.workspaceNodes[workspaceId] ?? LOCAL_NODE);
+	const nodeOnline = useAppState((s) => node === LOCAL_NODE || s.nodes[node]?.connection === "open");
+	useAppState((s) => s.peers);
 	if (!workspace) return null;
 	return (
 		<div className="home">
@@ -136,6 +93,12 @@ export function WorkspaceHome({ workspaceId }: { workspaceId: string }) {
 					<div className="workspace-hero-text">
 						<h1>{workspace.name}</h1>
 						<div className="workspace-meta">
+							{node === LOCAL_NODE ? null : (
+								<span className="pill node-pill" title="Agent 在这台电脑上运行">
+									<IconMonitor size={12} />
+									{store.nodeName(node)}
+								</span>
+							)}
 							<code title={workspace.path}>{workspace.path}</code>
 							<span className={`pill policy-pill ${workspace.policy}`}>
 								<IconShield size={12} />
@@ -154,7 +117,11 @@ export function WorkspaceHome({ workspaceId }: { workspaceId: string }) {
 						<h3>最近的会话</h3>
 						{sessions?.length ? <span className="muted small">共 {sessions.length} 个</span> : null}
 					</div>
-					{!sessions ? <div className="recent-empty">加载中…</div> : null}
+					{!sessions ? (
+						<div className="recent-empty">
+							{nodeOnline ? "加载中…" : `${store.nodeName(node)} 未连接，连接后显示会话`}
+						</div>
+					) : null}
 					{sessions && !sessions.length ? (
 						<div className="recent-empty">
 							<IconMessage size={22} />

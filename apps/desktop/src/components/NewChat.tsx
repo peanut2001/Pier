@@ -1,7 +1,7 @@
 import type { WorkspaceInfo } from "@pier/protocol";
 import { useEffect, useRef, useState } from "react";
 import { draftToPrompt } from "../lib/composer-text.ts";
-import { type Draft, NEW_CHAT_DRAFT, useAppState, useCanManageNode, useStore } from "../lib/store.tsx";
+import { type Draft, LOCAL_NODE, NEW_CHAT_DRAFT, useAppState, useComputers, useStore } from "../lib/store.tsx";
 import { readImages, useComposerInsert } from "./Composer.tsx";
 import { ComposerInput, type ComposerInputHandle } from "./ComposerInput.tsx";
 import { FilesPanelToggle } from "./FilesPanel.tsx";
@@ -14,70 +14,106 @@ import {
 	IconFolderPlus,
 	IconImage,
 	IconLoader,
+	IconMonitor,
 	IconX,
 	Logo,
 } from "./Icons.tsx";
 import { NoModelsBanner } from "./ModelsPanel.tsx";
 import { PolicyPicker, useOutsideClick } from "./SessionControls.tsx";
-import { SidebarToggle, useAddWorkspace } from "./Sidebar.tsx";
+import { AddWorkspaceItems, SidebarToggle, useAddWorkspace } from "./Sidebar.tsx";
 import { TerminalToggle } from "./TerminalPanel.tsx";
 
-/** Chip that picks the workspace the new chat will be created in. */
+/** Chip that picks the workspace (on any computer) the new chat will be created in. */
 function WorkspacePicker({ workspace, disabled }: { workspace?: WorkspaceInfo; disabled?: boolean }) {
 	const store = useStore();
-	const workspaces = useAppState((s) => s.workspaces);
+	const computers = useComputers();
+	const hasPeers = computers.length > 1;
+	const workspaceNode = useAppState((s) => (workspace ? s.workspaceNodes[workspace.id] : undefined));
+	const workspaceCount = useAppState((s) => s.workspaces.length);
 	const addWorkspace = useAddWorkspace();
-	const canAdd = useCanManageNode();
 	const [open, setOpen] = useState(false);
+	const [adding, setAdding] = useState(false);
 	const ref = useOutsideClick(open, () => setOpen(false));
+	const close = () => {
+		setOpen(false);
+		setAdding(false);
+	};
+	const item = (w: WorkspaceInfo) => {
+		const selected = w.id === workspace?.id;
+		return (
+			<button
+				type="button"
+				key={w.id}
+				className={`dropdown-item${selected ? " selected" : ""}`}
+				title={w.path}
+				onClick={() => {
+					close();
+					store.setNewChatWorkspace(w.id);
+				}}
+			>
+				<span className="workspace-item-text">
+					<span className="workspace-item-name">
+						<IconFolder size={14} />
+						{w.name}
+					</span>
+					<span className="muted">{w.path}</span>
+				</span>
+				{selected ? <IconCheck size={15} className="policy-check" /> : null}
+			</button>
+		);
+	};
+	const nodeLabel =
+		workspace && workspaceNode && workspaceNode !== LOCAL_NODE ? store.nodeName(workspaceNode) : undefined;
 	return (
 		<div className="dropdown" ref={ref}>
 			<button
 				type="button"
 				className={`chip workspace-chip${workspace ? "" : " empty"}`}
 				disabled={disabled}
-				onClick={() => setOpen(!open)}
-				title={workspace ? `在「${workspace.path}」中对话，点击更换工作区` : "选择这个对话所在的工作区"}
+				onClick={() => (open ? close() : setOpen(true))}
+				title={
+					workspace
+						? `在「${nodeLabel ? `${nodeLabel}：` : ""}${workspace.path}」中对话，点击更换工作区`
+						: "选择这个对话所在的工作区"
+				}
 			>
 				<IconFolder size={14} />
 				<span className="workspace-chip-name">{workspace ? workspace.name : "选择工作区"}</span>
+				{nodeLabel ? <span className="workspace-chip-node">{nodeLabel}</span> : null}
 				<IconChevronUp size={13} className="chip-caret" />
 			</button>
 			{open ? (
 				<div className="dropdown-menu up workspaces">
-					<div className="dropdown-group-title no-caps">在哪个工作区中对话？</div>
-					{workspaces.map((w) => {
-						const selected = w.id === workspace?.id;
-						return (
-							<button
-								type="button"
-								key={w.id}
-								className={`dropdown-item${selected ? " selected" : ""}`}
-								title={w.path}
-								onClick={() => {
-									setOpen(false);
-									store.setNewChatWorkspace(w.id);
-								}}
-							>
-								<span className="workspace-item-text">
-									<span className="workspace-item-name">
-										<IconFolder size={14} />
-										{w.name}
-									</span>
-									<span className="muted">{w.path}</span>
-								</span>
-								{selected ? <IconCheck size={15} className="policy-check" /> : null}
-							</button>
-						);
-					})}
-					{canAdd ? (
+					{adding ? (
+						<AddWorkspaceItems onDone={close} />
+					) : (
 						<>
-							{workspaces.length ? <div className="dropdown-separator" /> : null}
+							<div className="dropdown-group-title no-caps">在哪个工作区中对话？</div>
+							{hasPeers
+								? computers.map((computer) =>
+										computer.state.workspaces.length ? (
+											<div key={computer.id} className="workspace-picker-group">
+												<div className="dropdown-group-title no-caps workspace-picker-node">
+													<IconMonitor size={12} />
+													{computer.name}
+													{computer.local ? <span className="muted">本机</span> : null}
+													{computer.online ? null : <span className="muted">未连接</span>}
+												</div>
+												{computer.state.workspaces.map(item)}
+											</div>
+										) : null,
+									)
+								: computers[0]?.state.workspaces.map(item)}
+							{workspaceCount ? <div className="dropdown-separator" /> : null}
 							<button
 								type="button"
 								className="dropdown-item"
 								onClick={() => {
-									setOpen(false);
+									if (hasPeers) {
+										setAdding(true);
+										return;
+									}
+									close();
 									void addWorkspace();
 								}}
 							>
@@ -87,10 +123,6 @@ function WorkspacePicker({ workspace, disabled }: { workspace?: WorkspaceInfo; d
 								</span>
 							</button>
 						</>
-					) : workspaces.length ? null : (
-						<div className="dropdown-note">
-							那台电脑的 Pier 版本较旧，不支持远程添加工作区。请升级那台电脑上的 Pier，或在那台电脑上添加。
-						</div>
 					)}
 				</div>
 			) : null}
@@ -106,6 +138,7 @@ export function NewChatView({ workspaceId }: { workspaceId?: string }) {
 	const store = useStore();
 	const workspaces = useAppState((s) => s.workspaces);
 	const workspace = workspaces.find((w) => w.id === workspaceId);
+	const node = useAppState((s) => (workspaceId ? s.workspaceNodes[workspaceId] : undefined));
 	const online = useNodeStatus().online;
 	const [draft, setDraft] = useState<Draft>(() => store.draft(NEW_CHAT_DRAFT));
 	const [sending, setSending] = useState(false);
@@ -163,7 +196,9 @@ export function NewChatView({ workspaceId }: { workspaceId?: string }) {
 				)}
 				<p className="muted">
 					{workspace
-						? "发送第一条消息后会在这个工作区中创建会话，Agent 只在其中读写文件、运行命令。"
+						? node && node !== LOCAL_NODE
+							? `这个工作区在 ${store.nodeName(node)} 上：发送第一条消息后会在那里创建会话，Agent 只在其中读写文件、运行命令。`
+							: "发送第一条消息后会在这个工作区中创建会话，Agent 只在其中读写文件、运行命令。"
 						: workspaces.length
 							? "在输入框下方选择对话所在的工作区。"
 							: "先添加一个项目目录作为工作区。"}

@@ -2,7 +2,7 @@ import type { ChatController, ChatState } from "@pier/chat-state";
 import type { ApprovalPolicy, ForkPoint, ModelInfo, ThinkingLevel, WorkspaceInfo } from "@pier/protocol";
 import { useEffect, useRef, useState } from "react";
 import { POLICY_LABEL, POLICY_SUMMARY } from "../lib/format.ts";
-import { useCanManageNode, useStore } from "../lib/store.tsx";
+import { useCanManageWorkspace, useStore } from "../lib/store.tsx";
 import {
 	IconCheck,
 	IconChevronDown,
@@ -184,7 +184,7 @@ export function PolicyPicker({ workspace }: { workspace: WorkspaceInfo }) {
 	const ref = useOutsideClick(open, () => setOpen(false));
 	const current = workspace.policy;
 	// Paired computers on protocol 1.10+ let this one change their policies too.
-	const local = useCanManageNode();
+	const local = useCanManageWorkspace(workspace.id);
 	return (
 		<div className="dropdown" ref={ref}>
 			<button
