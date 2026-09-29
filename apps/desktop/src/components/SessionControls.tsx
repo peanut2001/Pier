@@ -15,6 +15,7 @@ import {
 	IconShield,
 	IconShieldAlert,
 	IconSparkles,
+	IconTrash,
 	IconX,
 } from "./Icons.tsx";
 import { Modal } from "./Modal.tsx";
@@ -297,9 +298,11 @@ export function SessionMenu({ chat, controller }: { chat: ChatState; controller:
 	const [open, setOpen] = useState(false);
 	const [dialog, setDialog] = useState<"fork" | "compact" | undefined>();
 	const [confirmClose, setConfirmClose] = useState(false);
+	const [confirmDelete, setConfirmDelete] = useState(false);
 	const ref = useOutsideClick(open, () => {
 		setOpen(false);
 		setConfirmClose(false);
+		setConfirmDelete(false);
 	});
 	const session = chat.session;
 	const idle = chat.runState === "idle";
@@ -357,6 +360,31 @@ export function SessionMenu({ chat, controller }: { chat: ChatState; controller:
 							<span className="menu-label">
 								<IconX size={14} />
 								{confirmClose ? "Agent 仍在运行：再次点击以中止并关闭" : "关闭会话"}
+							</span>
+						</button>
+						<button
+							type="button"
+							className="dropdown-item danger"
+							disabled={!session}
+							onClick={() => {
+								if (!session) return;
+								if (!confirmDelete) {
+									setConfirmDelete(true);
+									return;
+								}
+								const running = chat.runState !== "idle" && chat.runState !== "inactive";
+								setOpen(false);
+								setConfirmDelete(false);
+								void store.deleteSession(session, running);
+							}}
+						>
+							<span className="menu-label">
+								<IconTrash size={14} />
+								{confirmDelete
+									? chat.runState !== "idle" && chat.runState !== "inactive"
+										? "Agent 仍在运行：再次点击以中止并删除"
+										: "再次点击确认删除"
+									: "删除会话"}
 							</span>
 						</button>
 					</div>

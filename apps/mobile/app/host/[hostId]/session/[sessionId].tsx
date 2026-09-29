@@ -1,6 +1,6 @@
 import { type ChatController, contentText, isRole } from "@pier/chat-state";
 import type { ModelInfo, SessionSummary, ThinkingLevel } from "@pier/protocol";
-import { Stack, useLocalSearchParams } from "expo-router";
+import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
 	ActivityIndicator,
@@ -17,8 +17,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Composer } from "../../../../src/components/Composer.tsx";
 import { PendingRequests } from "../../../../src/components/PendingRequests.tsx";
 import { Transcript } from "../../../../src/components/Transcript.tsx";
-import { Button, Muted, Title } from "../../../../src/components/ui.tsx";
-import { RUN_STATE_LABEL, sessionTitle } from "../../../../src/format.ts";
+import { Button, confirmDestructive, Muted, Title } from "../../../../src/components/ui.tsx";
+import { isBusy, RUN_STATE_LABEL, sessionTitle } from "../../../../src/format.ts";
 import { useChatView, useMobileState, useStore } from "../../../../src/store.ts";
 import { usePalette } from "../../../../src/theme.ts";
 
@@ -40,6 +40,8 @@ function placeholderSummary(sessionId: string, workspaceId: string): SessionSumm
 }
 
 function SessionMenu({ chat, onClose }: { chat: ChatController; onClose: () => void }) {
+	const store = useStore();
+	const router = useRouter();
 	const p = usePalette();
 	const insets = useSafeAreaInsets();
 	const [models, setModels] = useState<ModelInfo[] | undefined>();
@@ -107,6 +109,27 @@ function SessionMenu({ chat, onClose }: { chat: ChatController; onClose: () => v
 							await chat.compact();
 							setBusy(false);
 							onClose();
+						}}
+					/>
+					<Title style={styles.sectionTitle}>会话</Title>
+					<Button
+						title="删除会话"
+						variant="danger"
+						disabled={!chat.chat.session}
+						onPress={() => {
+							const session = chat.chat.session;
+							if (!session) return;
+							const running = isBusy(chat.chat.runState);
+							confirmDestructive(
+								`删除“${sessionTitle(session)}”？`,
+								`${running ? "Agent 正在运行，会先中止。" : ""}会话文件会移到电脑上的 Pier 回收站（~/.pier/trash/sessions）。`,
+								"删除",
+								async () => {
+									if (!(await store.deleteSession(session, running))) return;
+									onClose();
+									if (router.canGoBack()) router.back();
+								},
+							);
 						}}
 					/>
 				</ScrollView>

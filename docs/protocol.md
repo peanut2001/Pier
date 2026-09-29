@@ -99,6 +99,7 @@
 | `session.create` | `{ workspaceId, name? }` | `{ session }`（已进入活跃池） |
 | `session.open` | `{ workspaceId, sessionId }` 或 `{ workspaceId, path }` | `{ session }`；`path` 必须出现在该工作区的会话列表中 |
 | `session.close` | `{ sessionId, force? }` | `{ closed }`；运行中且未 `force` → `CONFLICT` |
+| `session.delete` | `{ workspaceId, sessionId, force? }` | `{ deleted }`；关闭会话（`session.closed { reason: "deleted" }`）并把会话文件移到 `~/.pier/trash/sessions/<时间戳>-<文件名>`（可手动移回恢复）。活跃会话属于其他工作区 → `NOT_FOUND`；工作区中没有该会话 → `{ deleted: false }`；运行中且未 `force`，或会话正被其他 Pier Host 打开 → `CONFLICT`。从未写入磁盘的新会话只会被关闭；分叉出的子会话不受影响（1.6） |
 | `session.forkPoints` | `{ sessionId }` | `{ points: { entryId, text }[] }`（可 fork 的用户消息） |
 | `session.fork` | `{ sessionId, entryId, position?: "before"\|"at" }` | `{ session, selectedText? }`；生成**新**会话，原会话不变 |
 | `session.rename` | `{ sessionId, name }` | `{ session }` |
@@ -242,7 +243,7 @@ pi 终端界面自带的命令（`/model`、`/compact`、`/new`、`/fork`、`/na
 | `session.status` | `state: idle\|streaming\|compacting\|retrying` | 状态变化时发送 |
 | `session.model` | `model?, thinkingLevel` | `model.set` 之后 |
 | `session.replaced` | `previousSessionId, session` | 扩展命令（如 `/new`）替换了底层 pi 会话；帧的 `sessionId` 为旧 ID，随后会收到新会话的 `session.snapshot` |
-| `session.closed` | `reason: idle\|closed\|host_shutdown` | 会话离开活跃池 |
+| `session.closed` | `reason: idle\|closed\|deleted\|host_shutdown` | 会话离开活跃池；`deleted` 表示会话已被 `session.delete` 删除（1.6） |
 | `ui.request` | `request: UiRequest` | 对话框或审批请求，见 §6 |
 | `ui.resolved` | `requestId, resolution: answered\|timeout\|cancelled, response?, by?` | `by` 为回答者的 `connectionId` |
 | `ui.notify` | `message, level` | 扩展通知 |

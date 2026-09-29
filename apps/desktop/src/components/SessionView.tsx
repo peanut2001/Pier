@@ -88,7 +88,11 @@ function Banners({ chat }: { chat: ChatState }) {
 			{chat.closed ? (
 				<div className="banner warning">
 					<IconInfo size={15} />
-					{chat.closed === "host_shutdown" ? "Pier Host 已停止，会话已关闭。" : "会话已关闭。"}
+					{chat.closed === "host_shutdown"
+						? "Pier Host 已停止，会话已关闭。"
+						: chat.closed === "deleted"
+							? "会话已被删除。"
+							: "会话已关闭。"}
 				</div>
 			) : null}
 		</>

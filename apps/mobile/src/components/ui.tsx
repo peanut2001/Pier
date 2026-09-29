@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
 import {
 	ActivityIndicator,
+	Alert,
+	Platform,
 	Pressable,
 	type StyleProp,
 	StyleSheet,
@@ -12,6 +14,18 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useMobileState, useStore } from "../store.ts";
 import { type Palette, usePalette } from "../theme.ts";
+
+/** Ask before a destructive action (`window.confirm` on web). */
+export function confirmDestructive(title: string, message: string, action: string, onConfirm: () => void): void {
+	if (Platform.OS === "web") {
+		if (globalThis.confirm?.(`${title}\n\n${message}`)) onConfirm();
+		return;
+	}
+	Alert.alert(title, message, [
+		{ text: "取消", style: "cancel" },
+		{ text: action, style: "destructive", onPress: onConfirm },
+	]);
+}
 
 type Variant = "primary" | "secondary" | "danger" | "ghost";
 

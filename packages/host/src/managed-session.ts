@@ -512,7 +512,7 @@ export class ManagedSession {
 		return this.bridge.respond(requestId, response, by);
 	}
 
-	async dispose(reason: "idle" | "closed" | "host_shutdown"): Promise<void> {
+	async dispose(reason: "idle" | "closed" | "deleted" | "host_shutdown"): Promise<void> {
 		if (this.disposed) return;
 		this.bridge.cancelAll();
 		this.emit({ type: "session.closed", reason });

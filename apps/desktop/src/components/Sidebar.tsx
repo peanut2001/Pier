@@ -10,6 +10,7 @@ import {
 	IconMessagePlus,
 	IconPlus,
 	IconSettings,
+	IconTrash,
 	Logo,
 } from "./Icons.tsx";
 import { Modal } from "./Modal.tsx";
@@ -32,10 +33,60 @@ function SessionBadge({ session }: { session: SessionSummary }) {
 	const pending = live?.pendingUi.length ?? 0;
 	const state = live?.loaded ? live.runState : session.state;
 	if (pending) return <span className="badge-dot attention" title={`${pending} 个待处理请求`} />;
-	if (state === "streaming" || state === "retrying" || state === "compacting") {
+	if (isRunning(state)) {
 		return <span className="badge-dot running" title="运行中" />;
 	}
 	return null;
+}
+
+function isRunning(state: SessionSummary["state"]): boolean {
+	return state === "streaming" || state === "retrying" || state === "compacting";
+}
+
+function SessionItem({ session, selected }: { session: SessionSummary; selected: boolean }) {
+	const store = useStore();
+	useAppState((s) => s.chatsVersion);
+	const [confirm, setConfirm] = useState(false);
+	const [deleting, setDeleting] = useState(false);
+	const live = store.liveChat(session.id)?.chat;
+	const running = isRunning(live?.loaded ? live.runState : session.state);
+	return (
+		<div className={`session-item${confirm ? " confirming" : ""}`}>
+			<button
+				type="button"
+				className={`session-row${selected ? " selected" : ""}`}
+				onClick={() => store.selectSession(session)}
+				title={session.firstMessage || session.name || session.id}
+			>
+				<span className="session-row-title">{sessionTitle(session)}</span>
+				<SessionBadge session={session} />
+				<span className="session-row-time">{relativeTime(session.modifiedAt)}</span>
+			</button>
+			<button
+				type="button"
+				className={`session-delete${confirm ? " confirm" : ""}`}
+				disabled={deleting}
+				title={confirm ? undefined : "删除会话"}
+				aria-label={confirm ? "确认删除会话" : "删除会话"}
+				onBlur={() => setConfirm(false)}
+				onMouseLeave={() => setConfirm(false)}
+				onClick={async () => {
+					if (!confirm) {
+						setConfirm(true);
+						return;
+					}
+					setDeleting(true);
+					const deleted = await store.deleteSession(session, running);
+					if (!deleted) {
+						setDeleting(false);
+						setConfirm(false);
+					}
+				}}
+			>
+				{confirm ? running ? "中止并删除" : "删除" : <IconTrash size={13} />}
+			</button>
+		</div>
+	);
 }
 
 function WorkspaceGroup({ workspace, onSettings }: { workspace: WorkspaceInfo; onSettings: () => void }) {
@@ -87,17 +138,7 @@ function WorkspaceGroup({ workspace, onSettings }: { workspace: WorkspaceInfo; o
 					{!sessions ? <div className="session-empty">加载中…</div> : null}
 					{sessions && !sessions.length ? <div className="session-empty">还没有会话</div> : null}
 					{sessions?.slice(0, limit).map((session) => (
-						<button
-							type="button"
-							key={session.id}
-							className={`session-row${session.id === selectedSessionId ? " selected" : ""}`}
-							onClick={() => store.selectSession(session)}
-							title={session.firstMessage || session.name || session.id}
-						>
-							<span className="session-row-title">{sessionTitle(session)}</span>
-							<SessionBadge session={session} />
-							<span className="session-row-time">{relativeTime(session.modifiedAt)}</span>
-						</button>
+						<SessionItem key={session.id} session={session} selected={session.id === selectedSessionId} />
 					))}
 					{sessions && sessions.length > limit ? (
 						<button type="button" className="session-more" onClick={() => setLimit(limit + SESSION_PAGE)}>

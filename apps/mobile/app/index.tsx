@@ -1,21 +1,10 @@
 import { Link, Stack, useRouter } from "expo-router";
-import { ActivityIndicator, Alert, FlatList, Platform, Pressable, StyleSheet, Text, View } from "react-native";
-import { Button, Card, Muted, Screen, StatusDot, Title } from "../src/components/ui.tsx";
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from "react-native";
+import { Button, Card, confirmDestructive, Muted, Screen, StatusDot, Title } from "../src/components/ui.tsx";
 import { relativeTime } from "../src/format.ts";
 import type { PairedHost } from "../src/hosts.ts";
 import { useMobileState, useStore } from "../src/store.ts";
 import { usePalette } from "../src/theme.ts";
-
-function confirm(title: string, message: string, onConfirm: () => void): void {
-	if (Platform.OS === "web") {
-		if (globalThis.confirm?.(`${title}\n\n${message}`)) onConfirm();
-		return;
-	}
-	Alert.alert(title, message, [
-		{ text: "取消", style: "cancel" },
-		{ text: "移除", style: "destructive", onPress: onConfirm },
-	]);
-}
 
 function HostRow({ host }: { host: PairedHost }) {
 	const store = useStore();
@@ -29,9 +18,10 @@ function HostRow({ host }: { host: PairedHost }) {
 			testID={`host-${host.hostId}`}
 			onPress={() => router.push({ pathname: "/host/[hostId]", params: { hostId: host.hostId } })}
 			onLongPress={() =>
-				confirm(
+				confirmDestructive(
 					`移除“${host.hostName}”？`,
 					"只会删除这台手机上的配对信息。要彻底撤销访问，请在电脑的“手机与远程访问”中移除这台设备。",
+					"移除",
 					() => void store.forgetHost(host.hostId),
 				)
 			}

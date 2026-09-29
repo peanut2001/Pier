@@ -31,7 +31,7 @@ import {
 	type Transport,
 } from "./connection.ts";
 import type { ManagedSession } from "./managed-session.ts";
-import { accountPath, configPath, defaultPierDir, locksDir } from "./paths.ts";
+import { accountPath, configPath, defaultPierDir, locksDir, sessionTrashDir } from "./paths.ts";
 import { AccountManager } from "./pi/account.ts";
 import { PI_VERSION, PiEnvironment, type PiEnvironmentOptions, toModelInfo } from "./pi/environment.ts";
 import { NewApiManager } from "./pi/newapi.ts";
@@ -68,6 +68,7 @@ const AUDITED_METHODS = new Set<MethodName>([
 	"session.create",
 	"session.open",
 	"session.close",
+	"session.delete",
 	"session.fork",
 	"session.rename",
 	"session.prompt",
@@ -159,6 +160,7 @@ export class PierHost implements RequestHandler {
 			env,
 			config: this.config,
 			locksDir: locksDir(this.pierDir),
+			trashDir: sessionTrashDir(this.pierDir),
 			...(options.uiTimeoutMs === undefined ? {} : { uiTimeoutMs: options.uiTimeoutMs }),
 			...(options.idleTimeoutMs === undefined ? {} : { idleTimeoutMs: options.idleTimeoutMs }),
 			...(options.eventLogCapacity === undefined ? {} : { eventLogCapacity: options.eventLogCapacity }),
@@ -402,6 +404,12 @@ export class PierHost implements RequestHandler {
 				return { session: session.summary() };
 			},
 			"session.close": async (_ctx, params) => ({ closed: await this.pool.close(params.sessionId, params.force) }),
+			"session.delete": async (_ctx, params) => {
+				const workspace = this.requireWorkspace(params.workspaceId);
+				const deleted = await this.pool.delete(workspace, params.sessionId, params.force);
+				if (deleted) this.broadcast({ type: "session.listChanged", workspaceId: workspace.id });
+				return { deleted };
+			},
 			"session.forkPoints": (_ctx, params) => ({ points: this.pool.require(params.sessionId).forkPoints() }),
 			"session.fork": async (_ctx, params) => {
 				const source = this.pool.require(params.sessionId);

@@ -63,7 +63,7 @@ export interface ChatState {
 	retry?: { attempt: number; maxAttempts: number; errorMessage: string };
 	compacting?: { reason: string };
 	notices: Notice[];
-	closed?: "idle" | "closed" | "host_shutdown";
+	closed?: "idle" | "closed" | "deleted" | "host_shutdown";
 	/**
 	 * The transcript changed in a way the event stream does not describe (for example
 	 * after compaction). The client should fetch a fresh `session.snapshot` and apply it.

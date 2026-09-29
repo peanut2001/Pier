@@ -59,7 +59,7 @@ export type PierSessionEvent =
 	| { type: "session.snapshot"; snapshot: SessionSnapshot }
 	| { type: "session.status"; state: SessionRunState }
 	| { type: "session.replaced"; previousSessionId: string; session: SessionSummary }
-	| { type: "session.closed"; reason: "idle" | "closed" | "host_shutdown" }
+	| { type: "session.closed"; reason: "idle" | "closed" | "deleted" | "host_shutdown" }
 	| { type: "session.model"; model?: ModelInfo; thinkingLevel: string }
 	| { type: "ui.request"; request: UiRequest }
 	| {

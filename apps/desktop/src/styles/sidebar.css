@@ -178,6 +178,10 @@
 	border-left: 1px solid var(--border);
 }
 
+.session-item {
+	position: relative;
+}
+
 .session-row {
 	display: flex;
 	align-items: center;
@@ -194,7 +198,8 @@
 	font-weight: 400;
 }
 
-.session-row:hover:not(:disabled) {
+.session-row:hover:not(:disabled),
+.session-item:hover .session-row:not(.selected) {
 	background: var(--bg-hover);
 	color: var(--text);
 }
@@ -216,6 +221,52 @@
 	font-size: 11px;
 	font-weight: 400;
 	color: var(--text-faint);
+}
+
+.session-delete {
+	position: absolute;
+	top: 50%;
+	right: 4px;
+	transform: translateY(-50%);
+	display: none;
+	align-items: center;
+	justify-content: center;
+	min-width: 22px;
+	height: 22px;
+	padding: 0 5px;
+	border: 1px solid transparent;
+	border-radius: 6px;
+	background: transparent;
+	color: var(--text-faint);
+	font-size: 11px;
+	font-weight: 500;
+}
+
+.session-item:hover .session-delete,
+.session-delete:focus-visible,
+.session-item.confirming .session-delete {
+	display: inline-flex;
+}
+
+.session-item:hover .session-row-time,
+.session-item:focus-within .session-row-time,
+.session-item.confirming .session-row-time {
+	visibility: hidden;
+}
+
+.session-delete:hover:not(:disabled) {
+	background: var(--danger-soft);
+	color: var(--danger);
+}
+
+.session-delete.confirm {
+	border-color: var(--danger-line);
+	background: var(--bg);
+	color: var(--danger);
+}
+
+.session-delete.confirm:hover:not(:disabled) {
+	background: var(--danger-soft);
 }
 
 .session-empty,

@@ -74,6 +74,8 @@ export const MethodParamsSchemas = {
 		z.object({ workspaceId: Id, path: z.string().min(1).max(4096) }),
 	]),
 	"session.close": z.object({ ...SessionRef, force: z.boolean().optional() }),
+	/** Close the session and move its file to Pier's trash (1.6). Running sessions need `force`. */
+	"session.delete": z.object({ workspaceId: Id, sessionId: Id, force: z.boolean().optional() }),
 	"session.forkPoints": z.object(SessionRef),
 	"session.fork": z.object({ ...SessionRef, entryId: Id, position: z.enum(["before", "at"]).optional() }),
 	"session.rename": z.object({ ...SessionRef, name: z.string().min(1).max(200) }),
@@ -300,6 +302,7 @@ export interface MethodResults {
 	"session.create": { session: SessionSummary };
 	"session.open": { session: SessionSummary };
 	"session.close": { closed: boolean };
+	"session.delete": { deleted: boolean };
 	"session.forkPoints": { points: ForkPoint[] };
 	"session.fork": { session: SessionSummary; selectedText?: string };
 	"session.rename": { session: SessionSummary };

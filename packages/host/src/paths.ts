@@ -19,6 +19,11 @@ export function locksDir(pierDir: string): string {
 	return join(pierDir, "locks");
 }
 
+/** Deleted session files, kept so they can be restored by hand. */
+export function sessionTrashDir(pierDir: string): string {
+	return join(pierDir, "trash", "sessions");
+}
+
 /** Host static key for the remote secure channel. */
 export function identityPath(pierDir: string): string {
 	return join(pierDir, "identity.json");

@@ -969,6 +969,29 @@ export class PierStore {
 		await this.refreshSessions(session.workspaceId);
 	}
 
+	/**
+	 * Delete a session (the host moves its file to `~/.pier/trash/sessions`). `force` aborts a
+	 * running agent first. Resolves to whether it was deleted.
+	 */
+	async deleteSession(session: SessionSummary, force = false): Promise<boolean> {
+		const result = await this.call("删除会话", (c) =>
+			c.request("session.delete", { workspaceId: session.workspaceId, sessionId: session.id, force }),
+		);
+		if (!result) return false;
+		this.dropChat(session.id);
+		this.drafts.delete(session.id);
+		this.autoSend.delete(session.id);
+		this.set((s) => ({
+			sessions: {
+				...s.sessions,
+				[session.workspaceId]: (s.sessions[session.workspaceId] ?? []).filter((x) => x.id !== session.id),
+			},
+			...(s.selectedSessionId === session.id ? { selectedSessionId: undefined } : {}),
+		}));
+		await this.refreshSessions(session.workspaceId);
+		return true;
+	}
+
 	async renameSession(session: SessionSummary, name: string): Promise<void> {
 		const result = await this.call("重命名", (c) => c.request("session.rename", { sessionId: session.id, name }));
 		if (result) this.upsertSession(result.session);

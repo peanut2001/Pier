@@ -451,6 +451,28 @@ export class MobileStore {
 		}
 	}
 
+	/** Delete a session (moved to the computer's Pier trash). `force` aborts a running agent first. */
+	async deleteSession(session: SessionSummary, force = false): Promise<boolean> {
+		const client = this.client;
+		if (!client) return false;
+		try {
+			await client.request("session.delete", { workspaceId: session.workspaceId, sessionId: session.id, force });
+		} catch (error) {
+			this.toast("error", `删除会话失败：${errorText(error)}`);
+			return false;
+		}
+		this.chats.get(session.id)?.dispose();
+		this.chats.delete(session.id);
+		this.recent = this.recent.filter((id) => id !== session.id);
+		this.drafts.delete(session.id);
+		const workspaceId = session.workspaceId;
+		this.setHost((h) => ({
+			sessions: { ...h.sessions, [workspaceId]: (h.sessions[workspaceId] ?? []).filter((s) => s.id !== session.id) },
+		}));
+		this.scheduleRefresh(workspaceId);
+		return true;
+	}
+
 	draft(sessionId: string): string {
 		return this.drafts.get(sessionId) ?? "";
 	}

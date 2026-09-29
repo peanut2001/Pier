@@ -1,8 +1,10 @@
-import { resolve } from "node:path";
+import { constants, copyFileSync, existsSync, mkdirSync, renameSync, rmSync } from "node:fs";
+import { basename, join, resolve } from "node:path";
 import { PierProtocolError, type SessionSummary, type WorkspaceInfo } from "@pier/protocol";
 import type { ConfigStore } from "./config.ts";
 import { ManagedSession, type ManagedSessionOptions } from "./managed-session.ts";
 import type { PiEnvironment } from "./pi/environment.ts";
+import { SessionLock } from "./session-lock.ts";
 
 export const DEFAULT_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 
@@ -10,6 +12,8 @@ export interface SessionPoolOptions {
 	env: PiEnvironment;
 	config: ConfigStore;
 	locksDir: string;
+	/** Where deleted session files are moved. */
+	trashDir: string;
 	uiTimeoutMs?: number;
 	idleTimeoutMs?: number;
 	eventLogCapacity?: number;
@@ -24,6 +28,8 @@ export interface SessionPoolOptions {
 export class SessionPool {
 	private readonly sessions = new Map<string, ManagedSession>();
 	private readonly opening = new Map<string, Promise<ManagedSession>>();
+	/** Resolved paths of session files being deleted; they cannot be opened meanwhile. */
+	private readonly deleting = new Set<string>();
 	private sweeper: ReturnType<typeof setInterval> | undefined;
 
 	constructor(private readonly options: SessionPoolOptions) {}
@@ -110,6 +116,7 @@ export class SessionPool {
 		if (active) return active;
 
 		const key = resolve(info.path);
+		if (this.deleting.has(key)) throw new PierProtocolError("NOT_FOUND", "Session is being deleted");
 		const pending = this.opening.get(key);
 		if (pending) return pending;
 		const promise = (async () => {
@@ -169,7 +176,45 @@ export class SessionPool {
 		return [...summaries.values()].sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt));
 	}
 
-	async close(sessionId: string, force = false, reason: "closed" | "idle" = "closed"): Promise<boolean> {
+	/**
+	 * Close a session of `workspace` (if active) and move its file to the trash. Resolves to
+	 * false when the workspace has no such session. The file is taken from the active session
+	 * or the workspace's session list, so clients cannot make the host move arbitrary files.
+	 */
+	async delete(workspace: WorkspaceInfo, sessionId: string, force = false): Promise<boolean> {
+		let active = this.sessions.get(sessionId);
+		if (active && active.workspaceId !== workspace.id) {
+			throw new PierProtocolError("NOT_FOUND", "Session not in workspace");
+		}
+		let file = active?.session.sessionFile;
+		if (!active) {
+			const infos = await this.options.env.listSessions(workspace.path);
+			file = infos.find((i) => i.id === sessionId)?.path;
+			if (!file) return false;
+		}
+		const key = file ? resolve(file) : undefined;
+		if (key && this.deleting.has(key)) throw new PierProtocolError("CONFLICT", "Session is already being deleted");
+		if (key) this.deleting.add(key);
+		try {
+			const opening = key ? this.opening.get(key) : undefined;
+			if (opening) await opening.catch(() => undefined);
+			active = this.sessions.get(sessionId) ?? (file ? this.findActiveByPath(file) : undefined);
+			if (active) await this.close(active.id, force, "deleted");
+			if (!file || !existsSync(file)) return active !== undefined;
+			// Refuses when another Pier host has the session open.
+			const lock = SessionLock.acquire(this.options.locksDir, file);
+			try {
+				moveToTrash(file, this.options.trashDir);
+			} finally {
+				lock.release();
+			}
+			return true;
+		} finally {
+			if (key) this.deleting.delete(key);
+		}
+	}
+
+	async close(sessionId: string, force = false, reason: "closed" | "idle" | "deleted" = "closed"): Promise<boolean> {
 		const session = this.sessions.get(sessionId);
 		if (!session) return false;
 		if (session.state !== "idle" && !force) {
@@ -217,4 +262,18 @@ export class SessionPool {
 			),
 		);
 	}
+}
+
+/** Move a session file into `trashDir` under a unique name (copying across file systems). */
+function moveToTrash(file: string, trashDir: string): string {
+	mkdirSync(trashDir, { recursive: true, mode: 0o700 });
+	const target = join(trashDir, `${Date.now()}-${basename(file)}`);
+	try {
+		renameSync(file, target);
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "EXDEV") throw error;
+		copyFileSync(file, target, constants.COPYFILE_EXCL);
+		rmSync(file);
+	}
+	return target;
 }

@@ -1,5 +1,5 @@
-import { appendFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { appendFileSync, existsSync, mkdirSync, readdirSync } from "node:fs";
+import { basename, join } from "node:path";
 import type { PierClient } from "@pier/client";
 import {
 	PierProtocolError,
@@ -428,6 +428,79 @@ describe("sessions end to end", () => {
 		expect(snapshot.messages.length).toBeGreaterThanOrEqual(3);
 
 		await expectError(client.request("session.open", { workspaceId: workspace.id, path: "/etc/passwd" }), "NOT_FOUND");
+	});
+
+	it("deletes sessions into the trash", async () => {
+		const trash = join(t.root, "pier", "trash", "sessions");
+		t.faux.setResponses([fauxAssistantMessage("one"), fauxAssistantMessage("two")]);
+		const { session, rec } = await newSession();
+		await client.request("session.prompt", { sessionId: session.id, text: "keep me" });
+		await rec.waitForType("agent_settled");
+		const file = session.path ?? "";
+		expect(existsSync(file)).toBe(true);
+
+		// Active session: closed with reason "deleted", file moved to the trash.
+		expect(await client.request("session.delete", { workspaceId: workspace.id, sessionId: session.id })).toEqual({
+			deleted: true,
+		});
+		expect((await rec.waitForType("session.closed")).event.reason).toBe("deleted");
+		expect(existsSync(file)).toBe(false);
+		expect(readdirSync(trash).some((name) => name.endsWith(basename(file)))).toBe(true);
+		expect((await client.request("session.list", { workspaceId: workspace.id })).sessions).toEqual([]);
+		await expectError(
+			client.request("session.open", { workspaceId: workspace.id, sessionId: session.id }),
+			"NOT_FOUND",
+		);
+		expect(await client.request("session.delete", { workspaceId: workspace.id, sessionId: session.id })).toEqual({
+			deleted: false,
+		});
+
+		// Inactive session from the list.
+		const second = await newSession();
+		await client.request("session.prompt", { sessionId: second.session.id, text: "again" });
+		await second.rec.waitForType("agent_settled");
+		await client.request("session.close", { sessionId: second.session.id });
+		expect(await client.request("session.delete", { workspaceId: workspace.id, sessionId: second.session.id })).toEqual(
+			{ deleted: true },
+		);
+		expect(existsSync(second.session.path ?? "")).toBe(false);
+		expect(readdirSync(trash)).toHaveLength(2);
+
+		// A new session that was never written only needs closing.
+		const empty = await newSession();
+		expect(await client.request("session.delete", { workspaceId: workspace.id, sessionId: empty.session.id })).toEqual({
+			deleted: true,
+		});
+		expect(t.host.pool.size).toBe(0);
+
+		// Sessions of another workspace are not reachable through this one.
+		const otherDir = join(t.root, "other");
+		mkdirSync(otherDir);
+		const other = (await client.request("workspace.add", { path: otherDir })).workspace;
+		const foreign = await client.request("session.create", { workspaceId: other.id });
+		await expectError(
+			client.request("session.delete", { workspaceId: workspace.id, sessionId: foreign.session.id }),
+			"NOT_FOUND",
+		);
+	});
+
+	it("refuses to delete a running session unless forced", async () => {
+		const gate = deferred<void>();
+		t.faux.setResponses([
+			async () => {
+				await gate.promise;
+				return fauxAssistantMessage("late");
+			},
+		]);
+		const { session, rec } = await newSession();
+		await client.request("session.prompt", { sessionId: session.id, text: "work" });
+		await rec.waitFor((f) => f.event.type === "session.status" && f.event.state === "streaming");
+		const ref = { workspaceId: workspace.id, sessionId: session.id };
+		await expectError(client.request("session.delete", ref), "CONFLICT");
+		expect(await client.request("session.delete", { ...ref, force: true })).toEqual({ deleted: true });
+		gate.resolve();
+		expect(t.host.pool.size).toBe(0);
+		expect((await client.request("session.list", { workspaceId: workspace.id })).sessions).toEqual([]);
 	});
 
 	it("refuses to write after the session file changed outside Pier", async () => {

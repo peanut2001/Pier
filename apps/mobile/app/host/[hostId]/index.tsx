@@ -2,7 +2,7 @@ import type { SessionSummary, WorkspaceInfo } from "@pier/protocol";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, RefreshControl, SectionList, StyleSheet, Text, View } from "react-native";
-import { Button, Card, Muted, Pill, Screen, Title } from "../../../src/components/ui.tsx";
+import { Button, Card, confirmDestructive, Muted, Pill, Screen, Title } from "../../../src/components/ui.tsx";
 import { isBusy, RUN_STATE_LABEL, relativeTime, sessionTitle } from "../../../src/format.ts";
 import { useMobileState, useStore } from "../../../src/store.ts";
 import { usePalette } from "../../../src/theme.ts";
@@ -51,6 +51,7 @@ function ConnectionBanner({ hostId }: { hostId: string }) {
 }
 
 function SessionRow({ session, hostId }: { session: SessionSummary; hostId: string }) {
+	const store = useStore();
 	const router = useRouter();
 	const p = usePalette();
 	const pending = session.pendingUi ?? 0;
@@ -64,6 +65,15 @@ function SessionRow({ session, hostId }: { session: SessionSummary; hostId: stri
 					params: { hostId, sessionId: session.id, workspaceId: session.workspaceId },
 				})
 			}
+			onLongPress={() => {
+				const running = isBusy(session.state);
+				confirmDestructive(
+					`删除“${sessionTitle(session)}”？`,
+					`${running ? "Agent 正在运行，会先中止。" : ""}会话文件会移到电脑上的 Pier 回收站（~/.pier/trash/sessions）。`,
+					"删除",
+					() => void store.deleteSession(session, running),
+				);
+			}}
 		>
 			<View style={styles.sessionMain}>
 				<Text style={[styles.sessionTitle, { color: p.text }]} numberOfLines={2}>
