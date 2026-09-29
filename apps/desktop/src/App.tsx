@@ -104,7 +104,8 @@ export function App() {
 	const screen = useScreenWorkspace();
 	const screenWorkspace = screen.workspace;
 	const showFiles = filesPanel && hasWorkspace;
-	const columns = [...(sidebar ? ["264px"] : []), "minmax(0, 1fr)", ...(showFiles ? [`${filesPanelWidth}px`] : [])];
+	// The sidebar stays mounted and its shell animates between open and collapsed widths.
+	const columns = ["auto", "minmax(0, 1fr)", ...(showFiles ? [`${filesPanelWidth}px`] : [])];
 
 	// Ctrl/⌘+Shift+E toggles the file panel, like the explorer in editors; Ctrl/⌘+B the sidebar;
 	// Ctrl+` the terminal (Ctrl on macOS too, as in editors: ⌘+` cycles windows there).
@@ -140,7 +141,9 @@ export function App() {
 					className={`app${showFiles ? " with-files" : ""}${sidebar ? "" : " no-sidebar"}`}
 					style={{ gridTemplateColumns: columns.join(" ") }}
 				>
-					{sidebar ? <Sidebar /> : null}
+					<div className={`sidebar-shell${sidebar ? "" : " collapsed"}`} inert={!sidebar}>
+						<Sidebar open={sidebar} />
+					</div>
 					<main className="main">
 						<HostBanner onShowLogs={() => store.openSettings("logs")} />
 						<div className="main-body">
