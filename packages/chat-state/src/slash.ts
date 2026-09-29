@@ -1,4 +1,11 @@
-import type { ForkPoint, ModelInfo, SessionCommandInfo, ThinkingLevel } from "@pier/protocol";
+import type {
+	AgentRuntimeCapabilities,
+	AgentRuntimeId,
+	ForkPoint,
+	ModelInfo,
+	SessionCommandInfo,
+	ThinkingLevel,
+} from "@pier/protocol";
 
 /**
  * Slash commands typed into the composer.
@@ -56,10 +63,50 @@ const BUILTIN_NAMES = new Set(BUILTIN_COMMANDS.map((c) => c.name));
 /** Built-in commands whose argument is picked from a list. */
 export const ARGUMENT_COMMANDS: ReadonlySet<string> = new Set(["model", "thinking", "fork"]);
 
-/** Built-ins first; host commands that a built-in shadows are dropped. */
-export function mergeCommands(host: readonly SessionCommandInfo[]): SlashCommand[] {
-	const seen = new Set(BUILTIN_NAMES);
-	const merged: SlashCommand[] = [...BUILTIN_COMMANDS];
+/** Built-in commands that need a runtime capability (see `AgentRuntimeCapabilities`). */
+const BUILTIN_CAPABILITY: Partial<Record<string, keyof AgentRuntimeCapabilities>> = {
+	model: "setModel",
+	thinking: "thinking",
+	compact: "compact",
+	fork: "fork",
+	name: "rename",
+	reload: "reload",
+};
+
+/** The built-in commands a session supports (all of them without `capabilities`, as for pi). */
+export function builtinCommands(capabilities?: AgentRuntimeCapabilities): SlashCommand[] {
+	return BUILTIN_COMMANDS.filter((command) => {
+		const needs = BUILTIN_CAPABILITY[command.name];
+		return !needs || !capabilities || capabilities[needs];
+	});
+}
+
+/** Display name of an agent runtime. */
+export function agentRuntimeLabel(id: AgentRuntimeId | undefined): string {
+	switch (id) {
+		case undefined:
+		case "pi":
+			return "pi";
+		case "claude-code":
+			return "Claude Code";
+		case "codex":
+			return "Codex";
+		default:
+			return id;
+	}
+}
+
+/**
+ * Built-ins first; host commands that a built-in shadows are dropped. `capabilities` hides the
+ * built-ins the session's runtime does not support (its own command of that name stays).
+ */
+export function mergeCommands(
+	host: readonly SessionCommandInfo[],
+	capabilities?: AgentRuntimeCapabilities,
+): SlashCommand[] {
+	const builtins = builtinCommands(capabilities);
+	const seen = new Set(builtins.map((c) => c.name));
+	const merged: SlashCommand[] = [...builtins];
 	for (const command of host) {
 		if (seen.has(command.name)) continue;
 		seen.add(command.name);

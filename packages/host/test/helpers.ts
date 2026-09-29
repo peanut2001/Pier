@@ -78,7 +78,14 @@ export async function startTestHost(
 		...(options.extraResources ? { extraResources: options.extraResources } : {}),
 	});
 	const { tokensPerSecond: _ignored, extraResources: _extra, fileSettings: _file, ...hostOptions } = options;
-	const host = await PierHost.create({ pierDir: join(root, "pier"), env, localToken: TOKEN, ...hostOptions });
+	const host = await PierHost.create({
+		pierDir: join(root, "pier"),
+		env,
+		localToken: TOKEN,
+		// Only pi unless a test sets up other runtimes (the CLIs may be installed on this machine).
+		agents: { claudeCode: false, codex: false },
+		...hostOptions,
+	});
 	const gateway = await startLocalGateway(host);
 	const clients: PierClient[] = [];
 

@@ -509,3 +509,25 @@
 	flex: none;
 	color: var(--text-muted);
 }
+
+/* Which agent runs a session that pi does not (Claude Code, Codex). */
+.session-agent {
+	flex-shrink: 0;
+	font-size: 10px;
+	font-weight: 500;
+	line-height: 16px;
+	padding: 0 5px;
+	border-radius: 4px;
+	background: var(--bg-active);
+	color: var(--text-muted);
+}
+
+.session-agent.agent-claude-code {
+	color: #c96442;
+	background: color-mix(in srgb, #c96442 14%, transparent);
+}
+
+.session-agent.agent-codex {
+	color: #3b82f6;
+	background: color-mix(in srgb, #3b82f6 14%, transparent);
+}

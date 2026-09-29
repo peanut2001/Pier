@@ -1,4 +1,5 @@
-import type { SessionSummary, WorkspaceInfo } from "@pier/protocol";
+import { agentRuntimeLabel } from "@pier/chat-state";
+import type { AgentRuntimeId, SessionSummary, WorkspaceInfo } from "@pier/protocol";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -105,6 +106,7 @@ function SessionRow({ session, hostId }: { session: SessionSummary; hostId: stri
 				</Text>
 				<Text style={[styles.sessionMeta, { color: p.muted }]}>
 					{session.archived ? "已归档 · " : ""}
+					{session.runtime && session.runtime !== "pi" ? `${agentRuntimeLabel(session.runtime)} · ` : ""}
 					{relativeTime(session.modifiedAt)} · {session.messageCount} 条消息
 				</Text>
 			</View>
@@ -205,13 +207,26 @@ export default function HostScreen() {
 							small
 							disabled={view.connection !== "open"}
 							onPress={async () => {
-								const session = await store.createSession(section.workspace.id);
-								if (session) {
-									router.push({
-										pathname: "/host/[hostId]/session/[sessionId]",
-										params: { hostId, sessionId: session.id, workspaceId: session.workspaceId },
-									});
+								const workspaceId = section.workspace.id;
+								const create = async (runtime?: AgentRuntimeId) => {
+									const session = await store.createSession(workspaceId, runtime);
+									if (session) {
+										router.push({
+											pathname: "/host/[hostId]/session/[sessionId]",
+											params: { hostId, sessionId: session.id, workspaceId: session.workspaceId },
+										});
+									}
+								};
+								// Let the user pick the agent when the computer can run more than pi.
+								const runtimes = await store.availableRuntimes();
+								if (runtimes.length < 2 || Platform.OS === "web") {
+									await create();
+									return;
 								}
+								Alert.alert("由哪个 Agent 来做？", undefined, [
+									...runtimes.map((r) => ({ text: r.name, onPress: () => void create(r.id) })),
+									{ text: "取消", style: "cancel" as const },
+								]);
 							}}
 						/>
 					</View>

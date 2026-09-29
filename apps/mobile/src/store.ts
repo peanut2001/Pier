@@ -9,6 +9,8 @@ import {
 } from "@pier/client";
 import { ChannelError, fromBase64Url, type KeyPair, PairingUriError, parsePairingUri, toBase64Url } from "@pier/crypto";
 import {
+	type AgentRuntimeId,
+	type AgentRuntimeInfo,
 	type EventFrame,
 	type HostInfo,
 	parseProtocolVersion,
@@ -385,11 +387,26 @@ export class MobileStore {
 		}
 	}
 
-	async createSession(workspaceId: string): Promise<SessionSummary | undefined> {
+	/** Agent runtimes of the connected computer that can run sessions (none before protocol 1.22). */
+	async availableRuntimes(): Promise<AgentRuntimeInfo[]> {
+		const client = this.client;
+		const version = this.state.host.info ? parseProtocolVersion(this.state.host.info.protocolVersion) : undefined;
+		if (!client || !version || (version.major === 1 && version.minor < 22)) return [];
+		try {
+			return (await client.request("runtime.list", {})).runtimes.filter((r) => r.available);
+		} catch {
+			return [];
+		}
+	}
+
+	async createSession(workspaceId: string, runtime?: AgentRuntimeId): Promise<SessionSummary | undefined> {
 		const client = this.client;
 		if (!client) return undefined;
 		try {
-			const { session } = await client.request("session.create", { workspaceId });
+			const { session } = await client.request("session.create", {
+				workspaceId,
+				...(runtime && runtime !== "pi" ? { runtime } : {}),
+			});
 			this.setHost((h) => ({
 				sessions: { ...h.sessions, [workspaceId]: [session, ...(h.sessions[workspaceId] ?? [])] },
 			}));

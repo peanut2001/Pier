@@ -1,6 +1,8 @@
 import { ChatController, type ChatView } from "@pier/chat-state";
 import { CLOSE_DEVICE_REVOKED, type ClientState, PierClient } from "@pier/client";
 import type {
+	AgentRuntimeId,
+	AgentRuntimeInfo,
 	ApprovalPolicy,
 	AppUpdateStatus,
 	AuthMethod,
@@ -108,6 +110,11 @@ export function hostCanDeleteFiles(info: HostInfo | undefined): boolean {
 /** Whether a host can upload and download workspace files in chunks (`workspace.readBytes` / `upload*`, 1.21). */
 export function hostTransfersFiles(info: HostInfo | undefined): boolean {
 	return hostSpeaks(info, 21);
+}
+
+/** Whether a host runs agents other than pi (`runtime.list`, `session.create` with `runtime`, 1.22). */
+export function hostRunsAgents(info: HostInfo | undefined): boolean {
+	return hostSpeaks(info, 22);
 }
 
 /** Whether a host reports its resource usage (`host.stats`, 1.12). */
@@ -275,6 +282,8 @@ export interface AppState {
 	 * for later new chats until the app restarts.
 	 */
 	newChatModel: Record<string, NewChatModelChoice | undefined>;
+	/** The agent runtime picked on the new-chat screen, per computer (unset: pi). */
+	newChatRuntime: Record<string, AgentRuntimeId | undefined>;
 	toasts: Toast[];
 	/** Bumped whenever a live chat changes, so the sidebar can show running / approval badges. */
 	chatsVersion: number;
@@ -543,6 +552,7 @@ export class PierStore {
 			hostStats: {},
 			peerUpdates: {},
 			newChatModel: {},
+			newChatRuntime: {},
 		};
 		this.state = { ...state, ...deriveWorkspaces(state), ...deriveShown(state) };
 	}
@@ -2095,14 +2105,37 @@ export class PierStore {
 		this.set((s) => ({ newChatModel: { ...s.newChatModel, [node]: { ...s.newChatModel[node], ...choice } } }));
 	}
 
-	/**
-	 * The models a workspace's computer offers, with the model and thinking level a new session
-	 * there starts with (`current` / `thinkingLevel`, from hosts on protocol 1.19+).
-	 */
-	async listModels(workspaceId: string): Promise<MethodResult<"model.list">> {
+	/** The agent runtime new chats in `workspaceId` use. */
+	newChatRuntime(workspaceId: string): AgentRuntimeId {
+		return this.state.newChatRuntime[this.nodeOf(workspaceId)] ?? "pi";
+	}
+
+	/** Pick the agent runtime for new chats on the computer of `workspaceId` (resets the model). */
+	setNewChatRuntime(workspaceId: string, runtime: AgentRuntimeId): void {
+		const node = this.nodeOf(workspaceId);
+		if ((this.state.newChatRuntime[node] ?? "pi") === runtime) return;
+		this.set((s) => ({
+			newChatRuntime: { ...s.newChatRuntime, [node]: runtime },
+			newChatModel: { ...s.newChatModel, [node]: undefined },
+		}));
+	}
+
+	/** The agent runtimes of a workspace's computer (only pi on hosts older than 1.22). */
+	async listRuntimes(workspaceId: string): Promise<AgentRuntimeInfo[]> {
 		const client = this.clientFor(workspaceId);
 		if (!client) throw new Error("未连接到工作区所在的电脑");
-		return client.request("model.list", { workspaceId });
+		if (!hostRunsAgents(this.state.nodes[this.nodeOf(workspaceId)]?.hostInfo)) return [];
+		return (await client.request("runtime.list", {})).runtimes;
+	}
+
+	/**
+	 * The models a workspace's computer offers for `runtime` (default pi), with the model and
+	 * thinking level a new session there starts with (`current` / `thinkingLevel`, 1.19+).
+	 */
+	async listModels(workspaceId: string, runtime: AgentRuntimeId = "pi"): Promise<MethodResult<"model.list">> {
+		const client = this.clientFor(workspaceId);
+		if (!client) throw new Error("未连接到工作区所在的电脑");
+		return client.request("model.list", { workspaceId, ...(runtime !== "pi" ? { runtime } : {}) });
 	}
 
 	/**
@@ -2117,7 +2150,10 @@ export class PierStore {
 			return false;
 		}
 		const client = this.clientFor(workspaceId);
-		const result = await this.callWith(client, "新建会话", (c) => c.request("session.create", { workspaceId }));
+		const runtime = this.newChatRuntime(workspaceId);
+		const result = await this.callWith(client, "新建会话", (c) =>
+			c.request("session.create", { workspaceId, ...(runtime !== "pi" ? { runtime } : {}) }),
+		);
 		if (!result) return false;
 		const session = result.session;
 		const choice = this.state.newChatModel[this.nodeOf(workspaceId)];

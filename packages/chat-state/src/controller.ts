@@ -1,7 +1,7 @@
 import type { PierClient, Subscription } from "@pier/client";
 import type { EventFrame, ImageInput, SessionSummary, ThinkingLevel, UiResponse } from "@pier/protocol";
 import { applySnapshot, type ChatState, clearResync, dismissNotice, initialChatState, reduceChat } from "./reducer.ts";
-import { BUILTIN_COMMANDS, mergeCommands, type SlashCommand } from "./slash.ts";
+import { BUILTIN_COMMANDS, builtinCommands, mergeCommands, type SlashCommand } from "./slash.ts";
 
 /** Slash commands of a session, and whether the host could list its own (older hosts cannot). */
 export interface CommandList {
@@ -161,8 +161,13 @@ export class ChatController {
 		const sessionId = this.sessionId;
 		const loading = this.client
 			.request("session.commands", { sessionId })
-			.then((result): CommandList => ({ commands: mergeCommands(result.commands), known: true }))
-			.catch((): CommandList => ({ commands: [...BUILTIN_COMMANDS], known: false }))
+			.then(
+				(result): CommandList => ({
+					commands: mergeCommands(result.commands, this.chat.capabilities),
+					known: true,
+				}),
+			)
+			.catch((): CommandList => ({ commands: builtinCommands(this.chat.capabilities), known: false }))
 			.then((list) => {
 				if (this.sessionId === sessionId) this.commandList = list;
 				return list;

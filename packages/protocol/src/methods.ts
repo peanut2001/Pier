@@ -4,6 +4,7 @@ import {
 	type AccountLoginResult,
 	type AccountOverview,
 	type AccountStatus,
+	type AgentRuntimeInfo,
 	ApprovalPolicySchema,
 	type AppUpdateStatus,
 	AuthMethodSchema,
@@ -60,6 +61,8 @@ import {
 } from "./domain.ts";
 
 const Id = z.string().min(1).max(256);
+/** Agent runtime id (1.22), e.g. `pi`, `claude-code`, `codex`. */
+const RuntimeId = z.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
 const SessionRef = { sessionId: Id };
 const Text = z.string().max(1_000_000);
 const Images = z.array(ImageInputSchema).max(16).optional();
@@ -180,8 +183,16 @@ export const MethodParamsSchemas = {
 	/** Abandon an upload and delete what was received (1.21). */
 	"workspace.uploadCancel": z.object({ uploadId: Id }),
 
+	/** Agent runtimes the host knows and whether they can run sessions (1.22). */
+	"runtime.list": z.object({}).optional(),
+
 	"session.list": z.object({ workspaceId: Id }),
-	"session.create": z.object({ workspaceId: Id, name: z.string().min(1).max(200).optional() }),
+	/** `runtime` (1.22) picks the agent runtime; the default is `pi`. */
+	"session.create": z.object({
+		workspaceId: Id,
+		name: z.string().min(1).max(200).optional(),
+		runtime: RuntimeId.optional(),
+	}),
 	"session.open": z.union([
 		z.object({ workspaceId: Id, sessionId: Id }),
 		z.object({ workspaceId: Id, path: z.string().min(1).max(4096) }),
@@ -238,7 +249,14 @@ export const MethodParamsSchemas = {
 	 * `workspaceId` without `sessionId` (1.19): also report the model and thinking level a new
 	 * session in that workspace starts with.
 	 */
-	"model.list": z.object({ sessionId: Id.optional(), workspaceId: Id.optional() }).optional(),
+	"model.list": z
+		.object({
+			sessionId: Id.optional(),
+			workspaceId: Id.optional(),
+			/** Without `sessionId` (1.22): list the models of this runtime (default `pi`). */
+			runtime: RuntimeId.optional(),
+		})
+		.optional(),
 	"model.set": z.object({ ...SessionRef, provider: Id, modelId: Id, persist: z.boolean().optional() }),
 	"thinking.set": z.object({ ...SessionRef, level: ThinkingLevelSchema, persist: z.boolean().optional() }),
 	"model.setDefault": z.object({ provider: Id, modelId: Id }),
@@ -547,6 +565,7 @@ export interface MethodResults {
 	"workspace.uploadChunk": { received: number };
 	"workspace.uploadFinish": WorkspaceFileWriteResult;
 	"workspace.uploadCancel": { cancelled: boolean };
+	"runtime.list": { runtimes: AgentRuntimeInfo[] };
 	"session.list": { sessions: SessionSummary[] };
 	"session.create": { session: SessionSummary };
 	"session.open": { session: SessionSummary };

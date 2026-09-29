@@ -153,6 +153,8 @@ interface ModelMenuProps {
 	loading?: boolean;
 	disabled?: boolean;
 	loadModels: () => Promise<ModelInfo[]>;
+	/** Models come from Pier's providers (pi); other agents bring their own. */
+	manageable?: boolean;
 	onModel: (model: ModelInfo) => void;
 	onThinking: (level: ThinkingLevel) => void;
 }
@@ -161,7 +163,17 @@ interface ModelMenuProps {
  * The composer's model chip: a popover with the thinking-level slider and the current model,
  * which opens the model list (as in ChatGPT / Codex).
  */
-function ModelMenu({ node, model, thinkingLevel, loading, disabled, loadModels, onModel, onThinking }: ModelMenuProps) {
+function ModelMenu({
+	node,
+	model,
+	thinkingLevel,
+	loading,
+	disabled,
+	loadModels,
+	manageable = true,
+	onModel,
+	onThinking,
+}: ModelMenuProps) {
 	const store = useStore();
 	const [open, setOpen] = useState(false);
 	const [view, setView] = useState<"main" | "models">("main");
@@ -199,7 +211,7 @@ function ModelMenu({ node, model, thinkingLevel, loading, disabled, loadModels, 
 	const groups = new Map<string, ModelInfo[]>();
 	for (const m of visible) groups.set(m.provider, [...(groups.get(m.provider) ?? []), m]);
 
-	const manage = (
+	const manage = manageable ? (
 		<button
 			type="button"
 			className="dropdown-item manage-models"
@@ -213,7 +225,7 @@ function ModelMenu({ node, model, thinkingLevel, loading, disabled, loadModels, 
 				{models && !models.length ? "配置模型…" : "管理模型与服务商…"}
 			</span>
 		</button>
-	);
+	) : null;
 
 	return (
 		<div className="dropdown" ref={ref}>
@@ -340,7 +352,8 @@ export function SessionModelPicker({ chat, controller }: { chat: ChatState; cont
 			model={chat.model}
 			thinkingLevel={chat.thinkingLevel}
 			loading={!chat.loaded}
-			disabled={!!chat.closed}
+			disabled={!!chat.closed || chat.capabilities?.setModel === false}
+			manageable={(chat.session?.runtime ?? "pi") === "pi"}
 			loadModels={() => controller.listModels().then((r) => r.models)}
 			onModel={(m) => void controller.setModel(m.provider, m.id)}
 			onThinking={(level) => void controller.setThinking(level)}
@@ -357,6 +370,7 @@ export function NewChatModelPicker({ workspace, disabled }: { workspace: Workspa
 	const node = useAppState((s) => s.workspaceNodes[workspace.id] ?? s.node ?? LOCAL_NODE);
 	const online = useAppState((s) => s.nodes[node]?.connection === "open");
 	const choice = useAppState((s) => s.newChatModel[node]);
+	const runtime = useAppState((s) => s.newChatRuntime[node] ?? "pi");
 	// Reload the defaults when this computer's providers or default model change.
 	const providers = useAppState((s) => s.providers);
 	const [defaults, setDefaults] = useState<
@@ -367,8 +381,9 @@ export function NewChatModelPicker({ workspace, disabled }: { workspace: Workspa
 	useEffect(() => {
 		if (!online) return;
 		let live = true;
+		setDefaults(undefined);
 		store
-			.listModels(workspace.id)
+			.listModels(workspace.id, runtime)
 			.then((r) => {
 				if (!live) return;
 				setDefaults({
@@ -383,7 +398,7 @@ export function NewChatModelPicker({ workspace, disabled }: { workspace: Workspa
 		return () => {
 			live = false;
 		};
-	}, [store, workspace.id, online, providers]);
+	}, [store, workspace.id, online, providers, runtime]);
 
 	// A picked model that is no longer available falls back to the default.
 	const stale = !!choice?.model && !!defaults && !defaults.models.some((m) => sameModel(m, choice.model));
@@ -405,8 +420,9 @@ export function NewChatModelPicker({ workspace, disabled }: { workspace: Workspa
 			thinkingLevel={level}
 			loading={!defaults}
 			{...(disabled ? { disabled } : {})}
+			manageable={runtime === "pi"}
 			loadModels={() =>
-				store.listModels(workspace.id).then((r) => {
+				store.listModels(workspace.id, runtime).then((r) => {
 					setDefaults((d) => ({ ...d, models: r.models }));
 					return r.models;
 				})

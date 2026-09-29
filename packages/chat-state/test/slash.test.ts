@@ -1,7 +1,9 @@
 import type { ModelInfo, ThinkingLevel } from "@pier/protocol";
 import { describe, expect, it, vi } from "vitest";
 import {
+	agentRuntimeLabel,
 	BUILTIN_COMMANDS,
+	builtinCommands,
 	filterCommands,
 	loadArgumentOptions,
 	matchModel,
@@ -186,5 +188,38 @@ describe("built-in commands", () => {
 		expect(await runBuiltin(t, "reload", "", a)).toEqual({ kind: "failed" });
 		expect(t.compact).not.toHaveBeenCalled();
 		expect(t.reload).not.toHaveBeenCalled();
+	});
+});
+
+describe("runtime capabilities", () => {
+	const capabilities = {
+		steer: true,
+		followUp: true,
+		compact: true,
+		fork: false,
+		rename: true,
+		setModel: true,
+		thinking: true,
+		reload: false,
+		images: true,
+		piExtensions: false,
+	};
+
+	it("hides built-ins the runtime does not support", () => {
+		expect(builtinCommands(capabilities).map((c) => c.name)).toEqual(["new", "model", "thinking", "compact", "name"]);
+		expect(builtinCommands().map((c) => c.name)).toEqual(BUILTIN_COMMANDS.map((c) => c.name));
+		// The runtime's own command of a hidden built-in's name stays.
+		const merged = mergeCommands([{ name: "reload", source: "prompt" }], capabilities);
+		expect(merged.find((c) => c.name === "reload")?.source).toBe("prompt");
+	});
+
+	it("names agent runtimes", () => {
+		expect([undefined, "pi", "claude-code", "codex", "other"].map((id) => agentRuntimeLabel(id))).toEqual([
+			"pi",
+			"pi",
+			"Claude Code",
+			"Codex",
+			"other",
+		]);
 	});
 });

@@ -2,6 +2,9 @@ import { constants, copyFileSync, existsSync, mkdirSync, renameSync, rmSync } fr
 import { basename, join, resolve } from "node:path";
 import { stripImageHints } from "@pier/chat-state";
 import {
+	type AgentRuntimeId,
+	type AgentRuntimeInfo,
+	DEFAULT_AGENT_RUNTIME,
 	PierProtocolError,
 	type SessionCleanupResult,
 	type SessionCleanupScope,
@@ -9,8 +12,8 @@ import {
 	type WorkspaceInfo,
 } from "@pier/protocol";
 import type { ConfigStore } from "./config.ts";
-import { ManagedSession, type ManagedSessionOptions } from "./managed-session.ts";
-import type { PiEnvironment } from "./pi/environment.ts";
+import type { ManagedSession, ManagedSessionOptions } from "./managed-session.ts";
+import type { AgentRuntime, StoredSession } from "./runtimes/types.ts";
 import type { SessionArchiveStore } from "./session-archive.ts";
 import { SessionLock } from "./session-lock.ts";
 
@@ -25,7 +28,8 @@ export interface SessionCleanupOptions {
 }
 
 export interface SessionPoolOptions {
-	env: PiEnvironment;
+	/** Agent runtimes; the first one is the default for new sessions. */
+	runtimes: AgentRuntime[];
 	config: ConfigStore;
 	locksDir: string;
 	/** Where deleted session files are moved. */
@@ -40,9 +44,15 @@ export interface SessionPoolOptions {
 	onSessionReplaced?: (session: ManagedSession, previousId: string) => void;
 	onSessionClosed?: (session: ManagedSession) => void;
 	onSessionActivity?: (session: ManagedSession) => void;
+	log?: (message: string) => void;
 }
 
-/** Active session pool keyed by pi session id, loaded on demand and evicted when idle. */
+interface StoredEntry {
+	runtime: AgentRuntime;
+	stored: StoredSession;
+}
+
+/** Active session pool keyed by session id, loaded on demand and evicted when idle. */
 export class SessionPool {
 	private readonly sessions = new Map<string, ManagedSession>();
 	private readonly opening = new Map<string, Promise<ManagedSession>>();
@@ -50,7 +60,41 @@ export class SessionPool {
 	private readonly deleting = new Set<string>();
 	private sweeper: ReturnType<typeof setInterval> | undefined;
 
-	constructor(private readonly options: SessionPoolOptions) {}
+	constructor(private readonly options: SessionPoolOptions) {
+		if (options.runtimes.length === 0) throw new Error("SessionPool needs at least one runtime");
+	}
+
+	get runtimes(): readonly AgentRuntime[] {
+		return this.options.runtimes;
+	}
+
+	runtime(id: AgentRuntimeId = DEFAULT_AGENT_RUNTIME): AgentRuntime {
+		const runtime = this.options.runtimes.find((r) => r.id === id);
+		if (!runtime) throw new PierProtocolError("NOT_FOUND", `Unknown agent runtime ${id}`);
+		return runtime;
+	}
+
+	async runtimeInfos(): Promise<AgentRuntimeInfo[]> {
+		return Promise.all(this.options.runtimes.map((r) => r.info()));
+	}
+
+	/** Sessions every runtime stored for the workspace. A failing runtime is skipped (and logged). */
+	private async listStored(workspace: WorkspaceInfo): Promise<StoredEntry[]> {
+		const lists = await Promise.all(
+			this.options.runtimes.map(async (runtime) => {
+				try {
+					return (await runtime.listSessions(workspace)).map((stored) => ({ runtime, stored }));
+				} catch (error) {
+					if (runtime.id === DEFAULT_AGENT_RUNTIME) throw error;
+					this.options.log?.(
+						`listing ${runtime.id} sessions failed: ${error instanceof Error ? error.message : String(error)}`,
+					);
+					return [];
+				}
+			}),
+		);
+		return lists.flat();
+	}
 
 	get size(): number {
 		return this.sessions.size;
@@ -81,7 +125,6 @@ export class SessionPool {
 
 	private sessionOptions(workspace: WorkspaceInfo): ManagedSessionOptions {
 		return {
-			env: this.options.env,
 			workspace: this.workspaceAccessor(workspace),
 			locksDir: this.options.locksDir,
 			...(this.options.uiTimeoutMs === undefined ? {} : { uiTimeoutMs: this.options.uiTimeoutMs }),
@@ -101,15 +144,25 @@ export class SessionPool {
 		return session;
 	}
 
-	async create(workspace: WorkspaceInfo, name?: string): Promise<ManagedSession> {
-		const sessionManager = this.options.env.newSessionManager(workspace.path);
-		const session = this.add(await ManagedSession.start(this.sessionOptions(workspace), sessionManager));
-		if (name) session.rename(name);
+	async create(workspace: WorkspaceInfo, name?: string, runtimeId?: AgentRuntimeId): Promise<ManagedSession> {
+		const runtime = this.runtime(runtimeId);
+		const info = await runtime.info();
+		if (!info.available) {
+			throw new PierProtocolError("CONFLICT", info.reason ?? `${runtime.name} is not available on this computer`);
+		}
+		const session = this.add(await runtime.create(this.sessionOptions(workspace)));
+		if (name) {
+			try {
+				await session.rename(name);
+			} catch (error) {
+				this.options.log?.(`naming the new session failed: ${error instanceof Error ? error.message : error}`);
+			}
+		}
 		return session;
 	}
 
 	private findActiveByPath(path: string): ManagedSession | undefined {
-		return this.all().find((s) => s.session.sessionFile && resolve(s.session.sessionFile) === resolve(path));
+		return this.all().find((s) => s.sessionFile && resolve(s.sessionFile) === resolve(path));
 	}
 
 	/**
@@ -124,24 +177,22 @@ export class SessionPool {
 				return active;
 			}
 		}
-		const infos = await this.options.env.listSessions(workspace.path);
-		const info =
+		const entries = await this.listStored(workspace);
+		const entry =
 			"sessionId" in target
-				? infos.find((i) => i.id === target.sessionId)
-				: infos.find((i) => resolve(i.path) === resolve(target.path));
-		if (!info) throw new PierProtocolError("NOT_FOUND", "Session not found in this workspace");
+				? entries.find((e) => e.stored.id === target.sessionId)
+				: entries.find((e) => e.stored.path && resolve(e.stored.path) === resolve(target.path));
+		if (!entry) throw new PierProtocolError("NOT_FOUND", "Session not found in this workspace");
+		const { runtime, stored } = entry;
 
-		const active = this.findActiveByPath(info.path) ?? this.sessions.get(info.id);
+		const active = (stored.path ? this.findActiveByPath(stored.path) : undefined) ?? this.sessions.get(stored.id);
 		if (active) return active;
 
-		const key = resolve(info.path);
+		const key = stored.path ? resolve(stored.path) : `${runtime.id}:${stored.id}`;
 		if (this.deleting.has(key)) throw new PierProtocolError("NOT_FOUND", "Session is being deleted");
 		const pending = this.opening.get(key);
 		if (pending) return pending;
-		const promise = (async () => {
-			const sessionManager = this.options.env.openSessionManager(info.path, workspace.path);
-			return this.add(await ManagedSession.start(this.sessionOptions(workspace), sessionManager));
-		})();
+		const promise = (async () => this.add(await runtime.open(this.sessionOptions(workspace), stored)))();
 		this.opening.set(key, promise);
 		try {
 			return await promise;
@@ -157,24 +208,21 @@ export class SessionPool {
 	): Promise<{ session: ManagedSession; selectedText?: string }> {
 		const workspace = this.options.config.getWorkspace(source.workspaceId);
 		if (!workspace) throw new PierProtocolError("NOT_FOUND", "Workspace no longer exists");
-		let forked: ReturnType<PiEnvironment["forkSessionManager"]>;
-		try {
-			forked = this.options.env.forkSessionManager(source.session, entryId, position);
-		} catch (error) {
-			throw new PierProtocolError("BAD_REQUEST", error instanceof Error ? error.message : String(error));
-		}
-		const session = this.add(await ManagedSession.start(this.sessionOptions(workspace), forked.sessionManager));
-		return forked.selectedText === undefined ? { session } : { session, selectedText: forked.selectedText };
+		if (!source.capabilities.fork) throw new PierProtocolError("UNSUPPORTED", "This session cannot be forked");
+		const runtime = this.runtime(source.runtimeId);
+		const forked = await runtime.fork(source, entryId, position, this.sessionOptions(workspace));
+		this.add(forked.session);
+		return forked;
 	}
 
 	async list(workspace: WorkspaceInfo): Promise<SessionSummary[]> {
-		const infos = await this.options.env.listSessions(workspace.path);
+		const entries = await this.listStored(workspace);
 		const summaries = new Map<string, SessionSummary>();
-		for (const info of infos) {
+		for (const { runtime, stored: info } of entries) {
 			summaries.set(info.id, {
 				id: info.id,
 				workspaceId: workspace.id,
-				path: info.path,
+				...(info.path ? { path: info.path } : {}),
 				...(info.name ? { name: info.name } : {}),
 				cwd: info.cwd,
 				createdAt: info.created.toISOString(),
@@ -185,6 +233,7 @@ export class SessionPool {
 				active: false,
 				state: "inactive",
 				...(this.options.archive.has(info.id) ? { archived: true } : {}),
+				runtime: runtime.id,
 			});
 		}
 		for (const session of this.all()) {
@@ -206,11 +255,12 @@ export class SessionPool {
 		if (active && active.workspaceId !== workspace.id) {
 			throw new PierProtocolError("NOT_FOUND", "Session not in workspace");
 		}
-		let file = active?.session.sessionFile;
-		if (!active) {
-			const infos = await this.options.env.listSessions(workspace.path);
-			file = infos.find((i) => i.id === sessionId)?.path;
-			if (!file) return false;
+		let file = active?.sessionFile;
+		let entry: StoredEntry | undefined;
+		if (!active || active.runtimeId !== DEFAULT_AGENT_RUNTIME) {
+			entry = (await this.listStored(workspace)).find((e) => e.stored.id === sessionId);
+			if (!active && !entry) return false;
+			file ??= entry?.stored.path;
 		}
 		const key = file ? resolve(file) : undefined;
 		if (key && this.deleting.has(key)) throw new PierProtocolError("CONFLICT", "Session is already being deleted");
@@ -220,6 +270,10 @@ export class SessionPool {
 			if (opening) await opening.catch(() => undefined);
 			active = this.sessions.get(sessionId) ?? (file ? this.findActiveByPath(file) : undefined);
 			if (active) await this.close(active.id, force, "deleted");
+			if (entry?.runtime.deleteStored && (await entry.runtime.deleteStored(workspace, entry.stored))) {
+				this.options.archive.set([sessionId], false);
+				return true;
+			}
 			if (!file || !existsSync(file)) {
 				this.options.archive.set([sessionId], false);
 				return active !== undefined;
@@ -344,6 +398,7 @@ export class SessionPool {
 				]),
 			),
 		);
+		await Promise.allSettled(this.options.runtimes.map((runtime) => runtime.dispose()));
 	}
 }
 

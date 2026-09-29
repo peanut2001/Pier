@@ -1,4 +1,4 @@
-# Pier 协议 v1.21
+# Pier 协议 v1.22
 
 > 实现：`packages/protocol`（zod schema + TS 类型，Host 与所有客户端共享）。
 > 本文档描述线上格式与语义；字段的权威定义以 `packages/protocol/src` 为准。
@@ -59,7 +59,7 @@
 
 ```jsonc
 { "type": "req", "id": "h", "method": "host.hello", "params": {
-  "protocolVersion": "1.21",
+  "protocolVersion": "1.22",
   "client": { "name": "pier-desktop", "version": "0.1.0", "platform": "darwin" },
   "token": "<本地 token>",       // 本地连接必填；远程连接由加密通道认证，不需要
   "coalesceMs": 50               // 可选：合并流式增量的窗口（0–1000ms，默认 0）
@@ -136,12 +136,32 @@ sidecar 的 stdio 协议：桌面端用 `--shell-terminals` 启动 Host，声明
 | `workspace.uploadFinish` | `{ uploadId }` | `{ path, size, modifiedAt }`；把收齐的上传移动到目标路径（1.21）。未收齐时 `BAD_REQUEST`（`data.received`），上传保留可继续；目标在上传期间变成目录，或未给 `overwrite` 而目标已出现时 `CONFLICT`，上传被丢弃。远程调用写入审计日志 |
 | `workspace.uploadCancel` | `{ uploadId }` | `{ cancelled }`；取消上传并删除已收到的数据（1.21）。上传不存在或属于其他连接时 `cancelled: false` |
 
+### Agent 运行时（1.22）
+
+一个 Host 可以运行多种 Agent：内置的 **pi**（`pi`），以及这台电脑上安装的 **Claude Code**（`claude-code`，通过 Claude Agent SDK 驱动用户自己的 `claude` CLI 与登录）和 **Codex**（`codex`，通过 `codex app-server` 驱动用户自己的 `codex` CLI 与登录）。以后可以接入更多运行时。不同运行时的会话在同一个工作区中并存，事件、快照、审批与断线恢复都使用同一套协议：非 pi 运行时把自己的输出转换成 pi 形态的消息与事件（见 §4.1），常用工具映射到 pi 的工具名与参数（Claude Code 的 `Bash` / `Read` / `Write` / `Edit` / `Grep` / `Glob` 分别为 `bash` / `read` / `write` / `edit` / `grep` / `find`；Codex 的命令执行为 `bash`、文件修改为 `edit` 或 `write` 并带 diff），客户端无需区分。
+
+| 方法 | 参数 | 结果 |
+|---|---|---|
+| `runtime.list` | `{}` | `{ runtimes: AgentRuntimeInfo[] }`；`AgentRuntimeInfo = { id, name, available, reason?, version?, executable?, capabilities }`。`available` 表示能新建会话（CLI 已安装；登录状态在使用时才检查），不可用时 `reason` 说明原因。CLI 的位置可以用环境变量 `PIER_CLAUDE_PATH` / `PIER_CODEX_PATH` 指定，否则在 `PATH` 与常见安装目录中查找 |
+
+`capabilities: AgentRuntimeCapabilities = { steer, followUp, compact, fork, rename, setModel, thinking, reload, images, piExtensions }`：客户端据此隐藏会失败的操作。不支持的方法返回 `UNSUPPORTED`（例如 Claude Code / Codex 会话的 `session.reload`）。`piExtensions` 为 `false` 的运行时不加载 pi 的扩展、技能、提示词模板与 `settings.json`，扩展或设置变更后 Host 也不会重新加载这些会话。
+
+各运行时的差异：
+
+- **模型**：`model.list` 按会话（或 `runtime` 参数）的运行时列出模型，`ModelInfo.provider` 为 `claude-code` / `codex`。Claude Code 的模型与斜杠命令来自 CLI（Host 启动一次不发送消息的 CLI 读取，缓存 10 分钟）；Codex 的来自 `model/list`。`model.set` 只接受本运行时的模型，`persist` 被忽略。思考等级对应 Claude Code 的 effort（`off` 关闭思考）与 Codex 的 reasoning effort。
+- **审批**：工作区策略同样适用。Claude Code 自己放行的调用（如只读工具、设置中允许的命令）不再询问；它请求许可时，受策略约束的工具（`bash`、`write`、`edit`）按策略决定，其他工具（`WebFetch`、MCP 工具等）在非 `auto` 策略下询问用户；`AskUserQuestion` 以 `select` 请求逐个提问。Codex 按策略设置审批与沙箱：`ask` → `untrusted` + `workspace-write`，`smart` → `on-request` + `workspace-write`，`auto` → `never` + `danger-full-access`；它请求执行命令、修改文件或更多权限时，按策略决定或询问用户（"本会话内允许"对应 Codex 的 `acceptForSession`）。
+- **会话存储**：Claude Code 会话在 `~/.claude/projects`（或 `CLAUDE_CONFIG_DIR`），Codex 会话由 Codex 管理（`~/.codex/sessions`）。`session.list` 列出 cwd 与工作区路径相同的会话，包括在终端中创建的，都可以在 Pier 中继续。`session.delete` 对 Claude Code 会话同样移到 Pier 回收站；对 Codex 会话调用 Codex 的归档（`thread/archive`，可在 Codex 中恢复）。`messageCount` 为估算值。
+- **排队**：Claude Code 的 steer / followUp 直接交给 CLI 的消息队列；Codex 的 steer 并入当前回合（`turn/steer`），followUp 由 Host 排队，在当前回合结束后依次发送。
+- **压缩**：Claude Code 发送 `/compact`，Codex 调用 `thread/compact/start`；两者的 `summary` 为空字符串。
+- **分叉**：Claude Code 用 SDK 的 `forkSession`，Codex 用 `thread/fork`（`position: "at"` 时包含该用户消息所在的整个回合）。
+- **进程**：Claude Code 会话在首次发送消息时启动 CLI，空闲 10 分钟后停止（之后自动恢复会话）；所有 Codex 会话共用一个 `codex app-server` 进程，没有打开的 Codex 会话 5 分钟后停止。
+
 ### session
 
 | 方法 | 参数 | 结果 |
 |---|---|---|
-| `session.list` | `{ workspaceId }` | `{ sessions: SessionSummary[] }`，按修改时间倒序；活跃会话 `active: true` 并带实时 `state` 与 `pendingUi`（待回答的对话框 / 审批数，1.1）；已归档的会话带 `archived: true`（1.14），未归档时省略该字段 |
-| `session.create` | `{ workspaceId, name? }` | `{ session }`（已进入活跃池） |
+| `session.list` | `{ workspaceId }` | `{ sessions: SessionSummary[] }`，按修改时间倒序，包含所有可用运行时的会话（1.22 起每项带 `runtime`）；活跃会话 `active: true` 并带实时 `state` 与 `pendingUi`（待回答的对话框 / 审批数，1.1）；已归档的会话带 `archived: true`（1.14），未归档时省略该字段 |
+| `session.create` | `{ workspaceId, name?, runtime? }` | `{ session }`（已进入活跃池）；`runtime`（1.22）选择 Agent 运行时，默认 `pi`；未知运行时 → `NOT_FOUND`，不可用（CLI 未安装）→ `CONFLICT` |
 | `session.open` | `{ workspaceId, sessionId }` 或 `{ workspaceId, path }` | `{ session }`；`path` 必须出现在该工作区的会话列表中 |
 | `session.close` | `{ sessionId, force? }` | `{ closed }`；运行中且未 `force` → `CONFLICT` |
 | `session.delete` | `{ workspaceId, sessionId, force? }` | `{ deleted }`；关闭会话（`session.closed { reason: "deleted" }`）并把会话文件移到 `~/.pier/trash/sessions/<时间戳>-<文件名>`（可手动移回恢复）。活跃会话属于其他工作区 → `NOT_FOUND`；工作区中没有该会话 → `{ deleted: false }`；运行中且未 `force`，或会话正被其他 Pier Host 打开 → `CONFLICT`。从未写入磁盘的新会话只会被关闭；分叉出的子会话不受影响（1.6） |
@@ -180,7 +200,7 @@ pi 终端界面自带的命令（`/model`、`/compact`、`/new`、`/fork`、`/na
 
 | 方法 | 参数 | 结果 |
 |---|---|---|
-| `model.list` | `{ sessionId?, workspaceId? }` | `{ models: ModelInfo[], current?, thinkingLevel? }`（仅列出已配置凭据的模型）。带 `sessionId` 时 `current` / `thinkingLevel` 是该会话的模型与思考等级；只带 `workspaceId` 时（1.19）是在该工作区新建会话时会使用的模型与思考等级（与 pi 的解析一致：有凭据的默认模型，否则第一个可用模型；思考等级依次取该模型的设置、默认思考等级、`medium`，再按模型能力钳制），供新建会话前在输入框中选择模型；都不带时只返回 `models` |
+| `model.list` | `{ sessionId?, workspaceId?, runtime? }` | `{ models: ModelInfo[], current?, thinkingLevel? }`（仅列出已配置凭据的模型）。带 `sessionId` 时列出该会话运行时的模型，否则列出 `runtime`（1.22，默认 `pi`）的模型。带 `sessionId` 时 `current` / `thinkingLevel` 是该会话的模型与思考等级；只带 `workspaceId` 时（1.19）是在该工作区新建会话时会使用的模型与思考等级（与 pi 的解析一致：有凭据的默认模型，否则第一个可用模型；思考等级依次取该模型的设置、默认思考等级、`medium`，再按模型能力钳制），供新建会话前在输入框中选择模型；都不带时只返回 `models` |
 | `model.set` | `{ sessionId, provider, modelId, persist? }` | `{ model }`；`persist: true` 写入 pi 全局默认值 |
 | `thinking.set` | `{ sessionId, level, persist? }` | `{ level }`（按模型能力钳制后的实际等级） |
 | `model.setDefault` | `{ provider, modelId }` | `{ defaultModel }`；写入 pi 全局 settings，只影响新会话（1.2） |
@@ -341,6 +361,8 @@ Host 保存已配对的电脑于 `~/.pier/peers.json`（0600），每次经代�
 
 `agent_settled` 表示 pi 不会再自动继续，适合作为"任务完成"通知的触发点。
 
+Claude Code 与 Codex 会话（1.22）发出同样形态的事件与 `AgentMessage`（`user` / `assistant` / `toolResult`，以及压缩后的 `compactionSummary`），只使用其中的一个子集：`agent_start`、`agent_end`、`agent_settled`、`message_start|update|end`、`tool_execution_start|update|end`、`queue_update`、`compaction_start|end`、`auto_retry_start|end`、`session_info_changed`、`thinking_level_changed`；没有 `turn_*`、`entry_appended` 与 `bash_execution_update`。assistant 消息的 `provider` 为运行时 ID。
+
 ### 4.2 Pier 会话事件
 
 | 事件 | 字段 | 说明 |
@@ -428,8 +450,11 @@ Host 保存已配对的电脑于 `~/.pier/peers.json`（0600），每次经代�
   model?: ModelInfo; thinkingLevel: string;
   statuses: Record<string, string>; widgets: Record<string, { lines: string[]; placement?: string }>;
   title?: string; errorMessage?: string;
+  capabilities?: AgentRuntimeCapabilities; // 会话运行时的能力（1.22），见 §3 Agent 运行时
 }
 ```
+
+`SessionSummary.runtime`（1.22）是会话的 Agent 运行时；旧版 Host 不返回该字段，视为 `pi`。
 
 `ModelInfo = { provider, id, name, reasoning, input: string[], contextWindow?, thinkingLevels? }`。`thinkingLevels`（1.19）是模型支持的思考等级，从低到高（`off`、`minimal`、`low`、`medium`、`high`，模型支持时还有 `xhigh`、`max`），不支持推理的模型为 `["off"]`；`thinking.set` 会把不支持的等级钳制到其中之一。
 
