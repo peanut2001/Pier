@@ -5,7 +5,7 @@
 import { spawn } from "node:child_process";
 import { accessSync, constants, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, posix, win32 } from "node:path";
 import type { PackageManagerInfo, PackageManagerName } from "@pier/protocol";
 
 export const PACKAGE_MANAGER_NAMES: readonly PackageManagerName[] = ["npm", "pnpm", "bun"];
@@ -29,21 +29,23 @@ function executableNames(name: PackageManagerName, platform: NodeJS.Platform): s
 
 /** Where npm, pnpm and bun install themselves when that directory is not on `PATH`. */
 export function wellKnownDirs(platform: NodeJS.Platform, home: string, env: NodeJS.ProcessEnv): string[] {
+	// The paths of the given platform, whatever this computer is (tests pass other platforms).
+	const path = platform === "win32" ? win32 : posix;
 	if (platform === "win32") {
-		const dirs = [join(home, ".bun", "bin")];
-		if (env.APPDATA) dirs.push(join(env.APPDATA, "npm"));
-		if (env.LOCALAPPDATA) dirs.push(join(env.LOCALAPPDATA, "pnpm"), join(env.LOCALAPPDATA, "Volta", "bin"));
-		if (env.ProgramFiles) dirs.push(join(env.ProgramFiles, "nodejs"));
+		const dirs = [path.join(home, ".bun", "bin")];
+		if (env.APPDATA) dirs.push(path.join(env.APPDATA, "npm"));
+		if (env.LOCALAPPDATA) dirs.push(path.join(env.LOCALAPPDATA, "pnpm"), path.join(env.LOCALAPPDATA, "Volta", "bin"));
+		if (env.ProgramFiles) dirs.push(path.join(env.ProgramFiles, "nodejs"));
 		return dirs;
 	}
 	const dirs = [
-		join(home, ".bun", "bin"),
+		path.join(home, ".bun", "bin"),
 		env.PNPM_HOME,
-		platform === "darwin" ? join(home, "Library", "pnpm") : join(home, ".local", "share", "pnpm"),
-		join(home, ".volta", "bin"),
-		join(home, ".npm-global", "bin"),
-		join(home, ".local", "bin"),
-		join(home, ".nvm", "current", "bin"),
+		platform === "darwin" ? path.join(home, "Library", "pnpm") : path.join(home, ".local", "share", "pnpm"),
+		path.join(home, ".volta", "bin"),
+		path.join(home, ".npm-global", "bin"),
+		path.join(home, ".local", "bin"),
+		path.join(home, ".nvm", "current", "bin"),
 		platform === "darwin" ? "/opt/homebrew/bin" : undefined,
 		"/usr/local/bin",
 		"/usr/bin",
