@@ -105,74 +105,9 @@
 	color: var(--text-muted);
 }
 
-.model-chip {
-	gap: 7px;
-	max-width: 300px;
-	height: 32px;
-	padding: 0 10px 0 11px;
-}
-
-.model-chip-icon {
-	color: var(--accent-text);
-}
-
-.model-chip-name {
-	min-width: 0;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-
-.model-chip-thinking {
-	flex: none;
-	color: var(--text-muted);
-	padding-left: 7px;
-	border-left: 1px solid var(--border-strong);
-}
-
-.model-chip-caret,
 .chip-caret {
 	flex: none;
 	color: var(--text-faint);
-}
-
-.thinking-section {
-	padding: 0 2px 8px;
-	margin-bottom: 8px;
-	border-bottom: 1px solid var(--border);
-}
-
-.thinking-levels {
-	display: flex;
-	gap: 2px;
-	padding: 3px;
-	border-radius: 10px;
-	background: var(--bg-active);
-}
-
-.thinking-level {
-	flex: 1;
-	min-width: 0;
-	border: none;
-	background: transparent;
-	font-size: 12px;
-	padding: 5px 0;
-	border-radius: 7px;
-	color: var(--text-muted);
-}
-
-.thinking-level:hover:not(:disabled) {
-	background: transparent;
-	color: var(--text);
-}
-
-.thinking-level.selected,
-.thinking-level.selected:hover:not(:disabled) {
-	background: var(--bg-raised);
-	color: var(--text);
-	box-shadow:
-		var(--shadow-sm),
-		0 0 0 1px var(--border);
 }
 
 /* ---- dropdowns ------------------------------------------------------------------- */
@@ -217,13 +152,6 @@
 	left: 0;
 	right: auto;
 	width: 320px;
-}
-
-.dropdown-menu.models {
-	width: 380px;
-	left: auto;
-	right: 0;
-	transform-origin: top right;
 }
 
 .dropdown-note {

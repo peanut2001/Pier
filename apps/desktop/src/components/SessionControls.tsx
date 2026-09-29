@@ -1,5 +1,5 @@
 import type { ChatController, ChatState } from "@pier/chat-state";
-import type { ApprovalPolicy, ForkPoint, ModelInfo, ThinkingLevel, WorkspaceInfo } from "@pier/protocol";
+import type { ApprovalPolicy, ForkPoint, WorkspaceInfo } from "@pier/protocol";
 import { useEffect, useRef, useState } from "react";
 import { POLICY_LABEL, POLICY_SUMMARY } from "../lib/format.ts";
 import { useAppState, useCanArchiveSessions, useCanManageWorkspace, useStore } from "../lib/store.tsx";
@@ -7,30 +7,16 @@ import {
 	IconArchive,
 	IconArchiveRestore,
 	IconCheck,
-	IconChevronDown,
 	IconChevronUp,
 	IconGitBranch,
 	IconMinimize,
 	IconMore,
-	IconSearch,
-	IconSettings,
 	IconShield,
 	IconShieldAlert,
-	IconSparkles,
 	IconTrash,
 	IconX,
 } from "./Icons.tsx";
 import { Modal } from "./Modal.tsx";
-
-const THINKING_LEVELS: Array<{ value: ThinkingLevel; label: string }> = [
-	{ value: "off", label: "不思考" },
-	{ value: "minimal", label: "极少" },
-	{ value: "low", label: "低" },
-	{ value: "medium", label: "中" },
-	{ value: "high", label: "高" },
-	{ value: "xhigh", label: "很高" },
-	{ value: "max", label: "最高" },
-];
 
 export function useOutsideClick(open: boolean, close: () => void) {
 	const ref = useRef<HTMLDivElement>(null);
@@ -50,131 +36,6 @@ export function useOutsideClick(open: boolean, close: () => void) {
 		};
 	}, [open, close]);
 	return ref;
-}
-
-function thinkingLabel(level: string): string {
-	return THINKING_LEVELS.find((l) => l.value === level)?.label ?? level;
-}
-
-/** Combined model + thinking-level picker: one chip, one popover. */
-export function ModelPicker({ chat, controller }: { chat: ChatState; controller: ChatController }) {
-	const store = useStore();
-	const [open, setOpen] = useState(false);
-	const [models, setModels] = useState<ModelInfo[] | undefined>();
-	const [error, setError] = useState<string | undefined>();
-	const [filter, setFilter] = useState("");
-	const ref = useOutsideClick(open, () => setOpen(false));
-	const current = chat.model;
-	const reasoning = Boolean(current?.reasoning);
-
-	useEffect(() => {
-		if (!open) return;
-		setError(undefined);
-		controller
-			.listModels()
-			.then((r) => setModels(r.models))
-			.catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
-	}, [open, controller]);
-
-	const visible = (models ?? []).filter((m) =>
-		`${m.provider}/${m.id} ${m.name}`.toLowerCase().includes(filter.trim().toLowerCase()),
-	);
-	const groups = new Map<string, ModelInfo[]>();
-	for (const model of visible) groups.set(model.provider, [...(groups.get(model.provider) ?? []), model]);
-
-	return (
-		<div className="dropdown" ref={ref}>
-			<button type="button" className="chip model-chip" onClick={() => setOpen(!open)} title="切换模型与思考等级">
-				<IconSparkles size={14} className="model-chip-icon" />
-				<span className="model-chip-name">{current ? current.name || current.id : "未选择模型"}</span>
-				{reasoning ? <span className="model-chip-thinking">{thinkingLabel(chat.thinkingLevel)}</span> : null}
-				<IconChevronDown size={14} className="model-chip-caret" />
-			</button>
-			{open ? (
-				<div className="dropdown-menu models">
-					{reasoning ? (
-						<div className="thinking-section">
-							<div className="dropdown-group-title">思考等级</div>
-							<div className="thinking-levels">
-								{THINKING_LEVELS.map((level) => {
-									const selected = chat.thinkingLevel === level.value;
-									return (
-										<button
-											type="button"
-											aria-pressed={selected}
-											key={level.value}
-											className={`thinking-level${selected ? " selected" : ""}`}
-											onClick={() => {
-												if (!selected) void controller.setThinking(level.value);
-											}}
-										>
-											{level.label}
-										</button>
-									);
-								})}
-							</div>
-						</div>
-					) : null}
-					<div className="dropdown-search">
-						<IconSearch size={14} />
-						<input
-							// biome-ignore lint/a11y/noAutofocus: the menu was just opened to search.
-							autoFocus
-							placeholder="搜索模型"
-							value={filter}
-							onChange={(e) => setFilter(e.target.value)}
-						/>
-					</div>
-					{error ? <div className="dropdown-empty error">{error}</div> : null}
-					{!models && !error ? <div className="dropdown-empty">加载中…</div> : null}
-					{models && !visible.length ? (
-						<div className="dropdown-empty">{models.length ? "没有匹配的模型。" : "还没有可用的模型。"}</div>
-					) : null}
-					{[...groups].map(([provider, list]) => (
-						<div key={provider} className="dropdown-group">
-							<div className="dropdown-group-title">{provider}</div>
-							{list.map((model) => {
-								const selected = current?.provider === model.provider && current.id === model.id;
-								return (
-									<button
-										type="button"
-										key={model.id}
-										className={`dropdown-item${selected ? " selected" : ""}`}
-										onClick={() => {
-											setOpen(false);
-											if (!selected) void controller.setModel(model.provider, model.id);
-										}}
-									>
-										<span className="model-item-text">
-											<span className="model-item-name">
-												{model.name || model.id}
-												{model.reasoning ? <span className="mini-tag">推理</span> : null}
-											</span>
-											<span className="muted">{model.id}</span>
-										</span>
-										{selected ? <IconCheck size={15} className="policy-check" /> : null}
-									</button>
-								);
-							})}
-						</div>
-					))}
-					<button
-						type="button"
-						className="dropdown-item manage-models"
-						onClick={() => {
-							setOpen(false);
-							store.openModels();
-						}}
-					>
-						<span className="menu-label">
-							<IconSettings size={14} />
-							{models && !models.length ? "配置模型…" : "管理模型与服务商…"}
-						</span>
-					</button>
-				</div>
-			) : null}
-		</div>
-	);
 }
 
 const POLICIES: ApprovalPolicy[] = ["ask", "smart", "auto"];

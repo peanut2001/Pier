@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { type Api, clampThinkingLevel, getSupportedThinkingLevels, type Model } from "@earendil-works/pi-ai";
 import {
 	type AgentSession,
 	type AgentSessionRuntime,
@@ -15,7 +16,10 @@ import {
 	SessionManager,
 	SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import type { ModelInfo } from "@pier/protocol";
+import type { ModelInfo, ThinkingLevel } from "@pier/protocol";
+
+/** pi's default thinking level when settings name none (`DEFAULT_THINKING_LEVEL`). */
+const DEFAULT_THINKING_LEVEL: ThinkingLevel = "medium";
 
 export { PI_VERSION };
 
@@ -185,6 +189,31 @@ export class PiEnvironment {
 		const models = await this.modelRuntime.getAvailable();
 		return models.map(toModelInfo);
 	}
+
+	/**
+	 * The model and thinking level a new session in `cwd` starts with, following pi's own
+	 * resolution: the configured default model when its provider has credentials, otherwise the
+	 * first available model; then the per-model thinking level, the default level, or `medium`,
+	 * clamped to what the model supports.
+	 */
+	newSessionDefaults(cwd: string): { model?: ModelInfo; thinkingLevel: ThinkingLevel } {
+		const settings = this.settingsFor(cwd);
+		const runtime = this.modelRuntime;
+		const provider = settings.getDefaultProvider();
+		const modelId = settings.getDefaultModel();
+		let model: Model<Api> | undefined;
+		if (provider && modelId) {
+			const found = runtime.getModel(provider, modelId);
+			if (found && runtime.hasConfiguredAuth(found.provider)) model = found;
+		}
+		model ??= runtime.getAvailableSnapshot()[0];
+		if (!model) return { thinkingLevel: "off" };
+		const level =
+			settings.getModelThinkingLevel(model.provider, model.id) ??
+			settings.getDefaultThinkingLevel() ??
+			DEFAULT_THINKING_LEVEL;
+		return { model: toModelInfo(model), thinkingLevel: clampThinkingLevel(model, level) as ThinkingLevel };
+	}
 }
 
 function userText(content: unknown): string {
@@ -204,15 +233,21 @@ interface ModelLike {
 	reasoning?: boolean;
 	input?: readonly string[];
 	contextWindow?: number;
+	thinkingLevelMap?: Model<Api>["thinkingLevelMap"];
 }
 
 export function toModelInfo(model: ModelLike): ModelInfo {
+	const reasoning = model.reasoning === true;
 	return {
 		provider: model.provider,
 		id: model.id,
 		name: model.name ?? model.id,
-		reasoning: model.reasoning === true,
+		reasoning,
 		input: [...(model.input ?? ["text"])],
 		...(typeof model.contextWindow === "number" ? { contextWindow: model.contextWindow } : {}),
+		thinkingLevels: getSupportedThinkingLevels({
+			reasoning,
+			...(model.thinkingLevelMap ? { thinkingLevelMap: model.thinkingLevelMap } : {}),
+		} as Model<Api>) as ThinkingLevel[],
 	};
 }

@@ -18,6 +18,7 @@ import {
 	IconX,
 	Logo,
 } from "./Icons.tsx";
+import { NewChatModelPicker } from "./ModelPicker.tsx";
 import { NoModelsBanner } from "./ModelsPanel.tsx";
 import { PolicyPicker, useOutsideClick } from "./SessionControls.tsx";
 import { AddWorkspaceItems, SidebarToggle, useAddWorkspace } from "./Sidebar.tsx";
@@ -296,6 +297,7 @@ export function NewChatView({ workspaceId }: { workspaceId?: string }) {
 							{workspace ? <PolicyPicker workspace={workspace} /> : null}
 						</div>
 						<div className="composer-actions">
+							{workspace ? <NewChatModelPicker workspace={workspace} disabled={sending || !online} /> : null}
 							<button
 								type="button"
 								className="round-button send"

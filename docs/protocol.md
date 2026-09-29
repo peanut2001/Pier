@@ -1,4 +1,4 @@
-# Pier 协议 v1.18
+# Pier 协议 v1.19
 
 > 实现：`packages/protocol`（zod schema + TS 类型，Host 与所有客户端共享）。
 > 本文档描述线上格式与语义；字段的权威定义以 `packages/protocol/src` 为准。
@@ -59,7 +59,7 @@
 
 ```jsonc
 { "type": "req", "id": "h", "method": "host.hello", "params": {
-  "protocolVersion": "1.18",
+  "protocolVersion": "1.19",
   "client": { "name": "pier-desktop", "version": "0.1.0", "platform": "darwin" },
   "token": "<本地 token>",       // 本地连接必填；远程连接由加密通道认证，不需要
   "coalesceMs": 50               // 可选：合并流式增量的窗口（0–1000ms，默认 0）
@@ -175,7 +175,7 @@ pi 终端界面自带的命令（`/model`、`/compact`、`/new`、`/fork`、`/na
 
 | 方法 | 参数 | 结果 |
 |---|---|---|
-| `model.list` | `{ sessionId? }` | `{ models: ModelInfo[], current? }`（仅列出已配置凭据的模型） |
+| `model.list` | `{ sessionId?, workspaceId? }` | `{ models: ModelInfo[], current?, thinkingLevel? }`（仅列出已配置凭据的模型）。带 `sessionId` 时 `current` / `thinkingLevel` 是该会话的模型与思考等级；只带 `workspaceId` 时（1.19）是在该工作区新建会话时会使用的模型与思考等级（与 pi 的解析一致：有凭据的默认模型，否则第一个可用模型；思考等级依次取该模型的设置、默认思考等级、`medium`，再按模型能力钳制），供新建会话前在输入框中选择模型；都不带时只返回 `models` |
 | `model.set` | `{ sessionId, provider, modelId, persist? }` | `{ model }`；`persist: true` 写入 pi 全局默认值 |
 | `thinking.set` | `{ sessionId, level, persist? }` | `{ level }`（按模型能力钳制后的实际等级） |
 | `model.setDefault` | `{ provider, modelId }` | `{ defaultModel }`；写入 pi 全局 settings，只影响新会话（1.2） |
@@ -424,6 +424,8 @@ Host 保存已配对的电脑于 `~/.pier/peers.json`（0600），每次经代�
   title?: string; errorMessage?: string;
 }
 ```
+
+`ModelInfo = { provider, id, name, reasoning, input: string[], contextWindow?, thinkingLevels? }`。`thinkingLevels`（1.19）是模型支持的思考等级，从低到高（`off`、`minimal`、`low`、`medium`、`high`，模型支持时还有 `xhigh`、`max`），不支持推理的模型为 `["off"]`；`thinking.set` 会把不支持的等级钳制到其中之一。
 
 ## 6. UI 请求与审批
 

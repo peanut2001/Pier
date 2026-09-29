@@ -8,7 +8,7 @@ import { Composer } from "./Composer.tsx";
 import { FilesPanelToggle } from "./FilesPanel.tsx";
 import { IconAlert, IconFolder, IconInfo, IconLoader, IconX } from "./Icons.tsx";
 import { PendingRequests } from "./PendingRequests.tsx";
-import { ModelPicker, SessionMenu } from "./SessionControls.tsx";
+import { SessionMenu } from "./SessionControls.tsx";
 import { SidebarToggle } from "./Sidebar.tsx";
 import { TerminalToggle } from "./TerminalPanel.tsx";
 import { Transcript } from "./Transcript.tsx";
@@ -245,7 +245,6 @@ export function SessionView({ session }: { session: SessionSummary }) {
 					) : null}
 				</div>
 				<div className="session-tools">
-					<ModelPicker chat={chat} controller={controller} />
 					<SessionMenu chat={chat} controller={controller} />
 					<TerminalToggle workspace={workspace} />
 					<FilesPanelToggle />

@@ -379,9 +379,17 @@ describe("sessions end to end", () => {
 		const { session, rec } = await newSession();
 		const renamed = await client.request("session.rename", { sessionId: session.id, name: "My session" });
 		expect(renamed.session.name).toBe("My session");
-		const { models, current } = await client.request("model.list", { sessionId: session.id });
+		const { models, current, thinkingLevel } = await client.request("model.list", { sessionId: session.id });
 		expect(models.map((m) => `${m.provider}/${m.id}`)).toEqual(["faux/faux-1", "faux/faux-2"]);
+		expect(models.map((m) => m.thinkingLevels)).toEqual([["off", "minimal", "low", "medium", "high"], ["off"]]);
 		expect(current?.id).toBe("faux-1");
+		expect(thinkingLevel).toBe("medium");
+		// What a new session in the workspace would start with.
+		await expect(client.request("model.list", { workspaceId: workspace.id })).resolves.toMatchObject({
+			current: { provider: "faux", id: "faux-1" },
+			thinkingLevel: "medium",
+		});
+		expect(await client.request("model.list")).not.toHaveProperty("current");
 		const { model } = await client.request("model.set", { sessionId: session.id, provider: "faux", modelId: "faux-2" });
 		expect(model.name).toBe("Faux Two");
 		await rec.waitFor((f) => f.event.type === "session.model");

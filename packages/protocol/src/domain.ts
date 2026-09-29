@@ -279,6 +279,8 @@ export interface ModelInfo {
 	reasoning: boolean;
 	input: string[];
 	contextWindow?: number;
+	/** Thinking levels the model supports, lowest first (1.19). `["off"]` for non-reasoning models. */
+	thinkingLevels?: ThinkingLevel[];
 }
 
 /** Where a slash command offered by the host comes from (1.5). */
