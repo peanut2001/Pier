@@ -88,7 +88,7 @@ export function WorkspaceHome({ workspaceId }: { workspaceId: string }) {
 							</span>
 						</div>
 					</div>
-					<button type="button" className="primary large" onClick={() => void store.createSession(workspace.id)}>
+					<button type="button" className="primary large" onClick={() => store.startNewChat(workspace.id)}>
 						<IconMessagePlus size={17} />
 						新建会话
 					</button>

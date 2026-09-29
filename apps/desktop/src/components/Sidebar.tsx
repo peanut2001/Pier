@@ -44,8 +44,9 @@ function WorkspaceGroup({ workspace, onSettings }: { workspace: WorkspaceInfo; o
 	const sessions = useAppState((s) => s.sessions[workspace.id]);
 	const selectedSessionId = useAppState((s) => s.selectedSessionId);
 	const selectedWorkspaceId = useAppState((s) => s.selectedWorkspaceId);
+	const newChat = useAppState((s) => !!s.newChat);
 	const [limit, setLimit] = useState(SESSION_PAGE);
-	const selected = selectedWorkspaceId === workspace.id && !selectedSessionId;
+	const selected = selectedWorkspaceId === workspace.id && !selectedSessionId && !newChat;
 	return (
 		<div className="workspace-group">
 			<div className={`workspace-row${selected ? " selected" : ""}`}>
@@ -75,8 +76,8 @@ function WorkspaceGroup({ workspace, onSettings }: { workspace: WorkspaceInfo; o
 				<button
 					type="button"
 					className="ghost icon"
-					title="新建会话"
-					onClick={() => void store.createSession(workspace.id)}
+					title={`在「${workspace.name}」中新建会话`}
+					onClick={() => store.startNewChat(workspace.id)}
 				>
 					<IconPlus size={15} />
 				</button>
@@ -172,8 +173,7 @@ export function Sidebar() {
 	const addWorkspace = useAddWorkspace();
 	const [settingsFor, setSettingsFor] = useState<string | undefined>();
 	const settingsWorkspace = workspaces.find((w) => w.id === settingsFor);
-	const selectedWorkspaceId = useAppState((s) => s.selectedWorkspaceId);
-	const targetWorkspace = workspaces.find((w) => w.id === selectedWorkspaceId) ?? workspaces[0];
+	const newChat = useAppState((s) => !!s.newChat);
 	const status = useHostStatus();
 	const online = status.online;
 	const attention = updateReady ? "有可用更新" : noModels ? "还没有可用模型" : undefined;
@@ -187,12 +187,10 @@ export function Sidebar() {
 			<div className="sidebar-actions">
 				<button
 					type="button"
-					className="new-session-button"
-					disabled={!online || !targetWorkspace}
-					title={targetWorkspace ? `在「${targetWorkspace.name}」中新建会话` : "请先添加工作区"}
-					onClick={() => {
-						if (targetWorkspace) void store.createSession(targetWorkspace.id);
-					}}
+					className={`new-session-button${newChat ? " selected" : ""}`}
+					disabled={!online}
+					title="新建会话：选择工作区后发送第一条消息"
+					onClick={() => store.startNewChat()}
 				>
 					<IconMessagePlus size={16} />
 					<span>新建会话</span>

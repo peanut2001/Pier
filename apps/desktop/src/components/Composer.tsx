@@ -8,6 +8,20 @@ import { SlashMenu, type SlashMenuEntry, useSlashMenu } from "./SlashMenu.tsx";
 
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 
+/** Read the image files among `files` as attachments, warning about oversized ones. */
+export async function readImages(files: Iterable<File>, warn: (message: string) => void): Promise<Draft["images"]> {
+	const images: Draft["images"] = [];
+	for (const file of files) {
+		if (!file.type.startsWith("image/")) continue;
+		if (file.size > MAX_IMAGE_BYTES) {
+			warn(`图片 ${file.name} 超过 20 MB，已忽略`);
+			continue;
+		}
+		images.push(await readImage(file));
+	}
+	return images;
+}
+
 function readImage(file: File): Promise<Draft["images"][number]> {
 	return new Promise((resolve, reject) => {
 		const reader = new FileReader();
@@ -70,7 +84,10 @@ export function Composer({
 	const menu = useSlashMenu(controller, draft.text);
 
 	const actions: SlashActions = {
-		newSession: () => store.createSession(controller.workspaceId),
+		newSession: () => {
+			store.startNewChat(controller.workspaceId);
+			return true;
+		},
 		fork: (entryId) => (chat.session ? store.forkSession(chat.session, entryId) : false),
 		notify: (level, message) => store.toast(level, message),
 	};
@@ -117,6 +134,12 @@ export function Composer({
 		textarea.current?.focus();
 	}
 
+	// The session was just created from the new-chat screen: send its first message once loaded.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: fire once, when the session loads.
+	useEffect(() => {
+		if (chat.loaded && !closed && store.takeAutoSend(sessionId)) void send("auto");
+	}, [chat.loaded]);
+
 	function pick(entry: SlashMenuEntry, tab = false) {
 		const next = entry.pick(tab);
 		if (next.run) void send(running ? "steer" : "auto", next.text);
@@ -125,15 +148,7 @@ export function Composer({
 	}
 
 	async function addFiles(files: Iterable<File>) {
-		const images: Draft["images"] = [];
-		for (const file of files) {
-			if (!file.type.startsWith("image/")) continue;
-			if (file.size > MAX_IMAGE_BYTES) {
-				store.toast("warning", `图片 ${file.name} 超过 20 MB，已忽略`);
-				continue;
-			}
-			images.push(await readImage(file));
-		}
+		const images = await readImages(files, (m) => store.toast("warning", m));
 		if (images.length) setDraft((d) => ({ ...d, images: [...d.images, ...images].slice(0, 16) }));
 	}
 

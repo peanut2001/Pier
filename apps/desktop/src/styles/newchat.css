@@ -1,0 +1,124 @@
+/* New-chat screen: pick a workspace, then send the first message. */
+
+.new-chat {
+	display: flex;
+	flex-direction: column;
+	flex: 1;
+	min-height: 0;
+	background: radial-gradient(900px 360px at 50% -140px, var(--accent-soft), transparent 70%), var(--bg);
+}
+
+.new-chat-hero {
+	flex: 1;
+	min-height: 0;
+	overflow-y: auto;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 12px;
+	padding: 48px 32px 24px;
+	text-align: center;
+	animation: rise-in 0.3s var(--ease);
+}
+
+.new-chat-hero .logo {
+	border-radius: 12px;
+	box-shadow: 0 10px 30px var(--brand-glow);
+	margin-bottom: 6px;
+}
+
+.new-chat-hero h1 {
+	margin: 0;
+	max-width: 720px;
+	font-size: 26px;
+	font-weight: 600;
+	letter-spacing: -0.01em;
+	line-height: 1.35;
+	overflow-wrap: anywhere;
+}
+
+.new-chat-target {
+	margin: 0 0.2em;
+	text-decoration: underline dotted var(--text-faint);
+	text-underline-offset: 6px;
+}
+
+.new-chat-hero p {
+	margin: 0;
+	max-width: 520px;
+	font-size: 13.5px;
+	line-height: 1.6;
+}
+
+.new-chat-banner {
+	width: 100%;
+	max-width: var(--content-width);
+	margin-top: 12px;
+}
+
+.new-chat-banner .no-models {
+	margin: 0;
+}
+
+.new-chat-bottom {
+	padding-bottom: 24px;
+}
+
+.workspace-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	max-width: 260px;
+	height: 30px;
+	padding: 0 10px;
+}
+
+.workspace-chip .icon-svg:first-child {
+	flex: none;
+	color: var(--accent-text);
+}
+
+.workspace-chip.empty {
+	border-style: dashed;
+	color: var(--text-muted);
+}
+
+.workspace-chip-name {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.dropdown-menu.up.workspaces {
+	left: 0;
+	right: auto;
+	width: 340px;
+	max-height: 360px;
+}
+
+.workspace-item-text {
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+	min-width: 0;
+}
+
+.workspace-item-name {
+	display: inline-flex;
+	align-items: center;
+	gap: 7px;
+	font-weight: 500;
+}
+
+.workspace-item-name .icon-svg {
+	flex: none;
+	color: var(--text-muted);
+}
+
+.dropdown-separator {
+	height: 1px;
+	margin: 4px 2px;
+	background: var(--border);
+}

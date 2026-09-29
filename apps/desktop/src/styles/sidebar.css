@@ -49,6 +49,12 @@
 	color: var(--accent-text);
 }
 
+.new-session-button.selected,
+.new-session-button.selected:hover:not(:disabled) {
+	background: var(--bg-active);
+	border-color: var(--border-strong);
+}
+
 .sidebar-section-title {
 	display: flex;
 	align-items: center;

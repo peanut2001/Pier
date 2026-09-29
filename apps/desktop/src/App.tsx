@@ -2,6 +2,7 @@ import { Welcome, WorkspaceHome } from "./components/Home.tsx";
 import { HostBanner } from "./components/HostPanels.tsx";
 import { IconAlert, IconInfo, IconMessage, IconX } from "./components/Icons.tsx";
 import { AuthDialog, YunlianDialog } from "./components/ModelsPanel.tsx";
+import { NewChatView } from "./components/NewChat.tsx";
 import { PairingRequestDialog } from "./components/RemotePanel.tsx";
 import { SessionView } from "./components/SessionView.tsx";
 import { SettingsPage } from "./components/Settings.tsx";
@@ -35,11 +36,13 @@ function Main() {
 	const selectedWorkspaceId = useAppState((s) => s.selectedWorkspaceId);
 	const workspaces = useAppState((s) => s.workspaces);
 	const workspacesLoaded = useAppState((s) => s.workspacesLoaded);
+	const newChat = useAppState((s) => s.newChat);
 	useAppState((s) => s.sessions);
 	const session = store.findSession(selectedSessionId);
 
 	if (session) return <SessionView key={session.id} session={session} />;
 	if (!workspacesLoaded) return <div className="placeholder center" />;
+	if (newChat) return <NewChatView workspaceId={newChat.workspaceId} />;
 	if (!workspaces.length) return <Welcome />;
 	if (selectedWorkspaceId) return <WorkspaceHome workspaceId={selectedWorkspaceId} />;
 	return (

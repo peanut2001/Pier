@@ -29,7 +29,7 @@ const THINKING_LEVELS: Array<{ value: ThinkingLevel; label: string }> = [
 	{ value: "max", label: "最高" },
 ];
 
-function useOutsideClick(open: boolean, close: () => void) {
+export function useOutsideClick(open: boolean, close: () => void) {
 	const ref = useRef<HTMLDivElement>(null);
 	useEffect(() => {
 		if (!open) return;

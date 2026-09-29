@@ -77,6 +77,11 @@ export interface AppState {
 	expanded: Record<string, boolean>;
 	selectedWorkspaceId?: string;
 	selectedSessionId?: string;
+	/**
+	 * The blank "new chat" screen is open. No session exists yet: sending the first message
+	 * creates one in `workspaceId` and switches to it.
+	 */
+	newChat?: { workspaceId?: string };
 	toasts: Toast[];
 	/** Bumped whenever a live chat changes, so the sidebar can show running / approval badges. */
 	chatsVersion: number;
@@ -103,6 +108,8 @@ const PAIRING_RESULT_TEXT: Record<PairingResolution, string> = {
 };
 
 const SELECTION_KEY = "pier.selection";
+/** Draft key of the new-chat composer (session ids are UUIDs, so no clash). */
+export const NEW_CHAT_DRAFT = "#new-chat";
 /** Refresh-timer keys for the device and provider lists (workspace ids are UUIDs, so no clash). */
 const DEVICES_KEY = "#devices";
 const PROVIDERS_KEY = "#providers";
@@ -119,6 +126,8 @@ export class PierStore {
 	private readonly chats = new Map<string, ChatController>();
 	private recent: string[] = [];
 	private readonly drafts = new Map<string, Draft>();
+	/** Sessions created from the new-chat screen whose draft is sent as soon as they load. */
+	private readonly autoSend = new Set<string>();
 	private nextToastId = 1;
 	private readonly refreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
 	private wasOpen = false;
@@ -312,6 +321,14 @@ export class PierStore {
 		}
 	}
 
+	/** Keep the new-chat target pointing at an existing workspace. */
+	private fixNewChatTarget(workspaces: WorkspaceInfo[]): Partial<AppState> {
+		const newChat = this.state.newChat;
+		if (!newChat || workspaces.some((w) => w.id === newChat.workspaceId)) return {};
+		const fallback = workspaces.find((w) => w.id === this.state.selectedWorkspaceId) ?? workspaces[0];
+		return { newChat: fallback ? { workspaceId: fallback.id } : {} };
+	}
+
 	async loadWorkspaces(): Promise<void> {
 		const client = this.client;
 		if (!client) return;
@@ -326,6 +343,7 @@ export class PierStore {
 				workspacesLoaded: true,
 				expanded,
 				...(selected ? { selectedWorkspaceId: selected } : { selectedWorkspaceId: undefined }),
+				...this.fixNewChatTarget(workspaces),
 			});
 			await Promise.all(workspaces.filter((w) => expanded[w.id]).map((w) => this.refreshSessions(w.id)));
 		} catch (error) {
@@ -676,6 +694,7 @@ export class PierStore {
 		this.set((s) => ({
 			selectedWorkspaceId: result.workspace.id,
 			expanded: { ...s.expanded, [result.workspace.id]: true },
+			...(s.newChat ? { newChat: { workspaceId: result.workspace.id } } : {}),
 		}));
 		await this.refreshSessions(result.workspace.id);
 		return result.workspace;
@@ -712,20 +731,59 @@ export class PierStore {
 		this.set((s) => ({
 			selectedWorkspaceId: workspaceId,
 			selectedSessionId: undefined,
+			newChat: undefined,
 			expanded: { ...s.expanded, [workspaceId]: true },
 		}));
 		if (!this.state.sessions[workspaceId]) void this.refreshSessions(workspaceId);
 	}
 
-	// ---- sessions ----------------------------------------------------------------------
+	// ---- new chat ----------------------------------------------------------------------
 
-	async createSession(workspaceId: string): Promise<boolean> {
+	/**
+	 * Open the blank new-chat screen. The session is only created when the first message is
+	 * sent, so opening it and walking away leaves no empty session behind.
+	 */
+	startNewChat(workspaceId?: string): void {
+		const { workspaces, selectedWorkspaceId } = this.state;
+		const target =
+			workspaces.find((w) => w.id === workspaceId) ??
+			workspaces.find((w) => w.id === selectedWorkspaceId) ??
+			workspaces[0];
+		this.set({ newChat: target ? { workspaceId: target.id } : {}, selectedSessionId: undefined });
+	}
+
+	setNewChatWorkspace(workspaceId: string): void {
+		if (this.state.newChat) this.set({ newChat: { workspaceId } });
+	}
+
+	/**
+	 * Send the new-chat draft: create a session in the chosen workspace, open it, and let its
+	 * composer send the draft once the session has loaded (so slash commands and failures behave
+	 * exactly as in any other session). Resolves to whether the session was created.
+	 */
+	async sendNewChat(draft: Draft): Promise<boolean> {
+		const workspaceId = this.state.newChat?.workspaceId;
+		if (!workspaceId) {
+			this.toast("warning", "请先选择一个工作区");
+			return false;
+		}
 		const result = await this.call("新建会话", (c) => c.request("session.create", { workspaceId }));
 		if (!result) return false;
-		this.upsertSession(result.session);
-		this.selectSession(result.session);
+		const session = result.session;
+		this.drafts.delete(NEW_CHAT_DRAFT);
+		this.saveDraft(session.id, draft);
+		this.autoSend.add(session.id);
+		this.upsertSession(session);
+		this.selectSession(session);
 		return true;
 	}
+
+	/** Whether the session's draft should be sent right away (asked once, by its composer). */
+	takeAutoSend(sessionId: string): boolean {
+		return this.autoSend.delete(sessionId);
+	}
+
+	// ---- sessions ----------------------------------------------------------------------
 
 	private upsertSession(session: SessionSummary): void {
 		this.set((s) => {
@@ -739,6 +797,7 @@ export class PierStore {
 		this.set((s) => ({
 			selectedWorkspaceId: session.workspaceId,
 			selectedSessionId: session.id,
+			newChat: undefined,
 			expanded: { ...s.expanded, [session.workspaceId]: true },
 		}));
 	}
