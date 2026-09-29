@@ -1,9 +1,17 @@
 import type { WorkspaceFileContent } from "@pier/protocol";
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type KeyboardEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatBytes, languageForPath, relativeTime } from "../lib/format.ts";
 import { isSensitiveFile } from "../lib/sensitive-files.ts";
 import { useAppState, useStore } from "../lib/store.tsx";
-import { IconAlert, IconFile, IconLoader, IconMessagePlus, IconRefresh, IconShieldAlert } from "./Icons.tsx";
+import {
+	IconAlert,
+	IconFile,
+	IconLoader,
+	IconMessagePlus,
+	IconPencil,
+	IconRefresh,
+	IconShieldAlert,
+} from "./Icons.tsx";
 import { CopyButton, Markdown } from "./Markdown.tsx";
 import { Modal } from "./Modal.tsx";
 import { Highlighted } from "./ToolCard.tsx";
@@ -16,6 +24,91 @@ function errorText(error: unknown): string {
 	if (code === "FORBIDDEN") return /outside/.test(message) ? "该文件位于工作区之外，无法预览" : "没有权限读取该文件";
 	if (code === "BAD_REQUEST" && /Not a file/.test(message)) return "这不是普通文件，无法预览";
 	return message;
+}
+
+function saveErrorText(error: unknown): string {
+	const code = (error as { code?: string }).code;
+	const message = error instanceof Error ? error.message : String(error);
+	if (code === "BAD_REQUEST" && /Unknown method/.test(message)) return "当前 Pier Host 版本不支持编辑文件，请更新 Pier";
+	if (code === "NOT_FOUND") return "文件不存在，可能已被移动或删除";
+	if (code === "FORBIDDEN") return /outside/.test(message) ? "该文件位于工作区之外，无法保存" : "没有权限写入该文件";
+	if (code === "BAD_REQUEST" && /larger than/.test(message)) return "内容太大，无法保存";
+	return message;
+}
+
+const isConflict = (error: unknown) => (error as { code?: string }).code === "CONFLICT";
+
+/** Text areas report "\n" line breaks only, so CRLF files are edited as LF and converted back on save. */
+const toLf = (text: string) => text.replace(/\r\n?/g, "\n");
+
+/** The indentation Tab inserts: the file's own style when it has one, else a tab (two spaces for YAML). */
+function indentUnit(text: string, path: string): string {
+	if (/^\t/m.test(text)) return "\t";
+	const widths = [...text.matchAll(/^( +)\S/gm)].map((m) => m[1]?.length ?? 0);
+	const width = widths.length ? Math.min(...widths) : 0;
+	if (width === 2 || width === 4) return " ".repeat(width);
+	return /\.ya?ml$/i.test(path) ? "  " : "\t";
+}
+
+/** Insert text at the caret, keeping the browser's undo history when it can. */
+function insertAtCaret(area: HTMLTextAreaElement, text: string, onChange: (value: string) => void) {
+	if (document.execCommand("insertText", false, text)) return;
+	area.setRangeText(text, area.selectionStart, area.selectionEnd, "end");
+	onChange(area.value);
+}
+
+function TextEditor({
+	value,
+	path,
+	onChange,
+	onSave,
+}: {
+	value: string;
+	path: string;
+	onChange: (value: string) => void;
+	onSave: () => void;
+}) {
+	const gutter = useRef<HTMLPreElement>(null);
+	const area = useRef<HTMLTextAreaElement>(null);
+	const lines = useMemo(() => Array.from({ length: value.split("\n").length }, (_, i) => i + 1).join("\n"), [value]);
+	const indent = useMemo(() => indentUnit(value, path), [value, path]);
+	useEffect(() => {
+		const el = area.current;
+		if (!el) return;
+		el.focus();
+		el.setSelectionRange(0, 0);
+	}, []);
+	const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+		if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === "s") {
+			e.preventDefault();
+			onSave();
+		} else if (e.key === "Tab" && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey) {
+			e.preventDefault();
+			insertAtCaret(e.currentTarget, indent, onChange);
+		}
+	};
+	return (
+		<div className="file-viewer-editor">
+			<pre ref={gutter} className="file-viewer-gutter" aria-hidden="true">
+				{lines}
+			</pre>
+			<textarea
+				ref={area}
+				value={value}
+				spellCheck={false}
+				autoCapitalize="off"
+				autoComplete="off"
+				autoCorrect="off"
+				wrap="off"
+				aria-label="文件内容"
+				onChange={(e) => onChange(e.target.value)}
+				onKeyDown={onKeyDown}
+				onScroll={(e) => {
+					if (gutter.current) gutter.current.scrollTop = e.currentTarget.scrollTop;
+				}}
+			/>
+		</div>
+	);
 }
 
 const MARKDOWN = /\.(md|markdown|mdx)$/i;
@@ -40,8 +133,9 @@ function TextView({ file }: { file: WorkspaceFileContent }) {
 }
 
 /**
- * Read-only preview of one workspace file: text with line numbers and syntax highlighting,
- * rendered Markdown, or an image. `onInsert` inserts the path into the composer when present.
+ * Preview of one workspace file: text with line numbers and syntax highlighting, rendered
+ * Markdown, or an image. Text files that were read in full can be edited and saved back.
+ * `onInsert` inserts the path into the composer when present.
  */
 export function FileViewer({
 	workspaceId,
@@ -60,6 +154,12 @@ export function FileViewer({
 	const [error, setError] = useState<string>();
 	const [loading, setLoading] = useState(false);
 	const [rendered, setRendered] = useState(true);
+	/** The text being edited; undefined while previewing. */
+	const [draft, setDraft] = useState<string>();
+	const [saving, setSaving] = useState(false);
+	const [saveError, setSaveError] = useState<string>();
+	const [conflict, setConflict] = useState(false);
+	const [closePrompt, setClosePrompt] = useState(false);
 	const request = useRef(0);
 
 	const load = useCallback(async () => {
@@ -82,6 +182,48 @@ export function FileViewer({
 
 	const name = path.split("/").pop() ?? path;
 	const isMarkdown = MARKDOWN.test(path) && file?.kind === "text";
+	const editable = file?.kind === "text" && !file.truncated;
+	const editing = draft !== undefined && !!file;
+	const original = useMemo(() => toLf(file?.text ?? ""), [file?.text]);
+	const dirty = editing && draft !== original;
+
+	const startEditing = () => {
+		setDraft(original);
+		setSaveError(undefined);
+		setConflict(false);
+	};
+	const stopEditing = () => {
+		setDraft(undefined);
+		setSaveError(undefined);
+		setConflict(false);
+		setClosePrompt(false);
+	};
+
+	/** Write the draft; `force` skips the check that the file is unchanged on disk. */
+	const save = async (force = false): Promise<boolean> => {
+		if (!file || draft === undefined || saving) return false;
+		const text = file.text?.includes("\r\n") ? draft.replace(/\n/g, "\r\n") : draft;
+		setSaving(true);
+		setSaveError(undefined);
+		try {
+			const result = await store.writeFile(workspaceId, path, text, force ? undefined : file.modifiedAt);
+			setFile({ ...file, text, size: result.size, modifiedAt: result.modifiedAt });
+			setConflict(false);
+			setClosePrompt(false);
+			return true;
+		} catch (e) {
+			if (isConflict(e)) setConflict(true);
+			else setSaveError(saveErrorText(e));
+			return false;
+		} finally {
+			setSaving(false);
+		}
+	};
+
+	const requestClose = () => {
+		if (dirty) setClosePrompt(true);
+		else onClose();
+	};
 
 	let body: ReactNode;
 	if (!confirmed) {
@@ -132,6 +274,50 @@ export function FileViewer({
 				二进制文件，无法以文本显示
 			</div>
 		);
+	} else if (editing) {
+		body = (
+			<>
+				{closePrompt ? (
+					<div className="file-viewer-banner row">
+						<span>有尚未保存的修改，要保存吗？</span>
+						<button type="button" className="ghost small" onClick={() => setClosePrompt(false)}>
+							继续编辑
+						</button>
+						<button type="button" className="ghost small error-text" onClick={onClose}>
+							不保存
+						</button>
+						<button
+							type="button"
+							className="primary small"
+							disabled={saving}
+							onClick={() => void save().then((ok) => ok && onClose())}
+						>
+							保存并关闭
+						</button>
+					</div>
+				) : null}
+				{conflict ? (
+					<div className="file-viewer-banner row">
+						<span>文件在打开后已被修改，保存会覆盖磁盘上的内容。</span>
+						<button
+							type="button"
+							className="ghost small"
+							onClick={() => {
+								stopEditing();
+								void load();
+							}}
+						>
+							放弃修改并重新读取
+						</button>
+						<button type="button" className="primary small" disabled={saving} onClick={() => void save(true)}>
+							仍然覆盖
+						</button>
+					</div>
+				) : null}
+				{saveError ? <div className="file-viewer-banner error">保存失败：{saveError}</div> : null}
+				<TextEditor value={draft} path={path} onChange={setDraft} onSave={() => void save()} />
+			</>
+		);
 	} else {
 		body = (
 			<>
@@ -150,7 +336,7 @@ export function FileViewer({
 	}
 
 	return (
-		<Modal title={name} onClose={onClose} wide className="file-viewer">
+		<Modal title={dirty ? `${name} •` : name} onClose={requestClose} wide className="file-viewer">
 			<div className="file-viewer-toolbar">
 				<span className="file-viewer-meta" title={path}>
 					<span className="file-viewer-path">{path}</span>
@@ -160,54 +346,81 @@ export function FileViewer({
 						</span>
 					) : null}
 				</span>
-				<span className="file-viewer-actions">
-					{isMarkdown ? (
-						<span className="segmented" role="tablist" aria-label="显示方式">
+				{editing ? (
+					<span className="file-viewer-actions">
+						<span className="file-viewer-hint">{dirty ? "未保存" : "已保存"} · Ctrl/⌘+S 保存</span>
+						<button
+							type="button"
+							className="ghost small"
+							disabled={saving}
+							onClick={() => {
+								if (dirty) setDraft(original);
+								else stopEditing();
+							}}
+						>
+							{dirty ? "撤销修改" : "完成"}
+						</button>
+						<button type="button" className="primary small" disabled={!dirty || saving} onClick={() => void save()}>
+							{saving ? <IconLoader size={13} className="spin" /> : null}
+							保存
+						</button>
+					</span>
+				) : (
+					<span className="file-viewer-actions">
+						{isMarkdown ? (
+							<span className="segmented" role="tablist" aria-label="显示方式">
+								<button
+									type="button"
+									className={rendered ? "active" : ""}
+									role="tab"
+									aria-selected={rendered}
+									onClick={() => setRendered(true)}
+								>
+									预览
+								</button>
+								<button
+									type="button"
+									className={rendered ? "" : "active"}
+									role="tab"
+									aria-selected={!rendered}
+									onClick={() => setRendered(false)}
+								>
+									源码
+								</button>
+							</span>
+						) : null}
+						{editable ? (
+							<button type="button" className="ghost small" title="编辑文件" onClick={startEditing}>
+								<IconPencil size={13} />
+								编辑
+							</button>
+						) : null}
+						{file?.kind === "text" && file.text ? <CopyButton text={file.text} label="复制内容" /> : null}
+						<CopyButton text={path} label="复制路径" iconOnly />
+						{onInsert ? (
 							<button
 								type="button"
-								className={rendered ? "active" : ""}
-								role="tab"
-								aria-selected={rendered}
-								onClick={() => setRendered(true)}
+								className="ghost icon"
+								title="插入路径到输入框"
+								onClick={() => {
+									onInsert();
+									requestClose();
+								}}
 							>
-								预览
+								<IconMessagePlus size={14} />
 							</button>
-							<button
-								type="button"
-								className={rendered ? "" : "active"}
-								role="tab"
-								aria-selected={!rendered}
-								onClick={() => setRendered(false)}
-							>
-								源码
-							</button>
-						</span>
-					) : null}
-					{file?.kind === "text" && file.text ? <CopyButton text={file.text} label="复制内容" /> : null}
-					<CopyButton text={path} label="复制路径" iconOnly />
-					{onInsert ? (
+						) : null}
 						<button
 							type="button"
 							className="ghost icon"
-							title="插入路径到输入框"
-							onClick={() => {
-								onInsert();
-								onClose();
-							}}
+							title="重新读取"
+							disabled={!confirmed || loading}
+							onClick={() => void load()}
 						>
-							<IconMessagePlus size={14} />
+							<IconRefresh size={14} className={loading ? "spin" : undefined} />
 						</button>
-					) : null}
-					<button
-						type="button"
-						className="ghost icon"
-						title="重新读取"
-						disabled={!confirmed || loading}
-						onClick={() => void load()}
-					>
-						<IconRefresh size={14} className={loading ? "spin" : undefined} />
-					</button>
-				</span>
+					</span>
+				)}
 			</div>
 			<div className="file-viewer-body">{body}</div>
 		</Modal>

@@ -38,6 +38,7 @@ import {
 	UiResponseSchema,
 	type WorkspaceFileContent,
 	type WorkspaceFilesResult,
+	type WorkspaceFileWriteResult,
 	type WorkspaceInfo,
 } from "./domain.ts";
 
@@ -78,6 +79,16 @@ export const MethodParamsSchemas = {
 	"workspace.files": z.object({ workspaceId: Id, path: z.string().max(4096).optional() }),
 	/** Read one workspace file for preview (1.7). `path` is relative to the workspace root. */
 	"workspace.readFile": z.object({ workspaceId: Id, path: z.string().min(1).max(4096) }),
+	/**
+	 * Overwrite an existing workspace file with UTF-8 text (1.8). With `expectedModifiedAt`
+	 * (the `modifiedAt` the client read), fails with `CONFLICT` if the file changed since.
+	 */
+	"workspace.writeFile": z.object({
+		workspaceId: Id,
+		path: z.string().min(1).max(4096),
+		text: z.string().max(4 * 1024 * 1024),
+		expectedModifiedAt: z.string().max(64).optional(),
+	}),
 
 	"session.list": z.object({ workspaceId: Id }),
 	"session.create": z.object({ workspaceId: Id, name: z.string().min(1).max(200).optional() }),
@@ -288,6 +299,7 @@ export const LOCAL_ONLY_METHODS: ReadonlySet<MethodName> = new Set([
 	"workspace.add",
 	"workspace.remove",
 	"workspace.setPolicy",
+	"workspace.writeFile",
 	"model.setDefault",
 	"provider.list",
 	"provider.login",
@@ -353,6 +365,7 @@ export interface MethodResults {
 	"workspace.setPolicy": { workspace: WorkspaceInfo };
 	"workspace.files": WorkspaceFilesResult;
 	"workspace.readFile": WorkspaceFileContent;
+	"workspace.writeFile": WorkspaceFileWriteResult;
 	"session.list": { sessions: SessionSummary[] };
 	"session.create": { session: SessionSummary };
 	"session.open": { session: SessionSummary };

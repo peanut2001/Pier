@@ -76,6 +76,15 @@ export interface WorkspaceFileContent {
 	tooLarge?: boolean;
 }
 
+/** Result of `workspace.writeFile` (1.8): the file's metadata after writing. */
+export interface WorkspaceFileWriteResult {
+	/** Path relative to the workspace root, normalized and joined with "/". */
+	path: string;
+	/** Size in bytes of the file on disk. */
+	size: number;
+	modifiedAt: string;
+}
+
 /** Runtime state of a session as seen by clients. */
 export type SessionRunState = "inactive" | "idle" | "streaming" | "compacting" | "retrying";
 

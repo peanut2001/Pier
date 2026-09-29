@@ -171,6 +171,7 @@ describe("remote access", () => {
 			phone.request("device.list"),
 			phone.request("pairing.start"),
 			phone.request("remote.configure", { enabled: false }),
+			phone.request("workspace.writeFile", { workspaceId: workspace.id, path: "x.txt", text: "" }),
 			phone.request("provider.list"),
 			phone.request("provider.login", { providerId: "openai", method: "api_key" }),
 		]) {
