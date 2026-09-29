@@ -24,6 +24,11 @@ export type ContextMenuItem = ContextMenuAction | "separator" | false | null | u
 export interface ContextMenuPosition {
 	x: number;
 	y: number;
+	/**
+	 * The element the menu was opened on. Only scrolling one of its scroll containers closes
+	 * the menu; scrolling elsewhere (e.g. the chat transcript auto-scrolling) leaves it open.
+	 */
+	anchor?: Element;
 }
 
 /**
@@ -31,9 +36,10 @@ export interface ContextMenuPosition {
  * Shift+F10, which report 0,0 in some engines) the lower left of the target element.
  */
 export function contextMenuPosition(event: { clientX: number; clientY: number; currentTarget: Element }) {
-	if (event.clientX || event.clientY) return { x: event.clientX, y: event.clientY };
-	const rect = event.currentTarget.getBoundingClientRect();
-	return { x: rect.left + 12, y: rect.bottom };
+	const anchor = event.currentTarget;
+	if (event.clientX || event.clientY) return { x: event.clientX, y: event.clientY, anchor };
+	const rect = anchor.getBoundingClientRect();
+	return { x: rect.left + 12, y: rect.bottom, anchor };
 }
 
 const MARGIN = 6;
@@ -66,6 +72,8 @@ export function ContextMenu({
 	const [placed, setPlaced] = useState<ContextMenuPosition>();
 	const onCloseRef = useRef(onClose);
 	onCloseRef.current = onClose;
+	const anchorRef = useRef(position.anchor);
+	anchorRef.current = position.anchor;
 	const entries = normalize(items);
 
 	// Keep the menu inside the window: flip it left/up when it would overflow.
@@ -93,7 +101,12 @@ export function ContextMenu({
 			if (!ref.current?.contains(e.target as Node)) close();
 		};
 		const onScroll = (e: Event) => {
-			if (!ref.current?.contains(e.target as Node)) close();
+			const target = e.target as Node;
+			if (ref.current?.contains(target)) return;
+			// Unrelated scroll containers (another pane re-laying out) must not dismiss the menu.
+			const anchor = anchorRef.current;
+			if (anchor && !target.contains?.(anchor)) return;
+			close();
 		};
 		document.addEventListener("pointerdown", onPointerDown, true);
 		document.addEventListener("scroll", onScroll, true);
