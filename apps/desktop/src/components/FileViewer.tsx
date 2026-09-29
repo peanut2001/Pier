@@ -2,7 +2,7 @@ import type { WorkspaceFileContent } from "@pier/protocol";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatBytes, languageForPath, relativeTime } from "../lib/format.ts";
 import { isSensitiveFile } from "../lib/sensitive-files.ts";
-import { useStore } from "../lib/store.tsx";
+import { useAppState, useStore } from "../lib/store.tsx";
 import { IconAlert, IconFile, IconLoader, IconMessagePlus, IconRefresh, IconShieldAlert } from "./Icons.tsx";
 import { CopyButton, Markdown } from "./Markdown.tsx";
 import { Modal } from "./Modal.tsx";
@@ -211,5 +211,23 @@ export function FileViewer({
 			</div>
 			<div className="file-viewer-body">{body}</div>
 		</Modal>
+	);
+}
+
+/** The preview dialog opened from the file panel or a composer file chip. */
+export function FilePreview() {
+	const store = useStore();
+	const preview = useAppState((s) => s.filePreview);
+	const known = useAppState((s) => !!preview && s.workspaces.some((w) => w.id === preview.workspaceId));
+	if (!preview || !known) return null;
+	const { workspaceId, path, composerKey } = preview;
+	return (
+		<FileViewer
+			key={`${workspaceId}:${path}`}
+			workspaceId={workspaceId}
+			path={path}
+			onClose={() => store.closeFilePreview()}
+			onInsert={composerKey ? () => store.insertFileIntoComposer(composerKey, path) : undefined}
+		/>
 	);
 }

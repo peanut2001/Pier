@@ -1,7 +1,9 @@
 import type { WorkspaceInfo } from "@pier/protocol";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { draftToPrompt } from "../lib/composer-text.ts";
 import { type Draft, NEW_CHAT_DRAFT, useAppState, useStore } from "../lib/store.tsx";
 import { readImages, useComposerInsert } from "./Composer.tsx";
+import { ComposerInput, type ComposerInputHandle } from "./ComposerInput.tsx";
 import { FilesPanelToggle } from "./FilesPanel.tsx";
 import { useHostStatus } from "./HostPanels.tsx";
 import {
@@ -98,28 +100,21 @@ export function NewChatView({ workspaceId }: { workspaceId?: string }) {
 	const [draft, setDraft] = useState<Draft>(() => store.draft(NEW_CHAT_DRAFT));
 	const [sending, setSending] = useState(false);
 	const [dragging, setDragging] = useState(false);
-	const textarea = useRef<HTMLTextAreaElement>(null);
+	const input = useRef<ComposerInputHandle>(null);
 	const fileInput = useRef<HTMLInputElement>(null);
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies: refocus whenever the target changes.
 	useEffect(() => {
-		textarea.current?.focus();
+		input.current?.focus();
 	}, [workspaceId]);
 
 	useEffect(() => {
 		store.saveDraft(NEW_CHAT_DRAFT, draft);
 	}, [store, draft]);
 
-	useComposerInsert(NEW_CHAT_DRAFT, textarea, setDraft);
+	useComposerInsert(NEW_CHAT_DRAFT, input);
 
-	useLayoutEffect(() => {
-		const el = textarea.current;
-		if (!el) return;
-		el.style.height = "auto";
-		el.style.height = `${Math.min(el.scrollHeight, 320)}px`;
-	});
-
-	const hasContent = draft.text.trim().length > 0 || draft.images.length > 0;
+	const hasContent = draftToPrompt(draft.text).trim().length > 0 || draft.images.length > 0;
 	const canSend = online && !!workspace && !sending && hasContent;
 
 	async function send() {
@@ -129,7 +124,7 @@ export function NewChatView({ workspaceId }: { workspaceId?: string }) {
 		// On success this view unmounts (the new session opens and sends the draft itself).
 		if (!created) {
 			setSending(false);
-			textarea.current?.focus();
+			input.current?.focus();
 		}
 	}
 
@@ -200,9 +195,8 @@ export function NewChatView({ workspaceId }: { workspaceId?: string }) {
 							))}
 						</div>
 					) : null}
-					<textarea
-						ref={textarea}
-						rows={1}
+					<ComposerInput
+						ref={input}
 						value={draft.text}
 						disabled={sending}
 						placeholder={
@@ -210,7 +204,10 @@ export function NewChatView({ workspaceId }: { workspaceId?: string }) {
 								? `在「${workspace.name}」中描述你的任务…（Enter 发送，Shift+Enter 换行）`
 								: "先选择工作区，再描述你的任务…"
 						}
-						onChange={(e) => setDraft((d) => ({ ...d, text: e.target.value }))}
+						onChange={(text) => setDraft((d) => ({ ...d, text }))}
+						onOpenFile={(path) => {
+							if (workspace) store.openFilePreview(workspace.id, path);
+						}}
 						onPaste={(e) => {
 							const files = [...e.clipboardData.files].filter((f) => f.type.startsWith("image/"));
 							if (files.length) {

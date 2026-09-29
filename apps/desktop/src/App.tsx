@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { FilesPanel } from "./components/FilesPanel.tsx";
+import { FilePreview } from "./components/FileViewer.tsx";
 import { Welcome, WorkspaceHome } from "./components/Home.tsx";
 import { HostBanner } from "./components/HostPanels.tsx";
 import { IconAlert, IconInfo, IconMessage, IconX } from "./components/Icons.tsx";
@@ -128,6 +129,7 @@ export function App() {
 					{showFiles ? <RightPanel /> : null}
 				</div>
 			)}
+			{settings ? null : <FilePreview />}
 			<Toasts />
 			<AuthDialog />
 			<YunlianDialog />

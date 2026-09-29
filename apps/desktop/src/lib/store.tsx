@@ -28,6 +28,7 @@ import type {
 } from "@pier/protocol";
 import { createContext, useContext, useSyncExternalStore } from "react";
 import type { Bridge, HostStatus, UpdateStatus } from "./bridge.ts";
+import { fileToken } from "./composer-text.ts";
 import { isYunlianProvider, YUNLIAN_SITE, yunlianGroupOf, yunlianProvider } from "./yunlian.ts";
 
 export const APP_VERSION = "0.2.4";
@@ -112,6 +113,11 @@ export interface AppState {
 	filesPanelWidth: number;
 	/** Bumped per workspace when its files may have changed (an agent run finished). */
 	filesVersion: Record<string, number>;
+	/**
+	 * The workspace file shown in the preview dialog. `composerKey` is the composer that the
+	 * dialog's "insert" button targets, when there is one.
+	 */
+	filePreview?: { workspaceId: string; path: string; composerKey?: string } | undefined;
 }
 
 const PAIRING_RESULT_TEXT: Record<PairingResolution, string> = {
@@ -165,7 +171,7 @@ export class PierStore {
 	/** The update version already announced with a toast. */
 	private announcedUpdate: string | undefined;
 	/** Mounted composers, by session, that accept text inserted from elsewhere (the file panel). */
-	private readonly composerInserts = new Map<string, (text: string) => void>();
+	private readonly composerInserts = new Map<string, (path: string, directory: boolean) => void>();
 
 	constructor(private readonly bridge: Bridge) {
 		const saved = (() => {
@@ -789,24 +795,35 @@ export class PierStore {
 		this.set((s) => ({ filesVersion: { ...s.filesVersion, [workspaceId]: (s.filesVersion[workspaceId] ?? 0) + 1 } }));
 	}
 
+	openFilePreview(workspaceId: string, path: string, composerKey?: string): void {
+		this.set({ filePreview: { workspaceId, path, ...(composerKey ? { composerKey } : {}) } });
+	}
+
+	closeFilePreview(): void {
+		if (this.state.filePreview) this.set({ filePreview: undefined });
+	}
+
 	/** Called by a mounted composer; returns the unregister function. */
-	registerComposer(sessionId: string, insert: (text: string) => void): () => void {
+	registerComposer(sessionId: string, insert: (path: string, directory: boolean) => void): () => void {
 		this.composerInserts.set(sessionId, insert);
 		return () => {
 			if (this.composerInserts.get(sessionId) === insert) this.composerInserts.delete(sessionId);
 		};
 	}
 
-	/** Insert text at the cursor of the session's composer (or append it to the saved draft). */
-	insertIntoComposer(sessionId: string, text: string): void {
+	/**
+	 * Insert a workspace file (or directory) chip at the cursor of the session's composer, or
+	 * append it to the saved draft when that composer is not on screen.
+	 */
+	insertFileIntoComposer(sessionId: string, path: string, directory = false): void {
 		const insert = this.composerInserts.get(sessionId);
 		if (insert) {
-			insert(text);
+			insert(path, directory);
 			return;
 		}
 		const draft = this.draft(sessionId);
 		const sep = draft.text && !/\s$/.test(draft.text) ? " " : "";
-		this.saveDraft(sessionId, { ...draft, text: `${draft.text}${sep}${text}` });
+		this.saveDraft(sessionId, { ...draft, text: `${draft.text}${sep}${fileToken(path, directory)} ` });
 	}
 
 	async addWorkspace(path: string, policy?: ApprovalPolicy): Promise<WorkspaceInfo | undefined> {

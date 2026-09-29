@@ -1,15 +1,9 @@
 import { type ChatController, type ChatState, resolveSlash, runBuiltin, type SlashActions } from "@pier/chat-state";
 import type { WorkspaceInfo } from "@pier/protocol";
-import {
-	type Dispatch,
-	type RefObject,
-	type SetStateAction,
-	useEffect,
-	useLayoutEffect,
-	useRef,
-	useState,
-} from "react";
+import { type RefObject, useEffect, useRef, useState } from "react";
+import { draftToPrompt } from "../lib/composer-text.ts";
 import { type Draft, useStore } from "../lib/store.tsx";
+import { ComposerInput, type ComposerInputHandle } from "./ComposerInput.tsx";
 import { IconArrowUp, IconImage, IconStop, IconX } from "./Icons.tsx";
 import { PolicyPicker } from "./SessionControls.tsx";
 import { SlashMenu, type SlashMenuEntry, useSlashMenu } from "./SlashMenu.tsx";
@@ -43,37 +37,14 @@ function readImage(file: File): Promise<Draft["images"][number]> {
 }
 
 /**
- * Let the file panel insert text at the cursor of this composer, separated by spaces.
+ * Let the file panel insert file chips at the cursor of this composer.
  * `key` is the draft key (a session id, or the new-chat draft).
  */
-export function useComposerInsert(
-	key: string,
-	textarea: RefObject<HTMLTextAreaElement | null>,
-	setDraft: Dispatch<SetStateAction<Draft>>,
-): void {
+export function useComposerInsert(key: string, input: RefObject<ComposerInputHandle | null>): void {
 	const store = useStore();
 	useEffect(
-		() =>
-			store.registerComposer(key, (text) => {
-				const el = textarea.current;
-				if (!el) return;
-				// A textarea keeps its selection after losing focus to the file panel.
-				const value = el.value;
-				const start = Math.min(el.selectionStart, value.length);
-				const end = Math.min(el.selectionEnd, value.length);
-				const before = value.slice(0, start);
-				const after = value.slice(end);
-				const lead = before && !/\s$/.test(before) ? " " : "";
-				const trail = after && /^\s/.test(after) ? "" : " ";
-				const inserted = `${lead}${text}${trail}`;
-				const caret = before.length + inserted.length;
-				setDraft((d) => ({ ...d, text: `${before}${inserted}${after}` }));
-				requestAnimationFrame(() => {
-					el.focus();
-					el.setSelectionRange(caret, caret);
-				});
-			}),
-		[store, key, textarea, setDraft],
+		() => store.registerComposer(key, (path, directory) => input.current?.insertFile(path, directory)),
+		[store, key, input],
 	);
 }
 
@@ -89,7 +60,7 @@ export function Composer({
 	const store = useStore();
 	const sessionId = chat.sessionId;
 	const [draft, setDraft] = useState<Draft>(() => store.draft(sessionId));
-	const textarea = useRef<HTMLTextAreaElement>(null);
+	const input = useRef<ComposerInputHandle>(null);
 	const fileInput = useRef<HTMLInputElement>(null);
 	const [sending, setSending] = useState(false);
 	const [dragging, setDragging] = useState(false);
@@ -97,14 +68,14 @@ export function Composer({
 	// The parent remounts the composer per session (`key={sessionId}`), so the draft state
 	// always belongs to `sessionId`.
 	useEffect(() => {
-		textarea.current?.focus();
+		input.current?.focus();
 	}, []);
 
 	useEffect(() => {
 		store.saveDraft(sessionId, draft);
 	}, [store, sessionId, draft]);
 
-	useComposerInsert(sessionId, textarea, setDraft);
+	useComposerInsert(sessionId, input);
 
 	// An extension asked to prefill the editor.
 	const editorNonce = chat.editorText?.nonce;
@@ -112,21 +83,15 @@ export function Composer({
 	useEffect(() => {
 		if (chat.editorText) {
 			setDraft((d) => ({ ...d, text: chat.editorText?.text ?? "" }));
-			textarea.current?.focus();
+			input.current?.focus();
 		}
 	}, [editorNonce]);
 
-	useLayoutEffect(() => {
-		const el = textarea.current;
-		if (!el) return;
-		el.style.height = "auto";
-		el.style.height = `${Math.min(el.scrollHeight, 320)}px`;
-	});
-
 	const running = chat.runState === "streaming" || chat.runState === "retrying" || chat.runState === "compacting";
 	const closed = !!chat.closed;
-	const canSend = !closed && chat.loaded && !sending && (draft.text.trim().length > 0 || draft.images.length > 0);
-	const menu = useSlashMenu(controller, draft.text);
+	const prompt = draftToPrompt(draft.text);
+	const canSend = !closed && chat.loaded && !sending && (prompt.trim().length > 0 || draft.images.length > 0);
+	const menu = useSlashMenu(controller, prompt);
 
 	const actions: SlashActions = {
 		newSession: () => {
@@ -138,7 +103,7 @@ export function Composer({
 	};
 
 	async function send(mode: "auto" | "steer" | "followUp", override?: string) {
-		const text = (override ?? draft.text).trim();
+		const text = draftToPrompt(override ?? draft.text).trim();
 		if (closed || !chat.loaded || sending || (!text && !draft.images.length)) return;
 		const images = draft.images.map(({ data, mimeType }) => ({ type: "image" as const, data, mimeType }));
 		const previous = { ...draft, text: override ?? draft.text };
@@ -165,7 +130,7 @@ export function Composer({
 			setSending(false);
 			if (result.kind === "failed") setDraft(previous);
 			else if (result.kind === "complete") setDraft({ ...previous, text: result.text });
-			textarea.current?.focus();
+			input.current?.focus();
 			return;
 		}
 
@@ -176,7 +141,7 @@ export function Composer({
 				: await controller.send(text, images, mode);
 		setSending(false);
 		if (result === undefined) setDraft(previous);
-		textarea.current?.focus();
+		input.current?.focus();
 	}
 
 	// The session was just created from the new-chat screen: send its first message once loaded.
@@ -189,7 +154,7 @@ export function Composer({
 		const next = entry.pick(tab);
 		if (next.run) void send(running ? "steer" : "auto", next.text);
 		else setDraft((d) => ({ ...d, text: next.text }));
-		textarea.current?.focus();
+		input.current?.focus();
 	}
 
 	async function addFiles(files: Iterable<File>) {
@@ -232,9 +197,8 @@ export function Composer({
 				</div>
 			) : null}
 			<SlashMenu menu={menu} onPick={(entry) => pick(entry)} />
-			<textarea
-				ref={textarea}
-				rows={1}
+			<ComposerInput
+				ref={input}
 				value={draft.text}
 				disabled={closed}
 				placeholder={
@@ -244,7 +208,8 @@ export function Composer({
 							? "补充指示以引导当前任务，Esc 停止…"
 							: "描述你的任务…（Enter 发送，Shift+Enter 换行，/ 使用命令）"
 				}
-				onChange={(e) => setDraft((d) => ({ ...d, text: e.target.value }))}
+				onChange={(text) => setDraft((d) => ({ ...d, text }))}
+				onOpenFile={(path) => store.openFilePreview(controller.workspaceId, path)}
 				onPaste={(e) => {
 					const files = [...e.clipboardData.files].filter((f) => f.type.startsWith("image/"));
 					if (files.length) {
