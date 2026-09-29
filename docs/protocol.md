@@ -1,4 +1,4 @@
-# Pier 协议 v1.15
+# Pier 协议 v1.16
 
 > 实现：`packages/protocol`（zod schema + TS 类型，Host 与所有客户端共享）。
 > 本文档描述线上格式与语义；字段的权威定义以 `packages/protocol/src` 为准。
@@ -59,7 +59,7 @@
 
 ```jsonc
 { "type": "req", "id": "h", "method": "host.hello", "params": {
-  "protocolVersion": "1.15",
+  "protocolVersion": "1.16",
   "client": { "name": "pier-desktop", "version": "0.1.0", "platform": "darwin" },
   "token": "<本地 token>",       // 本地连接必填；远程连接由加密通道认证，不需要
   "coalesceMs": 50               // 可选：合并流式增量的窗口（0–1000ms，默认 0）
@@ -218,15 +218,22 @@ pi 终端界面自带的命令（`/model`、`/compact`、`/new`、`/fork`、`/na
 
 | 方法 | 参数 | 结果 |
 |---|---|---|
-| `account.status` | — | `{ site?, siteError?, user? }`；`site = AccountSite = { name, url, version?, logo?, registerEnabled, emailVerification, passwordLogin, turnstile, oauth: string[], quota: { perUnit, type, usdRate?, customSymbol?, customRate? } }`（来自站点的 `/api/status`，`type` 为 `USD`、`CNY`、`CUSTOM` 或 `TOKENS`）；`user` 为保存的登录，没有登录时省略 |
+| `account.status` | — | `{ site?, siteError?, user? }`；`site = AccountSite = { name, url, version?, logo?, registerEnabled, emailVerification, passwordLogin, browserLogin, turnstile, oauth: string[], quota: { perUnit, type, usdRate?, customSymbol?, customRate? } }`（来自站点的 `/api/status`，`type` 为 `USD`、`CNY`、`CUSTOM` 或 `TOKENS`）；`user` 为保存的登录，没有登录时省略 |
 | `account.login` | `{ username, password }` 或 `{ accessToken, userId? }` | `AccountLoginResult`：`{ status: "ok", overview }` 或需要两步验证时 `{ status: "verify", methods }`。站点开启 Turnstile 时密码登录返回 `BAD_REQUEST` |
 | `account.verify` | `{ code }` | `AccountLoginResult`；提交两步验证码（或备用码） |
+| `account.authorizeStart` | — | `{ flowId, authorizeUrl, expiresAt }`（1.16）；见下文「浏览器登录」。站点不支持时 `BAD_REQUEST` |
+| `account.authorizeWait` | `{ flowId }` | `AccountLoginResult`（1.16）；用户在浏览器中登录并同意后返回 `{ status: "ok", overview }` 并保存登录。拒绝、超时、取消或换取失败时返回错误 |
+| `account.authorizeCancel` | `{ flowId }` | `{ cancelled }`（1.16） |
 | `account.sendCode` | `{ email }` | `{ sent: true }`；发送注册邮箱验证码（`GET /api/verification`） |
 | `account.register` | `{ username, password, email?, code?, affCode? }` | `AccountLoginResult`；注册（`POST /api/user/register`，用户名最多 20 个字符、密码 8–128 位，站点开启邮箱验证时必须提供 `email` 和 `code`，`affCode` 为邀请码）后立即登录。站点关闭注册或开启 Turnstile 时 `BAD_REQUEST` |
 | `account.overview` | — | `{ site, user, tokens: NewApiToken[], groups }`；`user = { id?, username, displayName?, email?, group?, quota, usedQuota, requestCount }`，额度为站点单位，按 `site.quota` 换算显示 |
 | `account.createToken` | `{ name, group? }` | `{ tokenId, tokens }`；在分组中新建无限额度、永不过期、不限模型的令牌 |
 | `account.useToken` | `{ tokenId }` | `{ keyRef, models, modelsError? }`；与 `newapi.useToken` 相同，`keyRef` 属于调用的连接 |
 | `account.logout` | — | `{ loggedOut }`；退出站点上的会话（不会吊销用户自己的访问令牌）并删除 `account.json` |
+
+#### 浏览器登录（1.16）
+
+`site.browserLogin` 为 `true`（站点的 `/api/status` 返回 `app_authorization_enabled: true`，且 `app_authorization_scopes` 包含 `account`）时，个人中心只在浏览器中登录，Pier 不接触密码：用户可以用站点支持的任意方式登录（账号密码、GitHub、LinuxDO、Passkey、人机验证等），在授权页面同意后，站点为 Pier 建立一个独立的登录会话（登录方式为「应用」，出现在网页「登录会话」中，可以随时注销）。流程与上文的 `newapi.authorize*` 相同（RFC 8252 回环重定向 + PKCE S256），区别是授权页面地址带 `scope=account`、不带 `key_name`，站点不会新建令牌，`POST /api/app-auth/token` 返回 `{ scope: "account", access_token, access_expires_at, refresh_token, session, user }`。Host 把 `refresh_token` 当作刷新 Cookie 使用，与密码登录一样只保存它，并自动续期。流程属于发起的连接；因为浏览器会跳回 Host 所在电脑的回环地址，所以只适用于本地 UI。Host 请求 NewAPI 站点时使用 `User-Agent: Pier/<版本> (<系统>)`。不支持的站点仍然使用 `account.login` / `account.register`。
 
 桌面端把每个分组的令牌保存为自定义服务商 `yunlian-<分组>`（名称为「云链API · 分组」，Base URL 为 `<站点>/v1`）；「模型与服务商」中浏览器授权添加的是 `yunlian`。
 

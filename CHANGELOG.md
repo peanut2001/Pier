@@ -2,6 +2,13 @@
 
 Pier 的所有重要变更都记录在这里。版本号规则：日常发版只递增最后一位（0.2.1、0.2.2……），`x.y.0` 留给大版本；1.0 之前，大版本可能包含不兼容的变更。
 
+## 未发布
+
+### 变更
+
+- **个人中心改为浏览器登录**：「设置 → 个人中心」不再在 Pier 中输入账号密码，而是点击「在浏览器中登录」，在系统浏览器里用云链API 支持的任意方式（账号密码、GitHub、LinuxDO、Passkey 等）登录并授权 Pier，完成后自动回到 Pier 显示余额与分组。Pier 只保存站点为它建立的独立登录会话（可以在网页「登录会话」中随时注销），不会接触密码；没有账号可以在登录页面注册。站点需要支持应用授权登录的 NewAPI（`app_authorization_scopes` 包含 `account`），不支持的站点仍显示原来的账号密码 / 访问令牌表单。
+- **协议 1.16**（向后兼容）：新增 `account.authorizeStart` / `account.authorizeWait` / `account.authorizeCancel`，`AccountSite` 新增 `browserLogin`。
+
 ## v0.2.10 — 2026-09-29
 
 可以在设置中远程更新其他电脑上的 Pier；会话支持归档与按时间批量清理；新增 pi 配置（`settings.json`）的可视化编辑。

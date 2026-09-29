@@ -66,6 +66,12 @@ import {
 
 export const PIER_HOST_VERSION = "0.2.10";
 
+/** How Pier introduces itself to NewAPI sites (their login sessions list shows the system). */
+function pierUserAgent(): string {
+	const system = { win32: "Windows", darwin: "Mac OS", linux: "Linux" }[process.platform as string];
+	return `Pier/${PIER_HOST_VERSION}${system ? ` (${system})` : ""}`;
+}
+
 /** Unauthenticated connections are closed after this long without a successful `host.hello`. */
 export const HELLO_TIMEOUT_MS = 10_000;
 
@@ -123,6 +129,7 @@ const AUDITED_METHODS = new Set<MethodName>([
 	"provider.removeCustom",
 	"newapi.useToken",
 	"newapi.authorizeStart",
+	"account.authorizeStart",
 	"account.login",
 	"account.register",
 	"account.useToken",
@@ -319,7 +326,7 @@ export class PierHost implements RequestHandler {
 			},
 			log,
 		});
-		this.newapi = new NewApiManager({ log });
+		this.newapi = new NewApiManager({ log, userAgent: pierUserAgent() });
 		this.account = new AccountManager(this.newapi, {
 			site: options.accountSite ?? YUNLIAN_SITE_URL,
 			file: accountPath(this.pierDir),
@@ -821,6 +828,11 @@ export class PierHost implements RequestHandler {
 			"account.status": () => this.account.getStatus(),
 			"account.login": (_ctx, params) => this.account.login(params),
 			"account.verify": (_ctx, params) => this.account.verify(params.code),
+			"account.authorizeStart": (ctx) => this.account.authorizeStart(ctx.connection.connectionId),
+			"account.authorizeWait": (ctx, params) => this.account.authorizeWait(ctx.connection.connectionId, params.flowId),
+			"account.authorizeCancel": (ctx, params) => ({
+				cancelled: this.account.authorizeCancel(ctx.connection.connectionId, params.flowId),
+			}),
 			"account.sendCode": (_ctx, params) => this.account.sendCode(params.email),
 			"account.register": (_ctx, params) => this.account.register(params),
 			"account.overview": () => this.account.overview(),

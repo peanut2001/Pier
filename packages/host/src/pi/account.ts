@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import {
+	type AccountAuthorizeStart,
 	type AccountLoginResult,
 	type AccountOverview,
 	type AccountSite,
@@ -15,13 +16,16 @@ import {
 	NewApiSessionExpired,
 	normalizeNewApiUrl,
 	type SavedNewApiSession,
+	supportsAccountScope,
 } from "./newapi.ts";
 
 /**
  * The personal center: one login to the 云链API site that belongs to the host rather than to
- * a connection. The login is saved in the Pier directory (owner-only) so it survives restarts:
- * for password logins only the site's rotating refresh cookie, for access-token logins the
- * user's system access token. Token keys never leave the host; `useToken` hands out the same
+ * a connection. The user normally signs in through the browser (`authorizeStart`), where the
+ * site offers every sign-in method; Pier then gets a login session of its own and never sees
+ * the password. The login is saved in the Pier directory (owner-only) so it survives restarts:
+ * for browser and password logins only the site's rotating refresh cookie, for access-token
+ * logins the user's system access token. Token keys never leave the host; `useToken` hands out the same
  * key references as `newapi.useToken`.
  */
 
@@ -65,6 +69,7 @@ export function accountSite(origin: string, status: Json): AccountSite {
 		registerEnabled: status.register_enabled !== false && status.password_register_enabled !== false,
 		emailVerification: status.email_verification === true,
 		passwordLogin: status.password_login_enabled !== false,
+		browserLogin: supportsAccountScope(status),
 		turnstile: status.turnstile_check === true,
 		oauth,
 		quota: {
@@ -188,14 +193,15 @@ export class AccountManager {
 		this.pending = undefined;
 	}
 
-	private async finish(result: NewApiLoginResult): Promise<AccountLoginResult> {
+	/** Take over a finished login owned by `owner` (a pending one waits for `verify`). */
+	private async finish(result: NewApiLoginResult, owner = OWNER): Promise<AccountLoginResult> {
 		if (result.status === "verify") {
 			this.pending = result.sessionId;
 			return { status: "verify", methods: result.methods };
 		}
 		this.pending = undefined;
 		const previous = this.session;
-		this.adopt(this.newapi.detach(OWNER, result.sessionId));
+		this.adopt(this.newapi.detach(owner, result.sessionId));
 		this.loaded = true;
 		this.persist();
 		if (previous) void this.newapi.signOut(previous);
@@ -214,6 +220,26 @@ export class AccountManager {
 			);
 		}
 		return this.finish(await this.newapi.login(OWNER, { baseUrl: this.origin, ...params }));
+	}
+
+	/**
+	 * Start a browser sign-in: the returned page lets the user sign in with any method the site
+	 * offers and approve Pier. The flow belongs to `connectionId` (closing it cancels the flow).
+	 */
+	async authorizeStart(connectionId: string): Promise<AccountAuthorizeStart> {
+		const started = await this.newapi.authorizeSessionStart(connectionId, this.origin);
+		return { flowId: started.flowId, authorizeUrl: started.authorizeUrl, expiresAt: started.expiresAt };
+	}
+
+	/** Wait for the browser sign-in and keep the login. */
+	async authorizeWait(connectionId: string, flowId: string): Promise<AccountLoginResult> {
+		const result = await this.newapi.authorizeSessionWait(connectionId, flowId);
+		this.dropPending();
+		return this.finish(result, connectionId);
+	}
+
+	authorizeCancel(connectionId: string, flowId: string): boolean {
+		return this.newapi.authorizeCancel(connectionId, flowId);
 	}
 
 	async verify(code: string): Promise<AccountLoginResult> {

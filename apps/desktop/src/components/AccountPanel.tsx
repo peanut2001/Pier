@@ -7,7 +7,7 @@ import type {
 	NewApiToken,
 	ProviderInfo,
 } from "@pier/protocol";
-import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAppState, useStore } from "../lib/store.tsx";
 import { formatQuota, relayProvider, YUNLIAN_NAME, yunlianGroupId } from "../lib/yunlian.ts";
 import {
@@ -72,6 +72,103 @@ function SiteHeader({ site }: { site: AccountSite }) {
 }
 
 // ---- sign-in and registration -----------------------------------------------------------
+
+/** How long to wait for the user in the browser (the host abandons the flow after 10 minutes). */
+const BROWSER_LOGIN_TIMEOUT_MS = 11 * 60_000;
+
+/**
+ * Sign in on the website in the system browser: every sign-in method of the site works there
+ * (password, GitHub, LinuxDO, passkeys, human verification), and Pier never sees the password.
+ */
+function BrowserLogin({ site, onDone }: { site: AccountSite; onDone: (result: AccountLoginResult) => void }) {
+	const store = useStore();
+	const [flow, setFlow] = useState<{ flowId: string; authorizeUrl: string } | undefined>();
+	const [starting, setStarting] = useState(false);
+	const [error, setError] = useState<string | undefined>();
+	// Bumped to abandon the current attempt (cancel, retry or leaving the page).
+	const attempt = useRef(0);
+	const pending = useRef<string | undefined>(undefined);
+
+	const cancel = useCallback(() => {
+		attempt.current++;
+		const flowId = pending.current;
+		pending.current = undefined;
+		if (flowId) void store.account("account.authorizeCancel", { flowId }).catch(() => undefined);
+		setFlow(undefined);
+		setStarting(false);
+	}, [store]);
+
+	useEffect(() => cancel, [cancel]);
+
+	const start = async () => {
+		cancel();
+		const current = ++attempt.current;
+		setError(undefined);
+		setStarting(true);
+		try {
+			const started = await store.account("account.authorizeStart", {});
+			if (current !== attempt.current) {
+				void store.account("account.authorizeCancel", { flowId: started.flowId }).catch(() => undefined);
+				return;
+			}
+			pending.current = started.flowId;
+			setFlow(started);
+			setStarting(false);
+			store.openExternal(started.authorizeUrl);
+			const result = await store.account("account.authorizeWait", { flowId: started.flowId }, BROWSER_LOGIN_TIMEOUT_MS);
+			if (current !== attempt.current) return;
+			pending.current = undefined;
+			setFlow(undefined);
+			onDone(result);
+		} catch (e) {
+			if (current !== attempt.current) return;
+			pending.current = undefined;
+			setFlow(undefined);
+			setStarting(false);
+			setError(errorText(e));
+		}
+	};
+
+	if (flow) {
+		return (
+			<div className="account-form">
+				<p className="account-waiting">
+					<IconLoader size={14} className="spin" />
+					<span>已在浏览器中打开{site.name}，请在网页上登录，并在授权页面点击「授权」。完成后会自动回到这里。</span>
+				</p>
+				<div className="account-actions">
+					<div className="account-links muted small">
+						<button type="button" className="link-button" onClick={() => store.openExternal(flow.authorizeUrl)}>
+							<IconExternal size={12} /> 浏览器没有打开？重新打开
+						</button>
+					</div>
+					<button type="button" onClick={cancel}>
+						取消
+					</button>
+				</div>
+			</div>
+		);
+	}
+
+	return (
+		<div className="account-form">
+			<p className="muted">
+				在浏览器中登录{site.name}
+				{site.oauth.length ? `（支持账号密码、${site.oauth.join("、")} 等所有登录方式）` : ""}
+				，并允许 Pier 访问你的账户。没有账号可以在登录页面注册。
+			</p>
+			<ErrorBanner error={error} />
+			<div className="account-actions">
+				<span />
+				<button type="button" className="primary" disabled={starting} onClick={() => void start()}>
+					{starting ? <IconLoader size={14} className="spin" /> : <IconExternal size={14} />}
+					在浏览器中登录
+				</button>
+			</div>
+			<p className="muted small">Pier 不会接触你的密码，只保存一个可以随时在网页「登录会话」中注销的登录状态。</p>
+		</div>
+	);
+}
 
 function LoginForm({ site, onDone }: { site: AccountSite; onDone: (result: AccountLoginResult) => void }) {
 	const store = useStore();
@@ -397,6 +494,17 @@ function RegisterForm({ site, onDone }: { site: AccountSite; onDone: (result: Ac
 
 function SignIn({ site, onDone }: { site: AccountSite; onDone: (result: AccountLoginResult) => void }) {
 	const [tab, setTab] = useState<"login" | "register">("login");
+	if (site.browserLogin) {
+		return (
+			<SettingsGroup>
+				<SettingsCard className="account-card">
+					<SiteHeader site={site} />
+					<BrowserLogin site={site} onDone={onDone} />
+				</SettingsCard>
+			</SettingsGroup>
+		);
+	}
+	// Sites without browser sign-in: enter the password or a system access token in Pier.
 	return (
 		<SettingsGroup>
 			<SettingsCard className="account-card">
