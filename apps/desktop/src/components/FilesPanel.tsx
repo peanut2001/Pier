@@ -3,11 +3,13 @@ import { type PointerEvent as ReactPointerEvent, useCallback, useEffect, useRef,
 import { formatBytes, joinPath, relativeTime } from "../lib/format.ts";
 import { useAppState, useStore } from "../lib/store.tsx";
 import { terminals } from "../lib/terminals.ts";
+import { ContextMenu, type ContextMenuItem, type ContextMenuPosition, contextMenuPosition } from "./ContextMenu.tsx";
 import {
 	IconAlert,
 	IconChevronRight,
 	IconChevronUp,
 	IconCopy,
+	IconExternal,
 	IconFile,
 	IconFolder,
 	IconFolderOpen,
@@ -30,6 +32,19 @@ interface DirState {
 
 /** Expanded directories per workspace, kept while the app runs so switching back restores the tree. */
 const expandedByWorkspace = new Map<string, Set<string>>();
+
+const platform = typeof navigator === "undefined" ? "" : navigator.platform || navigator.userAgent;
+const revealLabel = /Mac/.test(platform)
+	? "在访达中显示"
+	: /Win/.test(platform)
+		? "在资源管理器中显示"
+		: "在文件管理器中显示";
+
+/** The parent of a workspace-relative path (`""` for the workspace root). */
+function parentPath(path: string): string {
+	const i = path.lastIndexOf("/");
+	return i < 0 ? "" : path.slice(0, i);
+}
 
 function errorText(error: unknown): string {
 	const code = (error as { code?: string }).code;
@@ -170,6 +185,8 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 	const { dirs, expanded, reload, toggle, collapseAll } = useWorkspaceTree(workspace.id);
 	const [selected, setSelected] = useState<string>();
 	const [copied, setCopied] = useState<string>();
+	/** Open context menu; without `entry` it is the menu for the workspace root (blank area). */
+	const [menu, setMenu] = useState<{ position: ContextMenuPosition; entry?: WorkspaceFileEntry }>();
 	const lastReload = useRef(0);
 	/** Pending single-click preview, cancelled when the click turns out to be a double click. */
 	const clickTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -194,17 +211,82 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 		return () => window.removeEventListener("focus", onFocus);
 	}, [reload]);
 
-	const copyPath = (entry: WorkspaceFileEntry) => {
-		void navigator.clipboard.writeText(entry.path).then(
+	const copyText = (text: string, badge?: string) => {
+		void navigator.clipboard.writeText(text).then(
 			() => {
-				setCopied(entry.path);
-				setTimeout(() => setCopied((c) => (c === entry.path ? undefined : c)), 1200);
+				if (badge === undefined) return;
+				setCopied(badge);
+				setTimeout(() => setCopied((c) => (c === badge ? undefined : c)), 1200);
 			},
 			() => store.toast("error", "复制失败"),
 		);
 	};
+	const copyPath = (entry: WorkspaceFileEntry) => copyText(entry.path, entry.path);
 	const insert = (entry: WorkspaceFileEntry) => {
 		if (composerKey) store.insertFileIntoComposer(composerKey, entry.path, entry.kind === "directory");
+	};
+	const refresh = () => {
+		lastReload.current = Date.now();
+		reload();
+	};
+
+	const menuItems = (entry?: WorkspaceFileEntry): ContextMenuItem[] => {
+		const reveal = store.canRevealPaths;
+		if (!entry) {
+			return [
+				{ label: "刷新", icon: <IconRefresh size={14} />, disabled: connection !== "open", onSelect: refresh },
+				{ label: "全部折叠", icon: <IconChevronUp size={14} />, disabled: !expanded.size, onSelect: collapseAll },
+				"separator",
+				{ label: "复制工作区路径", icon: <IconCopy size={14} />, onSelect: () => copyText(workspace.path) },
+				"separator",
+				terminals.supported && {
+					label: "在终端中打开",
+					icon: <IconTerminal size={14} />,
+					onSelect: () => terminals.create({ workspace, cwd: workspace.path }),
+				},
+				reveal && {
+					label: revealLabel,
+					icon: <IconExternal size={14} />,
+					onSelect: () => store.revealPath(workspace.path),
+				},
+			];
+		}
+		const isDir = entry.kind === "directory";
+		const absolute = joinPath(workspace.path, entry.path);
+		const open = isDir && expanded.has(entry.path);
+		return [
+			isDir
+				? {
+						label: open ? "折叠" : "展开",
+						icon: open ? <IconFolder size={14} /> : <IconFolderOpen size={14} />,
+						onSelect: () => toggle(entry.path),
+					}
+				: {
+						label: "打开",
+						icon: <IconFile size={14} />,
+						disabled: entry.kind !== "file",
+						onSelect: () => store.openFilePreview(workspace.id, entry.path, composerKey),
+					},
+			composerKey
+				? { label: "插入路径到输入框", icon: <IconMessagePlus size={14} />, onSelect: () => insert(entry) }
+				: null,
+			"separator",
+			{ label: "复制相对路径", icon: <IconCopy size={14} />, onSelect: () => copyPath(entry) },
+			{
+				label: "复制绝对路径",
+				icon: <IconCopy size={14} />,
+				onSelect: () => copyText(absolute, entry.path),
+			},
+			{ label: "复制名称", icon: <IconCopy size={14} />, onSelect: () => copyText(entry.name, entry.path) },
+			"separator",
+			terminals.supported && {
+				label: isDir ? "在终端中打开" : "在所在目录打开终端",
+				icon: <IconTerminal size={14} />,
+				onSelect: () =>
+					terminals.create({ workspace, cwd: isDir ? absolute : joinPath(workspace.path, parentPath(entry.path)) }),
+			},
+			reveal && { label: revealLabel, icon: <IconExternal size={14} />, onSelect: () => store.revealPath(absolute) },
+		];
 	};
 
 	const renderDir = (path: string, depth: number) => {
@@ -240,9 +322,17 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 					const open = isDir && expanded.has(entry.path);
 					return (
 						<div key={entry.path}>
+							{/* biome-ignore lint/a11y/noStaticElementInteractions: the row's button is the focusable control; this only adds its context menu. */}
 							<div
-								className={`files-row${selected === entry.path ? " selected" : ""}${entry.kind === "other" ? " dim" : ""}`}
+								className={`files-row${selected === entry.path ? " selected" : ""}${menu?.entry?.path === entry.path ? " menu-open" : ""}${entry.kind === "other" ? " dim" : ""}`}
 								style={{ paddingLeft: 6 + depth * 14 }}
+								onContextMenu={(event) => {
+									event.preventDefault();
+									event.stopPropagation();
+									clearTimeout(clickTimer.current);
+									setSelected(entry.path);
+									setMenu({ position: contextMenuPosition(event), entry });
+								}}
 							>
 								<button
 									type="button"
@@ -322,16 +412,7 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 						{workspace.name}
 					</span>
 				</div>
-				<button
-					type="button"
-					className="ghost icon"
-					title="刷新"
-					disabled={connection !== "open"}
-					onClick={() => {
-						lastReload.current = Date.now();
-						reload();
-					}}
-				>
+				<button type="button" className="ghost icon" title="刷新" disabled={connection !== "open"} onClick={refresh}>
 					<IconRefresh size={14} className={loading ? "spin" : undefined} />
 				</button>
 				<button type="button" className="ghost icon" title="全部折叠" disabled={!expanded.size} onClick={collapseAll}>
@@ -341,10 +422,27 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 					<IconX size={14} />
 				</button>
 			</header>
-			<div className="files-tree">
+			{/* biome-ignore lint/a11y/noStaticElementInteractions: context menu for the blank area; every action is also in the header. */}
+			<div
+				className="files-tree"
+				onContextMenu={(event) => {
+					event.preventDefault();
+					setMenu({ position: contextMenuPosition(event) });
+				}}
+			>
 				{connection === "open" || dirs[""] ? renderDir("", 0) : <div className="files-note">正在连接 Pier Host…</div>}
 			</div>
-			<div className="files-hint">{composerKey ? "单击文件查看内容，双击把路径插入输入框" : "单击文件查看内容"}</div>
+			<div className="files-hint">
+				{composerKey ? "单击查看内容，双击插入路径，右键更多操作" : "单击查看内容，右键更多操作"}
+			</div>
+			{menu ? (
+				<ContextMenu
+					position={menu.position}
+					label={menu.entry ? menu.entry.name : workspace.name}
+					items={menuItems(menu.entry)}
+					onClose={() => setMenu(undefined)}
+				/>
+			) : null}
 		</aside>
 	);
 }

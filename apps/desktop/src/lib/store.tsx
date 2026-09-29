@@ -1310,6 +1310,19 @@ export class PierStore {
 		void this.bridge.openExternal(url);
 	}
 
+	/** Whether local paths can be shown in the system file manager (desktop app only). */
+	get canRevealPaths(): boolean {
+		return Boolean(this.bridge.revealPath);
+	}
+
+	revealPath(path: string): void {
+		const reveal = this.bridge.revealPath;
+		if (!reveal) return;
+		reveal(path).catch((error: unknown) =>
+			this.toast("error", `无法在文件管理器中显示：${error instanceof Error ? error.message : String(error)}`),
+		);
+	}
+
 	quit(): void {
 		void this.bridge.quit();
 	}
