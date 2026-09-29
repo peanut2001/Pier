@@ -2,8 +2,9 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { PierClient } from "@pier/client";
-import type { EventFrame, PairingRequest, PeerInfo } from "@pier/protocol";
+import { type EventFrame, type PairingRequest, type PeerInfo, PROTOCOL_VERSION } from "@pier/protocol";
 import { afterEach, describe, expect, it } from "vitest";
+import { WebSocket } from "ws";
 import { Connection, type RequestHandler } from "../src/connection.ts";
 import type { AppShell, ShellTerminalHandlers } from "../src/shell.ts";
 import {
@@ -203,21 +204,13 @@ describe("terminal.* (shells for clients)", () => {
 		const client = await t.connect();
 		expect(client.host?.terminals).toBe(true);
 		const events = new Recorder();
-		let answered = false;
-		const early: string[] = [];
-		client.onEvent((frame) => {
-			if (frame.event.type === "terminal.output" && !answered) early.push(frame.event.type);
-			events.handler(frame);
-		});
+		client.onEvent(events.handler);
 
 		await expect(client.request("terminal.open", { cwd: "relative", cols: 80, rows: 24 })).rejects.toMatchObject({
 			code: "BAD_REQUEST",
 		});
 		const opened = await client.request("terminal.open", { cwd: t.workspaceDir, cols: 80, rows: 24 });
-		answered = true;
 		expect(opened).toMatchObject({ shell: "fakesh", cwd: t.workspaceDir });
-		// The greeting printed before the app answered is delivered only after the response.
-		expect(early).toEqual([]);
 		await expect.poll(() => outputOf(events, opened.terminalId)).toBe("welcome\r\n");
 
 		expect(await client.request("terminal.write", { terminalId: opened.terminalId, data: "pwd\r" })).toEqual({
@@ -233,6 +226,30 @@ describe("terminal.* (shells for clients)", () => {
 		await expect(client.request("terminal.write", { terminalId: opened.terminalId, data: "x" })).rejects.toMatchObject({
 			code: "NOT_FOUND",
 		});
+	});
+
+	it("sends output the shell printed before the app answered only after the response", async () => {
+		const fake = new FakeTerminalShell();
+		const shell = new StdioShell(fake.toHost, fake.fromHost);
+		await expect.poll(() => shell.terminals).toBe(true);
+		const t = await startTestHost({ shell });
+		hosts.push(t);
+		const socket = new WebSocket(t.url);
+		await new Promise<void>((resolve, reject) => {
+			socket.once("open", () => resolve());
+			socket.once("error", reject);
+		});
+		const frames: Array<{ type: string; id?: string; event?: { type: string } }> = [];
+		socket.on("message", (data) => frames.push(JSON.parse(data.toString())));
+		const hello = { protocolVersion: PROTOCOL_VERSION, client: { name: "raw", version: "0" }, token: TOKEN };
+		socket.send(JSON.stringify({ type: "req", id: "h", method: "host.hello", params: hello }));
+		socket.send(JSON.stringify({ type: "req", id: "o", method: "terminal.open", params: { cols: 80, rows: 24 } }));
+		await expect.poll(() => frames.some((f) => f.event?.type === "terminal.output")).toBe(true);
+		socket.close();
+		const response = frames.findIndex((f) => f.type === "res" && f.id === "o");
+		const output = frames.findIndex((f) => f.event?.type === "terminal.output");
+		expect(response).toBeGreaterThanOrEqual(0);
+		expect(output).toBeGreaterThan(response);
 	});
 
 	it("keeps terminals private to their connection and hangs them up when it closes", async () => {
@@ -337,7 +354,8 @@ describe("terminal.* (shells for clients)", () => {
 
 		const audit = readFileSync(join(b.root, "pier", "audit.log"), "utf8");
 		expect(audit).toContain('"event":"terminal.open"');
-		expect(audit).toContain(b.workspaceDir);
+		// Paths are JSON strings in the log (backslashes escaped on Windows).
+		expect(audit).toContain(JSON.stringify(b.workspaceDir).slice(1, -1));
 		expect(audit).not.toContain("whoami");
 
 		remote.close();
