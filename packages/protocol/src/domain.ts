@@ -142,6 +142,29 @@ export interface HostStats {
 	hostRss: number;
 }
 
+/** An npm-compatible package manager pi can use for `npmCommand`. */
+export type PackageManagerName = "npm" | "pnpm" | "bun";
+
+/** One package manager executable found on the host (`host.packageManagers`, 1.16). */
+export interface PackageManagerInfo {
+	name: PackageManagerName;
+	/** Absolute path of the executable as found (not resolved through symlinks). */
+	path: string;
+	/** Found in a directory on the host's `PATH`, not only in a well-known install directory. */
+	onPath: boolean;
+	/** A bare `name` runs this one (the first of its name on the host's `PATH`). */
+	default?: true;
+	/** `--version` output, without a leading `v`; omitted when it could not be run (see `error`). */
+	version?: string;
+	/** Why `--version` failed (e.g. `node` is not on the host's `PATH` for npm). */
+	error?: string;
+}
+
+export interface PackageManagerDetection {
+	/** `PATH` order first, then the well-known install directories; one entry per real file. */
+	managers: PackageManagerInfo[];
+}
+
 /** One entry of a workspace directory listing (`workspace.files`, 1.5). */
 export interface WorkspaceFileEntry {
 	name: string;

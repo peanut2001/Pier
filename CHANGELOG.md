@@ -2,6 +2,17 @@
 
 Pier 的所有重要变更都记录在这里。版本号规则：日常发版只递增最后一位（0.2.1、0.2.2……），`x.y.0` 留给大版本；1.0 之前，大版本可能包含不兼容的变更。
 
+## 未发布
+
+### 新增
+
+- **检测本机的 npm / pnpm / bun**：「设置 → pi 配置 → 工具与 Shell → npm 命令」下方列出本机找到的 npm、pnpm 和 bun（版本、完整路径、是否在 PATH 中、哪一个是默认的 npm），点「使用」即把 `npmCommand` 设为它的完整路径，正在使用的一项会高亮；无法运行的（例如 npm 找不到 `node`）会标出原因。除 `PATH` 外还会查找 `~/.bun/bin`、pnpm 与 Volta 的安装目录、Homebrew、`/usr/local/bin` 等常见位置。
+- **协议 1.16**（向后兼容）：新增 `host.packageManagers`，对已配对设备开放。
+
+### 变更
+
+- **使用终端中的 PATH**：在 macOS 和 Linux 上，从程序坑 / 启动器打开的 Pier（包括 AppImage）没有终端里的 `PATH`，用 nvm、fnm、mise、Volta、Homebrew 或 bun 安装的工具会报「找不到命令」。内置的 Pier Host 现在启动时会向登录 Shell 读取一次 `PATH`（最多 5 秒）并放在前面，扩展安装和 Agent 的 bash 工具都能找到这些命令。Shell 启动文件可以根据 `PIER_RESOLVING_ENVIRONMENT=1` 跳过耗时的初始化；`pier-host --no-login-shell-path` 可关闭这一行为。
+
 ## v0.2.10 — 2026-09-29
 
 可以在设置中远程更新其他电脑上的 Pier；会话支持归档与按时间批量清理；新增 pi 配置（`settings.json`）的可视化编辑。

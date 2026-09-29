@@ -13,6 +13,7 @@ import { PROTOCOL_VERSION } from "@pier/protocol";
 import { writePrivateFile } from "./config.ts";
 import { DEFAULT_ALLOWED_ORIGINS, startLocalGateway } from "./gateway/local-gateway.ts";
 import { PIER_HOST_VERSION, PierHost } from "./host.ts";
+import { applyLoginShellPath } from "./login-shell-path.ts";
 import { defaultPierDir, runtimeFilePath } from "./paths.ts";
 import { checkImageSupport, installPhotonWasmRedirect } from "./pi/photon-wasm.ts";
 import { StdioShell } from "./shell.ts";
@@ -35,7 +36,11 @@ Options:
   --no-mdns           Do not advertise _pier._tcp over mDNS
   --watch-stdin       Exit when stdin closes (sidecar mode: exit with the parent). The
                       desktop app also talks to the host over stdin / stdout then (its
-                      updater, see src/shell.ts)
+                      updater, see src/shell.ts). On macOS / Linux the host then also
+                      adds the login shell's PATH (npm, pnpm, bun, git from nvm,
+                      Homebrew, ...), which apps started outside a terminal lack
+  --no-login-shell-path
+                      Do not ask the login shell for its PATH in sidecar mode
   --check-images      Resize a sample image through pi (Photon), print the result, and exit
   -h, --help          Show this help
 
@@ -63,6 +68,7 @@ async function main(): Promise<void> {
 			"remote-address": { type: "string", multiple: true },
 			"no-mdns": { type: "boolean" },
 			"watch-stdin": { type: "boolean" },
+			"no-login-shell-path": { type: "boolean" },
 			"check-images": { type: "boolean" },
 			help: { type: "boolean", short: "h" },
 		},
@@ -91,6 +97,12 @@ async function main(): Promise<void> {
 	// Sidecar mode: the desktop app answers on stdin (its updater). Requests only go out on
 	// stdout after the `pier.ready` line.
 	const shell = values["watch-stdin"] ? new StdioShell(process.stdin, process.stdout, { log }) : undefined;
+	// An app started from the Dock / a launcher lacks the terminal's PATH; ask the login shell
+	// while the host starts, so pi finds npm / pnpm / bun / git as it would in a terminal.
+	const loginPath =
+		values["watch-stdin"] && !values["no-login-shell-path"] && process.platform !== "win32"
+			? applyLoginShellPath().catch(() => undefined)
+			: undefined;
 	const host = await PierHost.create({
 		pierDir,
 		...(shell ? { shell } : {}),
@@ -108,6 +120,11 @@ async function main(): Promise<void> {
 		port,
 		...(values.origin?.length ? { allowedOrigins: [...DEFAULT_ALLOWED_ORIGINS, ...values.origin] } : {}),
 	});
+	if (loginPath) {
+		const added = await loginPath;
+		if (added === undefined) log("could not read the login shell's PATH; using the inherited PATH");
+		else if (added.length) log(`added ${added.length} PATH entries from the login shell`);
+	}
 
 	const ready = {
 		type: "pier.ready",

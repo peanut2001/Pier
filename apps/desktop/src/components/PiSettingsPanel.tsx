@@ -1,8 +1,9 @@
-import type { ExtensionScope, PiSettingsFile, PiSettingsResult } from "@pier/protocol";
+import type { ExtensionScope, PackageManagerInfo, PiSettingsFile, PiSettingsResult } from "@pier/protocol";
 import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
 	BUILTIN_TOOLS,
 	builtinDefault,
+	currentPackageManager,
 	type FieldDef,
 	formatValue,
 	getPath,
@@ -274,6 +275,7 @@ function FieldRow(props: FieldProps & { disabledReason?: string | undefined }) {
 	const stacked = field.kind.type === "list" || field.kind.type === "tools";
 	const key = field.path.join(".");
 	const fallbackText = `${inherited ? "继承全局" : "默认"}：${formatValue(field, fallback)}`;
+	const control = <FieldControl {...props} disabled={disabled || saving} />;
 	return (
 		<SettingRow
 			stack={stacked}
@@ -298,7 +300,18 @@ function FieldRow(props: FieldProps & { disabledReason?: string | undefined }) {
 				</>
 			}
 		>
-			<FieldControl {...props} disabled={disabled || saving} />
+			{field.suggest === "packageManagers" ? (
+				<div className="pi-setting-suggested">
+					{control}
+					<PackageManagerPicker
+						command={valid ? (own as string[]) : Array.isArray(fallback) ? (fallback as string[]) : undefined}
+						disabled={disabled || saving}
+						onPick={(command) => onChange(field, command)}
+					/>
+				</div>
+			) : (
+				control
+			)}
 			{set ? (
 				<button
 					type="button"
@@ -313,6 +326,113 @@ function FieldRow(props: FieldProps & { disabledReason?: string | undefined }) {
 				<span className="pi-setting-reset-placeholder" />
 			)}
 		</SettingRow>
+	);
+}
+
+// ---- package manager detection -----------------------------------------------------------
+
+type Detection =
+	| { status: "loading"; managers?: PackageManagerInfo[] }
+	| { status: "ok"; managers: PackageManagerInfo[] }
+	| { status: "error"; error: string };
+
+function detectionError(error: unknown): string {
+	const message = error instanceof Error ? error.message : String(error);
+	if ((error as { code?: string } | undefined)?.code === "BAD_REQUEST" && /Unknown method/.test(message))
+		return "当前 Pier Host 版本不支持检测包管理器，请更新 Pier";
+	return message;
+}
+
+/** npm / pnpm / bun found on this computer; picking one sets `npmCommand` to its full path. */
+function PackageManagerPicker({
+	command,
+	disabled,
+	onPick,
+}: {
+	/** The `npmCommand` in effect (undefined: pi's default, `npm`). */
+	command: string[] | undefined;
+	disabled: boolean;
+	onPick: (command: string[]) => void;
+}) {
+	const store = useStore();
+	const [detection, setDetection] = useState<Detection>({ status: "loading" });
+	const detect = useCallback(async () => {
+		setDetection((d) => ({ status: "loading", ...(d.status === "ok" ? { managers: d.managers } : {}) }));
+		try {
+			setDetection({ status: "ok", managers: await store.detectPackageManagers() });
+		} catch (error) {
+			setDetection({ status: "error", error: detectionError(error) });
+		}
+	}, [store]);
+	useEffect(() => {
+		void detect();
+	}, [detect]);
+
+	const managers = detection.status === "error" ? undefined : detection.managers;
+	const current = managers ? currentPackageManager(command, managers) : undefined;
+	return (
+		<div className="pi-pm">
+			<div className="pi-pm-head">
+				<span className="muted small">本机检测到的包管理器</span>
+				<button
+					type="button"
+					className="ghost small"
+					disabled={detection.status === "loading"}
+					onClick={() => void detect()}
+				>
+					{detection.status === "loading" ? <IconLoader size={12} className="spin" /> : <IconRefresh size={12} />}
+					重新检测
+				</button>
+			</div>
+			{detection.status === "error" ? (
+				<div className="error-text small">检测失败：{detection.error}</div>
+			) : !managers ? (
+				<div className="muted small">正在检测…</div>
+			) : managers.length === 0 ? (
+				<div className="muted small">没有找到 npm、pnpm 或 bun。安装后点「重新检测」，或在上方填写完整路径。</div>
+			) : (
+				<ul className="pi-pm-list">
+					{managers.map((manager) => (
+						<li key={manager.path} className={`pi-pm-item${manager === current ? " current" : ""}`}>
+							<span className="pi-pm-name mono">{manager.name}</span>
+							{manager.version ? (
+								<span className="muted small mono">{manager.version}</span>
+							) : (
+								<span className="mini-tag warn" title={manager.error}>
+									无法运行
+								</span>
+							)}
+							{manager.name === "npm" && manager.default ? (
+								<span className="mini-tag" title="未设置 npm 命令时使用这一个">
+									默认
+								</span>
+							) : null}
+							{manager.onPath ? null : (
+								<span className="mini-tag" title="所在目录不在 Pier Host 的 PATH 中，需要使用完整路径">
+									不在 PATH 中
+								</span>
+							)}
+							<code className="pi-pm-path" title={manager.error ? `${manager.path}\n${manager.error}` : manager.path}>
+								{manager.path}
+							</code>
+							{manager === current ? (
+								<span className="mini-tag accent pi-pm-action">正在使用</span>
+							) : (
+								<button
+									type="button"
+									className="small pi-pm-action"
+									disabled={disabled}
+									title={`将 npmCommand 设为 ${manager.path}`}
+									onClick={() => onPick([manager.path])}
+								>
+									使用
+								</button>
+							)}
+						</li>
+					))}
+				</ul>
+			)}
+		</div>
 	);
 }
 
