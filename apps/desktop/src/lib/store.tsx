@@ -25,7 +25,7 @@ import type {
 import { createContext, useContext, useSyncExternalStore } from "react";
 import type { Bridge, HostStatus, UpdateStatus } from "./bridge.ts";
 
-export const APP_VERSION = "0.2.1";
+export const APP_VERSION = "0.2.2";
 
 /** Subscriptions kept alive for recently viewed sessions (so approvals elsewhere stay visible). */
 const MAX_LIVE_CHATS = 8;

@@ -2,12 +2,15 @@
 
 Pier 的所有重要变更都记录在这里。版本号规则：日常发版只递增最后一位（0.2.1、0.2.2……），`x.y.0` 留给大版本；1.0 之前，大版本可能包含不兼容的变更。
 
-## 未发布
+## v0.2.2 — 2026-09-29
+
+支持直接登录 NewAPI 中转站配置模型，桌面端新增设置界面，并开始提供 Android 安装包。
 
 ### 新增
 
 - **NewAPI 登录**：「设置 → 模型与服务商」新增「NewAPI 登录」。填写站点地址，用账号密码（支持两步验证和站点开启的登录密码加密）或系统访问令牌登录后，选择一个令牌或直接新建（可选分组），Pier 会读取它可用的模型列表，并预填名称、Base URL 和全部模型，确认后保存为自定义接口。令牌密钥由 Pier Host 直接读取并保存到 pi 的 `auth.json`，不会出现在界面或协议消息中；登录会话只在内存中保留，关闭对话框即退出。同时兼容新版本的访问令牌登录和旧版本的 Cookie 会话。
 - **协议 1.3**（向后兼容）：新增仅限本地连接的 `newapi.login` / `verify` / `createToken` / `useToken` / `close`；`provider.saveCustom` 与 `provider.probeModels` 新增 `apiKeyRef` 参数。
+- **Android 安装包**：GitHub Release 开始附带签名的 Android APK（`pier-mobile-v<版本>-android.apk`，包含 arm64-v8a / armeabi-v7a / x86_64），可以直接下载安装手机端；之后的版本可以覆盖升级。
 
 ### 变更
 
