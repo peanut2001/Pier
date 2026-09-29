@@ -29,7 +29,7 @@ import { createContext, useContext, useSyncExternalStore } from "react";
 import type { Bridge, HostStatus, UpdateStatus } from "./bridge.ts";
 import { isYunlianProvider, YUNLIAN_SITE, yunlianGroupOf, yunlianProvider } from "./yunlian.ts";
 
-export const APP_VERSION = "0.2.3";
+export const APP_VERSION = "0.2.4";
 
 /** Subscriptions kept alive for recently viewed sessions (so approvals elsewhere stay visible). */
 const MAX_LIVE_CHATS = 8;
