@@ -21,6 +21,7 @@ import {
 	PROTOCOL_VERSION,
 	parseClientFrame,
 	type ResponseFrame,
+	type ThinkingLevel,
 	type WorkspaceInfo,
 	YUNLIAN_SITE_URL,
 } from "@pier/protocol";
@@ -775,9 +776,17 @@ export class PierHost implements RequestHandler {
 
 			"model.list": async (_ctx, params) => {
 				const models = await this.env.listModels();
-				const session = params?.sessionId ? this.pool.require(params.sessionId) : undefined;
-				const current = session?.session.model;
-				return current ? { models, current: toModelInfo(current) } : { models };
+				if (params?.sessionId) {
+					const session = this.pool.require(params.sessionId).session;
+					const current = session.model;
+					const thinkingLevel = session.thinkingLevel as ThinkingLevel;
+					return current ? { models, current: toModelInfo(current), thinkingLevel } : { models, thinkingLevel };
+				}
+				if (params?.workspaceId) {
+					const { model, thinkingLevel } = this.env.newSessionDefaults(this.requireWorkspace(params.workspaceId).path);
+					return model ? { models, current: model, thinkingLevel } : { models, thinkingLevel };
+				}
+				return { models };
 			},
 			"model.set": async (_ctx, params) => ({
 				model: await this.pool

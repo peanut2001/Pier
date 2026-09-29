@@ -44,6 +44,7 @@ import {
 	type SessionSummary,
 	StreamingBehaviorSchema,
 	type TerminalInfo,
+	type ThinkingLevel,
 	ThinkingLevelSchema,
 	UiResponseSchema,
 	type WorkspaceFileContent,
@@ -194,7 +195,11 @@ export const MethodParamsSchemas = {
 	"session.abort": z.object(SessionRef),
 	"session.compact": z.object({ ...SessionRef, instructions: z.string().max(10_000).optional() }),
 
-	"model.list": z.object({ sessionId: Id.optional() }).optional(),
+	/**
+	 * `workspaceId` without `sessionId` (1.19): also report the model and thinking level a new
+	 * session in that workspace starts with.
+	 */
+	"model.list": z.object({ sessionId: Id.optional(), workspaceId: Id.optional() }).optional(),
 	"model.set": z.object({ ...SessionRef, provider: Id, modelId: Id, persist: z.boolean().optional() }),
 	"thinking.set": z.object({ ...SessionRef, level: ThinkingLevelSchema, persist: z.boolean().optional() }),
 	"model.setDefault": z.object({ provider: Id, modelId: Id }),
@@ -506,7 +511,11 @@ export interface MethodResults {
 	"session.followUp": { queue: QueueState };
 	"session.abort": { aborted: true };
 	"session.compact": { summary: string; tokensBefore: number };
-	"model.list": { models: ModelInfo[]; current?: ModelInfo };
+	/**
+	 * `current` / `thinkingLevel`: the session's, or with only `workspaceId` (1.19) what a new
+	 * session there starts with. `thinkingLevel` is new in 1.19.
+	 */
+	"model.list": { models: ModelInfo[]; current?: ModelInfo; thinkingLevel?: ThinkingLevel };
 	"model.set": { model: ModelInfo };
 	"thinking.set": { level: string };
 	"model.setDefault": { defaultModel: DefaultModelRef };
