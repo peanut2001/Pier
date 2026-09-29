@@ -110,6 +110,8 @@ describe("computer-to-computer (peers)", () => {
 		expect((await remote.request("workspace.list")).workspaces.map((w) => w.id)).toEqual([bWorkspace.id]);
 		expect((await remote.request("workspace.add", { path: b.workspaceDir })).workspace.id).toBe(bWorkspace.id);
 		expect((await remote.request("host.listDirectories")).path).toBeTruthy();
+		// Other computers can see B's resource usage (the status bar's host status).
+		expect((await remote.request("host.stats")).memory.total).toBeGreaterThan(0);
 		await expectCode(remote.request("pairing.start"), "FORBIDDEN");
 		await expectCode(remote.request("peer.list"), "FORBIDDEN");
 

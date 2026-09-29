@@ -20,6 +20,7 @@ import type {
 	ExtensionUpdateInfo,
 	HostDirectoryListing,
 	HostInfo,
+	HostStats,
 	MethodName,
 	MethodParams,
 	MethodResult,
@@ -92,6 +93,25 @@ function hostSpeaks(info: HostInfo | undefined, minor: number): boolean {
 /** Whether the shown host can delete workspace files and directories (`workspace.deletePath`, 1.11). */
 export function hostCanDeleteFiles(info: HostInfo | undefined): boolean {
 	return hostSpeaks(info, 11);
+}
+
+/** Whether a host reports its resource usage (`host.stats`, 1.12). */
+export function hostReportsStats(info: HostInfo | undefined): boolean {
+	return hostSpeaks(info, 12);
+}
+
+/** How often the status bar samples host usage while the window is visible. */
+const HOST_STATS_INTERVAL_MS = 2000;
+
+/** Resource usage of one computer, for the status bar's host status. */
+export interface HostStatsEntry {
+	/**
+	 * `loading` until the first sample; `offline` while the computer cannot be reached;
+	 * `unsupported` when its Pier is too old to report usage.
+	 */
+	state: "loading" | "ok" | "offline" | "unsupported" | "error";
+	stats?: HostStats;
+	error?: string;
 }
 
 /** Subscriptions kept alive for recently viewed sessions (so approvals elsewhere stay visible). */
@@ -227,6 +247,8 @@ export interface AppState {
 	extensionProgress?: ExtensionProgressState | undefined;
 	/** The directory picker for a paired computer is open. */
 	directoryPicker?: { title: string; node: string } | undefined;
+	/** Resource usage per computer (`LOCAL_NODE` or a paired computer's id), while sampled. */
+	hostStats: Record<string, HostStatsEntry>;
 }
 
 /** Recompute the lists that combine every computer (after `nodes` or `peers` changed). */
@@ -364,6 +386,11 @@ export class PierStore {
 	private announcedUpdate: string | undefined;
 	/** Mounted composers, by session, that accept text inserted from elsewhere (the file panel). */
 	private readonly composerInserts = new Map<string, (path: string, directory: boolean) => void>();
+	/** Mounted views sampling the shown computer (`summary`) or every computer (`detail`). */
+	private readonly statsWatchers = { summary: 0, detail: 0 };
+	private statsTimer: ReturnType<typeof setInterval> | undefined;
+	/** Computers with a `host.stats` request in flight. */
+	private readonly statsBusy = new Set<string>();
 
 	constructor(private readonly bridge: Bridge) {
 		const saved = (() => {
@@ -427,6 +454,7 @@ export class PierStore {
 			filesPanelWidth: clampPanelWidth(panel.width ?? FILES_PANEL_DEFAULT_WIDTH),
 			filesVersion: {},
 			extensionsVersion: 0,
+			hostStats: {},
 		};
 		this.state = { ...state, ...deriveWorkspaces(state), ...deriveShown(state) };
 	}
@@ -507,6 +535,8 @@ export class PierStore {
 			off();
 			offUpdate();
 			offOpen();
+			if (this.statsTimer) clearInterval(this.statsTimer);
+			this.statsTimer = undefined;
 			this.teardownAll();
 		};
 	}
@@ -1040,6 +1070,84 @@ export class PierStore {
 		if (!result) return;
 		this.set((s) => ({ peers: s.peers.filter((p) => p.id !== peerId) }));
 		this.forgetNode(peerId);
+	}
+
+	// ---- host usage (status bar) -------------------------------------------------------
+
+	/**
+	 * Sample host usage every few seconds until the returned stop function is called: the
+	 * usage of the computer of the workspace on screen, and with `detail` also this computer's
+	 * and every paired computer's (through the connections the sidebar keeps open anyway).
+	 */
+	watchHostStats(detail = false): () => void {
+		const kind = detail ? "detail" : "summary";
+		this.statsWatchers[kind] += 1;
+		this.updateStatsTimer();
+		void this.pollHostStats();
+		let stopped = false;
+		return () => {
+			if (stopped) return;
+			stopped = true;
+			this.statsWatchers[kind] -= 1;
+			this.updateStatsTimer();
+		};
+	}
+
+	private updateStatsTimer(): void {
+		const active = this.statsWatchers.summary + this.statsWatchers.detail > 0;
+		if (active && !this.statsTimer) {
+			this.statsTimer = setInterval(() => void this.pollHostStats(), HOST_STATS_INTERVAL_MS);
+		} else if (!active && this.statsTimer) {
+			clearInterval(this.statsTimer);
+			this.statsTimer = undefined;
+		}
+	}
+
+	private async pollHostStats(): Promise<void> {
+		if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+		const nodes = new Set([this.state.node]);
+		if (this.statsWatchers.detail > 0) {
+			nodes.add(LOCAL_NODE);
+			for (const peer of this.state.peers) nodes.add(peer.id);
+		}
+		await Promise.all([...nodes].map((node) => this.sampleHost(node)));
+	}
+
+	private setHostStats(node: string, entry: HostStatsEntry): void {
+		const current = this.state.hostStats[node];
+		if (current && current.state === entry.state && current.stats === entry.stats && current.error === entry.error) {
+			return;
+		}
+		this.set((s) => ({ hostStats: { ...s.hostStats, [node]: entry } }));
+	}
+
+	private async sampleHost(node: string): Promise<void> {
+		const client = this.clients.get(node);
+		if (client?.state !== "open" || !client.host) {
+			const state = this.state.nodes[node];
+			const connecting = (!state || state.connection === "connecting") && !state?.connectError;
+			this.setHostStats(
+				node,
+				connecting
+					? { state: "loading" }
+					: { state: "offline", ...(state?.connectError ? { error: state.connectError } : {}) },
+			);
+			return;
+		}
+		if (!hostReportsStats(client.host)) {
+			this.setHostStats(node, { state: "unsupported" });
+			return;
+		}
+		if (this.statsBusy.has(node)) return;
+		this.statsBusy.add(node);
+		try {
+			const stats = await client.request("host.stats", {}, { timeoutMs: 10_000 });
+			if (this.clients.get(node) === client) this.setHostStats(node, { state: "ok", stats });
+		} catch (error) {
+			if (this.clients.get(node) === client) this.setHostStats(node, { state: "error", error: errorText(error) });
+		} finally {
+			this.statsBusy.delete(node);
+		}
 	}
 
 	// ---- models and providers (this computer) ------------------------------------------

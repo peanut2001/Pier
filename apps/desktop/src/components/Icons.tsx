@@ -240,3 +240,11 @@ export const IconUser = make(
 		<path d="M4 21a8 8 0 0 1 16 0" />
 	</>,
 );
+export const IconActivity = make(<path d="M22 12h-4l-3 9L9 3l-3 9H2" />);
+export const IconServer = make(
+	<>
+		<rect width="20" height="8" x="2" y="2" rx="2" ry="2" />
+		<rect width="20" height="8" x="2" y="14" rx="2" ry="2" />
+		<path d="M6 6h.01M6 18h.01" />
+	</>,
+);

@@ -1,0 +1,253 @@
+/* The window's bottom status bar and its host status (usage of this and paired computers). */
+
+.window {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+	background: var(--ambient), var(--bg-app);
+}
+
+.window > .app {
+	flex: 1;
+	min-height: 0;
+	height: auto;
+	background: none;
+}
+
+/* The status bar provides the gap below the panels. */
+.window > .app .main,
+.window > .app .files-panel {
+	margin-bottom: 0;
+}
+
+.statusbar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	flex: none;
+	height: 28px;
+	padding: 0 8px 0 12px;
+	font-size: 11.5px;
+	color: var(--text-faint);
+	user-select: none;
+	-webkit-user-select: none;
+}
+
+.statusbar-left,
+.statusbar-right {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	min-width: 0;
+}
+
+button.statusbar-item {
+	gap: 10px;
+	height: 22px;
+	padding: 0 8px;
+	border: none;
+	border-radius: 6px;
+	background: transparent;
+	color: var(--text-muted);
+	font-size: 11.5px;
+	font-weight: 450;
+	font-variant-numeric: tabular-nums;
+}
+
+button.statusbar-item:hover,
+button.statusbar-item.active {
+	background: var(--bg-hover);
+	color: var(--text);
+}
+
+.statusbar-stat,
+.statusbar-host {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+}
+
+.statusbar-stat b {
+	font-weight: 600;
+	color: var(--text);
+}
+
+.statusbar-stat b.warn,
+.host-meter-value.warn {
+	color: var(--warning);
+}
+
+.statusbar-stat b.high,
+.host-meter-value.high {
+	color: var(--danger);
+}
+
+.statusbar-net {
+	gap: 2px;
+}
+
+/* Fixed widths keep the bar from jittering as the numbers change. */
+.statusbar-stat b {
+	display: inline-block;
+	min-width: 3.1em;
+}
+
+.statusbar-rate {
+	display: inline-block;
+	min-width: 5.6em;
+}
+
+.statusbar-host {
+	padding-left: 10px;
+	border-left: 1px solid var(--border-strong);
+}
+
+/* ---- host status popover ------------------------------------------------------------ */
+
+.host-status .dropdown-menu.host-status-menu {
+	left: auto;
+	right: 0;
+	width: 380px;
+	max-height: min(640px, calc(100vh - 60px));
+	transform-origin: bottom right;
+}
+
+.host-cards {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	padding: 0 2px 4px;
+}
+
+.host-card {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	padding: 10px 12px;
+	border: 1px solid var(--border);
+	border-radius: 10px;
+	background: var(--bg-hover);
+}
+
+.host-card.current {
+	border-color: var(--accent-ring);
+}
+
+.host-card-head {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	min-width: 0;
+}
+
+.host-card-title {
+	display: flex;
+	flex-direction: column;
+	flex: 1;
+	min-width: 0;
+	line-height: 1.35;
+}
+
+.host-card-name {
+	font-size: 13px;
+	font-weight: 600;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.host-card-sub {
+	font-size: 11.5px;
+	color: var(--text-faint);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.host-card-badge {
+	flex: none;
+	font-size: 11px;
+	color: var(--accent-text);
+}
+
+button.host-card-action {
+	flex: none;
+	padding: 2px 8px;
+	font-size: 11.5px;
+}
+
+.host-card-hint,
+.host-card-foot,
+.host-status-empty {
+	font-size: 11.5px;
+	color: var(--text-faint);
+}
+
+.host-status-empty {
+	padding: 4px 10px 6px;
+}
+
+.host-meter {
+	display: grid;
+	grid-template-columns: 32px minmax(0, 1fr) 42px auto;
+	align-items: center;
+	gap: 8px;
+	font-size: 12px;
+	font-variant-numeric: tabular-nums;
+}
+
+.host-meter-label {
+	color: var(--text-muted);
+}
+
+.host-meter-track {
+	height: 6px;
+	border-radius: 999px;
+	background: var(--bg-active);
+	overflow: hidden;
+}
+
+.host-meter-fill {
+	display: block;
+	height: 100%;
+	border-radius: inherit;
+	background: var(--accent);
+	transition: width 0.4s var(--ease);
+}
+
+.host-meter-fill.warn {
+	background: var(--warning);
+}
+
+.host-meter-fill.high {
+	background: var(--danger);
+}
+
+.host-meter-value {
+	text-align: right;
+	font-weight: 600;
+}
+
+.host-meter-detail {
+	min-width: 104px;
+	text-align: right;
+	color: var(--text-faint);
+	font-size: 11.5px;
+}
+
+.host-meter.host-network {
+	grid-template-columns: 32px auto auto 1fr;
+	gap: 14px;
+}
+
+.host-net {
+	display: inline-flex;
+	align-items: center;
+	gap: 3px;
+	color: var(--text);
+}
+
+.host-net .icon-svg {
+	color: var(--text-faint);
+}

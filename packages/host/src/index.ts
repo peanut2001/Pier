@@ -5,6 +5,7 @@ export * from "./connection.ts";
 export * from "./event-log.ts";
 export * from "./gateway/local-gateway.ts";
 export * from "./host.ts";
+export * from "./host-stats.ts";
 export * from "./managed-session.ts";
 export * from "./paths.ts";
 export * from "./peers/peers.ts";

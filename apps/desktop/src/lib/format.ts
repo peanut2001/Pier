@@ -44,6 +44,33 @@ export function formatBytes(n: number): string {
 	return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
+/** A size in bytes with a binary unit up to TB, e.g. `15.0 GB`. */
+export function formatSize(n: number): string {
+	const units = ["B", "KB", "MB", "GB", "TB"];
+	let value = Math.max(0, n);
+	let unit = 0;
+	while (value >= 1024 && unit < units.length - 1) {
+		value /= 1024;
+		unit += 1;
+	}
+	return unit === 0 ? `${Math.round(value)} B` : `${value.toFixed(value >= 100 ? 0 : 1)} ${units[unit]}`;
+}
+
+/** A transfer rate in bytes per second, e.g. `1.2 MB/s`. */
+export function formatRate(bytesPerSecond: number): string {
+	return `${formatSize(bytesPerSecond)}/s`;
+}
+
+/** How long a computer has been up, e.g. `3 天 4 小时`. */
+export function formatUptime(seconds: number): string {
+	const minutes = Math.floor(seconds / 60);
+	const hours = Math.floor(minutes / 60);
+	const days = Math.floor(hours / 24);
+	if (days > 0) return hours % 24 ? `${days} 天 ${hours % 24} 小时` : `${days} 天`;
+	if (hours > 0) return minutes % 60 ? `${hours} 小时 ${minutes % 60} 分钟` : `${hours} 小时`;
+	return `${Math.max(1, minutes)} 分钟`;
+}
+
 export const RUN_STATE_LABEL: Record<SessionRunState, string> = {
 	inactive: "未加载",
 	idle: "空闲",

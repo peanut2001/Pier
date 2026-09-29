@@ -12,6 +12,7 @@ import { AddPeerDialog, PairingRequestDialog } from "./components/RemotePanel.ts
 import { SessionView } from "./components/SessionView.tsx";
 import { SettingsPage } from "./components/Settings.tsx";
 import { Sidebar, SidebarToggle } from "./components/Sidebar.tsx";
+import { StatusBar } from "./components/StatusBar.tsx";
 import { TerminalPanel } from "./components/TerminalPanel.tsx";
 import { LOCAL_NODE, NEW_CHAT_DRAFT, useAppState, useStore } from "./lib/store.tsx";
 import { terminals, useTerminals } from "./lib/terminals.ts";
@@ -136,7 +137,7 @@ export function App() {
 	}, [store, settings, screenWorkspace, local]);
 
 	return (
-		<>
+		<div className="window">
 			{settings ? (
 				<SettingsPage section={settings} />
 			) : (
@@ -157,6 +158,7 @@ export function App() {
 					{showFiles ? <RightPanel {...screen} /> : null}
 				</div>
 			)}
+			<StatusBar />
 			{settings ? null : <FilePreview />}
 			<Toasts />
 			<AuthDialog />
@@ -164,6 +166,6 @@ export function App() {
 			<PairingRequestDialog />
 			<AddPeerDialog />
 			<DirectoryPicker />
-		</>
+		</div>
 	);
 }
