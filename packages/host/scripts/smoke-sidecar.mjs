@@ -2,14 +2,16 @@
 /**
  * Smoke-test a compiled pier-host sidecar: start it with throwaway pi/Pier directories,
  * read the `pier.ready` line, speak the protocol over WebSocket (hello, workspace, session
- * via the pi SDK inside the binary), then close stdin and expect a clean exit.
+ * via the pi SDK inside the binary), then close stdin and expect a clean exit. Finally run
+ * `--check-images` and expect pi to resize an image with the Photon wasm shipped next to the
+ * binary or in PI_PACKAGE_DIR (not the build machine's node_modules path baked into it).
  *
  * Usage: node scripts/smoke-sidecar.mjs <path-to-pier-host> [expected-version]
  */
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { createInterface } from "node:readline";
 
 const exe = resolve(process.argv[2] ?? "");
@@ -117,9 +119,37 @@ async function main() {
 	const { code, signal } = await withTimeout(exited, 15_000, "shutdown");
 	if (code !== 0) fail(`pier-host exited with code ${code} signal ${signal}`);
 	if (existsSync(join(pierDir, "run", "host.json"))) fail("runtime file was not removed on shutdown");
+
+	const images = checkImages();
 	console.log(
-		`smoke OK: pier-host ${ready.version} (protocol ${ready.protocolVersion}, pi ${hello.host.piVersion}, ${hello.host.platform})`,
+		`smoke OK: pier-host ${ready.version} (protocol ${ready.protocolVersion}, pi ${hello.host.piVersion}, ${hello.host.platform}; images via ${images.wasm})`,
 	);
+}
+
+/** pi must resize images with the bundled Photon wasm, or it silently drops every attachment. */
+function checkImages() {
+	let output;
+	try {
+		output = execFileSync(exe, ["--check-images"], {
+			encoding: "utf8",
+			timeout: 60_000,
+			env: { ...process.env, PI_CODING_AGENT_DIR: join(root, "agent") },
+		});
+	} catch (error) {
+		fail(`--check-images failed: ${error.stdout || error.message}`);
+	}
+	const result = JSON.parse(output.trim().split("\n").at(-1));
+	if (!result.ok) fail(`pi cannot resize images: ${result.error}`);
+	const bundleDirs = [process.env.PI_PACKAGE_DIR, dirname(exe)].filter(Boolean).map((dir) => resolve(dir));
+	const inBundle = (file) =>
+		bundleDirs.some((dir) => {
+			const rel = relative(dir, resolve(file));
+			return rel === "photon_rs_bg.wasm";
+		});
+	if (!result.wasm || !inBundle(result.wasm)) {
+		fail(`Photon wasm was not loaded from the bundle (${result.wasm ?? "build machine path"})`);
+	}
+	return result;
 }
 
 main()
