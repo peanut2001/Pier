@@ -1,5 +1,5 @@
 import type { Dirent } from "node:fs";
-import { lstat, open, readdir, realpath, stat, writeFile } from "node:fs/promises";
+import { lstat, open, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { extname, isAbsolute, join, relative, sep } from "node:path";
 import {
 	PierProtocolError,
@@ -7,6 +7,7 @@ import {
 	type WorkspaceFileEntry,
 	type WorkspaceFilesResult,
 	type WorkspaceFileWriteResult,
+	type WorkspacePathDeleteResult,
 } from "@pier/protocol";
 
 /** Most entries returned for one directory; the rest are dropped and `truncated` is set. */
@@ -186,8 +187,8 @@ const UTF8_BOM = Buffer.from([0xef, 0xbb, 0xbf]);
 
 function fsError(error: unknown, relPath: string): never {
 	const code = (error as NodeJS.ErrnoException).code;
-	if (code === "ENOENT") throw new PierProtocolError("NOT_FOUND", `No such file: ${relPath}`);
-	if (code === "EACCES" || code === "EPERM" || code === "EROFS")
+	if (code === "ENOENT" || code === "ENOTDIR") throw new PierProtocolError("NOT_FOUND", `No such file: ${relPath}`);
+	if (code === "EACCES" || code === "EPERM" || code === "EROFS" || code === "EBUSY")
 		throw new PierProtocolError("FORBIDDEN", `Permission denied: ${relPath}`);
 	if (code === "EISDIR") throw new PierProtocolError("BAD_REQUEST", `Not a file: ${relPath}`);
 	throw error;
@@ -227,6 +228,30 @@ export async function writeWorkspaceFile(
 		return { path: relPath, size: after.size, modifiedAt: after.mtime.toISOString() };
 	} catch (error) {
 		if (error instanceof PierProtocolError) throw error;
+		fsError(error, relPath);
+	}
+}
+
+/**
+ * Permanently delete a file, directory (with everything in it) or symbolic link of a workspace.
+ * The parent directory must resolve (after symlinks) to a location inside the workspace root;
+ * the entry itself is not followed, so deleting a symlink removes only the link, never its
+ * target. The workspace root itself cannot be deleted.
+ */
+export async function deleteWorkspacePath(workspaceRoot: string, path: string): Promise<WorkspacePathDeleteResult> {
+	const relPath = normalizeRelativePath(path);
+	if (!relPath) throw new PierProtocolError("BAD_REQUEST", "Cannot delete the workspace root");
+	const root = await workspaceRealRoot(workspaceRoot);
+	const segments = relPath.split("/");
+	const name = segments.pop() as string;
+	const parent = await resolveInside(root, segments.join("/"), "directory");
+	const target = join(parent, name);
+	try {
+		const info = await lstat(target);
+		const kind = info.isDirectory() ? "directory" : info.isFile() ? "file" : "other";
+		await rm(target, { recursive: kind === "directory", maxRetries: 2 });
+		return { path: relPath, kind };
+	} catch (error) {
 		fsError(error, relPath);
 	}
 }

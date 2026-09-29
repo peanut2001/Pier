@@ -35,6 +35,7 @@ import type {
 	WorkspaceFilesResult,
 	WorkspaceFileWriteResult,
 	WorkspaceInfo,
+	WorkspacePathDeleteResult,
 } from "@pier/protocol";
 import { PierProtocolError, parseProtocolVersion } from "@pier/protocol";
 import { createContext, useContext, useSyncExternalStore } from "react";
@@ -55,8 +56,18 @@ export type WorkspaceTarget = "node" | "local";
  * speaking protocol 1.10 or later trust paired devices fully.
  */
 export function hostAllowsRemoteManagement(info: HostInfo | undefined): boolean {
+	return hostSpeaks(info, 10);
+}
+
+/** Whether a host speaks protocol `1.<minor>` or a later version. */
+function hostSpeaks(info: HostInfo | undefined, minor: number): boolean {
 	const version = info ? parseProtocolVersion(info.protocolVersion) : undefined;
-	return version !== undefined && (version.major > 1 || (version.major === 1 && version.minor >= 10));
+	return version !== undefined && (version.major > 1 || (version.major === 1 && version.minor >= minor));
+}
+
+/** Whether the shown host can delete workspace files and directories (`workspace.deletePath`, 1.11). */
+export function hostCanDeleteFiles(info: HostInfo | undefined): boolean {
+	return hostSpeaks(info, 11);
 }
 
 /** Subscriptions kept alive for recently viewed sessions (so approvals elsewhere stay visible). */
@@ -1334,6 +1345,26 @@ export class PierStore {
 			text,
 			...(expectedModifiedAt ? { expectedModifiedAt } : {}),
 		});
+		this.bumpFiles(workspaceId);
+		return result;
+	}
+
+	/**
+	 * Permanently delete a workspace file or directory (with its contents); rejects with the
+	 * host's error. Closes a preview of the deleted path and refreshes the file panel.
+	 */
+	async deletePath(workspaceId: string, path: string): Promise<WorkspacePathDeleteResult> {
+		const client = this.client;
+		if (!client) throw new Error("尚未连接到 Pier Host");
+		if (!hostCanDeleteFiles(this.state.hostInfo)) throw new Error("这台电脑的 Pier 版本过旧，不支持删除文件");
+		const result = await client.request("workspace.deletePath", { workspaceId, path });
+		const preview = this.state.filePreview;
+		if (
+			preview?.workspaceId === workspaceId &&
+			(preview.path === result.path || preview.path.startsWith(`${result.path}/`))
+		) {
+			this.closeFilePreview();
+		}
 		this.bumpFiles(workspaceId);
 		return result;
 	}

@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
 	CLOSE_DEVICE_REVOKED,
@@ -179,6 +179,11 @@ describe("remote access", () => {
 		writeFileSync(join(extraDir, "x.txt"), "old");
 		await phone.request("workspace.writeFile", { workspaceId: added.id, path: "x.txt", text: "new" });
 		expect(readFileSync(join(extraDir, "x.txt"), "utf8")).toBe("new");
+		expect(await phone.request("workspace.deletePath", { workspaceId: added.id, path: "x.txt" })).toEqual({
+			path: "x.txt",
+			kind: "file",
+		});
+		expect(existsSync(join(extraDir, "x.txt"))).toBe(false);
 		expect((await phone.request("provider.list")).providers.length).toBeGreaterThan(0);
 		expect(await phone.request("workspace.remove", { workspaceId: added.id })).toEqual({ removed: true });
 
@@ -224,6 +229,7 @@ describe("remote access", () => {
 		expect(audit).toMatch(/"event":"session.prompt".*"textLength":30/);
 		expect(audit).toMatch(/"event":"workspace.add".*phone-project/);
 		expect(audit).toMatch(/"event":"workspace.writeFile".*"bytes":3/);
+		expect(audit).toMatch(/"event":"workspace.deletePath".*"path":"x.txt"/);
 		expect(audit).not.toContain("TOP-SECRET");
 		phone.close();
 	});
