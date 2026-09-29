@@ -41,21 +41,70 @@ export function yunlianGroupOf(provider: Pick<ProviderInfo, "id" | "custom">): s
 	return provider.custom && provider.id.startsWith(GROUP_PREFIX) ? provider.id.slice(GROUP_PREFIX.length) : undefined;
 }
 
-/** Provider id for a group, e.g. `yunlian-vip`. */
+function groupSlug(group: string): string {
+	return group
+		.toLowerCase()
+		.replace(/[^a-z0-9._-]+/g, "-")
+		.replace(/^[-._]+|[-._]+$/g, "")
+		.slice(0, 48);
+}
+
+/** FNV-1a of the group name, so ids stay distinct when the slug drops characters. */
+function groupHash(group: string): string {
+	let hash = 0x811c9dc5;
+	for (const byte of new TextEncoder().encode(group)) hash = Math.imul(hash ^ byte, 0x01000193) >>> 0;
+	return hash.toString(36);
+}
+
+/**
+ * Provider id for a group, e.g. `yunlian-vip`. Names that are not already a valid slug (upper
+ * case, spaces, non-ASCII, too long) get a hash suffix, so `Claude`, `claude` and `claude企业级`
+ * never share a provider.
+ */
 export function yunlianGroupId(group: string): string {
+	const slug = groupSlug(group);
+	if (slug && slug === group) return `${GROUP_PREFIX}${slug}`;
+	return `${GROUP_PREFIX}${slug || "g"}-${groupHash(group)}`;
+}
+
+/** The id releases up to 0.2.11 used for a group; distinct groups could share it. */
+export function legacyYunlianGroupId(group: string): string {
 	const slug =
-		group
-			.toLowerCase()
-			.replace(/[^a-z0-9._-]+/g, "-")
-			.replace(/^[-._]+|[-._]+$/g, "")
-			.slice(0, 48) ||
-		// Non-ASCII group names (e.g. 企业) still need a stable, valid id.
+		groupSlug(group) ||
 		[...group]
 			.map((c) => c.codePointAt(0)?.toString(36))
 			.join("")
 			.slice(0, 48) ||
 		"default";
 	return `${GROUP_PREFIX}${slug}`;
+}
+
+/**
+ * The provider configured for `group`. Providers saved under the old id are still found, unless
+ * another listed group shares that id and the provider is not named after this group.
+ */
+export function findYunlianGroupProvider<P extends { id: string; name: string }>(
+	providers: ReadonlyMap<string, P>,
+	group: string,
+	groups: ReadonlyArray<string>,
+	siteName: string,
+): P | undefined {
+	const named = (provider: P, name: string) => provider.name === `${siteName} · ${name}`;
+	const current = providers.get(yunlianGroupId(group));
+	if (current) {
+		// e.g. `yunlian-claude` saved for `Claude` by an older release, now the id of `claude`.
+		const takenBy = groups.some(
+			(other) => other !== group && legacyYunlianGroupId(other) === current.id && named(current, other),
+		);
+		return takenBy ? undefined : current;
+	}
+	const legacyId = legacyYunlianGroupId(group);
+	const legacy = providers.get(legacyId);
+	if (!legacy) return undefined;
+	const shared = groups.some((other) => other !== group && legacyYunlianGroupId(other) === legacyId);
+	if (!shared) return legacy;
+	// Only the group the provider was first saved for owns it (the name is kept on later saves).
+	return named(legacy, group) ? legacy : undefined;
 }
 
 /** Base URL of a NewAPI site for a wire API. */

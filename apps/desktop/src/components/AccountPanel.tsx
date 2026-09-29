@@ -9,7 +9,7 @@ import type {
 } from "@pier/protocol";
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAppState, useStore } from "../lib/store.tsx";
-import { formatQuota, relayProvider, YUNLIAN_NAME, yunlianGroupId } from "../lib/yunlian.ts";
+import { findYunlianGroupProvider, formatQuota, relayProvider, YUNLIAN_NAME, yunlianGroupId } from "../lib/yunlian.ts";
 import {
 	IconAlert,
 	IconCheck,
@@ -696,7 +696,9 @@ function Dashboard({
 	// Only groups already configured locally are listed; others are added one at a time.
 	const [picked, setPicked] = useState<string[]>([]);
 	const [picking, setPicking] = useState(false);
-	const isConfigured = (entry: GroupEntry) => byId.has(yunlianGroupId(entry.name));
+	const groupNames = entries.map((e) => e.name);
+	const providerOf = (entry: GroupEntry) => findYunlianGroupProvider(byId, entry.name, groupNames, site.name);
+	const isConfigured = (entry: GroupEntry) => providerOf(entry) !== undefined;
 	const shown = entries.filter((e) => isConfigured(e) || picked.includes(e.name));
 	const addable = entries.filter((e) => !e.unavailable && !isConfigured(e) && !picked.includes(e.name));
 	const [pick, setPick] = useState("");
@@ -840,7 +842,7 @@ function Dashboard({
 							key={entry.name}
 							entry={entry}
 							overview={overview}
-							provider={byId.get(yunlianGroupId(entry.name))}
+							provider={providerOf(entry)}
 							onTokens={onTokens}
 							onRemove={() => setPicked((list) => list.filter((name) => name !== entry.name))}
 						/>

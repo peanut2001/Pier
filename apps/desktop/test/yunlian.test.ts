@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+	findYunlianGroupProvider,
 	formatQuota,
 	isYunlianProvider,
+	legacyYunlianGroupId,
 	newApiBaseUrl,
 	relayProvider,
 	YUNLIAN_ID,
@@ -118,9 +120,14 @@ describe("云链API provider", () => {
 describe("personal center helpers", () => {
 	it("maps groups to provider ids", () => {
 		expect(yunlianGroupId("vip")).toBe("yunlian-vip");
-		expect(yunlianGroupId("Claude Max")).toBe("yunlian-claude-max");
-		expect(yunlianGroupId("企业")).toMatch(/^yunlian-[a-z0-9]+$/);
+		expect(yunlianGroupId("Claude Max")).toMatch(/^yunlian-claude-max-[a-z0-9]+$/);
+		expect(yunlianGroupId("企业")).toMatch(/^yunlian-g-[a-z0-9]+$/);
 		expect(yunlianGroupId("企业")).not.toBe(yunlianGroupId("默认"));
+		const long = "x".repeat(80);
+		for (const id of [yunlianGroupId(long), yunlianGroupId(`${long}企业`)]) {
+			expect(id.length).toBeLessThanOrEqual(64);
+			expect(id).toMatch(/^[a-z0-9][a-z0-9._-]*$/);
+		}
 		const custom = { api: "openai-completions" as const, baseUrl: "https://api.yunnet.top/v1", models: [] };
 		expect(
 			yunlianGroupOf({ id: "yunlian-vip", custom: { ...custom, id: "yunlian-vip", hasConfiguredKey: true } }),
@@ -129,6 +136,37 @@ describe("personal center helpers", () => {
 			undefined,
 		);
 		expect(isYunlianProvider({ id: "yunlian-vip" })).toBe(true);
+	});
+
+	it("gives groups whose slugs collide separate providers", () => {
+		const groups = ["Claude", "claude企业级", "claude"];
+		expect(new Set(groups.map(yunlianGroupId)).size).toBe(groups.length);
+		// Up to 0.2.11 all three mapped to `yunlian-claude`.
+		expect(new Set(groups.map(legacyYunlianGroupId))).toEqual(new Set(["yunlian-claude"]));
+	});
+
+	it("finds providers saved under the old ids", () => {
+		const saved = (id: string, name: string) => [id, { id, name }] as const;
+		const site = "云链API";
+		const old = new Map([
+			saved("yunlian-claude", "云链API · Claude"),
+			saved("yunlian-claude-max", "云链API · Claude Max"),
+		]);
+		const groups = ["Claude", "claude企业级", "Claude Max"];
+		expect(findYunlianGroupProvider(old, "Claude", groups, site)?.id).toBe("yunlian-claude");
+		expect(findYunlianGroupProvider(old, "claude企业级", groups, site)).toBeUndefined();
+		expect(findYunlianGroupProvider(old, "Claude Max", groups, site)?.id).toBe("yunlian-claude-max");
+		// Without a colliding group the old id is used whatever its name.
+		const renamed = new Map([saved("yunlian-claude", "My relay")]);
+		expect(findYunlianGroupProvider(renamed, "Claude", ["Claude"], site)?.id).toBe("yunlian-claude");
+		// A provider under the new id wins.
+		const both = new Map([...old, saved(yunlianGroupId("claude企业级"), "云链API · claude企业级")]);
+		expect(findYunlianGroupProvider(both, "claude企业级", groups, site)?.id).toBe(yunlianGroupId("claude企业级"));
+		expect(findYunlianGroupProvider(both, "Claude", groups, site)?.id).toBe("yunlian-claude");
+		// `claude` now owns `yunlian-claude`, but not while it holds the old `Claude` provider.
+		const cased = ["Claude", "claude"];
+		expect(findYunlianGroupProvider(old, "claude", cased, site)).toBeUndefined();
+		expect(findYunlianGroupProvider(old, "Claude", cased, site)?.id).toBe("yunlian-claude");
 	});
 
 	it("builds a group provider", () => {
