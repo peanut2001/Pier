@@ -230,7 +230,8 @@ describe("writeWorkspaceFile", () => {
 			modifiedAt: statSync(file).mtime.toISOString(),
 		});
 		expect(readFileSync(file, "utf8")).toBe("新的内容\n");
-		expect(statSync(file).mode & 0o777).toBe(0o754);
+		// Windows has no POSIX permission bits (only read-only), so only check them elsewhere.
+		if (process.platform !== "win32") expect(statSync(file).mode & 0o777).toBe(0o754);
 		expect(readFileSync(join(root, "hard.ts"), "utf8")).toBe("新的内容\n");
 	});
 
