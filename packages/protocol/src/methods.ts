@@ -30,6 +30,7 @@ import {
 	type NewApiLoginResult,
 	type NewApiModel,
 	type NewApiToken,
+	type PackageManagerDetection,
 	type PeerInfo,
 	type PiSettingsChangeResult,
 	type PiSettingsResult,
@@ -93,6 +94,8 @@ export const MethodParamsSchemas = {
 	"host.listDirectories": z.object({ path: z.string().min(1).max(4096).optional() }).optional(),
 	/** CPU, memory, disk and network usage of the host's computer (1.12). */
 	"host.stats": z.object({}).optional(),
+	/** npm, pnpm and bun on the host's computer, for pi's `npmCommand` setting (1.17). */
+	"host.packageManagers": z.object({}).optional(),
 
 	/**
 	 * The desktop app's updater on the host's computer (1.13), so a paired computer or phone can
@@ -444,6 +447,7 @@ export interface MethodResults {
 	"host.info": HostInfo;
 	"host.listDirectories": HostDirectoryListing;
 	"host.stats": HostStats;
+	"host.packageManagers": PackageManagerDetection;
 	"update.status": AppUpdateStatus;
 	"update.check": AppUpdateStatus;
 	"update.install": AppUpdateStatus;

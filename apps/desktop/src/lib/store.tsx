@@ -26,6 +26,7 @@ import type {
 	MethodParams,
 	MethodResult,
 	ModelInfo,
+	PackageManagerInfo,
 	PairingRequest,
 	PairingResolution,
 	PeerInfo,
@@ -1514,6 +1515,14 @@ export class PierStore {
 		const client = this.localClient;
 		if (!client) throw new Error("尚未连接到 Pier Host");
 		return client.request("settings.get", workspaceId ? { workspaceId } : {});
+	}
+
+	/** npm, pnpm and bun found on this computer, for pi's `npmCommand`; rejects with the host's error. */
+	async detectPackageManagers(): Promise<PackageManagerInfo[]> {
+		const client = this.localClient;
+		if (!client) throw new Error("尚未连接到 Pier Host");
+		const result = await client.request("host.packageManagers", {}, { timeoutMs: 20_000 });
+		return result.managers;
 	}
 
 	/** Set (or, without `value`, remove) settings in one file. Failures are reported as a toast. */

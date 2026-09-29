@@ -27,6 +27,8 @@ export interface FieldDef {
 	terminal?: boolean;
 	/** Shown instead of a default value when the field has none. */
 	defaultLabel?: string;
+	/** Offer values detected on the host below the control. */
+	suggest?: "packageManagers";
 }
 
 export interface GroupDef {
@@ -172,9 +174,11 @@ export const SETTINGS_GROUPS: GroupDef[] = [
 			{
 				path: ["npmCommand"],
 				label: "npm 命令",
-				description: "查找与安装 npm 扩展包时使用的命令及参数，每行一项。找不到 npm 时可以填写 npm 的完整路径。",
+				description:
+					"查找与安装 npm 扩展包时使用的命令及参数，每行一项。支持 npm、pnpm 和 bun，可从下方检测到的包管理器中选择，或填写完整路径。",
 				kind: { type: "list", placeholder: "/usr/local/bin/npm" },
 				defaultLabel: "npm",
+				suggest: "packageManagers",
 			},
 		],
 	},
@@ -717,4 +721,21 @@ export function parseSettingsText(text: string): { settings?: SettingsObject; er
 	} catch (error) {
 		return { error: error instanceof Error ? error.message : String(error) };
 	}
+}
+
+/**
+ * The detected package manager an `npmCommand` value runs: the default npm when it is unset, the
+ * one at that path, or the first of that name on the host's PATH for a bare name. Undefined for a
+ * wrapper command (`mise exec -- pnpm`) or a path that was not detected.
+ */
+export function currentPackageManager<T extends { name: string; path: string; default?: true }>(
+	command: readonly string[] | undefined,
+	managers: readonly T[],
+): T | undefined {
+	if (!command || command.length === 0) return managers.find((m) => m.name === "npm" && m.default);
+	if (command.length !== 1) return undefined;
+	const [value = ""] = command;
+	if (/[\\/]/.test(value)) return managers.find((m) => m.path === value);
+	const name = value.replace(/\.(cmd|exe)$/i, "");
+	return managers.find((m) => m.name === name && m.default);
 }

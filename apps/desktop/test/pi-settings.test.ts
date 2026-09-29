@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	builtinDefault,
+	currentPackageManager,
 	type FieldDef,
 	formatValue,
 	getPath,
@@ -71,5 +72,32 @@ describe("pi settings fields", () => {
 		expect(parseSettingsText('{ "a": 1 }').settings).toEqual({ a: 1 });
 		expect(parseSettingsText("[]").error).toBeDefined();
 		expect(parseSettingsText("{ nope").error).toBeDefined();
+	});
+});
+
+describe("currentPackageManager", () => {
+	const managers = [
+		{ name: "npm", path: "/home/u/.nvm/versions/node/v22/bin/npm", default: true as const },
+		{ name: "npm", path: "/usr/bin/npm" },
+		{ name: "pnpm", path: "/home/u/.local/share/pnpm/pnpm", default: true as const },
+		{ name: "bun", path: "/home/u/.bun/bin/bun" },
+	];
+
+	it("uses the default npm when npmCommand is unset", () => {
+		expect(currentPackageManager(undefined, managers)?.path).toBe("/home/u/.nvm/versions/node/v22/bin/npm");
+		expect(currentPackageManager([], managers)?.path).toBe("/home/u/.nvm/versions/node/v22/bin/npm");
+	});
+
+	it("matches a full path, or a bare name to the first one on PATH", () => {
+		expect(currentPackageManager(["/usr/bin/npm"], managers)?.path).toBe("/usr/bin/npm");
+		expect(currentPackageManager(["pnpm"], managers)?.path).toBe("/home/u/.local/share/pnpm/pnpm");
+		expect(currentPackageManager(["pnpm.cmd"], managers)?.name).toBe("pnpm");
+		// bun is only in a well-known directory, not on PATH.
+		expect(currentPackageManager(["bun"], managers)).toBeUndefined();
+		expect(currentPackageManager(["/opt/other/npm"], managers)).toBeUndefined();
+	});
+
+	it("does not guess for wrapper commands", () => {
+		expect(currentPackageManager(["mise", "exec", "--", "pnpm"], managers)).toBeUndefined();
 	});
 });

@@ -36,6 +36,7 @@ import {
 import { listHostDirectories } from "./host-directories.ts";
 import { HostStatsSampler } from "./host-stats.ts";
 import type { ManagedSession } from "./managed-session.ts";
+import { detectPackageManagers } from "./package-managers.ts";
 import {
 	accountPath,
 	archivedSessionsPath,
@@ -615,6 +616,7 @@ export class PierHost implements RequestHandler {
 			"host.info": () => this.info(),
 			"host.listDirectories": (_ctx, params) => listHostDirectories(params?.path),
 			"host.stats": () => this.stats.sample(),
+			"host.packageManagers": async () => ({ managers: await detectPackageManagers() }),
 
 			"update.status": () => this.updateStatus(),
 			"update.check": () => this.updateRequest("update.check"),

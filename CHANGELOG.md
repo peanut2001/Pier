@@ -4,10 +4,16 @@ Pier 的所有重要变更都记录在这里。版本号规则：日常发版只
 
 ## 未发布
 
+### 新增
+
+- **检测本机的 npm / pnpm / bun**：「设置 → pi 配置 → 工具与 Shell → npm 命令」下方列出本机找到的 npm、pnpm 和 bun（版本、完整路径、是否在 PATH 中、哪一个是默认的 npm），点「使用」即把 `npmCommand` 设为它的完整路径，正在使用的一项会高亮；无法运行的（例如 npm 找不到 `node`）会标出原因。除 `PATH` 外还会查找 `~/.bun/bin`、pnpm 与 Volta 的安装目录、Homebrew、`/usr/local/bin` 等常见位置。
+- **协议 1.17**（向后兼容）：新增 `host.packageManagers`，对已配对设备开放。
+
 ### 变更
 
 - **个人中心改为浏览器登录**：「设置 → 个人中心」不再在 Pier 中输入账号密码，而是点击「在浏览器中登录」，在系统浏览器里用云链API 支持的任意方式（账号密码、GitHub、LinuxDO、Passkey 等）登录并授权 Pier，完成后自动回到 Pier 显示余额与分组。Pier 只保存站点为它建立的独立登录会话（可以在网页「登录会话」中随时注销），不会接触密码；没有账号可以在登录页面注册。站点需要支持应用授权登录的 NewAPI（`app_authorization_scopes` 包含 `account`），不支持的站点仍显示原来的账号密码 / 访问令牌表单。
 - **协议 1.16**（向后兼容）：新增 `account.authorizeStart` / `account.authorizeWait` / `account.authorizeCancel`，`AccountSite` 新增 `browserLogin`。
+- **使用终端中的 PATH**：在 macOS 和 Linux 上，从程序坞 / 启动器打开的 Pier（包括 AppImage）没有终端里的 `PATH`，用 nvm、fnm、mise、Volta、Homebrew 或 bun 安装的工具会报「找不到命令」。内置的 Pier Host 现在启动时会向登录 Shell 读取一次 `PATH`（最多 5 秒）并放在前面，扩展安装和 Agent 的 bash 工具都能找到这些命令。Shell 启动文件可以根据 `PIER_RESOLVING_ENVIRONMENT=1` 跳过耗时的初始化；`pier-host --no-login-shell-path` 可关闭这一行为。
 
 ## v0.2.10 — 2026-09-29
 
