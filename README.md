@@ -6,7 +6,7 @@ Pier 是编码 Agent 在桌面上的停靠点：Agent 常驻在你的电脑上�
 
 - 桌面端：Tauri 2，内置 Pier Host（当前 Agent 运行时为 pi SDK）
 - 手机端：Expo / React Native 原生 App，通过配对后的加密连接驱动桌面 Agent
-- 电脑之间：每台电脑都是一个节点，桌面端可以添加其他电脑并切换过去，直接查看和驱动那台电脑上的 Agent
+- 电脑之间：每台电脑都是一个节点，桌面端可以添加其他电脑并切换过去，直接查看和驱动那台电脑上的 Agent，并管理它的工作区（配对即完全信任）
 
 开发计划见 [docs/PLAN.md](docs/PLAN.md)，协议见 [docs/protocol.md](docs/protocol.md)，远程访问的安全设计见 [docs/security.md](docs/security.md)，技术验证结论见 [docs/spikes.md](docs/spikes.md)。
 

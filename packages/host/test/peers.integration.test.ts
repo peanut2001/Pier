@@ -106,9 +106,10 @@ describe("computer-to-computer (peers)", () => {
 		expect(listed).toMatchObject({ connected: true, version: b.host.info().version, platform: process.platform });
 		expect(listed?.lastConnectedAt).toBeDefined();
 
-		// It is a remote device there: workspaces yes, B's settings and pairing no.
+		// A paired computer manages B's workspaces, but not who can reach B.
 		expect((await remote.request("workspace.list")).workspaces.map((w) => w.id)).toEqual([bWorkspace.id]);
-		await expectCode(remote.request("workspace.add", { path: b.workspaceDir }), "FORBIDDEN");
+		expect((await remote.request("workspace.add", { path: b.workspaceDir })).workspace.id).toBe(bWorkspace.id);
+		expect((await remote.request("host.listDirectories")).path).toBeTruthy();
 		await expectCode(remote.request("pairing.start"), "FORBIDDEN");
 		await expectCode(remote.request("peer.list"), "FORBIDDEN");
 

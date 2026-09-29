@@ -128,18 +128,13 @@ export type PierHostEvent =
 			defaultModel?: DefaultModelRef;
 	  };
 
-/** Host events delivered only to local connections. */
+/** Host events delivered only to local connections (who can reach this computer). */
 export const LOCAL_ONLY_EVENTS: ReadonlySet<string> = new Set([
 	"remote.changed",
 	"device.changed",
 	"pairing.request",
 	"pairing.resolved",
 	"peer.changed",
-	"auth.prompt",
-	"auth.promptClosed",
-	"auth.notice",
-	"auth.done",
-	"extension.progress",
 ]);
 
 export type PierEvent = PierSessionEvent | PierHostEvent;

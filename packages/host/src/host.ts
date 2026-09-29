@@ -31,6 +31,7 @@ import {
 	type RequestHandler,
 	type Transport,
 } from "./connection.ts";
+import { listHostDirectories } from "./host-directories.ts";
 import type { ManagedSession } from "./managed-session.ts";
 import {
 	accountPath,
@@ -93,6 +94,27 @@ const AUDITED_METHODS = new Set<MethodName>([
 	"model.set",
 	"thinking.set",
 	"ui.respond",
+	// Managing the computer (open to paired devices since 1.10).
+	"workspace.add",
+	"workspace.remove",
+	"workspace.setPolicy",
+	"workspace.writeFile",
+	"model.setDefault",
+	"provider.login",
+	"provider.logout",
+	"provider.saveCustom",
+	"provider.removeCustom",
+	"newapi.useToken",
+	"newapi.authorizeStart",
+	"account.login",
+	"account.register",
+	"account.useToken",
+	"account.logout",
+	"extension.install",
+	"extension.remove",
+	"extension.update",
+	"extension.setEnabled",
+	"extension.delete",
 ]);
 
 function auditDetail(method: MethodName, params: Record<string, unknown>): Record<string, unknown> | undefined {
@@ -117,6 +139,38 @@ function auditDetail(method: MethodName, params: Record<string, unknown>): Recor
 			return { provider: params.provider, modelId: params.modelId };
 		case "thinking.set":
 			return { level: params.level };
+		case "workspace.add":
+			return { path: params.path, ...(params.policy ? { policy: params.policy } : {}) };
+		case "workspace.remove":
+			return { workspaceId: params.workspaceId };
+		case "workspace.setPolicy":
+			return { workspaceId: params.workspaceId, policy: params.policy };
+		case "workspace.writeFile":
+			return {
+				workspaceId: params.workspaceId,
+				path: params.path,
+				bytes: typeof params.text === "string" ? Buffer.byteLength(params.text) : 0,
+			};
+		case "model.setDefault":
+			return { provider: params.provider, modelId: params.modelId };
+		case "provider.login":
+			return { providerId: params.providerId, method: params.method };
+		case "provider.logout":
+		case "provider.removeCustom":
+			return { providerId: params.providerId };
+		case "provider.saveCustom": {
+			const provider = (params.provider ?? {}) as Record<string, unknown>;
+			return { providerId: provider.id };
+		}
+		case "extension.install":
+		case "extension.remove":
+			return { source: params.source, ...(params.scope ? { scope: params.scope } : {}) };
+		case "extension.update":
+			return params.source ? { source: params.source } : undefined;
+		case "extension.setEnabled":
+			return { type: params.type, path: params.path, enabled: params.enabled };
+		case "extension.delete":
+			return { path: params.path };
 		default:
 			return undefined;
 	}
@@ -326,7 +380,7 @@ export class PierHost implements RequestHandler {
 				throw new PierProtocolError("UNAUTHENTICATED", "Call host.hello first");
 			}
 			if (connection.kind !== "local" && LOCAL_ONLY_METHODS.has(method)) {
-				throw new PierProtocolError("FORBIDDEN", `${method} is only available to the desktop app`);
+				throw new PierProtocolError("FORBIDDEN", `${method} is only available on this computer`);
 			}
 			if (this.shuttingDown) throw new PierProtocolError("CONFLICT", "Host is shutting down");
 			const schema = MethodParamsSchemas[method];
@@ -433,6 +487,7 @@ export class PierHost implements RequestHandler {
 				};
 			},
 			"host.info": () => this.info(),
+			"host.listDirectories": (_ctx, params) => listHostDirectories(params?.path),
 
 			"workspace.list": () => ({ workspaces: this.config.listWorkspaces() }),
 			"workspace.add": (_ctx, params) => {

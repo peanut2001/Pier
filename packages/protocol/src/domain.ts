@@ -27,6 +27,30 @@ export interface WorkspaceInfo {
 	addedAt: string;
 }
 
+/** One subdirectory in a `host.listDirectories` result (1.10). */
+export interface HostDirectoryEntry {
+	name: string;
+	/** Absolute path on the host. */
+	path: string;
+	symlink?: boolean;
+}
+
+/** Subdirectories of one host directory, used to pick a workspace on another computer (1.10). */
+export interface HostDirectoryListing {
+	/** The listed directory: absolute and normalized (symlinks are not resolved). */
+	path: string;
+	/** Its parent directory; omitted at a filesystem root. */
+	parent?: string;
+	/** The host user's home directory. */
+	home: string;
+	/** Path separator on the host (`/` or `\\`). */
+	separator: string;
+	/** Subdirectories (symlinks to directories included), sorted by name. */
+	entries: HostDirectoryEntry[];
+	truncated?: boolean;
+	total?: number;
+}
+
 /** One entry of a workspace directory listing (`workspace.files`, 1.5). */
 export interface WorkspaceFileEntry {
 	name: string;

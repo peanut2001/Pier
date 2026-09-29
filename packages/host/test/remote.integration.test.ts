@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
 	CLOSE_DEVICE_REVOKED,
@@ -164,16 +164,30 @@ describe("remote access", () => {
 		expect(hello.device).toEqual({ id: outcome.deviceId, name: "Test Phone" });
 		expect((await desktop.request("device.list")).devices[0]?.connected).toBe(true);
 
-		// Remote devices see workspaces but cannot manage them, nor pairing or devices.
+		// A paired device is trusted to manage the computer (1.10): browse directories, add
+		// workspaces, change policies, edit files, and read provider settings.
 		expect((await phone.request("workspace.list")).workspaces.map((w) => w.id)).toEqual([workspace.id]);
+		const extraDir = join(t.root, "phone-project");
+		mkdirSync(extraDir);
+		const listing = await phone.request("host.listDirectories", { path: t.root });
+		expect(listing.entries.map((e) => e.name)).toContain("phone-project");
+		const added = (await phone.request("workspace.add", { path: extraDir })).workspace;
+		expect((await desktop.request("workspace.list")).workspaces.map((w) => w.id)).toContain(added.id);
+		expect(
+			(await phone.request("workspace.setPolicy", { workspaceId: added.id, policy: "auto" })).workspace.policy,
+		).toBe("auto");
+		writeFileSync(join(extraDir, "x.txt"), "old");
+		await phone.request("workspace.writeFile", { workspaceId: added.id, path: "x.txt", text: "new" });
+		expect(readFileSync(join(extraDir, "x.txt"), "utf8")).toBe("new");
+		expect((await phone.request("provider.list")).providers.length).toBeGreaterThan(0);
+		expect(await phone.request("workspace.remove", { workspaceId: added.id })).toEqual({ removed: true });
+
+		// Who can reach this computer stays local-only: devices, pairing, remote access, peers.
 		for (const call of [
-			phone.request("workspace.add", { path: t.workspaceDir }),
 			phone.request("device.list"),
 			phone.request("pairing.start"),
 			phone.request("remote.configure", { enabled: false }),
-			phone.request("workspace.writeFile", { workspaceId: workspace.id, path: "x.txt", text: "" }),
-			phone.request("provider.list"),
-			phone.request("provider.login", { providerId: "openai", method: "api_key" }),
+			phone.request("peer.list"),
 		]) {
 			await expectCode(call, "FORBIDDEN");
 		}
@@ -208,6 +222,8 @@ describe("remote access", () => {
 		expect(audit).toContain('"event":"pair.accepted"');
 		expect(audit).toContain('"event":"connect"');
 		expect(audit).toMatch(/"event":"session.prompt".*"textLength":30/);
+		expect(audit).toMatch(/"event":"workspace.add".*phone-project/);
+		expect(audit).toMatch(/"event":"workspace.writeFile".*"bytes":3/);
 		expect(audit).not.toContain("TOP-SECRET");
 		phone.close();
 	});

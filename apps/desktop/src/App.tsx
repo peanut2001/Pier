@@ -1,5 +1,6 @@
 import type { WorkspaceInfo } from "@pier/protocol";
 import { useEffect } from "react";
+import { DirectoryPicker } from "./components/DirectoryPicker.tsx";
 import { FilesPanel } from "./components/FilesPanel.tsx";
 import { FilePreview } from "./components/FileViewer.tsx";
 import { Welcome, WorkspaceHome } from "./components/Home.tsx";
@@ -162,6 +163,7 @@ export function App() {
 			<YunlianDialog />
 			<PairingRequestDialog />
 			<AddPeerDialog />
+			<DirectoryPicker />
 		</>
 	);
 }

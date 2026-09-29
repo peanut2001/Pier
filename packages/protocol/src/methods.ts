@@ -18,6 +18,7 @@ import {
 	ExtensionResourceTypeSchema,
 	ExtensionScopeSchema,
 	type ExtensionUpdateInfo,
+	type HostDirectoryListing,
 	type HostInfo,
 	ImageInputSchema,
 	type ModelInfo,
@@ -67,6 +68,11 @@ export const MethodParamsSchemas = {
 		coalesceMs: z.number().int().min(0).max(1000).optional(),
 	}),
 	"host.info": z.object({}).optional(),
+	/**
+	 * List the subdirectories of an absolute directory on the host (1.10), so a client can pick
+	 * a workspace on another computer. Omit `path` for the user's home directory.
+	 */
+	"host.listDirectories": z.object({ path: z.string().min(1).max(4096).optional() }).optional(),
 
 	"workspace.list": z.object({}).optional(),
 	"workspace.add": z.object({
@@ -297,7 +303,12 @@ export function isMethodName(method: string): method is MethodName {
 	return Object.hasOwn(MethodParamsSchemas, method);
 }
 
-/** Methods that only the local desktop UI may call. */
+/**
+ * Methods that only the local desktop UI may call: managing who can reach this computer
+ * (paired devices, pairing, remote access, paired computers). A paired device is fully
+ * trusted otherwise (1.10): it can manage workspaces and policies, edit files, and
+ * configure models, providers, accounts, and extensions.
+ */
 export const LOCAL_ONLY_METHODS: ReadonlySet<MethodName> = new Set([
 	"device.list",
 	"device.revoke",
@@ -310,43 +321,6 @@ export const LOCAL_ONLY_METHODS: ReadonlySet<MethodName> = new Set([
 	"peer.list",
 	"peer.pair",
 	"peer.remove",
-	"workspace.add",
-	"workspace.remove",
-	"workspace.setPolicy",
-	"workspace.writeFile",
-	"model.setDefault",
-	"provider.list",
-	"provider.login",
-	"provider.loginRespond",
-	"provider.loginCancel",
-	"provider.logout",
-	"provider.saveCustom",
-	"provider.removeCustom",
-	"provider.probeModels",
-	"newapi.login",
-	"newapi.verify",
-	"newapi.createToken",
-	"newapi.useToken",
-	"newapi.close",
-	"newapi.authorizeStart",
-	"newapi.authorizeWait",
-	"newapi.authorizeCancel",
-	"account.status",
-	"account.login",
-	"account.verify",
-	"account.sendCode",
-	"account.register",
-	"account.overview",
-	"account.createToken",
-	"account.useToken",
-	"account.logout",
-	"extension.list",
-	"extension.install",
-	"extension.remove",
-	"extension.update",
-	"extension.checkUpdates",
-	"extension.setEnabled",
-	"extension.delete",
 ]);
 
 export interface HelloResult {
@@ -373,6 +347,7 @@ export interface SubscribeResult {
 export interface MethodResults {
 	"host.hello": HelloResult;
 	"host.info": HostInfo;
+	"host.listDirectories": HostDirectoryListing;
 	"workspace.list": { workspaces: WorkspaceInfo[] };
 	"workspace.add": { workspace: WorkspaceInfo };
 	"workspace.remove": { removed: boolean };
