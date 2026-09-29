@@ -54,7 +54,7 @@ import { fileToken } from "./composer-text.ts";
 import { remotePageBlocker } from "./settings-target.ts";
 import { isYunlianProvider, YUNLIAN_SITE, yunlianGroupOf, yunlianProvider } from "./yunlian.ts";
 
-export const APP_VERSION = "0.2.12";
+export const APP_VERSION = "0.2.13";
 
 /** Node id of this computer; any other node is a paired computer's host id. */
 export const LOCAL_NODE = "local";
