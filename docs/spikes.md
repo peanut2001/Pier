@@ -37,14 +37,14 @@ pi 在 Bun 二进制中通过 `dirname(process.execPath)` 查找这些资源；�
 ### 发现的问题与处理
 
 1. **缺少 pi 资源时版本号为 `0.0.0`，且主题初始化失败。** 有扩展在 `session_start` 时访问 `ctx.ui.theme`，会导致会话创建失败。处理：构建脚本复制资源；UI 桥接在主题不可用时回退为无样式主题（样式函数原样返回文本），不会再抛错。
-2. **图片缩放 worker 未嵌入二进制。** pi 会自动回退为进程内缩放（需要 `photon_rs_bg.wasm`，已复制）。M4 做图片输入时再评估是否把 worker 作为额外入口编入。
+2. **图片缩放 worker 未嵌入二进制，且 Photon 的 wasm 读的是构建机路径。** pi 会自动回退为进程内缩放，但 `photon-node` 用 `__dirname` 读取 `photon_rs_bg.wasm`，`bun build --compile` 把构建机上的 `node_modules` 路径写死进了二进制；pi 自带的回退只查找可执行文件目录、`<可执行文件目录>/photon` 和工作目录，找不到桌面端放在 `pi-assets`（`PI_PACKAGE_DIR`）里的那份。于是在构建机以外的电脑上 Photon 加载失败，所有图片都被替换为 "[Image omitted: could not be resized below the inline image size limit.]"（v0.2.9 之前的版本都有这个问题；构建机上不会复现）。处理：`packages/host/src/pi/photon-wasm.ts` 在启动时把对 `photon_rs_bg.wasm` 的读取重定向到 `PI_PACKAGE_DIR` 或可执行文件目录中的那份；`pier-host --check-images` 会通过 pi 实际缩放一张图片，`smoke-sidecar.mjs` 据此校验 wasm 确实来自安装包。
 3. **偶发一次退出卡住，未能复现。** 该次日志已打印 "shutting down"，但进程未退出，且 `unref()` 的 10 s 强制退出定时器也未触发。随后在空闲、运行中断开、prompt 完成后等场景各复现数次，均正常退出（约 30 ms）。已加固：强制退出定时器不再 `unref`；每个会话的 dispose 限时 5 s（防止扩展的 `session_shutdown` 挂住）；退出各步骤写入 stderr，便于再次出现时定位。
 
 ### 决定
 
 - 桌面端 sidecar 采用 Bun 单文件二进制，pi 资源作为同目录文件（或 Tauri resources + `PI_PACKAGE_DIR`）一起分发。
 - 备选方案（内置 Node 运行时 + JS bundle，或 Node SEA）暂不需要；若 M2 在 macOS / Windows 真机上验证失败，再启用备选。
-- v0.0.1 发版时，在 GitHub Actions 原生 runner（linux-x64、linux-arm64、darwin-arm64、darwin-x64、windows-x64）上用 `scripts/smoke-sidecar.mjs` 验证了编译产物：启动、`pier.ready`、协议握手、通过二进制内的 pi SDK 创建会话、stdin 关闭后优雅退出。
+- v0.0.1 发版时，在 GitHub Actions 原生 runner（linux-x64、linux-arm64、darwin-arm64、darwin-x64、windows-x64）上用 `scripts/smoke-sidecar.mjs` 验证了编译产物：启动、`pier.ready`、协议握手、通过二进制内的 pi SDK 创建会话、stdin 关闭后优雅退出（此后还加入了 `--check-images` 图片缩放检查）。
 - 待在 M2 / M6 验证：macOS / Windows 上配合真实 `~/.pi/agent` 与真实模型运行；Bun 二进制在 macOS 上的签名与公证；带原生依赖的扩展。
 
 ## Spike 2：Tauri 启动 sidecar

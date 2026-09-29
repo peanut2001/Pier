@@ -14,6 +14,7 @@ import { writePrivateFile } from "./config.ts";
 import { DEFAULT_ALLOWED_ORIGINS, startLocalGateway } from "./gateway/local-gateway.ts";
 import { PIER_HOST_VERSION, PierHost } from "./host.ts";
 import { defaultPierDir, runtimeFilePath } from "./paths.ts";
+import { checkImageSupport, installPhotonWasmRedirect } from "./pi/photon-wasm.ts";
 
 const HELP = `pier-host ${PIER_HOST_VERSION}
 
@@ -32,6 +33,7 @@ Options:
                       addresses (repeatable; e.g. a Tailscale name or a forwarded port)
   --no-mdns           Do not advertise _pier._tcp over mDNS
   --watch-stdin       Exit when stdin closes (sidecar mode: exit with the parent)
+  --check-images      Resize a sample image through pi (Photon), print the result, and exit
   -h, --help          Show this help
 
 Environment:
@@ -43,6 +45,9 @@ function log(message: string): void {
 }
 
 async function main(): Promise<void> {
+	// Load Photon's wasm from the bundled assets, not the build machine's path; without it pi
+	// drops every image.
+	installPhotonWasmRedirect();
 	const { values } = parseArgs({
 		options: {
 			port: { type: "string" },
@@ -55,12 +60,19 @@ async function main(): Promise<void> {
 			"remote-address": { type: "string", multiple: true },
 			"no-mdns": { type: "boolean" },
 			"watch-stdin": { type: "boolean" },
+			"check-images": { type: "boolean" },
 			help: { type: "boolean", short: "h" },
 		},
 		allowPositionals: false,
 	});
 	if (values.help) {
 		process.stdout.write(HELP);
+		return;
+	}
+	if (values["check-images"]) {
+		const result = await checkImageSupport();
+		process.stdout.write(`${JSON.stringify(result)}\n`);
+		process.exitCode = result.ok ? 0 : 1;
 		return;
 	}
 
