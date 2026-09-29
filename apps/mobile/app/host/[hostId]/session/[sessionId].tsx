@@ -100,17 +100,21 @@ function SessionMenu({ chat, onClose }: { chat: ChatController; onClose: () => v
 							</View>
 						</>
 					) : null}
-					<Title style={styles.sectionTitle}>上下文</Title>
-					<Button
-						title="压缩上下文"
-						loading={busy}
-						onPress={async () => {
-							setBusy(true);
-							await chat.compact();
-							setBusy(false);
-							onClose();
-						}}
-					/>
+					{chat.chat.capabilities?.compact === false ? null : (
+						<>
+							<Title style={styles.sectionTitle}>上下文</Title>
+							<Button
+								title="压缩上下文"
+								loading={busy}
+								onPress={async () => {
+									setBusy(true);
+									await chat.compact();
+									setBusy(false);
+									onClose();
+								}}
+							/>
+						</>
+					)}
 					<Title style={styles.sectionTitle}>会话</Title>
 					<Button
 						title="删除会话"

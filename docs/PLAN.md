@@ -1,6 +1,6 @@
 # Pier 开发计划
 
-> Pier：编码 Agent 的桌面停靠点（Tauri）与手机遥控器（Expo / React Native）。首个 Agent 运行时为 [pi](https://github.com/earendil-works/pi)，后续通过 Host 适配层接入 Claude Code 与 Codex。
+> Pier：编码 Agent 的桌面停靠点（Tauri）与手机遥控器（Expo / React Native）。首个 Agent 运行时为 [pi](https://github.com/earendil-works/pi)，Claude Code 与 Codex 已通过 Host 的 Agent 运行时适配层接入。
 >
 > 本文档是项目的总体规划与里程碑，随开发进度持续更新。
 >
@@ -261,12 +261,13 @@ Pier/
 - [ ] 推送：手机上报 Expo push token（经加密通道交给 Host，Host 注册到 relay）；Host 在 `agent_settled`、`ui.request`、错误时触发推送，推送内容不含代码与命令原文。
 - 验收：手机使用移动网络（非同一局域网）可完成配对后的全部操作；锁屏状态下能收到审批通知。
 
-### 多 Agent 运行时（规划）
+### 多 Agent 运行时
 
-- [ ] Host 抽象出 Agent 运行时接口，现有 `packages/host/src/pi/` 作为第一个实现；协议事件保持与运行时无关。
-- [ ] 接入 Claude Code（Claude Agent SDK）：会话、流式输出、工具调用与权限审批映射到 Pier 协议。
-- [ ] 接入 Codex（Codex app-server / SDK）：同上，并处理其沙箱与审批模式。
-- [ ] 桌面与手机端：新建会话时选择 Agent，按运行时显示可用的模型、思考等级与能力（压缩、分叉等）。
+- [x] Host 抽象出 Agent 运行时接口（`packages/host/src/runtimes/`：`AgentRuntime` + `ManagedSession` 基类），`packages/host/src/pi/` 作为第一个实现；非 pi 运行时通过 `LiveTranscript` 输出 pi 形态的消息与事件，客户端无需区分（协议 1.22）。
+- [x] 接入 Claude Code（Claude Agent SDK，驱动用户安装的 `claude`）：会话、流式输出、工具调用与权限审批映射到 Pier 协议（`packages/host/src/claude/`）。
+- [x] 接入 Codex（`codex app-server`）：同上，并按工作区策略设置其沙箱与审批模式（`packages/host/src/codex/`）。
+- [x] 桌面与手机端：新建会话时选择 Agent，按运行时显示可用的模型、思考等级与能力（压缩、分叉等）。
+- [ ] 真机验证：Codex 的完整回合（本次只用模拟的 app-server 与未登录的真实 CLI 验证过）、Windows / macOS 上的 CLI 查找与启动。
 - 验收：同一台电脑上 pi、Claude Code、Codex 会话可以并存，手机端均可驱动和审批。
 
 ### M6 发布

@@ -1,4 +1,5 @@
-import type { WorkspaceInfo } from "@pier/protocol";
+import { agentRuntimeLabel } from "@pier/chat-state";
+import type { AgentRuntimeInfo, WorkspaceInfo } from "@pier/protocol";
 import { useEffect, useRef, useState } from "react";
 import { draftToPrompt } from "../lib/composer-text.ts";
 import { type Draft, LOCAL_NODE, NEW_CHAT_DRAFT, useAppState, useComputers, useStore } from "../lib/store.tsx";
@@ -8,6 +9,7 @@ import { FilesPanelToggle } from "./FilesPanel.tsx";
 import { useNodeStatus } from "./HostPanels.tsx";
 import {
 	IconArrowUp,
+	IconBot,
 	IconCheck,
 	IconChevronUp,
 	IconFolder,
@@ -129,6 +131,105 @@ function WorkspacePicker({ workspace, disabled }: { workspace?: WorkspaceInfo; d
 			) : null}
 		</div>
 	);
+}
+
+/**
+ * Chip that picks the agent (pi, Claude Code, Codex) the new chat runs on. Shown when the
+ * workspace's computer can run another agent than pi.
+ */
+function AgentPicker({ workspace, disabled }: { workspace: WorkspaceInfo; disabled?: boolean }) {
+	const store = useStore();
+	const node = useAppState((s) => s.workspaceNodes[workspace.id] ?? LOCAL_NODE);
+	const online = useAppState((s) => s.nodes[node]?.connection === "open");
+	const hostInfo = useAppState((s) => s.nodes[node]?.hostInfo);
+	const runtime = useAppState((s) => s.newChatRuntime[node] ?? "pi");
+	const [runtimes, setRuntimes] = useState<AgentRuntimeInfo[]>([]);
+	const [open, setOpen] = useState(false);
+	const ref = useOutsideClick(open, () => setOpen(false));
+
+	// biome-ignore lint/correctness/useExhaustiveDependencies: reload when the computer (re)connects.
+	useEffect(() => {
+		if (!online) return;
+		let live = true;
+		store
+			.listRuntimes(workspace.id)
+			.then((list) => {
+				if (live) setRuntimes(list);
+			})
+			.catch(() => {
+				if (live) setRuntimes([]);
+			});
+		return () => {
+			live = false;
+		};
+	}, [store, workspace.id, online, hostInfo]);
+
+	const current = runtimes.find((r) => r.id === runtime);
+	// A runtime that went away (CLI uninstalled, older host) falls back to pi.
+	useEffect(() => {
+		if (runtime !== "pi" && runtimes.length && !current?.available) store.setNewChatRuntime(workspace.id, "pi");
+	}, [runtime, runtimes, current, store, workspace.id]);
+
+	if (!runtimes.some((r) => r.id !== "pi" && r.available)) return null;
+	return (
+		<div className="dropdown" ref={ref}>
+			<button
+				type="button"
+				className="chip agent-chip"
+				disabled={disabled}
+				onClick={() => setOpen(!open)}
+				title="选择运行这个对话的 Agent"
+			>
+				<IconBot size={14} />
+				<span>{agentRuntimeLabel(runtime)}</span>
+				<IconChevronUp size={13} className="chip-caret" />
+			</button>
+			{open ? (
+				<div className="dropdown-menu up agents">
+					<div className="dropdown-group-title no-caps">由哪个 Agent 来做？</div>
+					{runtimes.map((r) => {
+						const selected = r.id === runtime;
+						return (
+							<button
+								type="button"
+								key={r.id}
+								className={`dropdown-item${selected ? " selected" : ""}`}
+								disabled={!r.available}
+								title={r.available ? (r.executable ?? r.name) : r.reason}
+								onClick={() => {
+									setOpen(false);
+									store.setNewChatRuntime(workspace.id, r.id);
+								}}
+							>
+								<span className="workspace-item-text">
+									<span className="workspace-item-name">
+										<IconBot size={14} />
+										{r.name}
+										{r.version ? <span className="mini-tag">{r.version}</span> : null}
+									</span>
+									<span className="muted">{r.available ? agentDescription(r.id) : (r.reason ?? "不可用")}</span>
+								</span>
+								{selected ? <IconCheck size={15} className="policy-check" /> : null}
+							</button>
+						);
+					})}
+				</div>
+			) : null}
+		</div>
+	);
+}
+
+function agentDescription(id: string): string {
+	switch (id) {
+		case "pi":
+			return "Pier 内置的 pi，使用在 Pier 中配置的模型与扩展";
+		case "claude-code":
+			return "这台电脑上安装的 Claude Code，使用它自己的登录与配置";
+		case "codex":
+			return "这台电脑上安装的 Codex，使用它自己的登录与配置";
+		default:
+			return "";
+	}
 }
 
 /**
@@ -294,6 +395,7 @@ export function NewChatView({ workspaceId }: { workspaceId?: string }) {
 								}}
 							/>
 							<WorkspacePicker workspace={workspace} disabled={sending} />
+							{workspace ? <AgentPicker workspace={workspace} disabled={sending || !online} /> : null}
 							{workspace ? <PolicyPicker workspace={workspace} /> : null}
 						</div>
 						<div className="composer-actions">

@@ -259,6 +259,54 @@ export interface WorkspaceUploadStart {
 /** Runtime state of a session as seen by clients. */
 export type SessionRunState = "inactive" | "idle" | "streaming" | "compacting" | "retrying";
 
+/**
+ * Agent runtime that runs a session (1.22). `pi` is built in; `claude-code` and `codex` drive
+ * the Claude Code and Codex CLIs installed on the host. Other ids may be added later.
+ */
+export type AgentRuntimeId = "pi" | "claude-code" | "codex" | (string & {});
+
+export const DEFAULT_AGENT_RUNTIME: AgentRuntimeId = "pi";
+
+/** What a runtime supports, so clients can hide controls that would fail (1.22). */
+export interface AgentRuntimeCapabilities {
+	/** `session.steer` / `streamingBehavior: "steer"` while the agent works. */
+	steer: boolean;
+	/** `session.followUp` / `streamingBehavior: "followUp"`. */
+	followUp: boolean;
+	/** `session.compact`. */
+	compact: boolean;
+	/** `session.forkPoints` / `session.fork`. */
+	fork: boolean;
+	/** `session.rename`. */
+	rename: boolean;
+	/** `model.set`. */
+	setModel: boolean;
+	/** `thinking.set`. */
+	thinking: boolean;
+	/** `session.reload`. */
+	reload: boolean;
+	/** Image attachments in prompts. */
+	images: boolean;
+	/** pi extensions, packages and `settings.json` apply to this runtime. */
+	piExtensions: boolean;
+}
+
+/** One agent runtime the host knows (1.22). */
+export interface AgentRuntimeInfo {
+	id: AgentRuntimeId;
+	/** Display name, e.g. `Claude Code`. */
+	name: string;
+	/** Whether sessions can be created: the CLI is installed (credentials are checked on use). */
+	available: boolean;
+	/** Why the runtime is unavailable, e.g. the CLI was not found. */
+	reason?: string;
+	/** Version of the runtime (pi SDK or CLI), when known. */
+	version?: string;
+	/** Executable the host runs, for CLI runtimes. */
+	executable?: string;
+	capabilities: AgentRuntimeCapabilities;
+}
+
 export interface SessionSummary {
 	id: string;
 	workspaceId: string;
@@ -278,6 +326,8 @@ export interface SessionSummary {
 	pendingUi?: number;
 	/** Set when the session was archived with `session.archive` (1.14); absent otherwise. */
 	archived?: boolean;
+	/** Agent runtime of the session (1.22). Absent from older hosts, which only run `pi`. */
+	runtime?: AgentRuntimeId;
 }
 
 /** Which sessions `session.cleanup` affects by archive state (1.14). */
@@ -434,6 +484,8 @@ export interface SessionSnapshot {
 	widgets: Record<string, { lines: string[]; placement?: string }>;
 	title?: string;
 	errorMessage?: string;
+	/** What the session's runtime supports (1.22). Absent from older hosts: everything (pi). */
+	capabilities?: AgentRuntimeCapabilities;
 }
 
 /** A remote device paired with this host (see `docs/security.md`). */

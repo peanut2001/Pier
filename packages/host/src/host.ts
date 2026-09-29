@@ -21,10 +21,11 @@ import {
 	PROTOCOL_VERSION,
 	parseClientFrame,
 	type ResponseFrame,
-	type ThinkingLevel,
 	type WorkspaceInfo,
 	YUNLIAN_SITE_URL,
 } from "@pier/protocol";
+import { ClaudeCodeRuntime, type ClaudeCodeRuntimeOptions } from "./claude/claude-runtime.ts";
+import { CodexRuntime, type CodexRuntimeOptions } from "./codex/codex-runtime.ts";
 import { ConfigStore } from "./config.ts";
 import {
 	badFrameResponse,
@@ -50,10 +51,11 @@ import {
 } from "./paths.ts";
 import { PeerManager, type PeerManagerOptions } from "./peers/peers.ts";
 import { AccountManager } from "./pi/account.ts";
-import { PI_VERSION, PiEnvironment, type PiEnvironmentOptions, toModelInfo } from "./pi/environment.ts";
+import { PI_VERSION, PiEnvironment, type PiEnvironmentOptions } from "./pi/environment.ts";
 import { ExtensionManager, type ExtensionTarget } from "./pi/extensions.ts";
 import { NewApiManager } from "./pi/newapi.ts";
 import { PackageCatalog, type PackageCatalogOptions } from "./pi/package-catalog.ts";
+import { PiRuntime } from "./pi/pi-runtime.ts";
 import { ProviderManager } from "./pi/providers.ts";
 import { PiSettingsFiles } from "./pi/settings-files.ts";
 import { RemoteAccess, type RemoteAccessOptions } from "./remote/remote-access.ts";
@@ -103,6 +105,14 @@ export interface PierHostOptions {
 	packageCatalog?: PackageCatalogOptions;
 	/** The desktop app the host runs in (its updater and terminals), when there is one. */
 	shell?: AppShell;
+	/**
+	 * Agent runtimes besides pi (1.22). Each is on by default and available when its CLI is
+	 * installed; `false` turns one off.
+	 */
+	agents?: {
+		claudeCode?: ClaudeCodeRuntimeOptions | false;
+		codex?: CodexRuntimeOptions | false;
+	};
 }
 
 /** Remote methods recorded in the audit log. */
@@ -309,8 +319,16 @@ export class PierHost implements RequestHandler {
 		this.config = new ConfigStore(configPath(this.pierDir));
 		this.env = env;
 		this.localToken = options.localToken;
+		const log = options.log ?? (() => {});
+		this.log = log;
+		const agents = options.agents ?? {};
 		this.pool = new SessionPool({
-			env,
+			runtimes: [
+				new PiRuntime(env),
+				...(agents.claudeCode === false ? [] : [new ClaudeCodeRuntime({ log, ...agents.claudeCode })]),
+				...(agents.codex === false ? [] : [new CodexRuntime({ log, ...agents.codex })]),
+			],
+			log,
 			config: this.config,
 			locksDir: locksDir(this.pierDir),
 			trashDir: sessionTrashDir(this.pierDir),
@@ -335,8 +353,6 @@ export class PierHost implements RequestHandler {
 				this.broadcast({ type: "session.listChanged", workspaceId: session.workspaceId });
 			},
 		});
-		const log = options.log ?? (() => {});
-		this.log = log;
 		this.extensions = new ExtensionManager({
 			agentDir: env.agentDir,
 			trashDir: extensionTrashDir(this.pierDir),
@@ -567,6 +583,8 @@ export class PierHost implements RequestHandler {
 		const summary: ExtensionReloadSummary = { reloaded: 0, pending: 0, failed: 0 };
 		for (const session of this.pool.all()) {
 			if (workspaceId && session.workspaceId !== workspaceId) continue;
+			// pi settings and extensions only apply to pi sessions.
+			if (!session.capabilities.reload) continue;
 			if (session.busy) {
 				summary.pending++;
 				continue;
@@ -727,8 +745,9 @@ export class PierHost implements RequestHandler {
 			"session.list": async (_ctx, params) => ({
 				sessions: await this.pool.list(this.requireWorkspace(params.workspaceId)),
 			}),
+			"runtime.list": async () => ({ runtimes: await this.pool.runtimeInfos() }),
 			"session.create": async (_ctx, params) => {
-				const session = await this.pool.create(this.requireWorkspace(params.workspaceId), params.name);
+				const session = await this.pool.create(this.requireWorkspace(params.workspaceId), params.name, params.runtime);
 				this.broadcast({ type: "session.listChanged", workspaceId: params.workspaceId });
 				return { session: session.summary() };
 			},
@@ -764,7 +783,9 @@ export class PierHost implements RequestHandler {
 				}
 				return result;
 			},
-			"session.forkPoints": (_ctx, params) => ({ points: this.pool.require(params.sessionId).forkPoints() }),
+			"session.forkPoints": async (_ctx, params) => ({
+				points: await this.pool.require(params.sessionId).forkPoints(),
+			}),
 			"session.fork": async (_ctx, params) => {
 				const source = this.pool.require(params.sessionId);
 				const { session, selectedText } = await this.pool.fork(source, params.entryId, params.position ?? "before");
@@ -773,8 +794,8 @@ export class PierHost implements RequestHandler {
 					? { session: session.summary() }
 					: { session: session.summary(), selectedText };
 			},
-			"session.rename": (_ctx, params) => {
-				const summary = this.pool.require(params.sessionId).rename(params.name);
+			"session.rename": async (_ctx, params) => {
+				const summary = await this.pool.require(params.sessionId).rename(params.name);
 				this.broadcast({ type: "session.listChanged", workspaceId: summary.workspaceId });
 				return { session: summary };
 			},
@@ -787,7 +808,9 @@ export class PierHost implements RequestHandler {
 				return { unsubscribed: session.unsubscribe(ctx.connection.connectionId) };
 			},
 			"session.snapshot": (_ctx, params) => this.pool.require(params.sessionId).snapshot(),
-			"session.commands": (_ctx, params) => ({ commands: this.pool.require(params.sessionId).commands() }),
+			"session.commands": async (_ctx, params) => ({
+				commands: await this.pool.require(params.sessionId).commands(),
+			}),
 			"session.reload": async (_ctx, params) => {
 				await this.pool.require(params.sessionId).reload();
 				return { reloaded: true as const };
@@ -810,15 +833,18 @@ export class PierHost implements RequestHandler {
 			"session.compact": (_ctx, params) => this.pool.require(params.sessionId).compact(params.instructions),
 
 			"model.list": async (_ctx, params) => {
-				const models = await this.env.listModels();
 				if (params?.sessionId) {
-					const session = this.pool.require(params.sessionId).session;
-					const current = session.model;
-					const thinkingLevel = session.thinkingLevel as ThinkingLevel;
-					return current ? { models, current: toModelInfo(current), thinkingLevel } : { models, thinkingLevel };
+					const session = this.pool.require(params.sessionId);
+					const models = await this.pool.runtime(session.runtimeId).listModels();
+					const { model: current, thinkingLevel } = session.modelState();
+					return current ? { models, current, thinkingLevel } : { models, thinkingLevel };
 				}
+				const runtime = this.pool.runtime(params?.runtime);
+				const models = await runtime.listModels();
 				if (params?.workspaceId) {
-					const { model, thinkingLevel } = this.env.newSessionDefaults(this.requireWorkspace(params.workspaceId).path);
+					const { model, thinkingLevel } = await runtime.newSessionDefaults(
+						this.requireWorkspace(params.workspaceId).path,
+					);
 					return model ? { models, current: model, thinkingLevel } : { models, thinkingLevel };
 				}
 				return { models };
@@ -828,8 +854,8 @@ export class PierHost implements RequestHandler {
 					.require(params.sessionId)
 					.setModel(params.provider, params.modelId, params.persist ?? false),
 			}),
-			"thinking.set": (_ctx, params) => ({
-				level: this.pool.require(params.sessionId).setThinking(params.level, params.persist ?? false),
+			"thinking.set": async (_ctx, params) => ({
+				level: await this.pool.require(params.sessionId).setThinking(params.level, params.persist ?? false),
 			}),
 			"model.setDefault": async (_ctx, params) => ({
 				defaultModel: await this.providers.setDefault(params.provider, params.modelId),

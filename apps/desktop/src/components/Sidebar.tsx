@@ -1,3 +1,4 @@
+import { agentRuntimeLabel } from "@pier/chat-state";
 import type { ApprovalPolicy, PeerInfo, SessionSummary, WorkspaceInfo } from "@pier/protocol";
 import { useEffect, useState } from "react";
 import { POLICY_DESCRIPTION, POLICY_LABEL, relativeTime, sessionTitle } from "../lib/format.ts";
@@ -207,6 +208,14 @@ function SessionItem({
 				title={session.firstMessage || session.name || session.id}
 			>
 				<span className="session-row-title">{sessionTitle(session)}</span>
+				{session.runtime && session.runtime !== "pi" ? (
+					<span
+						className={`session-agent agent-${session.runtime}`}
+						title={`由 ${agentRuntimeLabel(session.runtime)} 运行`}
+					>
+						{agentRuntimeLabel(session.runtime)}
+					</span>
+				) : null}
 				<SessionBadge session={session} />
 				<span className="session-row-time">{relativeTime(session.modifiedAt)}</span>
 			</button>

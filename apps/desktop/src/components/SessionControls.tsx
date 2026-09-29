@@ -185,33 +185,37 @@ export function SessionMenu({ chat, controller }: { chat: ChatState; controller:
 				</button>
 				{open ? (
 					<div className="dropdown-menu right">
-						<button
-							type="button"
-							className="dropdown-item"
-							disabled={!idle}
-							onClick={() => {
-								setOpen(false);
-								setDialog("compact");
-							}}
-						>
-							<span className="menu-label">
-								<IconMinimize size={14} />
-								压缩上下文…
-							</span>
-						</button>
-						<button
-							type="button"
-							className="dropdown-item"
-							onClick={() => {
-								setOpen(false);
-								setDialog("fork");
-							}}
-						>
-							<span className="menu-label">
-								<IconGitBranch size={14} />
-								从历史消息分叉…
-							</span>
-						</button>
+						{chat.capabilities?.compact === false ? null : (
+							<button
+								type="button"
+								className="dropdown-item"
+								disabled={!idle}
+								onClick={() => {
+									setOpen(false);
+									setDialog("compact");
+								}}
+							>
+								<span className="menu-label">
+									<IconMinimize size={14} />
+									压缩上下文…
+								</span>
+							</button>
+						)}
+						{chat.capabilities?.fork === false ? null : (
+							<button
+								type="button"
+								className="dropdown-item"
+								onClick={() => {
+									setOpen(false);
+									setDialog("fork");
+								}}
+							>
+								<span className="menu-label">
+									<IconGitBranch size={14} />
+									从历史消息分叉…
+								</span>
+							</button>
+						)}
 						<button
 							type="button"
 							className={`dropdown-item${confirmClose ? " danger" : ""}`}

@@ -2,9 +2,9 @@
 
 A desktop dock and mobile remote for coding agents.
 
-Pier 是编码 Agent 在桌面上的停靠点：Agent 常驻在你的电脑上运行，桌面端和手机端都能连上去查看、驱动和审批。目前内置 [pi](https://github.com/earendil-works/pi)，计划通过同一套 Host 适配层接入 Claude Code 与 Codex。
+Pier 是编码 Agent 在桌面上的停靠点：Agent 常驻在你的电脑上运行，桌面端和手机端都能连上去查看、驱动和审批。内置 [pi](https://github.com/earendil-works/pi)，也能驱动电脑上安装的 [Claude Code](https://code.claude.com) 与 [Codex](https://github.com/openai/codex)：三种 Agent 的会话在同一个工作区中并存，都可以在桌面端和手机端查看、驱动和审批。
 
-- 桌面端：Tauri 2，内置 Pier Host（当前 Agent 运行时为 pi SDK）
+- 桌面端：Tauri 2，内置 Pier Host（Agent 运行时：内置的 pi SDK，以及电脑上安装的 Claude Code、Codex）
 - 手机端：Expo / React Native 原生 App，通过配对后的加密连接驱动桌面 Agent
 - 电脑之间：每台电脑都是一个节点，桌面端可以添加其他电脑，那台电脑的工作区和会话与本机的一起列在侧边栏中，直接查看和驱动那台电脑上的 Agent，并管理它的工作区（配对即完全信任）
 
@@ -17,7 +17,7 @@ M0–M2（Host 核心、桌面端 MVP）已完成；M3（手机端 MVP，局域�
 | 包 | 说明 |
 |---|---|
 | `packages/protocol` | 协议 schema（zod）、类型、`PROTOCOL_VERSION` |
-| `packages/host` | Pier Host：工作区配置、会话池、pi SDK 适配层、UI 桥接、`pier-approval` 审批扩展、pi 扩展包管理、EventLog、本地 WebSocket Gateway、sidecar 入口 |
+| `packages/host` | Pier Host：工作区配置、会话池、Agent 运行时适配层（pi SDK、Claude Code、Codex）、UI 桥接、`pier-approval` 审批扩展、pi 扩展包管理、EventLog、本地 WebSocket Gateway、sidecar 入口 |
 | `packages/crypto` | Noise XX / IK（X25519、ChaCha20‑Poly1305、SHA‑256，纯 JS）、加密通道帧、配对链接、性能测试 |
 | `packages/client` | 通用客户端（握手、请求关联、自动重连、按 seq 恢复）、加密 WebSocket 与配对，以及调试 CLI `pier-cli` |
 | `packages/chat-state` | 快照 + 事件 → 聊天视图状态的纯逻辑 reducer、会话控制器与斜杠命令解析执行（桌面端与手机端共用） |
@@ -34,6 +34,19 @@ bun run lint       # Biome
 bun run typecheck  # tsc -b（项目引用）
 bun run test       # Vitest：单元测试 + 基于 faux 模型的端到端测试
 ```
+
+### Claude Code 与 Codex
+
+新建会话时，输入框下方的「Agent」选择框可以选择 pi、Claude Code 或 Codex（手机端点「新建」时选择）。Claude Code 与 Codex 使用电脑上安装的 CLI 和它们自己的登录、配置与会话目录，Pier 不需要另外配置模型或凭据：
+
+- **Claude Code**：安装 `claude` 并登录（`claude` 中执行 `/login`，或设置 `ANTHROPIC_API_KEY`）。Pier 通过 [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/overview) 驱动这个 CLI，会话保存在 `~/.claude/projects`，可以随时用 `claude --resume` 在终端继续。
+- **Codex**：安装 `codex` 并登录（`codex login`）。Pier 通过 `codex app-server` 驱动它，会话由 Codex 保存（`~/.codex/sessions`），可以用 `codex resume` 在终端继续。
+
+CLI 不在 `PATH` 中时，可以用 `PIER_CLAUDE_PATH` / `PIER_CODEX_PATH` 指定路径。工作区的审批策略同样适用于它们：Claude Code 请求许可、Codex 请求审批时，Pier 按策略放行或在桌面端和手机端询问你；Codex 的沙箱按策略设置（「询问」「智能」为工作区可写沙箱，「自动」不使用沙箱）。它们的会话显示在侧边栏中（带「Claude Code」「Codex」标记），也包括在终端里创建的会话。pi 的扩展、技能与 `settings.json` 只作用于 pi 会话。协议上的细节见 [docs/protocol.md](docs/protocol.md) 的「Agent 运行时」一节。
+
+调试时 `bun run faux-host --agents` 会同时提供电脑上的 Claude Code 与 Codex（真实会话，会消耗额度）；`npx tsx packages/host/scripts/live-agent-check.ts claude-code [模型]` 用真实 CLI 走一遍创建、流式输出、审批、重命名、重新打开与分叉。
+
+### pi 的配置
 
 Host 复用 pi 的配置（`~/.pi/agent`：模型、凭据、settings、会话目录）。桌面端可以直接在「设置 → 模型与服务商」中登录服务商（API Key 或账号）、一键「浏览器登录」云链API（在浏览器中授权后自动获取令牌和全部模型），或在「设置 → 个人中心」通过浏览器登录云链API 账号（Pier 不接触密码）、查看余额，并按分组把令牌一键配置为本地服务商、添加 OpenAI / Anthropic / Gemini 兼容的自定义接口并设置默认模型，不需要另外安装 pi；已经用 `pi` 配置过的电脑会直接沿用原有配置。
 

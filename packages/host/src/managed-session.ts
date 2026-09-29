@@ -1,7 +1,6 @@
-import type { AgentSession, AgentSessionEvent, AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
-import { stripImageHints } from "@pier/chat-state";
 import {
-	type ApprovalDetails,
+	type AgentRuntimeCapabilities,
+	type AgentRuntimeId,
 	type EventFrame,
 	type ImageInput,
 	type ModelInfo,
@@ -19,16 +18,11 @@ import {
 	type WireEvent,
 	type WorkspaceInfo,
 } from "@pier/protocol";
+import { evaluateToolCall } from "./approval/policy.ts";
 import { DEFAULT_EVENT_LOG_CAPACITY, EventLog } from "./event-log.ts";
-import { createApprovalExtension } from "./pi/approval-extension.ts";
-import { type PiEnvironment, toModelInfo } from "./pi/environment.ts";
-import { toWireEvent } from "./pi/events.ts";
-import { createUiContext } from "./pi/ui-context.ts";
-import { ExternalChangeGuard, SessionLock } from "./session-lock.ts";
+import { truncateInput } from "./pi/approval-extension.ts";
+import { SessionLock } from "./session-lock.ts";
 import { UiBridge } from "./ui-bridge.ts";
-
-/** pi's thinking level when neither the model nor the settings name one. */
-const DEFAULT_THINKING_LEVEL = "medium";
 
 export interface SessionSubscriber {
 	readonly connectionId: string;
@@ -48,13 +42,13 @@ export interface PendingSubscription {
 	start(): void;
 }
 
+/** Options every runtime's sessions share (see {@link ManagedSession}). */
 export interface ManagedSessionOptions {
-	env: PiEnvironment;
 	workspace: () => WorkspaceInfo;
 	locksDir: string;
 	uiTimeoutMs?: number;
 	eventLogCapacity?: number;
-	/** Called after an extension command replaced the underlying pi session (new/fork/switch). */
+	/** Called after the runtime replaced the underlying session (pi extension commands: new/fork/switch). */
 	onReplaced?: (session: ManagedSession, previousId: string) => void;
 	/** Called when the run state or the number of pending UI requests changes. */
 	onActivity?: (session: ManagedSession) => void;
@@ -62,39 +56,66 @@ export interface ManagedSessionOptions {
 	isArchived?: (sessionId: string) => boolean;
 }
 
-/** pi events that indicate the session file may have been written by this host. */
-const WRITE_EVENTS = new Set([
-	"entry_appended",
-	"message_end",
-	"agent_settled",
-	"compaction_end",
-	"session_info_changed",
-	"thinking_level_changed",
-]);
-
-function toImages(images: ImageInput[] | undefined) {
-	return images?.map((image) => ({ type: "image" as const, data: image.data, mimeType: image.mimeType }));
+/** Summary fields a runtime reports about its session; the base class adds the live state. */
+export interface SessionDescription {
+	path?: string;
+	name?: string;
+	cwd: string;
+	createdAt: string;
+	messageCount: number;
+	firstMessage: string;
+	parentSessionPath?: string;
 }
 
+/** Transcript and model state for a snapshot; the base class adds UI and log state. */
+export interface SessionContent {
+	messages: unknown[];
+	streamingMessage?: unknown;
+	pendingToolCalls: string[];
+	model?: ModelInfo;
+	thinkingLevel: ThinkingLevel;
+	errorMessage?: string;
+}
+
+export interface ToolApprovalRequest {
+	/** pi tool name (`bash`, `edit`, ...) or the runtime's own name for other tools. */
+	toolName: string;
+	toolCallId: string;
+	input: Record<string, unknown>;
+	/**
+	 * Set when the runtime itself decided to ask (Codex approvals, Claude Code permission
+	 * prompts for tools Pier's policy does not govern): Pier then asks unless the policy is
+	 * `auto` or the user allowed such calls for the session.
+	 */
+	runtimeAsked?: { reason: string; summary?: string; severity?: "normal" | "high" };
+}
+
+export type ToolApproval =
+	| {
+			allowed: true /** `session`: the user allowed such calls for the rest of the session. */;
+			scope: "policy" | "once" | "session";
+	  }
+	| { allowed: false; reason: string };
+
 /**
- * One active pi session held by the host: owns the pi runtime, the event log,
- * the UI bridge, per-session approval allowances, and the subscriber set.
+ * One active session held by the host, independent of the agent runtime that runs it: owns
+ * the event log, the UI bridge, per-session approval allowances, the session lock and the
+ * subscriber set. Runtimes subclass it and translate their events into the pi-shaped wire
+ * events clients render (see `docs/protocol.md`).
  */
-export class ManagedSession {
+export abstract class ManagedSession {
+	abstract readonly runtimeId: AgentRuntimeId;
+	abstract readonly capabilities: AgentRuntimeCapabilities;
 	readonly bridge: UiBridge;
 	readonly allowances = new Set<string>();
-	private log: EventLog<WireEvent>;
+	protected log: EventLog<WireEvent>;
 	private readonly subscribers = new Map<string, SubscriberEntry>();
-	private runtime!: AgentSessionRuntime;
-	private unsubscribePi: (() => void) | undefined;
-	private lock: SessionLock | undefined;
-	private guard = new ExternalChangeGuard(undefined);
-	private boundSessionId: string | undefined;
+	protected lock: SessionLock | undefined;
 	private runState: SessionRunState = "idle";
-	private disposed = false;
+	protected disposed = false;
 	lastActivity = Date.now();
 
-	private constructor(private readonly options: ManagedSessionOptions) {
+	protected constructor(protected readonly options: ManagedSessionOptions) {
 		this.log = new EventLog(options.eventLogCapacity ?? DEFAULT_EVENT_LOG_CAPACITY);
 		this.bridge = new UiBridge({
 			sessionId: () => this.id,
@@ -106,51 +127,17 @@ export class ManagedSession {
 		});
 	}
 
-	static async start(
-		options: ManagedSessionOptions,
-		sessionManager: ReturnType<PiEnvironment["newSessionManager"]>,
-	): Promise<ManagedSession> {
-		const managed = new ManagedSession(options);
-		const file = sessionManager.getSessionFile();
-		if (file) managed.lock = SessionLock.acquire(options.locksDir, file);
-		try {
-			managed.runtime = await options.env.createRuntime({
-				cwd: options.workspace().path,
-				sessionManager,
-				extensions: () => [createApprovalExtension(managed.approvalGate())],
-			});
-			managed.runtime.setRebindSession(async () => managed.bind());
-			await managed.bind();
-		} catch (error) {
-			managed.lock?.release();
-			throw error;
-		}
-		return managed;
-	}
+	abstract get id(): string;
 
-	private approvalGate() {
-		return {
-			policy: () => this.options.workspace().policy,
-			workspacePath: () => this.options.workspace().path,
-			allowances: this.allowances,
-			requestApproval: async (details: ApprovalDetails, signal: AbortSignal | undefined) =>
-				this.bridge.request(
-					{ kind: "approval", title: `Allow ${details.toolName}?`, message: details.reason, approval: details },
-					signal ? { signal } : {},
-				),
-		};
-	}
-
-	get session(): AgentSession {
-		return this.runtime.session;
-	}
-
-	get id(): string {
-		return this.runtime.session.sessionId;
-	}
+	/** File the session is stored in, if any (used for locking and to match session list entries). */
+	abstract get sessionFile(): string | undefined;
 
 	get workspaceId(): string {
 		return this.options.workspace().id;
+	}
+
+	get workspacePath(): string {
+		return this.options.workspace().path;
 	}
 
 	get epoch(): string {
@@ -174,81 +161,30 @@ export class ManagedSession {
 		return this.runState !== "idle" || this.bridge.pendingRequests.length > 0;
 	}
 
-	/** (Re)bind extensions and event subscriptions to the runtime's current AgentSession. */
-	private async bind(): Promise<void> {
-		const session = this.runtime.session;
-		const previousId = this.boundSessionId;
-		const replaced = previousId !== undefined && previousId !== session.sessionId;
-		this.unsubscribePi?.();
+	protected acquireLock(file: string | undefined): void {
+		this.lock?.release();
+		this.lock = file ? SessionLock.acquire(this.options.locksDir, file) : undefined;
+	}
 
-		if (replaced) {
-			this.bridge.cancelAll();
-			this.allowances.clear();
-			this.emit({ type: "session.replaced", previousSessionId: previousId, session: this.summary() }, previousId);
-			this.lock?.release();
-			this.lock = undefined;
-			const file = session.sessionFile;
-			if (file) this.lock = SessionLock.acquire(this.options.locksDir, file);
-			this.log = new EventLog(this.options.eventLogCapacity ?? DEFAULT_EVENT_LOG_CAPACITY);
-		}
-		this.boundSessionId = session.sessionId;
-		this.guard.setPath(session.sessionFile);
+	protected releaseLock(): void {
+		this.lock?.release();
+		this.lock = undefined;
+	}
 
-		await session.bindExtensions({
-			uiContext: createUiContext(this.bridge),
-			mode: "rpc",
-			commandContextActions: {
-				waitForIdle: () => session.waitForIdle(),
-				newSession: (opts) => this.runtime.newSession(opts),
-				fork: async (entryId, opts) => ({ cancelled: (await this.runtime.fork(entryId, opts)).cancelled }),
-				navigateTree: async (targetId, opts) => ({
-					cancelled: (await session.navigateTree(targetId, opts ?? {})).cancelled,
-				}),
-				switchSession: (path, opts) => this.runtime.switchSession(path, opts),
-				reload: () => session.reload(),
-			},
-			shutdownHandler: () => {
-				this.bridge.notify("An extension requested shutdown; Pier keeps the host running.", "warning");
-			},
-			onError: (error) => {
-				this.emit({
-					type: "extension.error",
-					extensionPath: error.extensionPath,
-					event: error.event,
-					error: error.error,
-				});
-			},
-		});
-		this.unsubscribePi = session.subscribe((event) => this.handlePiEvent(event));
-		this.updateRunState();
+	/** Start a fresh event log (after the runtime replaced the session). */
+	protected resetLog(): void {
+		this.log = new EventLog(this.options.eventLogCapacity ?? DEFAULT_EVENT_LOG_CAPACITY);
+	}
 
-		if (replaced && previousId !== undefined) {
-			this.options.onReplaced?.(this, previousId);
-			const snapshot = this.snapshot();
-			for (const entry of this.subscribers.values()) {
-				this.deliver(entry, { type: "evt", sessionId: this.id, event: { type: "session.snapshot", snapshot } });
-			}
+	/** Send a fresh snapshot to every subscriber (after the runtime replaced the session). */
+	protected sendSnapshotToAll(): void {
+		const snapshot = this.snapshot();
+		for (const entry of this.subscribers.values()) {
+			this.deliver(entry, { type: "evt", sessionId: this.id, event: { type: "session.snapshot", snapshot } });
 		}
 	}
 
-	private handlePiEvent(event: AgentSessionEvent): void {
-		this.lastActivity = Date.now();
-		const wire = toWireEvent(event);
-		if (wire) this.emit(wire);
-		if (WRITE_EVENTS.has(event.type)) this.guard.record();
-		this.updateRunState();
-	}
-
-	private computeRunState(): SessionRunState {
-		const session = this.runtime.session;
-		if (session.isCompacting) return "compacting";
-		if (session.isRetrying) return "retrying";
-		if (!session.isIdle) return "streaming";
-		return "idle";
-	}
-
-	private updateRunState(): void {
-		const next = this.computeRunState();
+	protected setRunState(next: SessionRunState): void {
 		if (next === this.runState) return;
 		this.runState = next;
 		this.emit({ type: "session.status", state: next });
@@ -256,7 +192,7 @@ export class ManagedSession {
 	}
 
 	/** Append an event to the log and fan it out to subscribers. */
-	private emit(event: WireEvent | PierSessionEvent, sessionId: string = this.id): void {
+	protected emit(event: WireEvent | PierSessionEvent, sessionId: string = this.id): void {
 		if (this.disposed) return;
 		const entry = this.log.append(event as WireEvent);
 		const frame: EventFrame = { type: "evt", sessionId, seq: entry.seq, event: entry.event };
@@ -304,250 +240,154 @@ export class ManagedSession {
 		return this.subscribers.delete(connectionId);
 	}
 
+	protected abstract describe(): SessionDescription;
+
+	protected abstract content(): SessionContent;
+
 	summary(): SessionSummary {
-		const session = this.runtime.session;
-		const manager = session.sessionManager;
-		const header = manager.getHeader();
-		const messages = session.messages.filter((m) => m.role === "user" || m.role === "assistant");
-		const firstUser = session.messages.find((m) => m.role === "user") as { content?: unknown } | undefined;
-		const now = new Date().toISOString();
+		const d = this.describe();
 		return {
-			id: session.sessionId,
+			id: this.id,
 			workspaceId: this.workspaceId,
-			...(session.sessionFile ? { path: session.sessionFile } : {}),
-			...(session.sessionName ? { name: session.sessionName } : {}),
-			cwd: manager.getCwd(),
-			createdAt: header?.timestamp ?? now,
+			...(d.path ? { path: d.path } : {}),
+			...(d.name ? { name: d.name } : {}),
+			cwd: d.cwd,
+			createdAt: d.createdAt,
 			modifiedAt: new Date(this.lastActivity).toISOString(),
-			messageCount: messages.length,
-			firstMessage: firstUser ? stripImageHints(textOf(firstUser.content)).slice(0, 200) : "",
-			...(header?.parentSession ? { parentSessionPath: header.parentSession } : {}),
+			messageCount: d.messageCount,
+			firstMessage: d.firstMessage,
+			...(d.parentSessionPath ? { parentSessionPath: d.parentSessionPath } : {}),
 			active: true,
 			state: this.runState,
 			pendingUi: this.bridge.pendingRequests.length,
-			...(this.options.isArchived?.(session.sessionId) ? { archived: true } : {}),
+			...(this.options.isArchived?.(this.id) ? { archived: true } : {}),
+			runtime: this.runtimeId,
 		};
 	}
 
 	snapshot(): SessionSnapshot {
-		const session = this.runtime.session;
-		const state = session.state;
-		const model = session.model;
+		const c = this.content();
 		return {
 			session: this.summary(),
 			seq: this.log.currentSeq,
 			epoch: this.log.epoch,
-			messages: [...session.messages],
-			...(state.streamingMessage ? { streamingMessage: state.streamingMessage } : {}),
-			pendingToolCalls: [...state.pendingToolCalls],
+			messages: c.messages,
+			...(c.streamingMessage ? { streamingMessage: c.streamingMessage } : {}),
+			pendingToolCalls: c.pendingToolCalls,
 			pendingUi: this.bridge.pendingRequests,
 			queue: this.queue(),
-			...(model ? { model: toModelInfo(model) } : {}),
-			thinkingLevel: session.thinkingLevel as ThinkingLevel,
+			...(c.model ? { model: c.model } : {}),
+			thinkingLevel: c.thinkingLevel,
 			statuses: Object.fromEntries(this.bridge.statuses),
 			widgets: Object.fromEntries(this.bridge.widgets),
 			...(this.bridge.title ? { title: this.bridge.title } : {}),
-			...(state.errorMessage ? { errorMessage: state.errorMessage } : {}),
+			...(c.errorMessage ? { errorMessage: c.errorMessage } : {}),
+			capabilities: this.capabilities,
 		};
 	}
 
-	queue(): QueueState {
-		const session = this.runtime.session;
-		return { steering: [...session.getSteeringMessages()], followUp: [...session.getFollowUpMessages()] };
+	/** The current model and thinking level (`model.list` with a session). */
+	modelState(): { model?: ModelInfo; thinkingLevel: ThinkingLevel } {
+		const c = this.content();
+		return c.model ? { model: c.model, thinkingLevel: c.thinkingLevel } : { thinkingLevel: c.thinkingLevel };
 	}
 
-	private assertWritable(): void {
-		if (this.runtime.session.isIdle && this.guard.changedExternally()) {
-			throw new PierProtocolError(
-				"CONFLICT",
-				"The session file was modified outside Pier (for example by the pi CLI). Close and reopen the session to continue.",
-			);
-		}
-	}
-
-	/** Start a prompt. Resolves once pi accepted it (the run continues in the background). */
-	prompt(text: string, images?: ImageInput[], streamingBehavior?: StreamingBehavior): Promise<void> {
-		this.assertWritable();
-		this.lastActivity = Date.now();
-		const session = this.runtime.session;
-		if (!session.isIdle && !streamingBehavior) {
-			return Promise.reject(
-				new PierProtocolError("CONFLICT", "Session is busy; pass streamingBehavior `steer` or `followUp`"),
-			);
-		}
-		return new Promise<void>((resolve, reject) => {
-			let settled = false;
-			// Extension commands may wait for UI answers from any client, so accept them right away
-			// instead of holding the request until the handler returns.
-			if (this.isExtensionCommand(text)) {
-				settled = true;
-				resolve();
-			}
-			session
-				.prompt(text, {
-					...(images ? { images: toImages(images) } : {}),
-					...(streamingBehavior ? { streamingBehavior } : {}),
-					source: "rpc",
-					preflightResult: (ok) => {
-						if (ok && !settled) {
-							settled = true;
-							resolve();
-						}
-					},
-				})
-				.then(() => {
-					// Extension commands and queued prompts may finish without a preflight callback.
-					if (!settled) {
-						settled = true;
-						resolve();
-					}
-				})
-				.catch((error: unknown) => {
-					if (!settled) {
-						settled = true;
-						reject(new PierProtocolError("CONFLICT", errorMessage(error)));
-					} else {
-						this.emit({ type: "ui.notify", level: "error", message: `Prompt failed: ${errorMessage(error)}` });
-					}
-				});
-		});
-	}
-
-	private isExtensionCommand(text: string): boolean {
-		if (!text.startsWith("/")) return false;
-		const space = text.indexOf(" ");
-		const name = space === -1 ? text.slice(1) : text.slice(1, space);
-		return name.length > 0 && this.runtime.session.extensionRunner.getCommand(name) !== undefined;
-	}
-
-	async steer(text: string, images?: ImageInput[]): Promise<QueueState> {
-		this.lastActivity = Date.now();
-		await this.runtime.session.steer(text, toImages(images), { source: "rpc" });
-		return this.queue();
-	}
-
-	async followUp(text: string, images?: ImageInput[]): Promise<QueueState> {
-		this.lastActivity = Date.now();
-		await this.runtime.session.followUp(text, toImages(images), { source: "rpc" });
-		return this.queue();
-	}
-
-	async abort(): Promise<void> {
-		this.lastActivity = Date.now();
-		await this.runtime.session.abort();
-	}
-
-	async compact(instructions?: string): Promise<{ summary: string; tokensBefore: number }> {
-		this.assertWritable();
-		this.lastActivity = Date.now();
-		const result = await this.runtime.session.compact(instructions);
-		this.guard.record();
-		return { summary: result.summary, tokensBefore: result.tokensBefore };
-	}
-
-	rename(name: string): SessionSummary {
-		this.assertWritable();
-		this.runtime.session.setSessionName(name);
-		this.guard.record();
-		return this.summary();
-	}
-
-	async setModel(provider: string, modelId: string, persist: boolean): Promise<ModelInfo> {
-		const model = this.options.env.modelRuntime.getModel(provider, modelId);
-		if (!model) throw new PierProtocolError("NOT_FOUND", `Unknown model ${provider}/${modelId}`);
-		this.assertWritable();
-		await this.runtime.session.setModel(model, { persist });
-		this.guard.record();
-		const info = toModelInfo(model);
-		this.emit({ type: "session.model", model: info, thinkingLevel: this.runtime.session.thinkingLevel });
-		return info;
+	protected unsupported(what: string): PierProtocolError {
+		return new PierProtocolError("UNSUPPORTED", `${runtimeName(this.runtimeId)} sessions do not support ${what}`);
 	}
 
 	/**
-	 * Re-resolve the current model after models.json or a provider catalog changed, so edited
-	 * capabilities (such as reasoning) apply without selecting the model again. A model that just
-	 * became a reasoning model gets the configured default thinking level instead of `off`.
+	 * Decide a tool call with the workspace's approval policy, asking the user through the UI
+	 * bridge when needed (runtimes other than pi; pi uses the `pier-approval` extension).
 	 */
-	refreshModel(): void {
-		const session = this.runtime.session;
-		const current = session.model;
-		if (!current) return;
-		const refreshed = this.options.env.modelRuntime.getModel(current.provider, current.id);
-		if (!refreshed || refreshed === current) return;
-		const before = JSON.stringify(toModelInfo(current));
-		const levelBefore = session.thinkingLevel;
-		session.agent.state.model = refreshed;
-		if (
-			!current.reasoning &&
-			refreshed.reasoning &&
-			session.thinkingLevel === "off" &&
-			session.isIdle &&
-			!this.guard.changedExternally()
-		) {
-			const settings = session.settingsManager;
-			const level =
-				settings.getModelThinkingLevel(refreshed.provider, refreshed.id) ??
-				settings.getDefaultThinkingLevel() ??
-				DEFAULT_THINKING_LEVEL;
-			if (level !== "off") {
-				session.setThinkingLevel(level);
-				this.guard.record();
-			}
+	protected async approveToolCall(call: ToolApprovalRequest, signal?: AbortSignal): Promise<ToolApproval> {
+		const workspace = this.options.workspace();
+		const verdict = evaluateToolCall(
+			{ toolName: call.toolName, input: call.input },
+			{ policy: workspace.policy, workspacePath: workspace.path, allowances: this.allowances },
+		);
+		let ask: Exclude<typeof verdict, { action: "allow" }>;
+		if (verdict.action === "allow") {
+			// Tools the policy governs follow it; others the runtime asked about need an answer.
+			const governed = verdict.reason !== "tool not governed by policy";
+			if (!call.runtimeAsked || governed || workspace.policy === "auto") return { allowed: true, scope: "policy" };
+			const sessionKey = `${call.toolName}:runtime`;
+			if (this.allowances.has(sessionKey)) return { allowed: true, scope: "policy" };
+			ask = {
+				action: "ask",
+				reason: call.runtimeAsked.reason,
+				severity: call.runtimeAsked.severity ?? "normal",
+				summary: call.runtimeAsked.summary ?? call.toolName,
+				sessionKey,
+				sessionScope: `${call.toolName} calls`,
+			};
+		} else {
+			ask = call.runtimeAsked ? { ...verdict, reason: `${call.runtimeAsked.reason} (${verdict.reason})` } : verdict;
 		}
-		const info = toModelInfo(refreshed);
-		if (JSON.stringify(info) === before && session.thinkingLevel === levelBefore) return;
-		this.emit({ type: "session.model", model: info, thinkingLevel: session.thinkingLevel });
+		const response = await this.bridge.request(
+			{
+				kind: "approval",
+				title: `Allow ${call.toolName}?`,
+				message: ask.reason,
+				approval: {
+					toolName: call.toolName,
+					toolCallId: call.toolCallId,
+					summary: ask.summary,
+					input: truncateInput(call.input),
+					reason: ask.reason,
+					severity: ask.severity,
+					sessionAllowable: ask.sessionKey !== undefined,
+					...(ask.sessionScope ? { sessionScope: ask.sessionScope } : {}),
+				},
+			},
+			signal ? { signal } : {},
+		);
+		if (!response)
+			return { allowed: false, reason: "The user did not approve this tool call (no answer or timed out)." };
+		if (response.decision === "allow_once") return { allowed: true, scope: "once" };
+		if (response.decision === "allow_session" && ask.sessionKey) {
+			this.allowances.add(ask.sessionKey);
+			return { allowed: true, scope: "session" };
+		}
+		const reason = response.reason?.trim();
+		return { allowed: false, reason: reason ? `Denied by the user: ${reason}` : "Denied by the user." };
 	}
 
-	setThinking(level: ThinkingLevel, persist: boolean): string {
-		this.assertWritable();
-		this.runtime.session.setThinkingLevel(level, { persist });
-		this.guard.record();
-		return this.runtime.session.thinkingLevel;
+	abstract queue(): QueueState;
+
+	/** Start a prompt. Resolves once the runtime accepted it (the run continues in the background). */
+	abstract prompt(text: string, images?: ImageInput[], streamingBehavior?: StreamingBehavior): Promise<void>;
+
+	abstract steer(text: string, images?: ImageInput[]): Promise<QueueState>;
+
+	abstract followUp(text: string, images?: ImageInput[]): Promise<QueueState>;
+
+	abstract abort(): Promise<void>;
+
+	compact(_instructions?: string): Promise<{ summary: string; tokensBefore: number }> {
+		return Promise.reject(this.unsupported("compaction"));
 	}
 
-	/** Slash commands pi handles in `prompt()`: extension commands, prompt templates, and skills. */
-	commands(): SessionCommandInfo[] {
-		const session = this.runtime.session;
-		const commands: SessionCommandInfo[] = [];
-		for (const command of session.extensionRunner.getRegisteredCommands()) {
-			commands.push({
-				name: command.invocationName,
-				...(command.description ? { description: command.description } : {}),
-				source: "extension",
-			});
-		}
-		for (const template of session.promptTemplates) {
-			commands.push({
-				name: template.name,
-				...(template.description ? { description: template.description } : {}),
-				...(template.argumentHint ? { argumentHint: template.argumentHint } : {}),
-				source: "prompt",
-			});
-		}
-		// Like pi's interactive mode, `enableSkillCommands: false` hides skills from discovery;
-		// a typed `/skill:name` still works.
-		if (session.settingsManager.getEnableSkillCommands()) {
-			for (const skill of session.resourceLoader.getSkills().skills) {
-				commands.push({
-					name: `skill:${skill.name}`,
-					...(skill.description ? { description: skill.description } : {}),
-					source: "skill",
-				});
-			}
-		}
-		return commands;
+	abstract rename(name: string): SessionSummary | Promise<SessionSummary>;
+
+	abstract setModel(provider: string, modelId: string, persist: boolean): Promise<ModelInfo>;
+
+	/** Re-resolve the current model after the model catalog changed. */
+	refreshModel(): void {}
+
+	abstract setThinking(level: ThinkingLevel, persist: boolean): string | Promise<string>;
+
+	/** Slash commands the runtime handles when they arrive as a prompt. */
+	commands(): SessionCommandInfo[] | Promise<SessionCommandInfo[]> {
+		return [];
 	}
 
-	/** Reload settings, extensions, skills, prompt templates, themes, and context files. */
-	async reload(): Promise<void> {
-		this.lastActivity = Date.now();
-		if (this.busy) throw new PierProtocolError("CONFLICT", "Wait for the agent to finish before reloading");
-		await this.runtime.session.reload();
+	reload(): Promise<void> {
+		return Promise.reject(this.unsupported("reloading"));
 	}
 
-	forkPoints(): Array<{ entryId: string; text: string }> {
-		return this.runtime.session.getUserMessagesForForking();
+	forkPoints(): Array<{ entryId: string; text: string }> | Promise<Array<{ entryId: string; text: string }>> {
+		throw this.unsupported("forking");
 	}
 
 	respondUi(requestId: string, response: UiResponse, by: string): boolean {
@@ -555,22 +395,37 @@ export class ManagedSession {
 		return this.bridge.respond(requestId, response, by);
 	}
 
+	/** Release the runtime's resources (processes, SDK sessions). */
+	protected abstract disposeRuntime(): Promise<void>;
+
 	async dispose(reason: "idle" | "closed" | "deleted" | "host_shutdown"): Promise<void> {
 		if (this.disposed) return;
 		this.bridge.cancelAll();
 		this.emit({ type: "session.closed", reason });
 		this.disposed = true;
 		this.subscribers.clear();
-		this.unsubscribePi?.();
 		try {
-			await this.runtime.dispose();
+			await this.disposeRuntime();
 		} finally {
-			this.lock?.release();
+			this.releaseLock();
 		}
 	}
 }
 
-function textOf(content: unknown): string {
+export function runtimeName(id: AgentRuntimeId): string {
+	switch (id) {
+		case "pi":
+			return "pi";
+		case "claude-code":
+			return "Claude Code";
+		case "codex":
+			return "Codex";
+		default:
+			return id;
+	}
+}
+
+export function textOf(content: unknown): string {
 	if (typeof content === "string") return content;
 	if (Array.isArray(content)) {
 		return content

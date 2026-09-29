@@ -1,4 +1,5 @@
 import type {
+	AgentRuntimeCapabilities,
 	EventFrame,
 	ModelInfo,
 	QueueState,
@@ -70,6 +71,8 @@ export interface ChatState {
 	 */
 	needsResync: boolean;
 	nextNoticeId: number;
+	/** What the session's agent runtime supports; absent until a snapshot from a 1.22 host (pi: all). */
+	capabilities?: AgentRuntimeCapabilities;
 }
 
 const MAX_NOTICES = 50;
@@ -131,6 +134,7 @@ export function applySnapshot(state: ChatState, snapshot: SessionSnapshot): Chat
 	if (snapshot.model) next.model = snapshot.model;
 	if (snapshot.title) next.title = snapshot.title;
 	if (snapshot.errorMessage) next.errorMessage = snapshot.errorMessage;
+	if (snapshot.capabilities) next.capabilities = snapshot.capabilities;
 	return next;
 }
 

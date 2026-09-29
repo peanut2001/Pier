@@ -16,6 +16,7 @@
  * `--account-site <url>` points the personal center at another NewAPI site (e.g. a local one)
  * instead of 云链API. `--demo-updates` pretends the host runs in a desktop app whose updater
  * finds v9.9.9 and fakes installing it (`update.*`, for the remote update UI).
+ * `--agents` also offers the Claude Code and Codex CLIs installed here (real sessions, real tokens).
  * `--demo-terminals` lets clients open terminals (`terminal.*`, for the remote terminal UI):
  * a real `bash` through `script(1)` on Linux (no resizing), a line-echo shell elsewhere. State
  * lives in a temporary directory that is removed on exit.
@@ -280,6 +281,8 @@ const remoteAddress = flag("--remote-address");
 const accountSite = flag("--account-site");
 const t = await startTestHost({
 	...(accountSite ? { accountSite } : {}),
+	// `--agents`: also offer the Claude Code and Codex CLIs installed on this computer.
+	...(process.argv.includes("--agents") ? { agents: {} } : {}),
 	...(demoUpdates || demoTerminals ? { shell: new DemoShell(demoUpdates, demoTerminals) } : {}),
 	tokensPerSecond: Number(process.env.FAUX_TPS ?? 400),
 	log: (message) => process.stderr.write(`[faux-host] ${message}\n`),
