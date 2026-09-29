@@ -50,7 +50,12 @@ import { NewApiManager } from "./pi/newapi.ts";
 import { ProviderManager } from "./pi/providers.ts";
 import { RemoteAccess, type RemoteAccessOptions } from "./remote/remote-access.ts";
 import { SessionPool } from "./session-pool.ts";
-import { listWorkspaceDirectory, readWorkspaceFile, writeWorkspaceFile } from "./workspace-files.ts";
+import {
+	deleteWorkspacePath,
+	listWorkspaceDirectory,
+	readWorkspaceFile,
+	writeWorkspaceFile,
+} from "./workspace-files.ts";
 
 export const PIER_HOST_VERSION = "0.2.7";
 
@@ -99,6 +104,7 @@ const AUDITED_METHODS = new Set<MethodName>([
 	"workspace.remove",
 	"workspace.setPolicy",
 	"workspace.writeFile",
+	"workspace.deletePath",
 	"model.setDefault",
 	"provider.login",
 	"provider.logout",
@@ -151,6 +157,8 @@ function auditDetail(method: MethodName, params: Record<string, unknown>): Recor
 				path: params.path,
 				bytes: typeof params.text === "string" ? Buffer.byteLength(params.text) : 0,
 			};
+		case "workspace.deletePath":
+			return { workspaceId: params.workspaceId, path: params.path };
 		case "model.setDefault":
 			return { provider: params.provider, modelId: params.modelId };
 		case "provider.login":
@@ -531,6 +539,8 @@ export class PierHost implements RequestHandler {
 					params.text,
 					params.expectedModifiedAt,
 				),
+			"workspace.deletePath": (_ctx, params) =>
+				deleteWorkspacePath(this.requireWorkspace(params.workspaceId).path, params.path),
 
 			"session.list": async (_ctx, params) => ({
 				sessions: await this.pool.list(this.requireWorkspace(params.workspaceId)),
