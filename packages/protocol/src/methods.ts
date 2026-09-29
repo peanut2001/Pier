@@ -4,6 +4,7 @@ import {
 	type AccountOverview,
 	type AccountStatus,
 	ApprovalPolicySchema,
+	type AppUpdateStatus,
 	AuthMethodSchema,
 	type ClientInfo,
 	type CustomModel,
@@ -77,6 +78,20 @@ export const MethodParamsSchemas = {
 	"host.listDirectories": z.object({ path: z.string().min(1).max(4096).optional() }).optional(),
 	/** CPU, memory, disk and network usage of the host's computer (1.12). */
 	"host.stats": z.object({}).optional(),
+
+	/**
+	 * The desktop app's updater on the host's computer (1.13), so a paired computer or phone can
+	 * update Pier there. Only signed official releases are installed.
+	 */
+	"update.status": z.object({}).optional(),
+	/** Check for a new release now. */
+	"update.check": z.object({}).optional(),
+	/**
+	 * Download and install the newest release (checking first when needed), then restart Pier on
+	 * that computer. Resolves once the install started; the host and every connection to it go
+	 * down while it installs. Progress arrives as `update.status` events.
+	 */
+	"update.install": z.object({}).optional(),
 
 	"workspace.list": z.object({}).optional(),
 	"workspace.add": z.object({
@@ -358,6 +373,9 @@ export interface MethodResults {
 	"host.info": HostInfo;
 	"host.listDirectories": HostDirectoryListing;
 	"host.stats": HostStats;
+	"update.status": AppUpdateStatus;
+	"update.check": AppUpdateStatus;
+	"update.install": AppUpdateStatus;
 	"workspace.list": { workspaces: WorkspaceInfo[] };
 	"workspace.add": { workspace: WorkspaceInfo };
 	"workspace.remove": { removed: boolean };

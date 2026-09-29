@@ -1,15 +1,25 @@
+import type { AppUpdateStatus, PeerInfo } from "@pier/protocol";
 import { type ReactNode, useEffect, useState } from "react";
 import type { UpdateStatus } from "../lib/bridge.ts";
 import { formatBytes, relativeTime } from "../lib/format.ts";
-import { useAppState, useStore } from "../lib/store.tsx";
-import { IconAlert, IconCheck, IconDownload, IconExternal, IconLoader, IconRefresh, Logo } from "./Icons.tsx";
+import { type PeerUpdateEntry, useAppState, useStore } from "../lib/store.tsx";
+import {
+	IconAlert,
+	IconCheck,
+	IconDownload,
+	IconExternal,
+	IconLoader,
+	IconMonitor,
+	IconRefresh,
+	Logo,
+} from "./Icons.tsx";
 import { Markdown } from "./Markdown.tsx";
 import { SettingRow, SettingsCard, SettingsGroup, Switch } from "./SettingsUi.tsx";
 
 export const RELEASES_URL = "https://github.com/yiranxiaohui/Pier/releases";
 
 /** An update is waiting for the user (or being installed). */
-export function updatePending(update: UpdateStatus): boolean {
+export function updatePending(update: UpdateStatus | AppUpdateStatus): boolean {
 	return (
 		update.state === "available" ||
 		update.state === "downloading" ||
@@ -37,6 +47,165 @@ function Progress({ update }: { update: UpdateStatus }) {
 						: `正在下载 ${formatBytes(update.downloaded)}…`}
 			</div>
 		</div>
+	);
+}
+
+/** What the update row of a paired computer says. */
+function peerUpdateText(
+	entry: PeerUpdateEntry | undefined,
+	online: boolean,
+	version: string | undefined,
+	busySessions: number | undefined,
+): { text: string; tone?: "error" | "warning" } {
+	const status = entry?.status;
+	if (!online) {
+		return entry?.installing
+			? { text: "正在安装更新，Pier 重启后会自动重新连接…" }
+			: { text: "离线，重新连接后才能检查和安装更新" };
+	}
+	if (entry?.tooOld) {
+		return {
+			text: `Pier ${version ? `v${version} ` : ""}版本较旧，不支持远程更新；请先在那台电脑上更新一次，之后即可在这里更新`,
+			tone: "warning",
+		};
+	}
+	if (!status) return { text: "正在读取…" };
+	const pendingVersion = status.version ? `v${status.version}` : "新版本";
+	switch (status.state) {
+		case "unsupported":
+			return { text: "那台电脑运行的是开发版本或未经打包的构建，无法自动更新" };
+		case "idle":
+			return { text: `Pier v${status.currentVersion}` };
+		case "checking":
+			return { text: "正在检查更新…" };
+		case "upToDate":
+			return { text: `Pier v${status.currentVersion} 已是最新版本` };
+		case "downloading": {
+			const total = status.total ?? 0;
+			const progress = total
+				? `${formatBytes(status.downloaded)} / ${formatBytes(total)}（${Math.min(100, Math.round((status.downloaded / total) * 100))}%）`
+				: formatBytes(status.downloaded);
+			return { text: `正在下载 ${pendingVersion}：${progress}` };
+		}
+		case "installing":
+			return { text: `正在安装 ${pendingVersion}，完成后那台电脑上的 Pier 会自动重启` };
+		default:
+			break;
+	}
+	const notes: string[] = [];
+	if (status.state === "available") notes.push(`可以从 v${status.currentVersion} 更新到 ${pendingVersion}`);
+	else notes.push(status.error ?? "检查更新失败");
+	if (status.version && busySessions) {
+		notes.push(`那台电脑上有 ${busySessions} 个会话正在运行或等待审批，更新会中断它们`);
+	}
+	if (status.version && status.installNeedsAuth) notes.push("安装时需要有人在那台电脑上输入管理员密码");
+	return {
+		text: notes.join("；"),
+		...(status.state === "error" ? { tone: "error" as const } : busySessions ? { tone: "warning" as const } : {}),
+	};
+}
+
+function PeerUpdateRow({ peer }: { peer: PeerInfo }) {
+	const store = useStore();
+	const entry = useAppState((s) => s.peerUpdates[peer.id]);
+	const online = useAppState((s) => s.nodes[peer.id]?.connection === "open");
+	const connection = useAppState((s) => s.nodes[peer.id]?.connection);
+	const version = useAppState((s) => s.nodes[peer.id]?.hostInfo?.version) ?? peer.version;
+	const [busySessions, setBusySessions] = useState<number | undefined>(undefined);
+	const [confirm, setConfirm] = useState(false);
+	const status = entry?.status;
+	const pending = online && !entry?.tooOld && !!status && updatePending(status);
+	const working = status?.state === "downloading" || status?.state === "installing" || !!entry?.busy;
+
+	// Warn before stopping agents that are still working there.
+	useEffect(() => {
+		if (!pending || working) return;
+		let alive = true;
+		void store.busySessionCount(peer.id).then((count) => {
+			if (alive) setBusySessions(count);
+		});
+		return () => {
+			alive = false;
+		};
+	}, [store, peer.id, pending, working]);
+
+	const { text, tone } = peerUpdateText(entry, online, version, pending && !working ? busySessions : undefined);
+	let action: ReactNode = null;
+	if (!online) {
+		action =
+			entry?.installing || connection === "connecting" ? (
+				<IconLoader size={16} className="spin" />
+			) : (
+				<button type="button" onClick={() => store.retryNode(peer.id)}>
+					重新连接
+				</button>
+			);
+	} else if (working || status?.state === "checking") {
+		action = <IconLoader size={16} className="spin" />;
+	} else if (pending) {
+		action = (
+			<button
+				type="button"
+				className={confirm ? "danger" : "primary"}
+				onClick={() => {
+					if (busySessions && !confirm) {
+						setConfirm(true);
+						return;
+					}
+					setConfirm(false);
+					void store.installPeerUpdate(peer.id);
+				}}
+				onBlur={() => setConfirm(false)}
+			>
+				<IconDownload size={14} />
+				{confirm ? "仍然更新" : status?.state === "error" ? "重试安装" : `更新到 v${status?.version ?? ""}`}
+			</button>
+		);
+	} else if (status && !entry?.tooOld && status.state !== "unsupported") {
+		action = (
+			<button type="button" onClick={() => void store.checkPeerUpdate(peer.id)}>
+				<IconRefresh size={14} />
+				检查更新
+			</button>
+		);
+	}
+	return (
+		<SettingRow
+			title={
+				<span className="peer-update-title">
+					<IconMonitor size={14} />
+					{peer.name}
+				</span>
+			}
+			description={<span className={tone ? `peer-update-${tone}` : undefined}>{text}</span>}
+		>
+			{action}
+		</SettingRow>
+	);
+}
+
+/** Pier on every paired computer: check for and install updates there. */
+function PeerUpdates() {
+	const store = useStore();
+	const peers = useAppState((s) => s.peers);
+	// Opening the page refreshes what each computer's updater knows.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: only when the page opens.
+	useEffect(() => {
+		for (const peer of peers) void store.loadPeerUpdate(peer.id);
+	}, []);
+	if (!peers.length) return null;
+	return (
+		<SettingsGroup title="其他电脑">
+			<SettingsCard>
+				{peers.map((peer) => (
+					<PeerUpdateRow key={peer.id} peer={peer} />
+				))}
+			</SettingsCard>
+			<p className="muted small settings-note">
+				已配对的电脑可以在这里远程更新：那台电脑上的 Pier
+				会下载并校验官方发布的更新包、安装，然后自动重启，本机随后自动重新连接。
+			</p>
+		</SettingsGroup>
 	);
 }
 
@@ -184,6 +353,7 @@ export function UpdateSettings() {
 					</SettingRow>
 				</SettingsCard>
 			</SettingsGroup>
+			<PeerUpdates />
 		</>
 	);
 }

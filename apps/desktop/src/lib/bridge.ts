@@ -88,6 +88,8 @@ export interface UpdateStatus {
 	error?: string | null;
 	/** Unix time (ms) of the last successful check. */
 	lastChecked?: number | null;
+	/** Installing asks for an administrator password (Linux .deb / .rpm). */
+	installNeedsAuth?: boolean;
 }
 
 export interface UpdateBridge {
