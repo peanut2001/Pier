@@ -1,7 +1,13 @@
-import type { CustomProviderApi, NewApiAccount, NewApiLoginResult, NewApiToken } from "@pier/protocol";
+import type {
+	CustomProviderApi,
+	NewApiAccount,
+	NewApiAuthorizeStart,
+	NewApiLoginResult,
+	NewApiToken,
+} from "@pier/protocol";
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { useStore } from "../lib/store.tsx";
-import { IconAlert, IconCheck, IconKey, IconLoader, IconPlus } from "./Icons.tsx";
+import { IconAlert, IconCheck, IconCopy, IconExternal, IconKey, IconLoader, IconPlus } from "./Icons.tsx";
 
 /** What the NewAPI sign-in hands to the custom endpoint form. */
 export interface NewApiPreset {
@@ -63,6 +69,26 @@ function tokenDetail(token: NewApiToken): string {
 }
 
 type Step = "login" | "verify" | "token";
+type Mode = "browser" | "password" | "token";
+
+/** The last site address, so signing in to the same site again needs no typing. */
+const LAST_SITE_KEY = "pier.newapi.lastSite";
+
+function lastSite(): string {
+	try {
+		return localStorage.getItem(LAST_SITE_KEY) ?? "";
+	} catch {
+		return "";
+	}
+}
+
+function rememberSite(url: string): void {
+	try {
+		localStorage.setItem(LAST_SITE_KEY, url);
+	} catch {
+		// storage unavailable
+	}
+}
 
 export function NewApiConnect({
 	takenIds,
@@ -74,8 +100,8 @@ export function NewApiConnect({
 }) {
 	const store = useStore();
 	const [step, setStep] = useState<Step>("login");
-	const [mode, setMode] = useState<"password" | "token">("password");
-	const [baseUrl, setBaseUrl] = useState("");
+	const [mode, setMode] = useState<Mode>("browser");
+	const [baseUrl, setBaseUrl] = useState(lastSite);
 	const [username, setUsername] = useState("");
 	const [password, setPassword] = useState("");
 	const [accessToken, setAccessToken] = useState("");
@@ -87,12 +113,16 @@ export function NewApiConnect({
 	const [newGroup, setNewGroup] = useState("");
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | undefined>();
+	const [authorizing, setAuthorizing] = useState<NewApiAuthorizeStart | undefined>();
+	const [copied, setCopied] = useState(false);
 	const sessionRef = useRef<string | undefined>(undefined);
+	const flowRef = useRef<string | undefined>(undefined);
 
-	// Forget the host-side login when the dialog closes.
+	// Forget the host-side login (or abandon the browser sign-in) when the dialog closes.
 	useEffect(
 		() => () => {
 			if (sessionRef.current) store.newApiClose(sessionRef.current);
+			if (flowRef.current) store.newApiAuthorizeCancel(flowRef.current);
 		},
 		[store],
 	);
@@ -117,16 +147,57 @@ export function NewApiConnect({
 			setStep("verify");
 			return;
 		}
+		rememberSite(result.account.site.url);
 		setAccount(result.account);
 		const usable = result.account.tokens.filter((t) => t.status === 1);
 		setSelected(usable[0]?.id ?? "new");
 		setStep("token");
 	};
 
+	const authorize = () =>
+		run(async () => {
+			const started = await store.newApiAuthorizeStart(baseUrl.trim());
+			rememberSite(started.site.url);
+			flowRef.current = started.flowId;
+			setCopied(false);
+			setAuthorizing(started);
+			store.openExternal(started.authorizeUrl);
+			try {
+				const result = await store.newApiAuthorizeWait(started.flowId);
+				onReady({
+					name: result.site.name,
+					id: providerIdFor(result.site.url, (id) => takenIds.has(id)),
+					siteUrl: result.site.url,
+					api: "openai-completions",
+					models: result.models,
+					...(result.modelsError ? { modelsError: result.modelsError } : {}),
+					keyRef: result.keyRef,
+					keyLabel: `${result.token.name}（${result.token.maskedKey}）`,
+				});
+			} catch (e) {
+				// Cancelling from this dialog is not an error worth showing.
+				if (flowRef.current === started.flowId) throw e;
+			} finally {
+				if (flowRef.current === started.flowId) flowRef.current = undefined;
+				setAuthorizing(undefined);
+			}
+		});
+
+	const cancelAuthorize = () => {
+		const flowId = flowRef.current;
+		flowRef.current = undefined;
+		if (flowId) store.newApiAuthorizeCancel(flowId);
+		setAuthorizing(undefined);
+	};
+
 	const login = (e: FormEvent) => {
 		e.preventDefault();
 		if (!baseUrl.trim()) {
 			setError("请填写 NewAPI 站点地址");
+			return;
+		}
+		if (mode === "browser") {
+			void authorize();
 			return;
 		}
 		void run(async () => {
@@ -191,6 +262,57 @@ export function NewApiConnect({
 			<span>{error}</span>
 		</div>
 	) : null;
+
+	if (authorizing) {
+		const { site } = authorizing;
+		return (
+			<div className="newapi-form">
+				<div className="newapi-account">
+					{site.logo ? <img src={site.logo} alt="" className="newapi-logo" /> : null}
+					<div className="provider-main">
+						<div className="provider-name">
+							{site.name}
+							{site.version ? <span className="mini-tag">{site.version}</span> : null}
+						</div>
+						<div className="muted small mono">{site.url}</div>
+					</div>
+				</div>
+				<p className="muted">
+					已在浏览器中打开授权页面。请在浏览器里登录（账号密码、GitHub、LinuxDO、Passkey
+					等该站点支持的方式都可以），确认令牌设置后点击「授权」，完成后会自动回到这里。
+				</p>
+				<div className="newapi-waiting">
+					<IconLoader size={15} className="spin" />
+					<span>等待浏览器中完成授权…</span>
+				</div>
+				<p className="muted small">
+					浏览器没有打开？
+					<button type="button" className="link-button" onClick={() => store.openExternal(authorizing.authorizeUrl)}>
+						<IconExternal size={12} /> 重新打开
+					</button>
+					或
+					<button
+						type="button"
+						className="link-button"
+						onClick={() => {
+							void navigator.clipboard
+								.writeText(authorizing.authorizeUrl)
+								.then(() => setCopied(true))
+								.catch(() => undefined);
+						}}
+					>
+						<IconCopy size={12} /> {copied ? "已复制" : "复制链接"}
+					</button>
+					到本机的浏览器中打开。
+				</p>
+				<div className="modal-actions">
+					<button type="button" onClick={cancelAuthorize}>
+						取消
+					</button>
+				</div>
+			</div>
+		);
+	}
 
 	if (step === "verify") {
 		return (
@@ -319,7 +441,7 @@ export function NewApiConnect({
 	return (
 		<form className="newapi-form" onSubmit={login}>
 			<p className="muted">
-				登录 NewAPI（One API 衍生的中转站面板），Pier 会读取你的令牌和可用模型，自动添加为自定义接口。
+				登录 NewAPI（One API 衍生的中转站面板），Pier 会获取令牌和可用模型，自动添加为自定义接口。
 			</p>
 			<label className="form-field">
 				<span className="field-label">站点地址</span>
@@ -334,6 +456,16 @@ export function NewApiConnect({
 				/>
 			</label>
 			<div className="segmented" role="tablist">
+				<button
+					type="button"
+					role="tab"
+					aria-selected={mode === "browser"}
+					className={mode === "browser" ? "active" : ""}
+					onClick={() => setMode("browser")}
+				>
+					<IconExternal size={13} />
+					浏览器授权
+				</button>
 				<button
 					type="button"
 					role="tab"
@@ -354,7 +486,12 @@ export function NewApiConnect({
 					访问令牌
 				</button>
 			</div>
-			{mode === "password" ? (
+			{mode === "browser" ? (
+				<p className="muted small">
+					在浏览器中打开站点的授权页面，用站点支持的任意方式登录（包括 GitHub、LinuxDO 等第三方账号）， 同意后 Pier
+					会自动获得一个新令牌，不需要输入密码。需要站点支持并开启「应用授权」，否则请改用账号密码或访问令牌。
+				</p>
+			) : mode === "password" ? (
 				<div className="form-grid">
 					<label className="form-field">
 						<span className="field-label">用户名或邮箱</span>
@@ -399,12 +536,12 @@ export function NewApiConnect({
 					</p>
 				</>
 			)}
-			<p className="muted small">密码只用于这次登录，不会被保存。</p>
+			{mode === "password" ? <p className="muted small">密码只用于这次登录，不会被保存。</p> : null}
 			{errorBanner}
 			<div className="modal-actions">
 				<button type="submit" className="primary" disabled={busy}>
-					{busy ? <IconLoader size={14} className="spin" /> : null}
-					登录
+					{busy ? <IconLoader size={14} className="spin" /> : mode === "browser" ? <IconExternal size={14} /> : null}
+					{mode === "browser" ? "在浏览器中授权" : "登录"}
 				</button>
 			</div>
 		</form>

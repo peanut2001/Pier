@@ -1,6 +1,19 @@
-import { constants, createCipheriv, publicEncrypt, randomBytes, randomUUID } from "node:crypto";
+import {
+	constants,
+	createCipheriv,
+	createHash,
+	publicEncrypt,
+	randomBytes,
+	randomUUID,
+	timingSafeEqual,
+} from "node:crypto";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import type { AddressInfo } from "node:net";
+import { hostname } from "node:os";
 import {
 	type NewApiAccount,
+	type NewApiAuthorizeResult,
+	type NewApiAuthorizeStart,
 	type NewApiGroup,
 	type NewApiLoginResult,
 	type NewApiToken,
@@ -15,6 +28,12 @@ import {
  *
  * Supports both the current dashboard auth (login returns a Bearer access token) and the
  * older cookie session that needs a `New-Api-User` header.
+ *
+ * Sites that enable NewAPI app authorization can also be signed in through the browser
+ * (`authorizeStart` / `authorizeWait`): the OAuth 2.0 authorization code flow for native apps
+ * (RFC 8252) with a loopback redirect and PKCE (RFC 7636). The user signs in on the site with
+ * any method it offers, approves a new token on its consent page, and the host exchanges the
+ * returned code for the token key.
  */
 
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -22,6 +41,10 @@ const REQUEST_TIMEOUT_MS = 15_000;
 const SESSION_TTL_MS = 30 * 60_000;
 const TOKEN_PAGE_SIZE = 100;
 const TOKEN_MAX_PAGES = 10;
+/** How long a browser authorization may take before it is abandoned. */
+const AUTHORIZE_TTL_MS = 10 * 60_000;
+/** Name shown to the user on the site's consent page. */
+const AUTHORIZE_CLIENT_NAME = "Pier";
 
 interface Envelope {
 	success?: boolean;
@@ -156,6 +179,52 @@ interface Session {
 	expiresAt: number;
 }
 
+interface AuthorizeFlow {
+	id: string;
+	connectionId: string;
+	origin: string;
+	status: Json;
+	state: string;
+	verifier: string;
+	redirectUri: string;
+	server: Server;
+	timer: ReturnType<typeof setTimeout>;
+	/** Set once a callback carrying the right state arrived; later callbacks are ignored. */
+	answered: boolean;
+	ended: boolean;
+	result: Promise<NewApiAuthorizeResult>;
+	resolve(result: NewApiAuthorizeResult): void;
+	reject(error: Error): void;
+}
+
+const escapeHtml = (text: string) =>
+	text.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] ?? c);
+
+/** The page the browser shows after returning from the site's consent page. */
+function callbackPage(res: ServerResponse, status: number, title: string, detail: string): void {
+	const ok = status === 200;
+	res.writeHead(status, {
+		"content-type": "text/html; charset=utf-8",
+		"cache-control": "no-store",
+		"referrer-policy": "no-referrer",
+		"content-security-policy": "default-src 'none'; style-src 'unsafe-inline'",
+		"x-content-type-options": "nosniff",
+	});
+	res.end(`<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${escapeHtml(title)} · Pier</title>
+<style>body{font:15px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif;display:grid;place-items:center;min-height:100vh;margin:0;background:#f6f7f9;color:#1f2328}
+main{max-width:420px;padding:32px;text-align:center}h1{font-size:20px;margin:12px 0 8px}p{color:#57606a;margin:0}
+.mark{font-size:36px;color:${ok ? "#1a7f37" : "#cf222e"}}@media(prefers-color-scheme:dark){body{background:#0d1117;color:#e6edf3}p{color:#8d96a0}}</style>
+</head><body><main><div class="mark">${ok ? "✓" : "✕"}</div><h1>${escapeHtml(title)}</h1><p>${escapeHtml(detail)}</p></main></body></html>`);
+}
+
+const sameSecret = (a: string, b: string) => {
+	const x = Buffer.from(a);
+	const y = Buffer.from(b);
+	return x.length === y.length && timingSafeEqual(x, y);
+};
+
 interface KeyRef {
 	key: string;
 	connectionId: string;
@@ -172,6 +241,7 @@ export interface NewApiManagerOptions {
 export class NewApiManager {
 	private readonly sessions = new Map<string, Session>();
 	private readonly keyRefs = new Map<string, KeyRef>();
+	private readonly flows = new Map<string, AuthorizeFlow>();
 	private readonly fetchImpl: typeof fetch;
 	private readonly now: () => number;
 
@@ -432,14 +502,8 @@ export class NewApiManager {
 
 	private async account(session: Session): Promise<NewApiAccount> {
 		const [tokens, groups] = await Promise.all([this.tokens(session), this.groups(session)]);
-		const { status } = session;
 		return {
-			site: {
-				name: str(status.system_name) ?? new URL(session.origin).host,
-				url: session.origin,
-				...(str(status.version) ? { version: str(status.version) } : {}),
-				...(str(status.logo) ? { logo: str(status.logo) } : {}),
-			},
+			site: this.siteInfo(session.origin, session.status),
 			user: session.user ?? { username: "用户" },
 			tokens,
 			groups,
@@ -602,7 +666,213 @@ export class NewApiManager {
 		}
 	}
 
+	// ---- browser authorization ------------------------------------------------------------
+
+	private siteInfo(origin: string, status: Json): NewApiAccount["site"] {
+		return {
+			name: str(status.system_name) ?? new URL(origin).host,
+			url: origin,
+			...(str(status.version) ? { version: str(status.version) } : {}),
+			...(str(status.logo) ? { logo: str(status.logo) } : {}),
+		};
+	}
+
+	/** Start a browser authorization: listen on a loopback port and build the consent page URL. */
+	async authorizeStart(connectionId: string, baseUrl: string): Promise<NewApiAuthorizeStart> {
+		this.sweep();
+		const origin = normalizeNewApiUrl(baseUrl);
+		const status = await this.siteStatus(origin);
+		if (status.app_authorization_enabled !== true) {
+			fail(
+				"该站点没有开启浏览器授权（需要支持应用授权的 NewAPI，并由管理员在「系统设置 → 认证」中开启），请改用账号密码或访问令牌登录",
+			);
+		}
+
+		const server = createServer();
+		await new Promise<void>((resolve, reject) => {
+			server.once("error", reject);
+			server.listen(0, "127.0.0.1", () => {
+				server.off("error", reject);
+				resolve();
+			});
+		});
+		const { port } = server.address() as AddressInfo;
+		const verifier = randomBytes(32).toString("base64url");
+		let resolve!: (result: NewApiAuthorizeResult) => void;
+		let reject!: (error: Error) => void;
+		const result = new Promise<NewApiAuthorizeResult>((res, rej) => {
+			resolve = res;
+			reject = rej;
+		});
+		// Settled flows may never be awaited (the dialog was closed).
+		result.catch(() => undefined);
+		const flow: AuthorizeFlow = {
+			id: randomUUID(),
+			connectionId,
+			origin,
+			status,
+			state: randomBytes(24).toString("base64url"),
+			verifier,
+			redirectUri: `http://127.0.0.1:${port}/callback`,
+			server,
+			timer: setTimeout(
+				() => this.endFlow(flow, new PierProtocolError("CONFLICT", "浏览器授权已超时，请重新授权")),
+				AUTHORIZE_TTL_MS,
+			),
+			answered: false,
+			ended: false,
+			result,
+			resolve,
+			reject,
+		};
+		flow.timer.unref?.();
+		server.on("request", (req, res) => void this.callback(flow, req, res));
+		this.flows.set(flow.id, flow);
+
+		const query = new URLSearchParams({
+			client_name: AUTHORIZE_CLIENT_NAME,
+			redirect_uri: flow.redirectUri,
+			code_challenge: createHash("sha256").update(verifier).digest("base64url"),
+			code_challenge_method: "S256",
+			state: flow.state,
+			key_name: `Pier · ${hostname()}`.slice(0, 40),
+		});
+		return {
+			flowId: flow.id,
+			authorizeUrl: `${origin}/app-auth?${query}`,
+			site: this.siteInfo(origin, status),
+			expiresAt: new Date(this.now() + AUTHORIZE_TTL_MS).toISOString(),
+		};
+	}
+
+	private async callback(flow: AuthorizeFlow, req: IncomingMessage, res: ServerResponse): Promise<void> {
+		const url = new URL(req.url ?? "/", flow.redirectUri);
+		if (req.method !== "GET" || url.pathname !== "/callback") {
+			res.writeHead(404).end();
+			return;
+		}
+		// Anything on this computer can reach the port; only the right state may settle the flow.
+		if (!sameSecret(url.searchParams.get("state") ?? "", flow.state)) {
+			callbackPage(res, 400, "无效的授权回调", "请回到 Pier 重新发起授权。");
+			return;
+		}
+		if (flow.answered) {
+			callbackPage(res, 409, "授权已经处理过了", "可以关闭此页面并回到 Pier。");
+			return;
+		}
+		flow.answered = true;
+		const code = url.searchParams.get("code");
+		if (!code) {
+			const denied = url.searchParams.get("error") === "access_denied";
+			const message = denied
+				? "已在浏览器中取消授权"
+				: `授权失败：${url.searchParams.get("error") || "没有返回授权码"}`;
+			callbackPage(res, 400, message, "可以关闭此页面并回到 Pier。");
+			this.endFlow(flow, new PierProtocolError("CONFLICT", message));
+			return;
+		}
+		try {
+			const result = await this.exchange(flow, code);
+			callbackPage(res, 200, "授权成功", `令牌「${result.token.name}」已交给 Pier，可以关闭此页面并回到 Pier。`);
+			this.endFlow(flow, result);
+		} catch (error) {
+			const message = errorText(error);
+			callbackPage(res, 400, "授权失败", `${message}。请回到 Pier 重新授权。`);
+			this.endFlow(flow, error instanceof Error ? error : new Error(message));
+		}
+	}
+
+	private async exchange(flow: AuthorizeFlow, code: string): Promise<NewApiAuthorizeResult> {
+		const data = await this.ok({ origin: flow.origin, cookies: new Map() }, "POST", "/api/app-auth/token", {
+			code,
+			code_verifier: flow.verifier,
+			redirect_uri: flow.redirectUri,
+		});
+		const body = isObject(data) ? data : {};
+		const rawKey = str(body.key);
+		const rawToken = isObject(body.token) ? body.token : {};
+		const tokenId = num(rawToken.id);
+		if (!rawKey || !tokenId) return fail("NewAPI 没有返回令牌");
+		const key = fullKey(rawKey);
+		const rawUser = isObject(body.user) ? body.user : {};
+		const userId = num(rawUser.id);
+		const ref = randomUUID();
+		this.keyRefs.set(ref, { key, connectionId: flow.connectionId, expiresAt: this.now() + SESSION_TTL_MS });
+		let models: Array<{ id: string; name?: string }> = [];
+		let modelsError: string | undefined;
+		try {
+			models = await this.models(flow.origin, key);
+		} catch (error) {
+			modelsError = errorText(error);
+		}
+		return {
+			site: this.siteInfo(flow.origin, flow.status),
+			user: {
+				...(userId ? { id: userId } : {}),
+				username: str(rawUser.username) ?? (userId ? `#${userId}` : "用户"),
+				...(str(rawUser.display_name) ? { displayName: str(rawUser.display_name) } : {}),
+			},
+			token: {
+				id: tokenId,
+				name: str(rawToken.name) ?? `#${tokenId}`,
+				...(str(rawToken.group) ? { group: str(rawToken.group) } : {}),
+				maskedKey: maskKey(key),
+			},
+			keyRef: ref,
+			models,
+			...(modelsError ? { modelsError } : {}),
+		};
+	}
+
+	/** Settle a flow, stop listening and forget it. */
+	private endFlow(flow: AuthorizeFlow, outcome: NewApiAuthorizeResult | Error): void {
+		if (flow.ended) return;
+		flow.ended = true;
+		clearTimeout(flow.timer);
+		if (outcome instanceof Error) flow.reject(outcome);
+		else flow.resolve(outcome);
+		// Let the callback page finish before the port closes.
+		flow.server.close();
+		flow.server.closeIdleConnections?.();
+		if (this.flows.get(flow.id) === flow) {
+			// Keep the settled flow briefly so a late `authorizeWait` still gets the outcome.
+			const forget = setTimeout(() => {
+				if (this.flows.get(flow.id) === flow) this.flows.delete(flow.id);
+			}, 60_000);
+			forget.unref?.();
+		}
+	}
+
+	private flow(connectionId: string, flowId: string): AuthorizeFlow {
+		const flow = this.flows.get(flowId);
+		if (!flow || flow.connectionId !== connectionId) {
+			throw new PierProtocolError("NOT_FOUND", "浏览器授权已结束，请重新授权");
+		}
+		return flow;
+	}
+
+	/** Wait until the user approves or declines in the browser. */
+	async authorizeWait(connectionId: string, flowId: string): Promise<NewApiAuthorizeResult> {
+		const flow = this.flow(connectionId, flowId);
+		try {
+			return await flow.result;
+		} finally {
+			this.flows.delete(flow.id);
+		}
+	}
+
+	authorizeCancel(connectionId: string, flowId: string): boolean {
+		const flow = this.flows.get(flowId);
+		if (!flow || flow.connectionId !== connectionId) return false;
+		this.flows.delete(flowId);
+		this.endFlow(flow, new PierProtocolError("CONFLICT", "已取消浏览器授权"));
+		return true;
+	}
+
 	connectionClosed(connectionId: string): void {
+		for (const flow of [...this.flows.values()]) {
+			if (flow.connectionId === connectionId) this.authorizeCancel(connectionId, flow.id);
+		}
 		for (const [id, session] of this.sessions) {
 			if (session.connectionId !== connectionId) continue;
 			this.drop(id);
@@ -612,6 +882,7 @@ export class NewApiManager {
 	}
 
 	shutdown(): void {
+		for (const flow of [...this.flows.values()]) this.authorizeCancel(flow.connectionId, flow.id);
 		for (const id of [...this.sessions.keys()]) {
 			const session = this.drop(id);
 			if (session) void this.revoke(session);

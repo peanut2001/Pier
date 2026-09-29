@@ -10,6 +10,8 @@ import {
 	type HostInfo,
 	ImageInputSchema,
 	type ModelInfo,
+	type NewApiAuthorizeResult,
+	type NewApiAuthorizeStart,
 	type NewApiLoginResult,
 	type NewApiToken,
 	type ProviderInfo,
@@ -152,6 +154,15 @@ export const MethodParamsSchemas = {
 	/** Fetch the key of a token (kept on the host as `keyRef`) and the models it can use. */
 	"newapi.useToken": z.object({ sessionId: Id, tokenId: z.number().int().positive() }),
 	"newapi.close": z.object({ sessionId: Id }),
+	/**
+	 * Browser sign-in (1.4) for sites with NewAPI app authorization: the user signs in with any
+	 * method and approves on the site, which creates a token for Pier. Only for local UIs,
+	 * because the browser returns to a loopback address on the host's computer.
+	 */
+	"newapi.authorizeStart": z.object({ baseUrl: z.string().trim().min(1).max(2000) }),
+	/** Resolve once the user approves (or reject when they decline, the flow expires or is cancelled). */
+	"newapi.authorizeWait": z.object({ flowId: Id }),
+	"newapi.authorizeCancel": z.object({ flowId: Id }),
 
 	"ui.respond": z.object({ ...SessionRef, requestId: Id, response: UiResponseSchema }),
 
@@ -204,6 +215,9 @@ export const LOCAL_ONLY_METHODS: ReadonlySet<MethodName> = new Set([
 	"newapi.createToken",
 	"newapi.useToken",
 	"newapi.close",
+	"newapi.authorizeStart",
+	"newapi.authorizeWait",
+	"newapi.authorizeCancel",
 ]);
 
 export interface HelloResult {
@@ -272,6 +286,9 @@ export interface MethodResults {
 		modelsError?: string;
 	};
 	"newapi.close": { closed: boolean };
+	"newapi.authorizeStart": NewApiAuthorizeStart;
+	"newapi.authorizeWait": NewApiAuthorizeResult;
+	"newapi.authorizeCancel": { cancelled: boolean };
 	"ui.respond": { accepted: boolean };
 	"device.list": { devices: DeviceInfo[] };
 	"device.revoke": { revoked: boolean };

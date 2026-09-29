@@ -12,6 +12,8 @@ import type {
 	EventFrame,
 	HostInfo,
 	ModelInfo,
+	NewApiAuthorizeResult,
+	NewApiAuthorizeStart,
 	NewApiLoginResult,
 	NewApiToken,
 	PairingRequest,
@@ -588,6 +590,21 @@ export class PierStore {
 		tokenId: number,
 	): Promise<{ keyRef: string; models: Array<{ id: string; name?: string }>; modelsError?: string }> {
 		return this.hostClient().request("newapi.useToken", { sessionId, tokenId }, { timeoutMs: 45_000 });
+	}
+
+	/** Start a browser sign-in (NewAPI app authorization); open `authorizeUrl` with `openExternal`. */
+	newApiAuthorizeStart(baseUrl: string): Promise<NewApiAuthorizeStart> {
+		return this.hostClient().request("newapi.authorizeStart", { baseUrl }, { timeoutMs: 45_000 });
+	}
+
+	/** Resolves when the user approves in the browser; the host gives up after 10 minutes. */
+	newApiAuthorizeWait(flowId: string): Promise<NewApiAuthorizeResult> {
+		return this.hostClient().request("newapi.authorizeWait", { flowId }, { timeoutMs: 11 * 60_000 });
+	}
+
+	/** Abandon a browser sign-in (fire and forget). */
+	newApiAuthorizeCancel(flowId: string): void {
+		void this.client?.request("newapi.authorizeCancel", { flowId }).catch(() => undefined);
 	}
 
 	/** Forget a NewAPI login (fire and forget). */

@@ -488,6 +488,11 @@ export class PierHost implements RequestHandler {
 			"newapi.close": async (ctx, params) => ({
 				closed: await this.newapi.close(ctx.connection.connectionId, params.sessionId),
 			}),
+			"newapi.authorizeStart": (ctx, params) => this.newapi.authorizeStart(ctx.connection.connectionId, params.baseUrl),
+			"newapi.authorizeWait": (ctx, params) => this.newapi.authorizeWait(ctx.connection.connectionId, params.flowId),
+			"newapi.authorizeCancel": (ctx, params) => ({
+				cancelled: this.newapi.authorizeCancel(ctx.connection.connectionId, params.flowId),
+			}),
 
 			"ui.respond": (ctx, params) => ({
 				accepted: this.pool

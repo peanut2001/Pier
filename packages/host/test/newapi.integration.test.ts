@@ -248,6 +248,83 @@ describe("NewAPI sign-in", () => {
 		).rejects.toMatchObject({ message: expect.stringContaining("NewAPI") });
 	});
 
+	it("signs in through the browser with app authorization", async () => {
+		const site = await fake({ variant: "modern", appAuth: true });
+		const started = await t.client.request("newapi.authorizeStart", { baseUrl: `${site.url}/console` });
+		expect(started.site).toEqual({ name: "测试站", url: site.url, version: "v1.3.19" });
+		const consent = new URL(started.authorizeUrl);
+		expect(`${consent.origin}${consent.pathname}`).toBe(`${site.url}/app-auth`);
+		expect(consent.searchParams.get("client_name")).toBe("Pier");
+		expect(consent.searchParams.get("code_challenge_method")).toBe("S256");
+		expect(consent.searchParams.get("key_name")).toMatch(/^Pier · /);
+		const redirect = new URL(consent.searchParams.get("redirect_uri") ?? "");
+		expect(redirect.hostname).toBe("127.0.0.1");
+
+		// Only the right state can settle the flow, and another connection cannot wait on it.
+		const forged = await fetch(`${redirect.origin}/callback?code=x&state=forged`);
+		expect(forged.status).toBe(400);
+		await expect(t.second.request("newapi.authorizeWait", { flowId: started.flowId })).rejects.toMatchObject({
+			code: "NOT_FOUND",
+		});
+
+		const waiting = t.client.request("newapi.authorizeWait", { flowId: started.flowId });
+		const page = await fetch(site.approve(started.authorizeUrl));
+		expect(page.status).toBe(200);
+		expect(page.headers.get("referrer-policy")).toBe("no-referrer");
+		expect(await page.text()).toContain("授权成功");
+		const result = await waiting;
+		const created = site.tokens.at(-1);
+		expect(result).toMatchObject({
+			site: { name: "测试站", url: site.url },
+			user: { id: 7, username: "alice", displayName: "Alice" },
+			token: { id: created?.id, name: created?.name, maskedKey: `sk-APP${created?.id}**********ykey` },
+			models: [{ id: "m-a" }, { id: "m-b" }, { id: `only-${created?.name}` }],
+		});
+		expect(JSON.stringify(result)).not.toContain(created?.key);
+
+		// The code was used once; the port is closed.
+		await expect(fetch(`${redirect.origin}/callback`)).rejects.toThrow();
+		const saved = await t.client.request("provider.saveCustom", {
+			provider: { id: "browser", api: "openai-completions", baseUrl: `${site.url}/v1`, models: [{ id: "m-a" }] },
+			apiKeyRef: result.keyRef,
+			create: true,
+		});
+		expect(saved.provider.stored).toBe(true);
+		expect(await t.credentials.read("browser")).toEqual({ type: "api_key", key: `sk-${created?.key}` });
+	});
+
+	it("reports declined, cancelled and failed browser authorizations", async () => {
+		const site = await fake({ variant: "modern", appAuth: true });
+
+		const declined = await t.client.request("newapi.authorizeStart", { baseUrl: site.url });
+		const declinedWait = t.client.request("newapi.authorizeWait", { flowId: declined.flowId });
+		const redirect = new URL(new URL(declined.authorizeUrl).searchParams.get("redirect_uri") ?? "");
+		const state = new URL(declined.authorizeUrl).searchParams.get("state") ?? "";
+		const page = await fetch(`${redirect}?error=access_denied&state=${encodeURIComponent(state)}`);
+		expect(page.status).toBe(400);
+		await expect(declinedWait).rejects.toMatchObject({ message: expect.stringContaining("取消授权") });
+
+		const cancelled = await t.client.request("newapi.authorizeStart", { baseUrl: site.url });
+		const cancelledWait = t.client.request("newapi.authorizeWait", { flowId: cancelled.flowId });
+		expect(await t.client.request("newapi.authorizeCancel", { flowId: cancelled.flowId })).toEqual({ cancelled: true });
+		await expect(cancelledWait).rejects.toMatchObject({ message: expect.stringContaining("已取消") });
+
+		// The site rejects the code (for example it expired): the flow fails with its message.
+		const failed = await t.client.request("newapi.authorizeStart", { baseUrl: site.url });
+		const failedWait = t.client.request("newapi.authorizeWait", { flowId: failed.flowId });
+		const callback = site.approve(failed.authorizeUrl);
+		site.grants.splice(0);
+		const failedPage = await fetch(callback);
+		expect(failedPage.status).toBe(400);
+		expect(await failedPage.text()).toContain("授权码无效");
+		await expect(failedWait).rejects.toMatchObject({ message: expect.stringContaining("授权码无效") });
+
+		const plain = await fake({ variant: "modern" });
+		await expect(t.client.request("newapi.authorizeStart", { baseUrl: plain.url })).rejects.toMatchObject({
+			message: expect.stringContaining("没有开启浏览器授权"),
+		});
+	});
+
 	it("explains sites that cannot be used", async () => {
 		const turnstile = await fake({ variant: "modern", turnstile: true });
 		await expect(

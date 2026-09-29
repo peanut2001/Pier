@@ -1,4 +1,4 @@
-import { constants, createDecipheriv, generateKeyPairSync, privateDecrypt } from "node:crypto";
+import { constants, createDecipheriv, createHash, generateKeyPairSync, privateDecrypt, randomBytes } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 
@@ -16,6 +16,15 @@ export interface FakeOptions {
 	twoFA?: boolean;
 	encryption?: boolean;
 	turnstile?: boolean;
+	/** NewAPI app authorization (`/app-auth` + `POST /api/app-auth/token`). */
+	appAuth?: boolean;
+}
+
+/** What the site's consent page received, and the code it issued. */
+export interface FakeGrant {
+	code: string;
+	tokenId: number;
+	params: URLSearchParams;
 }
 
 export interface FakeNewApi {
@@ -25,6 +34,12 @@ export interface FakeNewApi {
 	logouts: number;
 	requests: Array<{ method: string; path: string; headers: IncomingMessage["headers"] }>;
 	tokens: Array<{ id: number; name: string; key: string; group: string; status: number }>;
+	grants: FakeGrant[];
+	/**
+	 * Play the browser: "sign in" on the consent page of `authorizeUrl`, approve a new token and
+	 * return the loopback URL the site redirects to.
+	 */
+	approve(authorizeUrl: string): string;
 }
 
 const { publicKey, privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
@@ -62,6 +77,26 @@ export function startFakeNewApi(options: FakeOptions): Promise<FakeNewApi> {
 			{ id: 1, name: "old", key: TOKEN_KEY_A, group: "", status: 3 },
 			{ id: 2, name: "main", key: TOKEN_KEY_B, group: "vip", status: 1 },
 		],
+		grants: [],
+		approve(authorizeUrl) {
+			const url = new URL(authorizeUrl);
+			if (url.pathname !== "/app-auth") throw new Error(`unexpected consent page ${url.pathname}`);
+			const params = url.searchParams;
+			const id = Math.max(...fake.tokens.map((t) => t.id)) + 1;
+			fake.tokens.push({
+				id,
+				name: params.get("key_name") ?? "app",
+				key: `APP${id}keykeykeykeykeykeykeykeykeykey`,
+				group: "",
+				status: 1,
+			});
+			const grant = { code: randomBytes(16).toString("hex"), tokenId: id, params };
+			fake.grants.push(grant);
+			const redirect = new URL(params.get("redirect_uri") ?? "");
+			redirect.searchParams.set("code", grant.code);
+			redirect.searchParams.set("state", params.get("state") ?? "");
+			return redirect.toString();
+		},
 	};
 	const send = (res: ServerResponse, body: unknown, status = 200, headers: Record<string, string> = {}) => {
 		res.writeHead(status, { "content-type": "application/json", ...headers });
@@ -107,7 +142,23 @@ export function startFakeNewApi(options: FakeOptions): Promise<FakeNewApi> {
 					password_login_enabled: true,
 					password_login_encryption_enabled: options.encryption === true,
 					turnstile_check: options.turnstile === true,
+					...(options.appAuth ? { app_authorization_enabled: true } : {}),
 				},
+			});
+		}
+		if (path === "/api/app-auth/token" && req.method === "POST" && options.appAuth) {
+			const index = fake.grants.findIndex((g) => g.code === body.code);
+			const grant = fake.grants[index];
+			if (!grant) return send(res, { success: false, message: "授权码无效或已过期，请重新授权" });
+			fake.grants.splice(index, 1);
+			const challenge = createHash("sha256").update(String(body.code_verifier)).digest("base64url");
+			if (challenge !== grant.params.get("code_challenge") || body.redirect_uri !== grant.params.get("redirect_uri")) {
+				return send(res, { success: false, message: "授权码无效或已过期，请重新授权" });
+			}
+			const token = fake.tokens.find((t) => t.id === grant.tokenId);
+			return send(res, {
+				success: true,
+				data: { key: token?.key, token: { id: token?.id, name: token?.name, group: token?.group }, user: USER },
 			});
 		}
 		if (path === "/api/user/login/encryption-key") {

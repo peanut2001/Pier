@@ -338,6 +338,27 @@ export interface NewApiAccount {
 	groups: NewApiGroup[];
 }
 
+/** Result of `newapi.authorizeStart` (1.4): open `authorizeUrl` in the user's browser. */
+export interface NewApiAuthorizeStart {
+	flowId: string;
+	/** The site's consent page. The browser returns to a loopback address on the host. */
+	authorizeUrl: string;
+	site: NewApiAccount["site"];
+	/** ISO time after which the flow is abandoned. */
+	expiresAt: string;
+}
+
+/** Result of `newapi.authorizeWait` (1.4): the API token the user approved in the browser. */
+export interface NewApiAuthorizeResult {
+	site: NewApiAccount["site"];
+	user: NewApiAccount["user"];
+	token: { id: number; name: string; group?: string; maskedKey: string };
+	/** Host-side reference to the token key, as from `newapi.useToken`. */
+	keyRef: string;
+	models: Array<{ id: string; name?: string }>;
+	modelsError?: string;
+}
+
 /** Result of `newapi.login` / `newapi.verify`. */
 export type NewApiLoginResult =
 	| { status: "ok"; sessionId: string; account: NewApiAccount }

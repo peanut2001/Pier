@@ -408,3 +408,13 @@ label.provider-row.option-row.disabled:hover {
 	border-radius: 0 0 8px 8px;
 	color: var(--text-muted);
 }
+
+.newapi-waiting {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 10px 14px;
+	border: 1px dashed var(--border);
+	border-radius: var(--radius-lg);
+	color: var(--text);
+}

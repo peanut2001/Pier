@@ -1,4 +1,4 @@
-# Pier 协议 v1.3
+# Pier 协议 v1.4
 
 > 实现：`packages/protocol`（zod schema + TS 类型，Host 与所有客户端共享）。
 > 本文档描述线上格式与语义；字段的权威定义以 `packages/protocol/src` 为准。
@@ -57,7 +57,7 @@
 
 ```jsonc
 { "type": "req", "id": "h", "method": "host.hello", "params": {
-  "protocolVersion": "1.3",
+  "protocolVersion": "1.4",
   "client": { "name": "pier-desktop", "version": "0.1.0", "platform": "darwin" },
   "token": "<本地 token>",       // 本地连接必填；远程连接由加密通道认证，不需要
   "coalesceMs": 50               // 可选：合并流式增量的窗口（0–1000ms，默认 0）
@@ -156,6 +156,22 @@
 | `newapi.createToken` 🔒 | `{ sessionId, name, group? }` | `{ tokenId, tokens }`；新建无限额度、永不过期、不限模型的令牌 |
 | `newapi.useToken` 🔒 | `{ sessionId, tokenId }` | `{ keyRef, models: { id }[], modelsError? }`；读取令牌密钥（`POST /api/token/:id/key`，旧版本从令牌列表读取），并用它请求 `GET /v1/models` |
 | `newapi.close` 🔒 | `{ sessionId }` | `{ closed }`；丢弃登录，并退出 Host 用密码建立的仪表盘会话（不会吊销用户自己的访问令牌） |
+
+#### 浏览器授权（1.4）
+
+站点开启 NewAPI「应用授权」（`/api/status` 返回 `app_authorization_enabled: true`）时，可以不经过 Pier 输入任何凭据：用户在浏览器中用站点支持的任意方式登录（包括 GitHub、LinuxDO、Passkey 等），在站点的授权页面确认后，站点为 Pier 新建一个令牌。流程是面向原生应用的 OAuth 2.0 授权码流程（RFC 8252 回环重定向 + RFC 7636 PKCE S256）：
+
+1. `newapi.authorizeStart` 让 Host 在 `127.0.0.1` 的随机端口监听 `/callback`，生成 `state` 与 `code_verifier`，返回站点的授权页面地址 `authorizeUrl`（`<site>/app-auth?client_name=Pier&redirect_uri=…&code_challenge=…&code_challenge_method=S256&state=…&key_name=…`）；
+2. 客户端在系统浏览器中打开 `authorizeUrl`，并调用 `newapi.authorizeWait` 等待；
+3. 用户同意后浏览器跳回回环地址，Host 校验 `state`，用授权码和 `code_verifier` 调用站点的 `POST /api/app-auth/token` 换取令牌密钥，再读取模型列表；`state` 不符的请求返回 400 且不影响流程，用户拒绝（`error=access_denied`）时流程结束。
+
+因为浏览器会跳回 Host 所在电脑的回环地址，所以只适用于本地 UI；流程只属于发起的连接，10 分钟未完成、连接断开或调用 `newapi.authorizeCancel` 时结束并关闭端口。
+
+| 方法 | 参数 | 结果 |
+|---|---|---|
+| `newapi.authorizeStart` 🔒 | `{ baseUrl }` | `{ flowId, authorizeUrl, site, expiresAt }`；站点未开启应用授权时 `BAD_REQUEST` |
+| `newapi.authorizeWait` 🔒 | `{ flowId }` | `{ site, user, token: { id, name, group?, maskedKey }, keyRef, models, modelsError? }`；用户在浏览器中同意后返回，`keyRef` 与 `newapi.useToken` 的相同。拒绝、超时、取消或换取失败时返回错误 |
+| `newapi.authorizeCancel` 🔒 | `{ flowId }` | `{ cancelled }` |
 
 ### UI
 
