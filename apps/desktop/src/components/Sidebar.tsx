@@ -8,6 +8,7 @@ import {
 	IconFolder,
 	IconFolderPlus,
 	IconMessagePlus,
+	IconPanelLeft,
 	IconPlus,
 	IconSettings,
 	IconTrash,
@@ -17,6 +18,30 @@ import { Modal } from "./Modal.tsx";
 import { updatePending } from "./UpdatePanel.tsx";
 
 const SESSION_PAGE = 30;
+
+export const SIDEBAR_SHORTCUT = "Ctrl/⌘+B";
+
+/**
+ * Header button that brings a collapsed sidebar back. Renders nothing while the sidebar is
+ * shown (it has its own collapse button then).
+ */
+export function SidebarToggle({ floating = false }: { floating?: boolean }) {
+	const store = useStore();
+	const open = useAppState((s) => s.sidebar);
+	if (open) return null;
+	const button = (
+		<button
+			type="button"
+			className="chip icon-chip"
+			title={`显示侧边栏（${SIDEBAR_SHORTCUT}）`}
+			aria-label="显示侧边栏"
+			onClick={() => store.toggleSidebar(true)}
+		>
+			<IconPanelLeft size={15} />
+		</button>
+	);
+	return floating ? <div className="home-toolbar left">{button}</div> : button;
+}
 
 export function useAddWorkspace(): () => Promise<void> {
 	const store = useStore();
@@ -224,6 +249,15 @@ export function Sidebar() {
 			<div className="brand">
 				<Logo size={26} />
 				<span className="brand-name">Pier</span>
+				<button
+					type="button"
+					className="ghost icon sidebar-collapse"
+					title={`收起侧边栏（${SIDEBAR_SHORTCUT}）`}
+					aria-label="收起侧边栏"
+					onClick={() => store.toggleSidebar(false)}
+				>
+					<IconPanelLeft size={16} />
+				</button>
 			</div>
 			<div className="sidebar-actions">
 				<button

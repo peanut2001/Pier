@@ -229,3 +229,8 @@ body.resizing-panel {
 	right: 14px;
 	z-index: 2;
 }
+
+.home-toolbar.left {
+	right: auto;
+	left: 14px;
+}

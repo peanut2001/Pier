@@ -8,7 +8,7 @@ import { NewChatView } from "./components/NewChat.tsx";
 import { PairingRequestDialog } from "./components/RemotePanel.tsx";
 import { SessionView } from "./components/SessionView.tsx";
 import { SettingsPage } from "./components/Settings.tsx";
-import { Sidebar } from "./components/Sidebar.tsx";
+import { Sidebar, SidebarToggle } from "./components/Sidebar.tsx";
 import { NEW_CHAT_DRAFT, useAppState, useStore } from "./lib/store.tsx";
 
 function Toasts() {
@@ -43,12 +43,19 @@ function Main() {
 	const session = store.findSession(selectedSessionId);
 
 	if (session) return <SessionView key={session.id} session={session} />;
-	if (!workspacesLoaded) return <div className="placeholder center" />;
+	if (!workspacesLoaded) {
+		return (
+			<div className="placeholder center">
+				<SidebarToggle floating />
+			</div>
+		);
+	}
 	if (newChat) return <NewChatView workspaceId={newChat.workspaceId} />;
 	if (!workspaces.length) return <Welcome />;
 	if (selectedWorkspaceId) return <WorkspaceHome workspaceId={selectedWorkspaceId} />;
 	return (
 		<div className="placeholder center">
+			<SidebarToggle floating />
 			<div className="empty-state">
 				<div className="empty-icon">
 					<IconMessage size={24} />
@@ -82,15 +89,22 @@ export function App() {
 	const filesPanel = useAppState((s) => s.filesPanel);
 	const filesPanelWidth = useAppState((s) => s.filesPanelWidth);
 	const hasWorkspace = useAppState((s) => s.workspaces.length > 0);
+	const sidebar = useAppState((s) => s.sidebar);
 	const showFiles = filesPanel && hasWorkspace;
+	const columns = [...(sidebar ? ["264px"] : []), "minmax(0, 1fr)", ...(showFiles ? [`${filesPanelWidth}px`] : [])];
 
-	// Ctrl/⌘+Shift+E toggles the file panel, like the explorer in editors.
+	// Ctrl/⌘+Shift+E toggles the file panel, like the explorer in editors; Ctrl/⌘+B the sidebar.
 	useEffect(() => {
 		if (settings) return;
 		const onKey = (e: KeyboardEvent) => {
-			if ((e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey && e.key.toLowerCase() === "e") {
+			if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
+			const key = e.key.toLowerCase();
+			if (e.shiftKey && key === "e") {
 				e.preventDefault();
 				store.toggleFilesPanel();
+			} else if (!e.shiftKey && key === "b") {
+				e.preventDefault();
+				store.toggleSidebar();
 			}
 		};
 		window.addEventListener("keydown", onKey);
@@ -103,10 +117,10 @@ export function App() {
 				<SettingsPage section={settings} />
 			) : (
 				<div
-					className={`app${showFiles ? " with-files" : ""}`}
-					style={showFiles ? { gridTemplateColumns: `264px minmax(0, 1fr) ${filesPanelWidth}px` } : undefined}
+					className={`app${showFiles ? " with-files" : ""}${sidebar ? "" : " no-sidebar"}`}
+					style={{ gridTemplateColumns: columns.join(" ") }}
 				>
-					<Sidebar />
+					{sidebar ? <Sidebar /> : null}
 					<main className="main">
 						<HostBanner onShowLogs={() => store.openSettings("logs")} />
 						<Main />

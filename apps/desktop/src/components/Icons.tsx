@@ -202,6 +202,12 @@ export const IconPanelRight = make(
 		<path d="M15 3v18" />
 	</>,
 );
+export const IconPanelLeft = make(
+	<>
+		<rect x="3" y="3" width="18" height="18" rx="2" />
+		<path d="M9 3v18" />
+	</>,
+);
 export const IconFolderOpen = make(
 	<path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2" />,
 );

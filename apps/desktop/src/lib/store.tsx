@@ -103,6 +103,8 @@ export interface AppState {
 	update: UpdateStatus;
 	/** The settings screen is open on this page (undefined while closed). */
 	settings?: SettingsSection;
+	/** The left-hand sidebar (workspaces and sessions) is shown. */
+	sidebar: boolean;
 	/** The right-hand workspace file panel is shown. */
 	filesPanel: boolean;
 	/** Width of the file panel in pixels. */
@@ -122,6 +124,7 @@ const SELECTION_KEY = "pier.selection";
 /** Draft key of the new-chat composer (session ids are UUIDs, so no clash). */
 export const NEW_CHAT_DRAFT = "#new-chat";
 const FILES_PANEL_KEY = "pier.filesPanel";
+const SIDEBAR_KEY = "pier.sidebar";
 export const FILES_PANEL_MIN_WIDTH = 220;
 export const FILES_PANEL_MAX_WIDTH = 560;
 const FILES_PANEL_DEFAULT_WIDTH = 280;
@@ -182,6 +185,13 @@ export class PierStore {
 				return {};
 			}
 		})();
+		const sidebar = (() => {
+			try {
+				return JSON.parse(localStorage.getItem(SIDEBAR_KEY) ?? "{}") as { open?: boolean };
+			} catch {
+				return {};
+			}
+		})();
 		this.state = {
 			host: { state: "starting", restarts: 0, generation: 0 },
 			connection: "none",
@@ -196,6 +206,7 @@ export class PierStore {
 			devices: [],
 			pairingRequests: [],
 			update: { state: "idle", currentVersion: APP_VERSION, autoCheck: true, downloaded: 0 },
+			sidebar: sidebar.open !== false,
 			filesPanel: panel.open === true,
 			filesPanelWidth: clampPanelWidth(panel.width ?? FILES_PANEL_DEFAULT_WIDTH),
 			filesVersion: {},
@@ -223,6 +234,9 @@ export class PierStore {
 					expanded: this.state.expanded,
 				}),
 			);
+		}
+		if ("sidebar" in next) {
+			localStorage.setItem(SIDEBAR_KEY, JSON.stringify({ open: this.state.sidebar }));
 		}
 		if ("filesPanel" in next || "filesPanelWidth" in next) {
 			localStorage.setItem(
@@ -742,6 +756,10 @@ export class PierStore {
 	}
 
 	// ---- workspaces --------------------------------------------------------------------
+
+	toggleSidebar(open = !this.state.sidebar): void {
+		if (open !== this.state.sidebar) this.set({ sidebar: open });
+	}
 
 	toggleFilesPanel(open = !this.state.filesPanel): void {
 		if (open !== this.state.filesPanel) this.set({ filesPanel: open });

@@ -17,7 +17,7 @@ import {
 } from "./Icons.tsx";
 import { NoModelsBanner } from "./ModelsPanel.tsx";
 import { PolicyPicker, useOutsideClick } from "./SessionControls.tsx";
-import { useAddWorkspace } from "./Sidebar.tsx";
+import { SidebarToggle, useAddWorkspace } from "./Sidebar.tsx";
 
 /** Chip that picks the workspace the new chat will be created in. */
 function WorkspacePicker({ workspace, disabled }: { workspace?: WorkspaceInfo; disabled?: boolean }) {
@@ -140,6 +140,7 @@ export function NewChatView({ workspaceId }: { workspaceId?: string }) {
 
 	return (
 		<div className="new-chat">
+			<SidebarToggle floating />
 			{workspace ? (
 				<div className="home-toolbar">
 					<FilesPanelToggle />

@@ -337,6 +337,15 @@ code {
 	overflow: hidden;
 }
 
+/* Collapsed sidebar: the main panel takes its column and needs its own left gap. */
+.app.no-sidebar .main {
+	margin-left: 8px;
+}
+
+.app.no-sidebar .session-header {
+	padding-left: 14px;
+}
+
 .placeholder {
 	color: var(--text-muted);
 	padding: 40px 0;
@@ -352,6 +361,7 @@ code {
 }
 
 .placeholder.center {
+	position: relative;
 	flex: 1;
 	display: flex;
 	align-items: center;

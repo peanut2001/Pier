@@ -12,7 +12,7 @@ import {
 	Logo,
 } from "./Icons.tsx";
 import { NoModelsBanner } from "./ModelsPanel.tsx";
-import { useAddWorkspace } from "./Sidebar.tsx";
+import { SidebarToggle, useAddWorkspace } from "./Sidebar.tsx";
 
 const STEPS = [
 	{ icon: IconFolder, title: "添加工作区", text: "选择一个项目目录，Agent 只在其中读写文件、运行命令。" },
@@ -26,6 +26,7 @@ export function Welcome() {
 	const providers = useAppState((s) => s.providers);
 	return (
 		<div className="home">
+			<SidebarToggle floating />
 			<div className="home-inner">
 				<div className="hero">
 					<Logo size={56} />
@@ -74,6 +75,7 @@ export function WorkspaceHome({ workspaceId }: { workspaceId: string }) {
 	if (!workspace) return null;
 	return (
 		<div className="home">
+			<SidebarToggle floating />
 			<div className="home-toolbar">
 				<FilesPanelToggle />
 			</div>

@@ -9,6 +9,7 @@ import { FilesPanelToggle } from "./FilesPanel.tsx";
 import { IconAlert, IconFolder, IconInfo, IconLoader, IconX } from "./Icons.tsx";
 import { PendingRequests } from "./PendingRequests.tsx";
 import { ModelPicker, SessionMenu } from "./SessionControls.tsx";
+import { SidebarToggle } from "./Sidebar.tsx";
 import { Transcript } from "./Transcript.tsx";
 
 function firstUserText(chat: ChatState): string {
@@ -220,6 +221,7 @@ export function SessionView({ session }: { session: SessionSummary }) {
 	return (
 		<div className="session-view">
 			<header className="session-header">
+				<SidebarToggle />
 				<div className="session-heading">
 					<Title chat={chat} fallback={session} />
 					{workspace ? (
