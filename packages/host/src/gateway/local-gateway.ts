@@ -12,6 +12,9 @@ export const DEFAULT_ALLOWED_ORIGINS = [
 	"http://127.0.0.1:1420",
 ];
 
+/** `ws://127.0.0.1:<port>/peer/<peerId>` connects to a paired computer through this host. */
+export const PEER_PATH = "/peer/";
+
 export interface LocalGatewayOptions {
 	/** 0 picks a free port. */
 	port?: number;
@@ -30,6 +33,9 @@ export interface LocalGateway {
  * WebSocket gateway bound to 127.0.0.1 for the desktop UI and local tools. Browsers
  * cannot set headers on WebSockets, so the local token is checked in `host.hello`;
  * the Origin check keeps other web pages from even opening a connection.
+ *
+ * `/peer/<peerId>` is proxied to that paired computer over the secure channel; the first
+ * frame must still be `host.hello` with the local token.
  */
 export function startLocalGateway(host: PierHost, options: LocalGatewayOptions = {}): Promise<LocalGateway> {
 	const allowed = new Set(options.allowedOrigins ?? DEFAULT_ALLOWED_ORIGINS);
@@ -46,7 +52,19 @@ export function startLocalGateway(host: PierHost, options: LocalGatewayOptions =
 		},
 	});
 
-	wss.on("connection", (socket) => {
+	wss.on("connection", (socket, req) => {
+		const path = (req.url ?? "/").split("?")[0] ?? "/";
+		if (path.startsWith(PEER_PATH)) {
+			// The desktop UI talking to a paired computer (see PeerManager.attachProxy).
+			let peerId = "";
+			try {
+				peerId = decodeURIComponent(path.slice(PEER_PATH.length));
+			} catch {
+				// Malformed escape: unknown peer.
+			}
+			host.peers.attachProxy(socket, peerId);
+			return;
+		}
 		const connection = host.connect(
 			{
 				send: (data) => socket.send(data),

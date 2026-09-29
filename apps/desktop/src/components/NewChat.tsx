@@ -1,11 +1,11 @@
 import type { WorkspaceInfo } from "@pier/protocol";
 import { useEffect, useRef, useState } from "react";
 import { draftToPrompt } from "../lib/composer-text.ts";
-import { type Draft, NEW_CHAT_DRAFT, useAppState, useStore } from "../lib/store.tsx";
+import { type Draft, LOCAL_NODE, NEW_CHAT_DRAFT, useAppState, useStore } from "../lib/store.tsx";
 import { readImages, useComposerInsert } from "./Composer.tsx";
 import { ComposerInput, type ComposerInputHandle } from "./ComposerInput.tsx";
 import { FilesPanelToggle } from "./FilesPanel.tsx";
-import { useHostStatus } from "./HostPanels.tsx";
+import { useNodeStatus } from "./HostPanels.tsx";
 import {
 	IconArrowUp,
 	IconCheck,
@@ -27,6 +27,7 @@ function WorkspacePicker({ workspace, disabled }: { workspace?: WorkspaceInfo; d
 	const store = useStore();
 	const workspaces = useAppState((s) => s.workspaces);
 	const addWorkspace = useAddWorkspace();
+	const local = useAppState((s) => s.node === LOCAL_NODE);
 	const [open, setOpen] = useState(false);
 	const ref = useOutsideClick(open, () => setOpen(false));
 	return (
@@ -69,20 +70,26 @@ function WorkspacePicker({ workspace, disabled }: { workspace?: WorkspaceInfo; d
 							</button>
 						);
 					})}
-					{workspaces.length ? <div className="dropdown-separator" /> : null}
-					<button
-						type="button"
-						className="dropdown-item"
-						onClick={() => {
-							setOpen(false);
-							void addWorkspace();
-						}}
-					>
-						<span className="menu-label">
-							<IconFolderPlus size={14} />
-							添加工作区…
-						</span>
-					</button>
+					{local ? (
+						<>
+							{workspaces.length ? <div className="dropdown-separator" /> : null}
+							<button
+								type="button"
+								className="dropdown-item"
+								onClick={() => {
+									setOpen(false);
+									void addWorkspace();
+								}}
+							>
+								<span className="menu-label">
+									<IconFolderPlus size={14} />
+									添加工作区…
+								</span>
+							</button>
+						</>
+					) : workspaces.length ? null : (
+						<div className="dropdown-note">那台电脑上还没有工作区，请在它的 Pier 中添加。</div>
+					)}
 				</div>
 			) : null}
 		</div>
@@ -97,7 +104,7 @@ export function NewChatView({ workspaceId }: { workspaceId?: string }) {
 	const store = useStore();
 	const workspaces = useAppState((s) => s.workspaces);
 	const workspace = workspaces.find((w) => w.id === workspaceId);
-	const online = useHostStatus().online;
+	const online = useNodeStatus().online;
 	const [draft, setDraft] = useState<Draft>(() => store.draft(NEW_CHAT_DRAFT));
 	const [sending, setSending] = useState(false);
 	const [dragging, setDragging] = useState(false);

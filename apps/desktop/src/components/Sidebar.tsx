@@ -1,13 +1,16 @@
 import type { ApprovalPolicy, SessionSummary, WorkspaceInfo } from "@pier/protocol";
 import { useEffect, useState } from "react";
 import { POLICY_DESCRIPTION, POLICY_LABEL, relativeTime, sessionTitle } from "../lib/format.ts";
-import { useAppState, useStore } from "../lib/store.tsx";
-import { useHostStatus } from "./HostPanels.tsx";
+import { LOCAL_NODE, useAppState, useStore } from "../lib/store.tsx";
+import { useHostStatus, useNodeStatus } from "./HostPanels.tsx";
 import {
+	IconCheck,
+	IconChevronDown,
 	IconChevronRight,
 	IconFolder,
 	IconFolderPlus,
 	IconMessagePlus,
+	IconMonitor,
 	IconPanelLeft,
 	IconPlus,
 	IconSettings,
@@ -15,6 +18,8 @@ import {
 	Logo,
 } from "./Icons.tsx";
 import { Modal } from "./Modal.tsx";
+import { platformName } from "./RemotePanel.tsx";
+import { useOutsideClick } from "./SessionControls.tsx";
 import { updatePending } from "./UpdatePanel.tsx";
 
 const SESSION_PAGE = 30;
@@ -41,6 +46,11 @@ export function SidebarToggle({ floating = false }: { floating?: boolean }) {
 		</button>
 	);
 	return floating ? <div className="home-toolbar left">{button}</div> : button;
+}
+
+/** Whether workspaces can be added from the main window (only on this computer). */
+export function useCanAddWorkspace(): boolean {
+	return useAppState((s) => s.node === LOCAL_NODE);
 }
 
 export function useAddWorkspace(): () => Promise<void> {
@@ -114,7 +124,109 @@ function SessionItem({ session, selected }: { session: SessionSummary; selected:
 	);
 }
 
-function WorkspaceGroup({ workspace, onSettings }: { workspace: WorkspaceInfo; onSettings: () => void }) {
+/**
+ * Which computer the window shows: this one or another paired computer (every computer running
+ * Pier is a node; each can add the others and switch between them).
+ */
+function NodeSwitcher() {
+	const store = useStore();
+	const node = useAppState((s) => s.node);
+	const peers = useAppState((s) => s.peers);
+	const localName = useAppState((s) => s.localHostInfo?.hostName);
+	const status = useNodeStatus();
+	const [open, setOpen] = useState(false);
+	const ref = useOutsideClick(open, () => setOpen(false));
+	const local = node === LOCAL_NODE;
+	const name = store.nodeName(node);
+	const pick = (id: string) => {
+		setOpen(false);
+		store.switchNode(id);
+	};
+	return (
+		<div className="dropdown node-switcher" ref={ref}>
+			<button
+				type="button"
+				className={`node-button${local ? "" : " remote"}`}
+				title={local ? "正在查看本机，点击切换到其他电脑" : `正在查看 ${name}（${status.text}），点击切换`}
+				onClick={() => setOpen(!open)}
+			>
+				<IconMonitor size={15} className="node-icon" />
+				<span className="node-name">{name}</span>
+				{local ? <span className="node-tag">本机</span> : <span className={`status-dot ${status.dot}`} />}
+				<IconChevronDown size={14} className="chip-caret" />
+			</button>
+			{open ? (
+				<div className="dropdown-menu node-menu">
+					<div className="dropdown-group-title no-caps">切换电脑</div>
+					<button type="button" className={`dropdown-item${local ? " selected" : ""}`} onClick={() => pick(LOCAL_NODE)}>
+						<span className="node-item-text">
+							<span className="node-item-name">
+								<IconMonitor size={14} />
+								{localName ?? "本机"}
+							</span>
+							<span className="muted">本机</span>
+						</span>
+						{local ? <IconCheck size={15} className="policy-check" /> : null}
+					</button>
+					{peers.map((peer) => {
+						const selected = peer.id === node;
+						return (
+							<button
+								type="button"
+								key={peer.id}
+								className={`dropdown-item${selected ? " selected" : ""}`}
+								title={peer.addresses.join("、")}
+								onClick={() => pick(peer.id)}
+							>
+								<span className="node-item-text">
+									<span className="node-item-name">
+										<IconMonitor size={14} />
+										{peer.name}
+									</span>
+									<span className="muted">
+										{[peer.platform ? platformName(peer.platform) : "", peer.addresses[0] ?? ""]
+											.filter(Boolean)
+											.join(" · ")}
+									</span>
+								</span>
+								{selected ? <IconCheck size={15} className="policy-check" /> : null}
+							</button>
+						);
+					})}
+					<div className="dropdown-separator" />
+					<button
+						type="button"
+						className="dropdown-item"
+						onClick={() => {
+							setOpen(false);
+							store.openAddPeer();
+						}}
+					>
+						<span className="menu-label">
+							<IconPlus size={14} />
+							添加电脑…
+						</span>
+					</button>
+					<button
+						type="button"
+						className="dropdown-item"
+						onClick={() => {
+							setOpen(false);
+							store.openSettings("remote");
+						}}
+					>
+						<span className="menu-label">
+							<IconSettings size={14} />
+							管理设备与电脑
+						</span>
+					</button>
+				</div>
+			) : null}
+		</div>
+	);
+}
+
+function WorkspaceGroup({ workspace, onSettings }: { workspace: WorkspaceInfo; onSettings?: () => void }) {
 	const store = useStore();
 	const expanded = useAppState((s) => !!s.expanded[workspace.id]);
 	const sessions = useAppState((s) => s.sessions[workspace.id]);
@@ -146,9 +258,11 @@ function WorkspaceGroup({ workspace, onSettings }: { workspace: WorkspaceInfo; o
 						<span className={`policy-tag ${workspace.policy}`}>{POLICY_LABEL[workspace.policy]}</span>
 					) : null}
 				</button>
-				<button type="button" className="ghost icon" title="工作区设置" onClick={onSettings}>
-					<IconSettings size={14} />
-				</button>
+				{onSettings ? (
+					<button type="button" className="ghost icon" title="工作区设置" onClick={onSettings}>
+						<IconSettings size={14} />
+					</button>
+				) : null}
 				<button
 					type="button"
 					className="ghost icon"
@@ -245,7 +359,8 @@ export function Sidebar({ open = true }: { open?: boolean }) {
 	}, [open]);
 	const newChat = useAppState((s) => !!s.newChat);
 	const status = useHostStatus();
-	const online = status.online;
+	const online = useNodeStatus().online;
+	const canAdd = useCanAddWorkspace();
 	const attention = updateReady ? "有可用更新" : noModels ? "还没有可用模型" : undefined;
 
 	return (
@@ -263,6 +378,7 @@ export function Sidebar({ open = true }: { open?: boolean }) {
 					<IconPanelLeft size={16} />
 				</button>
 			</div>
+			<NodeSwitcher />
 			<div className="sidebar-actions">
 				<button
 					type="button"
@@ -277,19 +393,29 @@ export function Sidebar({ open = true }: { open?: boolean }) {
 			</div>
 			<div className="sidebar-section-title">
 				<span>工作区</span>
-				<button type="button" className="ghost icon" title="添加工作区" onClick={() => void addWorkspace()}>
-					<IconPlus size={14} />
-				</button>
+				{canAdd ? (
+					<button type="button" className="ghost icon" title="添加工作区" onClick={() => void addWorkspace()}>
+						<IconPlus size={14} />
+					</button>
+				) : null}
 			</div>
 			<div className="workspace-list">
 				{workspaces.map((workspace) => (
-					<WorkspaceGroup key={workspace.id} workspace={workspace} onSettings={() => setSettingsFor(workspace.id)} />
+					<WorkspaceGroup
+						key={workspace.id}
+						workspace={workspace}
+						{...(canAdd ? { onSettings: () => setSettingsFor(workspace.id) } : {})}
+					/>
 				))}
 				{online && !workspaces.length ? (
-					<button type="button" className="add-first" onClick={() => void addWorkspace()}>
-						<IconFolderPlus size={16} />
-						添加第一个工作区
-					</button>
+					canAdd ? (
+						<button type="button" className="add-first" onClick={() => void addWorkspace()}>
+							<IconFolderPlus size={16} />
+							添加第一个工作区
+						</button>
+					) : (
+						<div className="session-empty">那台电脑上还没有工作区，请在它的 Pier 中添加。</div>
+					)
 				) : null}
 			</div>
 			<div className="sidebar-footer">

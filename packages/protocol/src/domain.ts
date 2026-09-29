@@ -245,6 +245,31 @@ export interface DeviceInfo {
 	connected: boolean;
 }
 
+/**
+ * Another computer's Pier Host that this host paired with as a device (1.9). The desktop UI
+ * reaches it through the local gateway (`ws://127.0.0.1:<port>/peer/<id>`), which runs the
+ * secure channel with this host's own key.
+ */
+export interface PeerInfo {
+	/** The peer's host id. */
+	id: string;
+	/** The peer's host name (refreshed on every connection). */
+	name: string;
+	/** Fingerprint of the peer's host key, pinned at pairing. */
+	fingerprint: string;
+	/** Candidate `host:port` addresses, the last one that worked first. */
+	addresses: string[];
+	/** This computer's device id on the peer. */
+	deviceId: string;
+	pairedAt: string;
+	lastConnectedAt?: string;
+	/** The peer's OS (`darwin`, `linux`, `win32`) and Pier Host version, once connected. */
+	platform?: string;
+	version?: string;
+	/** Whether a desktop window is connected to it right now. */
+	connected: boolean;
+}
+
 /** Remote access (LAN / Tailscale) listener state. */
 export interface RemoteAccessStatus {
 	enabled: boolean;

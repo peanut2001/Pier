@@ -217,8 +217,18 @@ export class PierClient {
 						resolve(hello);
 					})
 					.catch((error: Error) => {
-						// Authentication and version errors are not retried.
-						this.close();
+						if (error instanceof PierProtocolError && error.code !== "TIMEOUT") {
+							// The host refused (authentication, version): not retried.
+							this.close();
+						} else if (this.socket === socket) {
+							// No answer: drop this socket. Its close handler reconnects if the client was
+							// open before (a proxy may accept the socket and then lose its upstream).
+							try {
+								socket.close(4000, "host.hello failed");
+							} catch {
+								// Ignore.
+							}
+						}
 						reject(error);
 					});
 			};

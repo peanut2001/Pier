@@ -7,12 +7,12 @@ import { HostBanner } from "./components/HostPanels.tsx";
 import { IconAlert, IconInfo, IconMessage, IconX } from "./components/Icons.tsx";
 import { AuthDialog, YunlianDialog } from "./components/ModelsPanel.tsx";
 import { NewChatView } from "./components/NewChat.tsx";
-import { PairingRequestDialog } from "./components/RemotePanel.tsx";
+import { AddPeerDialog, PairingRequestDialog } from "./components/RemotePanel.tsx";
 import { SessionView } from "./components/SessionView.tsx";
 import { SettingsPage } from "./components/Settings.tsx";
 import { Sidebar, SidebarToggle } from "./components/Sidebar.tsx";
 import { TerminalPanel } from "./components/TerminalPanel.tsx";
-import { NEW_CHAT_DRAFT, useAppState, useStore } from "./lib/store.tsx";
+import { LOCAL_NODE, NEW_CHAT_DRAFT, useAppState, useStore } from "./lib/store.tsx";
 import { terminals, useTerminals } from "./lib/terminals.ts";
 
 function Toasts() {
@@ -100,7 +100,9 @@ export function App() {
 	const filesPanelWidth = useAppState((s) => s.filesPanelWidth);
 	const hasWorkspace = useAppState((s) => s.workspaces.length > 0);
 	const sidebar = useAppState((s) => s.sidebar);
-	const terminalOpen = useTerminals((s) => s.open);
+	// Integrated terminals run on this computer, so they are hidden while another one is shown.
+	const local = useAppState((s) => s.node === LOCAL_NODE);
+	const terminalOpen = useTerminals((s) => s.open) && local;
 	const screen = useScreenWorkspace();
 	const screenWorkspace = screen.workspace;
 	const showFiles = filesPanel && hasWorkspace;
@@ -113,7 +115,7 @@ export function App() {
 		if (settings) return;
 		const onKey = (e: KeyboardEvent) => {
 			if (e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && e.key === "`") {
-				if (!terminals.supported) return;
+				if (!terminals.supported || !local) return;
 				e.preventDefault();
 				terminals.toggle(screenWorkspace ? { workspace: screenWorkspace } : {});
 				return;
@@ -130,7 +132,7 @@ export function App() {
 		};
 		window.addEventListener("keydown", onKey);
 		return () => window.removeEventListener("keydown", onKey);
-	}, [store, settings, screenWorkspace]);
+	}, [store, settings, screenWorkspace, local]);
 
 	return (
 		<>
@@ -145,7 +147,7 @@ export function App() {
 						<Sidebar open={sidebar} />
 					</div>
 					<main className="main">
-						<HostBanner onShowLogs={() => store.openSettings("logs")} />
+						<HostBanner scope="node" onShowLogs={() => store.openSettings("logs")} />
 						<div className="main-body">
 							<Main />
 						</div>
@@ -159,6 +161,7 @@ export function App() {
 			<AuthDialog />
 			<YunlianDialog />
 			<PairingRequestDialog />
+			<AddPeerDialog />
 		</>
 	);
 }

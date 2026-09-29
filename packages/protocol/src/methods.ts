@@ -26,6 +26,7 @@ import {
 	type NewApiLoginResult,
 	type NewApiModel,
 	type NewApiToken,
+	type PeerInfo,
 	type ProviderInfo,
 	type ProviderListResult,
 	type QueueState,
@@ -276,6 +277,16 @@ export const MethodParamsSchemas = {
 		enabled: z.boolean().optional(),
 		port: z.number().int().min(1024).max(65535).optional(),
 	}),
+
+	/** Computers this host paired with as a device (1.9). */
+	"peer.list": z.object({}).optional(),
+	/**
+	 * Pair with another computer from its `pier://pair?...` link, using this host's key as the
+	 * device key. Resolves after the other computer's user allowed (or declined) it.
+	 */
+	"peer.pair": z.object({ uri: z.string().min(1).max(4096) }),
+	/** Forget a paired computer here (its device list is not changed). */
+	"peer.remove": z.object({ peerId: Id }),
 } as const;
 
 export type MethodName = keyof typeof MethodParamsSchemas;
@@ -296,6 +307,9 @@ export const LOCAL_ONLY_METHODS: ReadonlySet<MethodName> = new Set([
 	"pairing.respond",
 	"remote.status",
 	"remote.configure",
+	"peer.list",
+	"peer.pair",
+	"peer.remove",
 	"workspace.add",
 	"workspace.remove",
 	"workspace.setPolicy",
@@ -440,6 +454,9 @@ export interface MethodResults {
 	"pairing.respond": { accepted: boolean };
 	"remote.status": RemoteAccessStatus;
 	"remote.configure": RemoteAccessStatus;
+	"peer.list": { peers: PeerInfo[] };
+	"peer.pair": { peer: PeerInfo };
+	"peer.remove": { removed: boolean };
 }
 
 export type MethodParams<M extends MethodName> = z.input<(typeof MethodParamsSchemas)[M]>;

@@ -9,7 +9,7 @@ import {
 	type ProviderInfo,
 } from "@pier/protocol";
 import { type FormEvent, useEffect, useMemo, useState } from "react";
-import { type AuthFlowState, useAppState, useStore, type YunlianLoginState } from "../lib/store.tsx";
+import { type AuthFlowState, LOCAL_NODE, useAppState, useStore, type YunlianLoginState } from "../lib/store.tsx";
 import { isYunlianProvider, YUNLIAN_NAME, YUNLIAN_SITE, yunlianGroupOf } from "../lib/yunlian.ts";
 import {
 	IconAlert,
@@ -995,7 +995,9 @@ export function YunlianDialog() {
 export function NoModelsBanner() {
 	const store = useStore();
 	const providers = useAppState((s) => s.providers);
-	if (!providers || providers.availableCount > 0) return null;
+	// Another computer's sessions use that computer's models.
+	const local = useAppState((s) => s.node === LOCAL_NODE);
+	if (!local || !providers || providers.availableCount > 0) return null;
 	return (
 		<div className="no-models">
 			<div className="no-models-icon">

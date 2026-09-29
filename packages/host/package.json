@@ -16,6 +16,7 @@
 	"dependencies": {
 		"@earendil-works/pi-ai": "0.87.1",
 		"@earendil-works/pi-coding-agent": "0.87.1",
+		"@pier/client": "workspace:*",
 		"@pier/crypto": "workspace:*",
 		"@pier/protocol": "workspace:*",
 		"bonjour-service": "^1.4.4",
@@ -24,7 +25,6 @@
 	},
 	"devDependencies": {
 		"@types/ws": "^8.18.1",
-		"@pier/chat-state": "workspace:*",
-		"@pier/client": "workspace:*"
+		"@pier/chat-state": "workspace:*"
 	}
 }
