@@ -5,7 +5,7 @@
 	flex-direction: column;
 	flex: 1;
 	min-height: 0;
-	background: radial-gradient(900px 360px at 50% -140px, var(--accent-soft), transparent 70%), var(--bg);
+	background: var(--hero-glow), var(--bg);
 }
 
 .new-chat-hero {
@@ -23,25 +23,29 @@
 }
 
 .new-chat-hero .logo {
-	border-radius: 12px;
-	box-shadow: 0 10px 30px var(--brand-glow);
-	margin-bottom: 6px;
+	border-radius: 13px;
+	box-shadow:
+		0 12px 36px var(--brand-glow),
+		0 0 0 1px rgba(255, 255, 255, 0.08);
+	margin-bottom: 8px;
 }
 
 .new-chat-hero h1 {
 	margin: 0;
 	max-width: 720px;
-	font-size: 26px;
-	font-weight: 600;
-	letter-spacing: -0.01em;
+	font-size: 28px;
+	font-weight: 650;
+	letter-spacing: -0.025em;
 	line-height: 1.35;
 	overflow-wrap: anywhere;
 }
 
 .new-chat-target {
 	margin: 0 0.2em;
-	text-decoration: underline dotted var(--text-faint);
-	text-underline-offset: 6px;
+	background: var(--brand-gradient);
+	-webkit-background-clip: text;
+	background-clip: text;
+	color: transparent;
 }
 
 .new-chat-hero p {

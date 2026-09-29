@@ -21,7 +21,7 @@ button.settings-back {
 	padding: 0 22px;
 	font-size: 20px;
 	font-weight: 700;
-	letter-spacing: -0.01em;
+	letter-spacing: -0.025em;
 }
 
 .settings-search {
@@ -102,6 +102,7 @@ button.settings-nav-item:hover:not(:disabled) {
 button.settings-nav-item.selected,
 button.settings-nav-item.selected:hover:not(:disabled) {
 	background: var(--bg-active);
+	box-shadow: var(--highlight);
 	color: var(--text);
 	font-weight: 500;
 }
@@ -165,7 +166,7 @@ button.settings-nav-item.selected:hover:not(:disabled) {
 	margin: 0 0 28px;
 	font-size: 28px;
 	font-weight: 700;
-	letter-spacing: -0.02em;
+	letter-spacing: -0.03em;
 }
 
 .settings-intro {
@@ -225,7 +226,8 @@ button.settings-nav-item.selected:hover:not(:disabled) {
 	padding: 0 18px;
 	border: 1px solid var(--border);
 	border-radius: var(--radius-lg);
-	background: var(--bg-elevated);
+	background: linear-gradient(180deg, rgba(255, 255, 255, 0.015), transparent 40%), var(--bg-elevated);
+	box-shadow: var(--highlight);
 }
 
 .settings-empty {
@@ -326,6 +328,12 @@ select.setting-select.compact {
 
 .settings-workspace-name .icon-svg {
 	color: var(--text-muted);
+}
+
+/* The selected settings page's icon takes the accent (kept after the rule above for biome's
+   specificity ordering). */
+button.settings-nav-item.selected .icon-svg {
+	color: var(--accent-text);
 }
 
 .settings-logs {

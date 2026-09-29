@@ -24,11 +24,11 @@
 }
 
 .ui-card {
-	padding: 14px 16px;
+	padding: 16px 18px;
 	border: 1px solid var(--border-strong);
 	border-radius: var(--radius-lg);
-	background: var(--bg-elevated);
-	box-shadow: var(--shadow-md);
+	background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 60%), var(--bg-elevated);
+	box-shadow: var(--shadow-md), var(--highlight);
 	animation: rise-in 0.22s var(--ease);
 }
 
@@ -129,7 +129,7 @@
 	overflow-y: auto;
 	margin: 0 0 8px;
 	padding: 10px 12px;
-	border-radius: 8px;
+	border-radius: var(--radius);
 	background: var(--bg-code);
 	color: #e6e8eb;
 	font-family: var(--mono);
@@ -253,27 +253,33 @@
 	display: flex;
 	flex-direction: column;
 	gap: 6px;
-	padding: 12px 10px 8px 16px;
-	border: 1px solid var(--border-strong);
+	padding: 13px 10px 9px 16px;
+	/* Two backgrounds: the fill (padding box) and a border ring (border box) that turns into
+	   the brand gradient on focus. */
+	border: 1px solid transparent;
 	border-radius: var(--radius-xl);
-	background: var(--bg-input);
-	box-shadow: var(--shadow-md);
-	transition:
-		border-color 0.15s var(--ease),
-		box-shadow 0.15s var(--ease);
+	background:
+		linear-gradient(var(--bg-input), var(--bg-input)) padding-box,
+		linear-gradient(var(--border-strong), var(--border-strong)) border-box;
+	box-shadow: var(--shadow-md), var(--highlight);
+	transition: box-shadow 0.2s var(--ease);
 }
 
 .composer:focus-within {
-	border-color: var(--accent-ring);
+	background:
+		linear-gradient(var(--bg-input), var(--bg-input)) padding-box,
+		var(--brand-gradient) border-box;
 	box-shadow:
 		0 0 0 4px var(--accent-soft),
-		var(--shadow-md);
+		0 12px 36px -10px var(--brand-glow),
+		var(--highlight);
 }
 
 .composer.dragging {
 	border-style: dashed;
 	border-color: var(--accent);
 	background: var(--accent-soft);
+	background-clip: padding-box;
 }
 
 .composer-input {
@@ -419,12 +425,17 @@
 .round-button.send {
 	background: var(--brand-gradient);
 	color: #fff;
-	box-shadow: 0 2px 8px var(--brand-glow);
+	box-shadow:
+		0 3px 10px -2px var(--brand-glow),
+		inset 0 1px 0 rgba(255, 255, 255, 0.22);
 }
 
 .round-button.send:hover:not(:disabled) {
 	background: var(--brand-gradient-hover);
-	box-shadow: 0 4px 16px var(--brand-glow);
+	box-shadow:
+		0 6px 18px -4px var(--brand-glow),
+		inset 0 1px 0 rgba(255, 255, 255, 0.26);
+	transform: translateY(-1px);
 }
 
 .round-button.send:disabled {

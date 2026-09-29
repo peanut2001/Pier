@@ -5,6 +5,7 @@
 	border: 1px solid var(--border);
 	border-radius: var(--radius);
 	background: var(--bg-elevated);
+	box-shadow: var(--highlight);
 	overflow: hidden;
 	font-size: 14px;
 	line-height: 1.5;
@@ -55,9 +56,10 @@
 	width: 26px;
 	height: 26px;
 	flex: none;
-	border-radius: 7px;
+	border-radius: 8px;
 	background: var(--bg-active);
 	color: var(--text-muted);
+	box-shadow: inset 0 0 0 1px var(--border);
 }
 
 .status-running .tool-icon,
