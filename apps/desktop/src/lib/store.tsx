@@ -12,10 +12,6 @@ import type {
 	EventFrame,
 	HostInfo,
 	ModelInfo,
-	NewApiAuthorizeResult,
-	NewApiAuthorizeStart,
-	NewApiLoginResult,
-	NewApiToken,
 	PairingRequest,
 	PairingResolution,
 	ProviderInfo,
@@ -26,6 +22,7 @@ import type {
 } from "@pier/protocol";
 import { createContext, useContext, useSyncExternalStore } from "react";
 import type { Bridge, HostStatus, UpdateStatus } from "./bridge.ts";
+import { isYunlianProvider, YUNLIAN_SITE, yunlianProvider } from "./yunlian.ts";
 
 export const APP_VERSION = "0.2.3";
 
@@ -56,6 +53,16 @@ export interface AuthFlowState {
 	error?: string;
 }
 
+/** The 云链API browser sign-in shown in its dialog. */
+export interface YunlianLoginState {
+	/** The authorization page opened in the browser (undefined while starting). */
+	authorizeUrl?: string;
+	/** Approved in the browser; saving the provider. */
+	saving?: boolean;
+	/** Set when the sign-in failed. */
+	error?: string;
+}
+
 /** Pages of the settings screen. */
 export type SettingsSection = "general" | "models" | "workspaces" | "remote" | "logs" | "about";
 
@@ -82,6 +89,7 @@ export interface AppState {
 	/** Model providers and credentials (undefined until loaded). */
 	providers?: ProviderListResult;
 	auth?: AuthFlowState;
+	yunlian?: YunlianLoginState;
 	update: UpdateStatus;
 	/** The settings screen is open on this page (undefined while closed). */
 	settings?: SettingsSection;
@@ -118,6 +126,9 @@ export class PierStore {
 	private authBacklog: EventFrame[] = [];
 	private openedAuthUrls = new Set<string>();
 	private authSeq = 0;
+	private yunlianSeq = 0;
+	/** The pending 云链API authorization on the host, if any. */
+	private yunlianFlow: string | undefined;
 	/** The update version already announced with a toast. */
 	private announcedUpdate: string | undefined;
 
@@ -217,7 +228,10 @@ export class PierStore {
 			pairingRequests: [],
 			pairing: undefined,
 			auth: undefined,
+			yunlian: undefined,
 		}));
+		this.yunlianSeq++;
+		this.yunlianFlow = undefined;
 	}
 
 	private async connect(url: string, token: string | undefined, key: string): Promise<void> {
@@ -555,61 +569,59 @@ export class PierStore {
 		return (await client.request("provider.probeModels", params, { timeoutMs: 30_000 })).models;
 	}
 
-	// ---- NewAPI sign-in (errors are thrown so the dialog can show them) ----------------------
+	// ---- 云链API sign-in (NewAPI app authorization in the browser) ------------------------
 
-	private hostClient(): PierClient {
+	/**
+	 * Sign in to 云链API: open its authorization page in the browser and, once the user approves,
+	 * save (or refresh) the provider with the new token and every model it can use.
+	 */
+	async loginYunlian(): Promise<void> {
 		const client = this.client;
-		if (!client) throw new Error("尚未连接到 Pier Host");
-		return client;
+		if (!client) {
+			this.toast("error", "尚未连接到 Pier Host");
+			return;
+		}
+		this.cancelYunlian();
+		const seq = ++this.yunlianSeq;
+		const current = () => seq === this.yunlianSeq;
+		this.set({ yunlian: {} });
+		try {
+			const started = await client.request("newapi.authorizeStart", { baseUrl: YUNLIAN_SITE }, { timeoutMs: 45_000 });
+			if (!current()) {
+				// Closed while starting: stop the orphaned authorization.
+				void client.request("newapi.authorizeCancel", { flowId: started.flowId }).catch(() => undefined);
+				return;
+			}
+			this.yunlianFlow = started.flowId;
+			this.set({ yunlian: { authorizeUrl: started.authorizeUrl } });
+			this.openExternal(started.authorizeUrl);
+			const result = await client.request(
+				"newapi.authorizeWait",
+				{ flowId: started.flowId },
+				{ timeoutMs: 11 * 60_000 },
+			);
+			if (!current()) return;
+			this.yunlianFlow = undefined;
+			this.set({ yunlian: { authorizeUrl: started.authorizeUrl, saving: true } });
+			const existing = this.state.providers?.providers.find((p) => p.custom && isYunlianProvider(p))?.custom;
+			const provider = yunlianProvider(result.models, existing, result.modelsError);
+			await this.saveCustomProvider(provider, { apiKeyRef: result.keyRef }, !existing);
+			if (current()) this.set({ yunlian: undefined });
+		} catch (error) {
+			if (current()) {
+				this.yunlianFlow = undefined;
+				this.set({ yunlian: { error: errorText(error) } });
+			}
+		}
 	}
 
-	newApiLogin(
-		params: { baseUrl: string } & ({ username: string; password: string } | { accessToken: string; userId?: number }),
-	): Promise<NewApiLoginResult> {
-		return this.hostClient().request("newapi.login", params, { timeoutMs: 45_000 });
-	}
-
-	newApiVerify(sessionId: string, code: string): Promise<NewApiLoginResult> {
-		return this.hostClient().request("newapi.verify", { sessionId, code }, { timeoutMs: 45_000 });
-	}
-
-	newApiCreateToken(
-		sessionId: string,
-		name: string,
-		group?: string,
-	): Promise<{ tokenId: number; tokens: NewApiToken[] }> {
-		return this.hostClient().request(
-			"newapi.createToken",
-			{ sessionId, name, ...(group ? { group } : {}) },
-			{ timeoutMs: 45_000 },
-		);
-	}
-
-	newApiUseToken(
-		sessionId: string,
-		tokenId: number,
-	): Promise<{ keyRef: string; models: Array<{ id: string; name?: string }>; modelsError?: string }> {
-		return this.hostClient().request("newapi.useToken", { sessionId, tokenId }, { timeoutMs: 45_000 });
-	}
-
-	/** Start a browser sign-in (NewAPI app authorization); open `authorizeUrl` with `openExternal`. */
-	newApiAuthorizeStart(baseUrl: string): Promise<NewApiAuthorizeStart> {
-		return this.hostClient().request("newapi.authorizeStart", { baseUrl }, { timeoutMs: 45_000 });
-	}
-
-	/** Resolves when the user approves in the browser; the host gives up after 10 minutes. */
-	newApiAuthorizeWait(flowId: string): Promise<NewApiAuthorizeResult> {
-		return this.hostClient().request("newapi.authorizeWait", { flowId }, { timeoutMs: 11 * 60_000 });
-	}
-
-	/** Abandon a browser sign-in (fire and forget). */
-	newApiAuthorizeCancel(flowId: string): void {
-		void this.client?.request("newapi.authorizeCancel", { flowId }).catch(() => undefined);
-	}
-
-	/** Forget a NewAPI login (fire and forget). */
-	newApiClose(sessionId: string): void {
-		void this.client?.request("newapi.close", { sessionId }).catch(() => undefined);
+	/** Close the 云链API sign-in, abandoning a pending authorization. */
+	cancelYunlian(): void {
+		this.yunlianSeq++;
+		const flowId = this.yunlianFlow;
+		this.yunlianFlow = undefined;
+		if (flowId) void this.client?.request("newapi.authorizeCancel", { flowId }).catch(() => undefined);
+		if (this.state.yunlian) this.set({ yunlian: undefined });
 	}
 
 	async refreshSessions(workspaceId: string): Promise<void> {

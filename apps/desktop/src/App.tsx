@@ -1,7 +1,7 @@
 import { Welcome, WorkspaceHome } from "./components/Home.tsx";
 import { HostBanner } from "./components/HostPanels.tsx";
 import { IconAlert, IconInfo, IconMessage, IconX } from "./components/Icons.tsx";
-import { AuthDialog } from "./components/ModelsPanel.tsx";
+import { AuthDialog, YunlianDialog } from "./components/ModelsPanel.tsx";
 import { PairingRequestDialog } from "./components/RemotePanel.tsx";
 import { SessionView } from "./components/SessionView.tsx";
 import { SettingsPage } from "./components/Settings.tsx";
@@ -72,6 +72,7 @@ export function App() {
 			)}
 			<Toasts />
 			<AuthDialog />
+			<YunlianDialog />
 			<PairingRequestDialog />
 		</>
 	);

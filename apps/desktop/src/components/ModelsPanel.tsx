@@ -9,7 +9,8 @@ import {
 	type ProviderInfo,
 } from "@pier/protocol";
 import { type FormEvent, useEffect, useMemo, useState } from "react";
-import { type AuthFlowState, useAppState, useStore } from "../lib/store.tsx";
+import { type AuthFlowState, useAppState, useStore, type YunlianLoginState } from "../lib/store.tsx";
+import { isYunlianProvider, YUNLIAN_NAME, YUNLIAN_SITE } from "../lib/yunlian.ts";
 import {
 	IconAlert,
 	IconCheck,
@@ -27,7 +28,6 @@ import {
 } from "./Icons.tsx";
 import { CopyButton } from "./Markdown.tsx";
 import { Modal } from "./Modal.tsx";
-import { NewApiConnect, type NewApiPreset, newApiBaseUrl } from "./NewApiConnect.tsx";
 import { SettingRow, SettingsCard, SettingsGroup } from "./SettingsUi.tsx";
 
 /** Providers listed first when adding one. */
@@ -195,6 +195,17 @@ function ConfiguredRow({ provider, onEdit }: { provider: ProviderInfo; onEdit: (
 				</div>
 			</div>
 			<div className="row-actions">
+				{isYunlianProvider(provider) ? (
+					<button
+						type="button"
+						className="ghost"
+						title="在浏览器中重新授权，更新令牌和模型列表"
+						onClick={() => void store.loginYunlian()}
+					>
+						<IconExternal size={13} />
+						重新登录
+					</button>
+				) : null}
 				{custom ? (
 					<button type="button" className="ghost" onClick={() => onEdit(provider)}>
 						<IconPencil size={13} />
@@ -261,7 +272,33 @@ function LoginButtons({ provider }: { provider: ProviderInfo }) {
 	);
 }
 
-function AddProviderList({ providers }: { providers: ProviderInfo[] }) {
+/** 云链API, listed first: signing in only takes a browser authorization. */
+function YunlianRow() {
+	const store = useStore();
+	return (
+		<div className="provider-row">
+			<div className="provider-main">
+				<div className="provider-name">
+					{YUNLIAN_NAME}
+					<span className="mini-tag">推荐</span>
+				</div>
+				<div className="muted small">
+					<span className="mono">{new URL(YUNLIAN_SITE).host}</span> · 在浏览器中登录授权，自动获取令牌和全部模型
+				</div>
+			</div>
+			<div className="row-actions">
+				<button type="button" className="primary" onClick={() => void store.loginYunlian()}>
+					<IconExternal size={13} />
+					浏览器登录
+				</button>
+			</div>
+		</div>
+	);
+}
+
+const YUNLIAN_KEYWORDS = `yunlian yunnet newapi ${YUNLIAN_NAME} ${YUNLIAN_SITE}`.toLowerCase();
+
+function AddProviderList({ providers, yunlian }: { providers: ProviderInfo[]; yunlian: boolean }) {
 	const [filter, setFilter] = useState("");
 	const [showAll, setShowAll] = useState(false);
 	const query = filter.trim().toLowerCase();
@@ -274,6 +311,7 @@ function AddProviderList({ providers }: { providers: ProviderInfo[] }) {
 	}, [providers]);
 	const matches = sorted.filter((p) => !query || `${p.id} ${p.name}`.toLowerCase().includes(query));
 	const visible = query || showAll ? matches : matches.slice(0, 8);
+	const showYunlian = yunlian && (!query || YUNLIAN_KEYWORDS.includes(query));
 	return (
 		<>
 			<div className="provider-search">
@@ -285,6 +323,7 @@ function AddProviderList({ providers }: { providers: ProviderInfo[] }) {
 				/>
 			</div>
 			<div className="provider-list">
+				{showYunlian ? <YunlianRow /> : null}
 				{visible.map((provider) => (
 					<div key={provider.id} className="provider-row">
 						<div className="provider-main">
@@ -294,7 +333,7 @@ function AddProviderList({ providers }: { providers: ProviderInfo[] }) {
 						<LoginButtons provider={provider} />
 					</div>
 				))}
-				{!visible.length ? <div className="provider-row muted small">没有匹配的服务商。</div> : null}
+				{!visible.length && !showYunlian ? <div className="provider-row muted small">没有匹配的服务商。</div> : null}
 			</div>
 			{!query && !showAll && matches.length > visible.length ? (
 				<button type="button" className="ghost show-all" onClick={() => setShowAll(true)}>
@@ -305,12 +344,13 @@ function AddProviderList({ providers }: { providers: ProviderInfo[] }) {
 	);
 }
 
-function ProviderList({ onCustom, onNewApi }: { onCustom: (provider?: ProviderInfo) => void; onNewApi: () => void }) {
+function ProviderList({ onCustom }: { onCustom: (provider?: ProviderInfo) => void }) {
 	const store = useStore();
 	const providers = useAppState((s) => s.providers);
 	if (!providers) return <p className="muted">正在读取模型配置…</p>;
 	const configured = providers.providers.filter((p) => p.status.configured || p.stored || p.custom);
 	const others = providers.providers.filter((p) => !configured.includes(p));
+	const hasYunlian = configured.some(isYunlianProvider);
 	return (
 		<>
 			<p className="settings-intro">
@@ -349,23 +389,17 @@ function ProviderList({ onCustom, onNewApi }: { onCustom: (provider?: ProviderIn
 			<SettingsGroup
 				title="添加服务商"
 				actions={
-					<div className="row-actions">
-						<button type="button" onClick={onNewApi} title="登录 NewAPI 中转站，自动获取令牌和模型">
-							<IconKey size={13} />
-							NewAPI 登录
-						</button>
-						<button type="button" className="primary" onClick={() => onCustom()}>
-							<IconPlus size={14} />
-							自定义接口
-						</button>
-					</div>
+					<button type="button" className="primary" onClick={() => onCustom()}>
+						<IconPlus size={14} />
+						自定义接口
+					</button>
 				}
 			>
 				<p className="muted small settings-note">
-					使用中转站、公司网关或本地模型（Ollama、LM Studio、vLLM 等）时，选择「自定义接口」填写 Base URL 和 API
-					Key；NewAPI 中转站可以直接「NewAPI 登录」，自动获取令牌和模型列表。
+					使用其他中转站、公司网关或本地模型（Ollama、LM Studio、vLLM 等）时，选择「自定义接口」填写 Base URL 和 API
+					Key。
 				</p>
-				<AddProviderList providers={others} />
+				<AddProviderList providers={others} yunlian={!hasYunlian} />
 			</SettingsGroup>
 		</>
 	);
@@ -539,34 +573,19 @@ const row = (model: CustomModel): ModelRow => ({ ...model, key: nextRowKey++ });
 /** Most models a custom provider may list (see `CustomProviderSchema`). */
 const MAX_MODELS = 500;
 
-function CustomProviderForm({
-	editing,
-	preset,
-	onDone,
-	onBack,
-}: {
-	editing?: ProviderInfo;
-	/** Values found by the NewAPI sign-in. */
-	preset?: NewApiPreset;
-	onDone: () => void;
-	/** “返回” handler when it should not close the dialog. */
-	onBack?: () => void;
-}) {
+function CustomProviderForm({ editing, onDone }: { editing?: ProviderInfo; onDone: () => void }) {
 	const store = useStore();
 	const providers = useAppState((s) => s.providers);
 	const initial = editing?.custom;
-	const [name, setName] = useState(initial?.name ?? editing?.name ?? preset?.name ?? "");
-	const [id, setId] = useState(initial?.id ?? preset?.id ?? "");
-	const [idTouched, setIdTouched] = useState(Boolean(initial || preset));
-	const [api, setApi] = useState<CustomProviderApi>(initial?.api ?? preset?.api ?? "openai-completions");
-	const [baseUrl, setBaseUrl] = useState(initial?.baseUrl ?? (preset ? newApiBaseUrl(preset.siteUrl, preset.api) : ""));
+	const [name, setName] = useState(initial?.name ?? editing?.name ?? "");
+	const [id, setId] = useState(initial?.id ?? "");
+	const [idTouched, setIdTouched] = useState(Boolean(initial));
+	const [api, setApi] = useState<CustomProviderApi>(initial?.api ?? "openai-completions");
+	const [baseUrl, setBaseUrl] = useState(initial?.baseUrl ?? "");
 	const [apiKey, setApiKey] = useState("");
-	const [keyRef, setKeyRef] = useState(preset?.keyRef);
-	const [models, setModels] = useState<ModelRow[]>(() =>
-		(initial?.models ?? (preset?.models.length ? preset.models.slice(0, MAX_MODELS) : [{ id: "" }])).map(row),
-	);
+	const [models, setModels] = useState<ModelRow[]>(() => (initial?.models ?? [{ id: "" }]).map(row));
 	const [probe, setProbe] = useState<{ busy?: boolean; error?: string; models?: Array<{ id: string; name?: string }> }>(
-		() => (preset ? (preset.modelsError ? { error: preset.modelsError } : { models: preset.models }) : {}),
+		{},
 	);
 	const [saving, setSaving] = useState(false);
 	const [error, setError] = useState<string | undefined>();
@@ -585,7 +604,7 @@ function CustomProviderForm({
 			const found = await store.probeModels({
 				api,
 				baseUrl: baseUrl.trim(),
-				...(apiKey.trim() ? { apiKey: apiKey.trim() } : keyRef ? { apiKeyRef: keyRef } : {}),
+				...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
 				...(editing ? { providerId: editing.id } : {}),
 			});
 			setProbe({ models: found });
@@ -609,7 +628,7 @@ function CustomProviderForm({
 		if (taken) return `ID “${effectiveId}” 已被使用，请换一个`;
 		if (!/^https?:\/\/\S+$/i.test(baseUrl.trim())) return "Base URL 必须以 http:// 或 https:// 开头";
 		if (cleaned.length > MAX_MODELS) return `最多添加 ${MAX_MODELS} 个模型`;
-		if (!editing && !apiKey.trim() && !keyRef) return "请填写 API Key（本地服务不需要密钥时可以随便填，例如 ollama）";
+		if (!editing && !apiKey.trim()) return "请填写 API Key（本地服务不需要密钥时可以随便填，例如 ollama）";
 		if (!cleaned.length) return "至少添加一个模型";
 		return undefined;
 	};
@@ -635,11 +654,7 @@ function CustomProviderForm({
 		};
 		setSaving(true);
 		try {
-			await store.saveCustomProvider(
-				provider,
-				apiKey.trim() ? { apiKey: apiKey.trim() } : { apiKeyRef: keyRef },
-				!editing,
-			);
+			await store.saveCustomProvider(provider, { apiKey: apiKey.trim() || undefined }, !editing);
 			onDone();
 		} catch (err) {
 			setError(errorText(err));
@@ -678,17 +693,7 @@ function CustomProviderForm({
 				</label>
 				<label className="form-field">
 					<span className="field-label">接口类型</span>
-					<select
-						value={api}
-						onChange={(e) => {
-							const next = e.target.value as CustomProviderApi;
-							// Follow the API type while the NewAPI address has not been edited.
-							if (preset && baseUrl.trim() === newApiBaseUrl(preset.siteUrl, api)) {
-								setBaseUrl(newApiBaseUrl(preset.siteUrl, next));
-							}
-							setApi(next);
-						}}
-					>
+					<select value={api} onChange={(e) => setApi(e.target.value as CustomProviderApi)}>
 						{CUSTOM_PROVIDER_APIS.map((value) => (
 							<option key={value} value={value}>
 								{API_LABEL[value]}
@@ -706,29 +711,17 @@ function CustomProviderForm({
 						onChange={(e) => setBaseUrl(e.target.value)}
 					/>
 				</label>
-				{keyRef && preset ? (
-					<div className="form-field wide">
-						<span className="field-label">API Key</span>
-						<div className="auth-input-row">
-							<input disabled value={`NewAPI 令牌 ${preset.keyLabel}`} />
-							<button type="button" onClick={() => setKeyRef(undefined)}>
-								手动填写
-							</button>
-						</div>
-					</div>
-				) : (
-					<label className="form-field wide">
-						<span className="field-label">API Key</span>
-						<input
-							type="password"
-							autoComplete="off"
-							spellCheck={false}
-							placeholder={hasKey ? "已保存，留空则保持不变" : "sk-…"}
-							value={apiKey}
-							onChange={(e) => setApiKey(e.target.value)}
-						/>
-					</label>
-				)}
+				<label className="form-field wide">
+					<span className="field-label">API Key</span>
+					<input
+						type="password"
+						autoComplete="off"
+						spellCheck={false}
+						placeholder={hasKey ? "已保存，留空则保持不变" : "sk-…"}
+						value={apiKey}
+						onChange={(e) => setApiKey(e.target.value)}
+					/>
+				</label>
 			</div>
 			<p className="muted small">{BASE_URL_NOTE[api]}</p>
 
@@ -845,7 +838,7 @@ function CustomProviderForm({
 				</div>
 			) : null}
 			<div className="modal-actions">
-				<button type="button" onClick={onBack ?? onDone}>
+				<button type="button" onClick={onDone}>
 					返回
 				</button>
 				<button type="submit" className="primary" disabled={saving}>
@@ -862,32 +855,9 @@ function CustomProviderForm({
 /** The “models and providers” settings page. */
 export function ModelsSettings() {
 	const [custom, setCustom] = useState<{ provider?: ProviderInfo } | undefined>();
-	const [newApi, setNewApi] = useState<{ preset?: NewApiPreset } | undefined>();
-	const providers = useAppState((s) => s.providers);
-	const takenIds = useMemo(() => new Set(providers?.providers.map((p) => p.id) ?? []), [providers]);
 	return (
 		<>
-			<ProviderList onCustom={(provider) => setCustom(provider ? { provider } : {})} onNewApi={() => setNewApi({})} />
-			{newApi ? (
-				<Modal
-					title={newApi.preset ? `添加 · ${newApi.preset.name}` : "连接 NewAPI"}
-					onClose={() => setNewApi(undefined)}
-					wide={Boolean(newApi.preset)}
-				>
-					{/* Kept mounted so “返回” shows the token list again and the login stays open. */}
-					<div hidden={Boolean(newApi.preset)}>
-						<NewApiConnect takenIds={takenIds} onReady={(preset) => setNewApi({ preset })} />
-					</div>
-					{newApi.preset ? (
-						<CustomProviderForm
-							key={newApi.preset.keyRef}
-							preset={newApi.preset}
-							onDone={() => setNewApi(undefined)}
-							onBack={() => setNewApi({})}
-						/>
-					) : null}
-				</Modal>
-			) : null}
+			<ProviderList onCustom={(provider) => setCustom(provider ? { provider } : {})} />
 			{custom ? (
 				<Modal
 					title={custom.provider ? `编辑 · ${custom.provider.name}` : "添加自定义接口"}
@@ -916,6 +886,70 @@ export function AuthDialog() {
 	);
 }
 
+function YunlianView({ login }: { login: YunlianLoginState }) {
+	const store = useStore();
+	const { authorizeUrl, saving, error } = login;
+	return (
+		<div className="login-view">
+			{error ? null : authorizeUrl ? (
+				<div className="auth-notice">
+					<div>
+						已在浏览器中打开{YUNLIAN_NAME}的授权页面。请在浏览器中登录（账号密码、GitHub、LinuxDO、Passkey
+						等方式都可以）并点击「授权」，完成后会自动回到这里。
+					</div>
+					<div className="row-actions">
+						<button type="button" onClick={() => store.openExternal(authorizeUrl)}>
+							<IconExternal size={13} />
+							重新打开浏览器
+						</button>
+						<CopyButton text={authorizeUrl} label="复制登录链接" />
+					</div>
+				</div>
+			) : null}
+			{error ? null : (
+				<div className="auth-waiting muted">
+					<IconLoader size={15} className="spin" />
+					{saving ? "已授权，正在添加模型…" : authorizeUrl ? "等待浏览器中完成授权…" : "正在打开浏览器…"}
+				</div>
+			)}
+			{error ? (
+				<div className="banner error inline">
+					<IconAlert size={15} />
+					<span>{error}</span>
+				</div>
+			) : null}
+			<p className="muted small">令牌密钥由 Pier Host 直接保存在本机的 pi 配置目录，不会显示在界面上。</p>
+			<div className="modal-actions">
+				<button type="button" onClick={() => store.cancelYunlian()} disabled={saving}>
+					{error ? "关闭" : "取消"}
+				</button>
+				{error ? (
+					<button type="button" className="primary" onClick={() => void store.loginYunlian()}>
+						重试
+					</button>
+				) : null}
+			</div>
+		</div>
+	);
+}
+
+/** 云链API browser sign-in dialog, shown over whatever is on screen. */
+export function YunlianDialog() {
+	const store = useStore();
+	const login = useAppState((s) => s.yunlian);
+	if (!login) return null;
+	return (
+		<Modal
+			title={`浏览器登录 · ${YUNLIAN_NAME}`}
+			onClose={() => {
+				if (!login.saving) store.cancelYunlian();
+			}}
+		>
+			<YunlianView login={login} />
+		</Modal>
+	);
+}
+
 /** Shown on the home screens while no model can be used. */
 export function NoModelsBanner() {
 	const store = useStore();
@@ -928,8 +962,14 @@ export function NoModelsBanner() {
 			</div>
 			<div className="no-models-text">
 				<div className="no-models-title">还没有可用的模型</div>
-				<div className="muted small">登录 Anthropic、OpenAI 等服务商，或添加中转站 / 本地模型的自定义接口。</div>
+				<div className="muted small">
+					登录{YUNLIAN_NAME}、Anthropic、OpenAI 等服务商，或添加中转站 / 本地模型的自定义接口。
+				</div>
 			</div>
+			<button type="button" onClick={() => void store.loginYunlian()}>
+				<IconExternal size={13} />
+				登录{YUNLIAN_NAME}
+			</button>
 			<button type="button" className="primary" onClick={() => store.openModels()}>
 				配置模型
 			</button>
