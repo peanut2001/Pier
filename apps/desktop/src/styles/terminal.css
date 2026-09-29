@@ -125,9 +125,9 @@ button.terminal-tab-label:hover:not(:disabled) {
 	opacity: 0;
 }
 
-.terminal-tab:hover .terminal-tab-close,
-.terminal-tab.active .terminal-tab-close,
-.terminal-tab-close:focus-visible {
+.terminal-tab:hover .ghost.icon.terminal-tab-close,
+.terminal-tab.active .ghost.icon.terminal-tab-close,
+.terminal-tab .ghost.icon.terminal-tab-close:focus-visible {
 	opacity: 1;
 }
 
