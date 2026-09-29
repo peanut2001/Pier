@@ -1,3 +1,5 @@
+import { useEffect } from "react";
+import { FilesPanel } from "./components/FilesPanel.tsx";
 import { Welcome, WorkspaceHome } from "./components/Home.tsx";
 import { HostBanner } from "./components/HostPanels.tsx";
 import { IconAlert, IconInfo, IconMessage, IconX } from "./components/Icons.tsx";
@@ -7,7 +9,7 @@ import { PairingRequestDialog } from "./components/RemotePanel.tsx";
 import { SessionView } from "./components/SessionView.tsx";
 import { SettingsPage } from "./components/Settings.tsx";
 import { Sidebar } from "./components/Sidebar.tsx";
-import { useAppState, useStore } from "./lib/store.tsx";
+import { NEW_CHAT_DRAFT, useAppState, useStore } from "./lib/store.tsx";
 
 function Toasts() {
 	const store = useStore();
@@ -57,20 +59,59 @@ function Main() {
 	);
 }
 
+/** The workspace shown in the file panel: the open session's, else the selected one. */
+function RightPanel() {
+	const store = useStore();
+	const selectedSessionId = useAppState((s) => s.selectedSessionId);
+	const selectedWorkspaceId = useAppState((s) => s.selectedWorkspaceId);
+	const newChat = useAppState((s) => s.newChat);
+	const workspaces = useAppState((s) => s.workspaces);
+	useAppState((s) => s.sessions);
+	const session = store.findSession(selectedSessionId);
+	// Mirrors `Main`: an open session wins, then the new-chat screen, then the selected workspace.
+	const workspaceId = session ? session.workspaceId : newChat ? newChat.workspaceId : selectedWorkspaceId;
+	const composerKey = session ? session.id : newChat ? NEW_CHAT_DRAFT : undefined;
+	const workspace = workspaces.find((w) => w.id === workspaceId);
+	if (!workspace) return null;
+	return <FilesPanel key={workspace.id} workspace={workspace} {...(composerKey ? { composerKey } : {})} />;
+}
+
 export function App() {
 	const store = useStore();
 	const settings = useAppState((s) => s.settings);
+	const filesPanel = useAppState((s) => s.filesPanel);
+	const filesPanelWidth = useAppState((s) => s.filesPanelWidth);
+	const hasWorkspace = useAppState((s) => s.workspaces.length > 0);
+	const showFiles = filesPanel && hasWorkspace;
+
+	// Ctrl/⌘+Shift+E toggles the file panel, like the explorer in editors.
+	useEffect(() => {
+		if (settings) return;
+		const onKey = (e: KeyboardEvent) => {
+			if ((e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey && e.key.toLowerCase() === "e") {
+				e.preventDefault();
+				store.toggleFilesPanel();
+			}
+		};
+		window.addEventListener("keydown", onKey);
+		return () => window.removeEventListener("keydown", onKey);
+	}, [store, settings]);
+
 	return (
 		<>
 			{settings ? (
 				<SettingsPage section={settings} />
 			) : (
-				<div className="app">
+				<div
+					className={`app${showFiles ? " with-files" : ""}`}
+					style={showFiles ? { gridTemplateColumns: `264px minmax(0, 1fr) ${filesPanelWidth}px` } : undefined}
+				>
 					<Sidebar />
 					<main className="main">
 						<HostBanner onShowLogs={() => store.openSettings("logs")} />
 						<Main />
 					</main>
+					{showFiles ? <RightPanel /> : null}
 				</div>
 			)}
 			<Toasts />

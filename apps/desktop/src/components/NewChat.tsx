@@ -1,7 +1,8 @@
 import type { WorkspaceInfo } from "@pier/protocol";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { type Draft, NEW_CHAT_DRAFT, useAppState, useStore } from "../lib/store.tsx";
-import { readImages } from "./Composer.tsx";
+import { readImages, useComposerInsert } from "./Composer.tsx";
+import { FilesPanelToggle } from "./FilesPanel.tsx";
 import { useHostStatus } from "./HostPanels.tsx";
 import {
 	IconArrowUp,
@@ -109,6 +110,8 @@ export function NewChatView({ workspaceId }: { workspaceId?: string }) {
 		store.saveDraft(NEW_CHAT_DRAFT, draft);
 	}, [store, draft]);
 
+	useComposerInsert(NEW_CHAT_DRAFT, textarea, setDraft);
+
 	useLayoutEffect(() => {
 		const el = textarea.current;
 		if (!el) return;
@@ -137,6 +140,11 @@ export function NewChatView({ workspaceId }: { workspaceId?: string }) {
 
 	return (
 		<div className="new-chat">
+			{workspace ? (
+				<div className="home-toolbar">
+					<FilesPanelToggle />
+				</div>
+			) : null}
 			<div className="new-chat-hero">
 				<Logo size={44} />
 				{workspace ? (

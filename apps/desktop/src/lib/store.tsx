@@ -18,6 +18,7 @@ import type {
 	ProviderListResult,
 	RemoteAccessStatus,
 	SessionSummary,
+	WorkspaceFilesResult,
 	WorkspaceInfo,
 } from "@pier/protocol";
 import { createContext, useContext, useSyncExternalStore } from "react";
@@ -98,6 +99,12 @@ export interface AppState {
 	update: UpdateStatus;
 	/** The settings screen is open on this page (undefined while closed). */
 	settings?: SettingsSection;
+	/** The right-hand workspace file panel is shown. */
+	filesPanel: boolean;
+	/** Width of the file panel in pixels. */
+	filesPanelWidth: number;
+	/** Bumped per workspace when its files may have changed (an agent run finished). */
+	filesVersion: Record<string, number>;
 }
 
 const PAIRING_RESULT_TEXT: Record<PairingResolution, string> = {
@@ -110,6 +117,15 @@ const PAIRING_RESULT_TEXT: Record<PairingResolution, string> = {
 const SELECTION_KEY = "pier.selection";
 /** Draft key of the new-chat composer (session ids are UUIDs, so no clash). */
 export const NEW_CHAT_DRAFT = "#new-chat";
+const FILES_PANEL_KEY = "pier.filesPanel";
+export const FILES_PANEL_MIN_WIDTH = 220;
+export const FILES_PANEL_MAX_WIDTH = 560;
+const FILES_PANEL_DEFAULT_WIDTH = 280;
+
+function clampPanelWidth(width: number): number {
+	if (!Number.isFinite(width)) return FILES_PANEL_DEFAULT_WIDTH;
+	return Math.round(Math.min(FILES_PANEL_MAX_WIDTH, Math.max(FILES_PANEL_MIN_WIDTH, width)));
+}
 /** Refresh-timer keys for the device and provider lists (workspace ids are UUIDs, so no clash). */
 const DEVICES_KEY = "#devices";
 const PROVIDERS_KEY = "#providers";
@@ -140,6 +156,8 @@ export class PierStore {
 	private yunlianFlow: string | undefined;
 	/** The update version already announced with a toast. */
 	private announcedUpdate: string | undefined;
+	/** Mounted composers, by session, that accept text inserted from elsewhere (the file panel). */
+	private readonly composerInserts = new Map<string, (text: string) => void>();
 
 	constructor(private readonly bridge: Bridge) {
 		const saved = (() => {
@@ -149,6 +167,13 @@ export class PierStore {
 					sessionId?: string;
 					expanded?: Record<string, boolean>;
 				};
+			} catch {
+				return {};
+			}
+		})();
+		const panel = (() => {
+			try {
+				return JSON.parse(localStorage.getItem(FILES_PANEL_KEY) ?? "{}") as { open?: boolean; width?: number };
 			} catch {
 				return {};
 			}
@@ -167,6 +192,9 @@ export class PierStore {
 			devices: [],
 			pairingRequests: [],
 			update: { state: "idle", currentVersion: APP_VERSION, autoCheck: true, downloaded: 0 },
+			filesPanel: panel.open === true,
+			filesPanelWidth: clampPanelWidth(panel.width ?? FILES_PANEL_DEFAULT_WIDTH),
+			filesVersion: {},
 		};
 	}
 
@@ -190,6 +218,12 @@ export class PierStore {
 					sessionId: this.state.selectedSessionId,
 					expanded: this.state.expanded,
 				}),
+			);
+		}
+		if ("filesPanel" in next || "filesPanelWidth" in next) {
+			localStorage.setItem(
+				FILES_PANEL_KEY,
+				JSON.stringify({ open: this.state.filesPanel, width: this.state.filesPanelWidth }),
 			);
 		}
 		for (const listener of [...this.listeners]) listener();
@@ -279,7 +313,10 @@ export class PierStore {
 		const event = frame.event;
 		if (event.type === "workspace.changed") void this.loadWorkspaces();
 		else if (event.type === "session.listChanged") this.scheduleRefresh(String(event.workspaceId));
-		else if (event.type === "host.notice") {
+		else if (event.type === "session.activity") {
+			// A run that ends (or pauses for an answer) has likely written files.
+			if (event.state === "idle" || Number(event.pendingUi) > 0) this.bumpFiles(String(event.workspaceId));
+		} else if (event.type === "host.notice") {
 			this.toast((event.level as Toast["level"]) ?? "info", String(event.message ?? ""));
 		} else if (event.type === "remote.changed") {
 			const remote = event.status as RemoteAccessStatus;
@@ -684,6 +721,46 @@ export class PierStore {
 	}
 
 	// ---- workspaces --------------------------------------------------------------------
+
+	toggleFilesPanel(open = !this.state.filesPanel): void {
+		if (open !== this.state.filesPanel) this.set({ filesPanel: open });
+	}
+
+	setFilesPanelWidth(width: number): void {
+		const filesPanelWidth = clampPanelWidth(width);
+		if (filesPanelWidth !== this.state.filesPanelWidth) this.set({ filesPanelWidth });
+	}
+
+	/** List one directory of a workspace; rejects with the host's error. */
+	async listFiles(workspaceId: string, path: string): Promise<WorkspaceFilesResult> {
+		const client = this.client;
+		if (!client) throw new Error("尚未连接到 Pier Host");
+		return client.request("workspace.files", path ? { workspaceId, path } : { workspaceId });
+	}
+
+	bumpFiles(workspaceId: string): void {
+		this.set((s) => ({ filesVersion: { ...s.filesVersion, [workspaceId]: (s.filesVersion[workspaceId] ?? 0) + 1 } }));
+	}
+
+	/** Called by a mounted composer; returns the unregister function. */
+	registerComposer(sessionId: string, insert: (text: string) => void): () => void {
+		this.composerInserts.set(sessionId, insert);
+		return () => {
+			if (this.composerInserts.get(sessionId) === insert) this.composerInserts.delete(sessionId);
+		};
+	}
+
+	/** Insert text at the cursor of the session's composer (or append it to the saved draft). */
+	insertIntoComposer(sessionId: string, text: string): void {
+		const insert = this.composerInserts.get(sessionId);
+		if (insert) {
+			insert(text);
+			return;
+		}
+		const draft = this.draft(sessionId);
+		const sep = draft.text && !/\s$/.test(draft.text) ? " " : "";
+		this.saveDraft(sessionId, { ...draft, text: `${draft.text}${sep}${text}` });
+	}
 
 	async addWorkspace(path: string, policy?: ApprovalPolicy): Promise<WorkspaceInfo | undefined> {
 		const result = await this.call("添加工作区", (c) =>

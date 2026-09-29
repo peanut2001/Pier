@@ -1,6 +1,14 @@
 import { type ChatController, type ChatState, resolveSlash, runBuiltin, type SlashActions } from "@pier/chat-state";
 import type { WorkspaceInfo } from "@pier/protocol";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+	type Dispatch,
+	type RefObject,
+	type SetStateAction,
+	useEffect,
+	useLayoutEffect,
+	useRef,
+	useState,
+} from "react";
 import { type Draft, useStore } from "../lib/store.tsx";
 import { IconArrowUp, IconImage, IconStop, IconX } from "./Icons.tsx";
 import { PolicyPicker } from "./SessionControls.tsx";
@@ -34,6 +42,41 @@ function readImage(file: File): Promise<Draft["images"][number]> {
 	});
 }
 
+/**
+ * Let the file panel insert text at the cursor of this composer, separated by spaces.
+ * `key` is the draft key (a session id, or the new-chat draft).
+ */
+export function useComposerInsert(
+	key: string,
+	textarea: RefObject<HTMLTextAreaElement | null>,
+	setDraft: Dispatch<SetStateAction<Draft>>,
+): void {
+	const store = useStore();
+	useEffect(
+		() =>
+			store.registerComposer(key, (text) => {
+				const el = textarea.current;
+				if (!el) return;
+				// A textarea keeps its selection after losing focus to the file panel.
+				const value = el.value;
+				const start = Math.min(el.selectionStart, value.length);
+				const end = Math.min(el.selectionEnd, value.length);
+				const before = value.slice(0, start);
+				const after = value.slice(end);
+				const lead = before && !/\s$/.test(before) ? " " : "";
+				const trail = after && /^\s/.test(after) ? "" : " ";
+				const inserted = `${lead}${text}${trail}`;
+				const caret = before.length + inserted.length;
+				setDraft((d) => ({ ...d, text: `${before}${inserted}${after}` }));
+				requestAnimationFrame(() => {
+					el.focus();
+					el.setSelectionRange(caret, caret);
+				});
+			}),
+		[store, key, textarea, setDraft],
+	);
+}
+
 export function Composer({
 	chat,
 	controller,
@@ -60,6 +103,8 @@ export function Composer({
 	useEffect(() => {
 		store.saveDraft(sessionId, draft);
 	}, [store, sessionId, draft]);
+
+	useComposerInsert(sessionId, textarea, setDraft);
 
 	// An extension asked to prefill the editor.
 	const editorNonce = chat.editorText?.nonce;

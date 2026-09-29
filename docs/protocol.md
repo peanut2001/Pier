@@ -89,6 +89,7 @@
 | `workspace.add` 🔒 | `{ path(绝对路径), name?, policy? }` | `{ workspace }`；路径会取 realpath，重复添加返回已有项 |
 | `workspace.remove` 🔒 | `{ workspaceId }` | `{ removed }`；先强制关闭该工作区的活跃会话 |
 | `workspace.setPolicy` 🔒 | `{ workspaceId, policy: "ask"\|"smart"\|"auto" }` | `{ workspace }`；立即对活跃会话生效 |
+| `workspace.files` | `{ workspaceId, path? }` | `WorkspaceFilesResult`：`{ path, entries: { name, path, kind: "file"\|"directory"\|"other", symlink?, size?, modifiedAt? }[], truncated?, total? }`；列出工作区中的一个目录（不递归）。`path` 为相对工作区根目录的路径（`/` 分隔，省略或 `""` 为根目录），绝对路径或含 `..` 时 `BAD_REQUEST`，目录（跟随符号链接后）位于工作区之外时 `FORBIDDEN`，不存在时 `NOT_FOUND`。目录在前、再按名称自然排序，不列出 `.git`、`.hg`、`.svn`；每个目录最多返回 2000 项，超出时 `truncated: true` 并给出 `total`。指向工作区外目录的符号链接和失效链接为 `other`（1.5） |
 
 ### session
 

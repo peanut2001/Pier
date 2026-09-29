@@ -24,6 +24,7 @@ import {
 	StreamingBehaviorSchema,
 	ThinkingLevelSchema,
 	UiResponseSchema,
+	type WorkspaceFilesResult,
 	type WorkspaceInfo,
 } from "./domain.ts";
 
@@ -60,6 +61,8 @@ export const MethodParamsSchemas = {
 	}),
 	"workspace.remove": z.object({ workspaceId: Id }),
 	"workspace.setPolicy": z.object({ workspaceId: Id, policy: ApprovalPolicySchema }),
+	/** List one directory of a workspace (1.5). `path` is relative to the workspace root; omit for the root. */
+	"workspace.files": z.object({ workspaceId: Id, path: z.string().max(4096).optional() }),
 
 	"session.list": z.object({ workspaceId: Id }),
 	"session.create": z.object({ workspaceId: Id, name: z.string().min(1).max(200).optional() }),
@@ -253,6 +256,7 @@ export interface MethodResults {
 	"workspace.add": { workspace: WorkspaceInfo };
 	"workspace.remove": { removed: boolean };
 	"workspace.setPolicy": { workspace: WorkspaceInfo };
+	"workspace.files": WorkspaceFilesResult;
 	"session.list": { sessions: SessionSummary[] };
 	"session.create": { session: SessionSummary };
 	"session.open": { session: SessionSummary };

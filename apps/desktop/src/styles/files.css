@@ -1,0 +1,231 @@
+/* Right-hand workspace file panel. */
+
+.app.with-files .main {
+	margin-right: 0;
+}
+
+.files-panel {
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+	min-height: 0;
+	margin: 8px 8px 8px 8px;
+	background: var(--bg);
+	border-radius: var(--radius-lg);
+	box-shadow: var(--panel-shadow);
+	overflow: hidden;
+	animation: files-in 0.18s var(--ease);
+}
+
+@keyframes files-in {
+	from {
+		opacity: 0;
+		transform: translateX(8px);
+	}
+}
+
+.files-resize {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	left: 0;
+	width: 6px;
+	cursor: col-resize;
+	z-index: 3;
+}
+
+.files-resize:hover,
+body.resizing-panel .files-resize {
+	background: linear-gradient(90deg, var(--accent-ring), transparent);
+}
+
+body.resizing-panel {
+	cursor: col-resize;
+	user-select: none;
+}
+
+.files-header {
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	min-height: 56px;
+	padding: 8px 8px 8px 16px;
+	border-bottom: 1px solid var(--border);
+}
+
+.files-heading {
+	flex: 1;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+}
+
+.files-title {
+	font-weight: 600;
+	font-size: 14px;
+}
+
+.files-workspace {
+	font-size: 11.5px;
+	color: var(--text-faint);
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+}
+
+.files-tree {
+	flex: 1;
+	min-height: 0;
+	overflow: auto;
+	padding: 6px 6px 12px;
+	font-size: 13px;
+}
+
+.files-row {
+	position: relative;
+	display: flex;
+	align-items: center;
+	height: 26px;
+	border-radius: 6px;
+	transition: background 0.1s;
+}
+
+.files-row:hover {
+	background: var(--bg-hover);
+}
+
+.files-row.selected {
+	background: var(--bg-active);
+}
+
+.files-entry {
+	flex: 1;
+	min-width: 0;
+	height: 100%;
+	justify-content: flex-start;
+	gap: 4px;
+	padding: 0 4px 0 0;
+	border: none;
+	background: transparent;
+	border-radius: 6px;
+	font-size: 13px;
+	font-weight: 400;
+}
+
+.files-entry:hover:not(:disabled) {
+	background: transparent;
+}
+
+.files-entry:active:not(:disabled) {
+	transform: none;
+}
+
+.files-chevron {
+	flex: none;
+	display: inline-flex;
+	justify-content: center;
+	width: 14px;
+	color: var(--text-faint);
+}
+
+.files-chevron .icon-svg {
+	transition: transform 0.15s var(--ease);
+}
+
+.files-chevron.open .icon-svg {
+	transform: rotate(90deg);
+}
+
+.files-icon {
+	flex: none;
+	display: inline-flex;
+	color: var(--text-faint);
+}
+
+.files-icon.dir {
+	color: var(--accent-text);
+}
+
+.files-name {
+	min-width: 0;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+}
+
+.files-row.dim .files-name {
+	color: var(--text-faint);
+}
+
+.files-link {
+	flex: none;
+	color: var(--text-faint);
+}
+
+.files-actions {
+	display: none;
+	flex: none;
+	gap: 1px;
+	padding-right: 2px;
+}
+
+.files-actions .ghost.icon {
+	width: 22px;
+	height: 22px;
+}
+
+.files-row:hover .files-actions,
+.files-row:focus-within .files-actions {
+	display: inline-flex;
+}
+
+.files-copied {
+	position: absolute;
+	right: 6px;
+	padding: 1px 6px;
+	border-radius: 999px;
+	font-size: 11px;
+	background: var(--accent-soft);
+	color: var(--accent-text);
+	pointer-events: none;
+}
+
+.files-note {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	min-height: 26px;
+	padding: 3px 8px 3px 12px;
+	font-size: 12px;
+	color: var(--text-faint);
+}
+
+.files-note.error {
+	color: var(--danger);
+}
+
+.files-hint {
+	padding: 7px 14px 9px;
+	border-top: 1px solid var(--border);
+	font-size: 11.5px;
+	color: var(--text-faint);
+}
+
+.icon-chip.active {
+	background: var(--bg-active);
+	color: var(--text);
+}
+
+.home,
+.new-chat {
+	position: relative;
+}
+
+.home-toolbar {
+	position: absolute;
+	top: 12px;
+	right: 14px;
+	z-index: 2;
+}

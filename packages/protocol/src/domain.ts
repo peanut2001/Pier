@@ -27,6 +27,33 @@ export interface WorkspaceInfo {
 	addedAt: string;
 }
 
+/** One entry of a workspace directory listing (`workspace.files`, 1.5). */
+export interface WorkspaceFileEntry {
+	name: string;
+	/** Path relative to the workspace root, joined with "/". */
+	path: string;
+	/**
+	 * `directory` can be listed with `workspace.files`. Symlinks are followed; a link to a
+	 * directory outside the workspace, a broken link, or a special file is `other`.
+	 */
+	kind: "file" | "directory" | "other";
+	symlink?: boolean;
+	/** Size in bytes (files only). */
+	size?: number;
+	modifiedAt?: string;
+}
+
+export interface WorkspaceFilesResult {
+	/** The listed directory, normalized ("" for the workspace root). */
+	path: string;
+	/** Directories first, then files, by name. VCS internals (`.git`, `.hg`, `.svn`) are omitted. */
+	entries: WorkspaceFileEntry[];
+	/** Set when the directory had more entries than the host returns. */
+	truncated?: boolean;
+	/** Total number of entries when `truncated`. */
+	total?: number;
+}
+
 /** Runtime state of a session as seen by clients. */
 export type SessionRunState = "inactive" | "idle" | "streaming" | "compacting" | "retrying";
 

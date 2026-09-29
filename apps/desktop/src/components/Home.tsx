@@ -1,5 +1,6 @@
 import { POLICY_LABEL, relativeTime, sessionTitle } from "../lib/format.ts";
 import { useAppState, useStore } from "../lib/store.tsx";
+import { FilesPanelToggle } from "./FilesPanel.tsx";
 import {
 	IconChevronRight,
 	IconFolder,
@@ -73,6 +74,9 @@ export function WorkspaceHome({ workspaceId }: { workspaceId: string }) {
 	if (!workspace) return null;
 	return (
 		<div className="home">
+			<div className="home-toolbar">
+				<FilesPanelToggle />
+			</div>
 			<div className="home-inner">
 				<div className="workspace-hero">
 					<div className="workspace-hero-icon">

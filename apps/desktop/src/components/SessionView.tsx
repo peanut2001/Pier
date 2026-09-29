@@ -5,6 +5,7 @@ import { useState } from "react";
 import { formatCost, formatPercent, formatTokens, RUN_STATE_LABEL, sessionTitle } from "../lib/format.ts";
 import { useAppState, useChatView, useStore } from "../lib/store.tsx";
 import { Composer } from "./Composer.tsx";
+import { FilesPanelToggle } from "./FilesPanel.tsx";
 import { IconAlert, IconFolder, IconInfo, IconLoader, IconX } from "./Icons.tsx";
 import { PendingRequests } from "./PendingRequests.tsx";
 import { ModelPicker, SessionMenu } from "./SessionControls.tsx";
@@ -227,6 +228,7 @@ export function SessionView({ session }: { session: SessionSummary }) {
 				<div className="session-tools">
 					<ModelPicker chat={chat} controller={controller} />
 					<SessionMenu chat={chat} controller={controller} />
+					<FilesPanelToggle />
 				</div>
 			</header>
 			{error ? <div className="banner error">无法打开会话：{error}</div> : null}
