@@ -46,7 +46,7 @@ export function useNodeStatus(): { online: boolean; dot: "ok" | "bad" | "wait"; 
 	};
 }
 
-/** Why a paired computer is not connected, with what to do about it. */
+/** Why the paired computer of the workspace on screen is not connected, with what to do about it. */
 function NodeBanner() {
 	const store = useStore();
 	const node = useAppState((s) => s.node);
@@ -63,7 +63,7 @@ function NodeBanner() {
 		text = `${name} 已移除这台电脑（或重置了 Pier）。请在那台电脑上重新生成配对链接，再次配对。`;
 	} else if (connectError) {
 		level = "warning";
-		text = `无法连接到 ${name}：${connectError}。请确认它已开机、开启了局域网访问，且两台电脑网络互通；正在自动重试…`;
+		text = `无法连接到 ${name}：${connectError}。这个工作区在 ${name} 上，请确认它已开机、开启了局域网访问，且两台电脑网络互通；正在自动重试…`;
 	} else if (connection === "reconnecting") {
 		level = "warning";
 		text = `与 ${name} 的连接中断，正在重连…（那台电脑上进行中的任务不受影响）`;
@@ -89,9 +89,6 @@ function NodeBanner() {
 						立即重试
 					</button>
 				) : null}
-				<button type="button" className="ghost" onClick={() => store.switchNode(LOCAL_NODE)}>
-					切换回本机
-				</button>
 			</span>
 		</div>
 	);
@@ -106,7 +103,7 @@ export function HostBanner({ onShowLogs, scope = "local" }: { onShowLogs: () => 
 	const host = useAppState((s) => s.host);
 	const node = useAppState((s) => s.node);
 	const connection = useAppState((s) => s.localConnection);
-	const connectError = useAppState((s) => (s.node === LOCAL_NODE ? s.connectError : undefined));
+	const connectError = useAppState((s) => s.nodes[LOCAL_NODE]?.connectError);
 
 	let level: "info" | "warning" | "error" = "info";
 	let text: string | undefined;

@@ -95,6 +95,30 @@
 	white-space: nowrap;
 }
 
+.workspace-chip-node {
+	flex: none;
+	max-width: 90px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 11px;
+	color: var(--text-faint);
+}
+
+.workspace-picker-node {
+	display: flex;
+	align-items: center;
+	gap: 5px;
+}
+
+.workspace-picker-node .muted {
+	font-weight: 400;
+}
+
+.workspace-picker-group + .workspace-picker-group {
+	margin-top: 4px;
+}
+
 .dropdown-menu.up.workspaces {
 	left: 0;
 	right: auto;
