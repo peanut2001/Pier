@@ -7,7 +7,9 @@
  *
  * - shell → host (stdin): `{"type":"pier.shell.updateStatus","status":{…}}` whenever the
  *   updater's state changes (and once when the host is ready),
- *   `{"type":"pier.shell.capabilities","terminals":true}` once when the host is ready,
+ *   `{"type":"pier.shell.capabilities","terminals":true}` once when the host is ready (an app
+ *   that runs terminals also starts the host with `--shell-terminals`, so the capability is
+ *   already in the `HostInfo` of clients that connect before this line arrives),
  *   `{"type":"pier.shell.response","id":"…","ok":true,"result":{…}}` /
  *   `{"type":"pier.shell.response","id":"…","ok":false,"error":"…"}`, and for terminals
  *   `{"type":"pier.shell.terminalOutput","key":"…","data":"<base64>"}` /
@@ -148,6 +150,12 @@ export interface StdioShellOptions {
 	timeoutMs?: number;
 	/** How long the app may take to start a terminal. */
 	terminalTimeoutMs?: number;
+	/**
+	 * The app declared terminals when it started the host (`--shell-terminals`). Paired
+	 * computers reconnecting right after a restart see them in their `host.hello` then, instead
+	 * of only after the `pier.shell.capabilities` line that follows `pier.ready`.
+	 */
+	terminals?: boolean;
 	log?: (message: string) => void;
 }
 
@@ -174,6 +182,7 @@ export class StdioShell implements AppShell {
 	) {
 		this.timeoutMs = options.timeoutMs ?? SHELL_REQUEST_TIMEOUT_MS;
 		this.terminalTimeoutMs = options.terminalTimeoutMs ?? SHELL_TERMINAL_TIMEOUT_MS;
+		this.terminalSupport = options.terminals === true;
 		this.log = options.log ?? (() => {});
 		this.lines = createInterface({ input, crlfDelay: Number.POSITIVE_INFINITY });
 		this.lines.on("line", (line) => this.receive(line));

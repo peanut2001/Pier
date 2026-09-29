@@ -11,8 +11,10 @@
 //! and this side answers with `pier.shell.response` lines and pushes every updater status as
 //! `{"type":"pier.shell.updateStatus","status":{…}}` on stdin.
 //!
-//! The channel also runs the terminals the host offers its clients (`terminal.*`): once the host
-//! is ready this side announces `{"type":"pier.shell.capabilities","terminals":true}`; the host
+//! The channel also runs the terminals the host offers its clients (`terminal.*`): the host is
+//! started with `--shell-terminals`, so a paired computer that reconnects the moment it listens
+//! already sees them, and once the host is ready this side also announces
+//! `{"type":"pier.shell.capabilities","terminals":true}`; the host
 //! starts shells with a `terminal.spawn` request (`params: {key, cwd?, cols, rows}`, answered
 //! with `{id, shell, cwd}`), types and resizes with
 //! `{"type":"pier.shell.terminal","op":"write"|"resize"|"pause"|"resume"|"kill","id":…}`, and gets
@@ -249,6 +251,7 @@ impl HostManager {
         let mut command = Command::new(&exe);
         command
             .arg("--watch-stdin")
+            .arg("--shell-terminals")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());

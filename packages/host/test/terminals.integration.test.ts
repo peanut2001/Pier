@@ -175,6 +175,21 @@ describe("StdioShell terminals", () => {
 		);
 		shell.close();
 	});
+
+	it("offers terminals declared at start before the app announces them", async () => {
+		// A paired computer can reconnect before the app's capabilities line arrives.
+		const quiet = new FakeTerminalShell(false);
+		const shell = new StdioShell(quiet.toHost, quiet.fromHost, { terminals: true });
+		expect(shell.terminals).toBe(true);
+		const output: string[] = [];
+		const terminal = await shell.openTerminal(
+			{ cols: 80, rows: 24 },
+			{ output: (data) => output.push(unb64(data)), exit: () => {} },
+		);
+		expect(terminal.shell).toBe("fakesh");
+		quiet.toHost.end();
+		await expect.poll(() => shell.terminals).toBe(false);
+	});
 });
 
 describe("terminal.* (shells for clients)", () => {
