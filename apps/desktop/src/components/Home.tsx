@@ -1,5 +1,5 @@
 import { POLICY_LABEL, relativeTime, sessionTitle } from "../lib/format.ts";
-import { useAppState, useStore } from "../lib/store.tsx";
+import { LOCAL_NODE, useAppState, useStore } from "../lib/store.tsx";
 import { FilesPanelToggle } from "./FilesPanel.tsx";
 import {
 	IconChevronRight,
@@ -7,6 +7,7 @@ import {
 	IconFolderPlus,
 	IconMessage,
 	IconMessagePlus,
+	IconMonitor,
 	IconShield,
 	IconSparkles,
 	Logo,
@@ -21,10 +22,41 @@ const STEPS = [
 	{ icon: IconShield, title: "审批操作", text: "执行命令或修改工作区外的文件前，Pier 会先征求你的同意。" },
 ];
 
+/** A paired computer without workspaces: they can only be added on that computer. */
+function RemoteWelcome() {
+	const store = useStore();
+	useAppState((s) => s.peers);
+	const name = store.nodeName();
+	return (
+		<div className="home">
+			<SidebarToggle floating />
+			<div className="home-inner">
+				<div className="hero">
+					<div className="workspace-hero-icon">
+						<IconMonitor size={26} />
+					</div>
+					<h1>{name} 上还没有工作区</h1>
+					<p className="hero-text">
+						工作区只能在那台电脑的 Pier 中添加（「添加工作区」或「设置 → 工作区」）。添加后会自动出现在这里，
+						之后就可以在这台电脑上新建会话、查看输出和审批命令，Agent 在 {name} 上运行。
+					</p>
+				</div>
+				<div className="hero-actions">
+					<button type="button" onClick={() => store.switchNode(LOCAL_NODE)}>
+						切换回本机
+					</button>
+				</div>
+			</div>
+		</div>
+	);
+}
+
 export function Welcome() {
 	const store = useStore();
 	const addWorkspace = useAddWorkspace();
 	const providers = useAppState((s) => s.providers);
+	const local = useAppState((s) => s.node === LOCAL_NODE);
+	if (!local) return <RemoteWelcome />;
 	return (
 		<div className="home">
 			<SidebarToggle floating />

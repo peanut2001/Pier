@@ -7,6 +7,8 @@ export * from "./gateway/local-gateway.ts";
 export * from "./host.ts";
 export * from "./managed-session.ts";
 export * from "./paths.ts";
+export * from "./peers/peers.ts";
+export * from "./peers/store.ts";
 export * from "./pi/approval-extension.ts";
 export * from "./pi/environment.ts";
 export * from "./remote/network.ts";

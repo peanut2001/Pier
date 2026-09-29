@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState } from "react";
-import { useAppState, useStore } from "../lib/store.tsx";
+import { LOCAL_NODE, useAppState, useStore } from "../lib/store.tsx";
 import { IconAlert, IconInfo, IconLoader } from "./Icons.tsx";
 import { CopyButton } from "./Markdown.tsx";
 import { SettingsGroup } from "./SettingsUi.tsx";
 
-/** Connection state summarised for the sidebar and the settings screen. */
+/** This computer's host connection, summarised for the settings screen. */
 export function useHostStatus(): { online: boolean; dot: "ok" | "bad" | "wait"; text: string } {
 	const host = useAppState((s) => s.host);
-	const connection = useAppState((s) => s.connection);
-	const hostInfo = useAppState((s) => s.hostInfo);
+	const connection = useAppState((s) => s.localConnection);
+	const hostInfo = useAppState((s) => s.localHostInfo);
 	const online = host.state === "ready" && connection === "open";
 	const text = online
 		? `已连接 · pi ${hostInfo?.piVersion ?? ""}`
@@ -24,12 +24,89 @@ export function useHostStatus(): { online: boolean; dot: "ok" | "bad" | "wait"; 
 	return { online, dot: online ? "ok" : host.state === "failed" ? "bad" : "wait", text };
 }
 
-/** Connection / host lifecycle banner shown above the main area when something is off. */
-export function HostBanner({ onShowLogs }: { onShowLogs: () => void }) {
+/** The shown computer's connection (this one's, or a paired computer's), for the main window. */
+export function useNodeStatus(): { online: boolean; dot: "ok" | "bad" | "wait"; text: string } {
 	const store = useStore();
+	const local = useHostStatus();
+	const node = useAppState((s) => s.node);
 	const host = useAppState((s) => s.host);
 	const connection = useAppState((s) => s.connection);
+	const revoked = useAppState((s) => !!s.nodeRevoked);
 	const connectError = useAppState((s) => s.connectError);
+	useAppState((s) => s.peers);
+	if (node === LOCAL_NODE) return local;
+	const name = store.nodeName(node);
+	const online = host.state === "ready" && connection === "open";
+	if (online) return { online, dot: "ok", text: `已连接 ${name}` };
+	if (revoked) return { online, dot: "bad", text: `${name} 已移除这台电脑` };
+	return {
+		online,
+		dot: connectError ? "bad" : "wait",
+		text: connectError ? `无法连接 ${name}` : connection === "reconnecting" ? "正在重连…" : `正在连接 ${name}…`,
+	};
+}
+
+/** Why a paired computer is not connected, with what to do about it. */
+function NodeBanner() {
+	const store = useStore();
+	const node = useAppState((s) => s.node);
+	const connection = useAppState((s) => s.connection);
+	const connectError = useAppState((s) => s.connectError);
+	const revoked = useAppState((s) => !!s.nodeRevoked);
+	useAppState((s) => s.peers);
+	const name = store.nodeName(node);
+
+	let level: "info" | "warning" | "error" = "info";
+	let text: string | undefined;
+	if (revoked) {
+		level = "error";
+		text = `${name} 已移除这台电脑（或重置了 Pier）。请在那台电脑上重新生成配对链接，再次配对。`;
+	} else if (connectError) {
+		level = "warning";
+		text = `无法连接到 ${name}：${connectError}。请确认它已开机、开启了局域网访问，且两台电脑网络互通；正在自动重试…`;
+	} else if (connection === "reconnecting") {
+		level = "warning";
+		text = `与 ${name} 的连接中断，正在重连…（那台电脑上进行中的任务不受影响）`;
+	} else if (connection === "connecting" || connection === "none") text = `正在通过加密通道连接 ${name}…`;
+	if (!text) return null;
+	return (
+		<div className={`banner host-banner ${level}`}>
+			{level === "info" ? (
+				<IconLoader size={15} className="spin" />
+			) : level === "warning" ? (
+				<IconInfo size={15} />
+			) : (
+				<IconAlert size={15} />
+			)}
+			<span>{text}</span>
+			<span className="banner-actions">
+				{revoked ? (
+					<button type="button" onClick={() => store.openAddPeer()}>
+						重新配对
+					</button>
+				) : level !== "info" ? (
+					<button type="button" onClick={() => store.retryNode()}>
+						立即重试
+					</button>
+				) : null}
+				<button type="button" className="ghost" onClick={() => store.switchNode(LOCAL_NODE)}>
+					切换回本机
+				</button>
+			</span>
+		</div>
+	);
+}
+
+/**
+ * Connection / host lifecycle banner shown above the main area when something is off.
+ * `scope="node"` (the main window) also covers the connection to a shown paired computer.
+ */
+export function HostBanner({ onShowLogs, scope = "local" }: { onShowLogs: () => void; scope?: "local" | "node" }) {
+	const store = useStore();
+	const host = useAppState((s) => s.host);
+	const node = useAppState((s) => s.node);
+	const connection = useAppState((s) => s.localConnection);
+	const connectError = useAppState((s) => (s.node === LOCAL_NODE ? s.connectError : undefined));
 
 	let level: "info" | "warning" | "error" = "info";
 	let text: string | undefined;
@@ -50,7 +127,7 @@ export function HostBanner({ onShowLogs }: { onShowLogs: () => void }) {
 		level = "warning";
 		text = "与 Pier Host 的连接中断，正在重连…（进行中的任务不受影响）";
 	} else if (connection === "connecting" || connection === "none") text = "正在连接 Pier Host…";
-	if (!text) return null;
+	if (!text) return scope === "node" && node !== LOCAL_NODE ? <NodeBanner /> : null;
 	const canRestart = store.bridgeKind === "tauri" && (host.state === "failed" || host.state === "ready");
 	return (
 		<div className={`banner host-banner ${level}`}>

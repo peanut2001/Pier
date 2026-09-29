@@ -1,4 +1,4 @@
-# Pier 协议 v1.8
+# Pier 协议 v1.9
 
 > 实现：`packages/protocol`（zod schema + TS 类型，Host 与所有客户端共享）。
 > 本文档描述线上格式与语义；字段的权威定义以 `packages/protocol/src` 为准。
@@ -50,6 +50,8 @@
 | 4401 | `host.hello` 失败或超时 | 不要自动重试（token / 版本错误） |
 | 4403 | 远程：设备未登记或已被吊销（握手时的 `error` 帧 code 为 `UNKNOWN_DEVICE`） | 停止重连，提示重新配对（`@pier/client` 默认把它视为终止） |
 | 4410 | 远程：桌面关闭了远程访问 | 稍后重连 |
+| 4404 | 本地 `/peer/<id>`：该电脑未配对（或已在本机移除）；`host.hello` 同时返回 `NOT_FOUND` | 不要重连 |
+| 4502 | 本地 `/peer/<id>`：连不上那台电脑，或与它的连接中断（原因写在 reason 中） | 稍后重连 |
 
 ## 2. 握手与版本
 
@@ -57,7 +59,7 @@
 
 ```jsonc
 { "type": "req", "id": "h", "method": "host.hello", "params": {
-  "protocolVersion": "1.8",
+  "protocolVersion": "1.9",
   "client": { "name": "pier-desktop", "version": "0.1.0", "platform": "darwin" },
   "token": "<本地 token>",       // 本地连接必填；远程连接由加密通道认证，不需要
   "coalesceMs": 50               // 可选：合并流式增量的窗口（0–1000ms，默认 0）
@@ -235,6 +237,18 @@ settings 文件无法解析时，修改类方法返回 `CONFLICT`，避免覆盖
 |---|---|---|
 | `ui.respond` | `{ sessionId, requestId, response: UiResponse }` | `{ accepted }`；请求已被其他客户端回答 / 超时 / 取消时为 `false` |
 
+### 其他电脑（1.9）
+
+每台电脑的 Host 都可以作为“设备”与其他电脑配对（使用它自己的静态密钥，见 [`docs/security.md`](security.md) §4.4）。桌面界面通过本地 Gateway 的 `ws://127.0.0.1:<port>/peer/<peerId>` 连接已配对的电脑：第一帧必须是带本地 token 的 `host.hello`（与普通本地连接一样校验 Origin 与 token），Host 校验后**去掉 token**，经 Noise IK 加密通道把 hello 与之后的帧原样转发给那台电脑，并把它的帧原样转回。对那台电脑来说这是一条普通的远程连接：`host.hello` 结果带 `device`，不能调用 🔒 方法，也收不到仅限本地的事件。连不上时以 4502 关闭，那台电脑吊销了本机时以 4403 关闭（reason `UNKNOWN_DEVICE`）。
+
+| 方法 | 参数 | 结果 |
+|---|---|---|
+| `peer.list` 🔒 | – | `{ peers: PeerInfo[] }`：`{ id（那台电脑的 hostId）, name, fingerprint, addresses, deviceId, pairedAt, lastConnectedAt?, platform?, version?, connected }`；`connected` 表示当前有桌面窗口经本机连着它 |
+| `peer.pair` 🔒 | `{ uri }`（那台电脑显示的 `pier://pair?...` 链接） | `{ peer }`；在那台电脑的用户确认后返回。失败时 `data.reason` 为 `INVALID_LINK`（`BAD_REQUEST`）、`SELF`（本机自己的链接）、`UNREACHABLE`、`PAIRING_INVALID`、`PAIRING_REJECTED`、`PAIRING_TIMEOUT`、`BAD_HANDSHAKE` 等（`CONFLICT`）。可能耗时数分钟，客户端请放宽超时 |
+| `peer.remove` 🔒 | `{ peerId }` | `{ removed }`；只在本机忘记那台电脑，并断开经本机到它的连接（4404）；那台电脑的设备列表不变 |
+
+Host 保存已配对的电脑于 `~/.pier/peers.json`（0600），每次经代理连接成功后更新名称、系统、版本、最近连接时间，并把成功的地址排到最前。
+
 ### 远程访问、配对与设备（1.1）
 
 | 方法 | 参数 | 结果 |
@@ -297,6 +311,7 @@ settings 文件无法解析时，修改类方法返回 `CONFLICT`，避免覆盖
 | `device.changed` | – | 设备登记、吊销、改名，或连接状态变化；重新调用 `device.list` |
 | `pairing.request` | `request: { id, device, fingerprint, address?, createdAt, expiresAt }` | 设备出示了正确的配对码，等待用户用 `pairing.respond` 确认 |
 | `pairing.resolved` | `requestId, resolution: accepted\|rejected\|expired\|cancelled, deviceId?` | 配对请求结束（`cancelled`：设备在等待中断开） |
+| `peer.changed` | – | 已配对的其他电脑增删、改名，或经本机的连接建立 / 断开（1.9）；重新调用 `peer.list` |
 | `extension.progress` | `action: install\|remove\|update\|clone\|pull, phase: start\|progress\|complete\|error, source, message?` | `extension.install` / `remove` / `update` 的进度（1.8） |
 
 服务商登录进度（1.2），只发给调用 `provider.login` 的那个连接；连接断开时登录自动取消：

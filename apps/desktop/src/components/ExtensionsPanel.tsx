@@ -326,7 +326,7 @@ function InstallForm({
 
 export function ExtensionsSettings() {
 	const store = useStore();
-	const workspaces = useAppState((s) => s.workspaces);
+	const workspaces = useAppState((s) => s.localWorkspaces);
 	const selectedWorkspaceId = useAppState((s) => s.selectedWorkspaceId);
 	const version = useAppState((s) => s.extensionsVersion);
 	const progress = useAppState((s) => s.extensionProgress);

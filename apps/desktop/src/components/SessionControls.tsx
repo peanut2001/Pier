@@ -2,7 +2,7 @@ import type { ChatController, ChatState } from "@pier/chat-state";
 import type { ApprovalPolicy, ForkPoint, ModelInfo, ThinkingLevel, WorkspaceInfo } from "@pier/protocol";
 import { useEffect, useRef, useState } from "react";
 import { POLICY_LABEL, POLICY_SUMMARY } from "../lib/format.ts";
-import { useStore } from "../lib/store.tsx";
+import { LOCAL_NODE, useAppState, useStore } from "../lib/store.tsx";
 import {
 	IconCheck,
 	IconChevronDown,
@@ -183,13 +183,16 @@ export function PolicyPicker({ workspace }: { workspace: WorkspaceInfo }) {
 	const [open, setOpen] = useState(false);
 	const ref = useOutsideClick(open, () => setOpen(false));
 	const current = workspace.policy;
+	// A workspace's policy can be changed only on its own computer.
+	const local = useAppState((s) => s.node === LOCAL_NODE);
 	return (
 		<div className="dropdown" ref={ref}>
 			<button
 				type="button"
 				className={`chip policy-chip ${current}`}
+				disabled={!local}
 				onClick={() => setOpen(!open)}
-				title="权限模式（对整个工作区生效）"
+				title={local ? "权限模式（对整个工作区生效）" : "权限模式只能在工作区所在的电脑上修改"}
 			>
 				{current === "auto" ? <IconShieldAlert size={14} /> : <IconShield size={14} />}
 				{POLICY_LABEL[current]}

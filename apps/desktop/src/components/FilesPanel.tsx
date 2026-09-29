@@ -1,7 +1,7 @@
 import type { WorkspaceFileEntry, WorkspaceInfo } from "@pier/protocol";
 import { type PointerEvent as ReactPointerEvent, useCallback, useEffect, useRef, useState } from "react";
 import { formatBytes, joinPath, relativeTime } from "../lib/format.ts";
-import { useAppState, useStore } from "../lib/store.tsx";
+import { LOCAL_NODE, useAppState, useStore } from "../lib/store.tsx";
 import { terminals } from "../lib/terminals.ts";
 import { ContextMenu, type ContextMenuItem, type ContextMenuPosition, contextMenuPosition } from "./ContextMenu.tsx";
 import {
@@ -181,6 +181,9 @@ function ResizeHandle() {
 export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInfo; composerKey?: string }) {
 	const store = useStore();
 	const connection = useAppState((s) => s.connection);
+	// Terminals and the file manager are on this computer: only for its own workspaces.
+	const local = useAppState((s) => s.node === LOCAL_NODE);
+	const canTerminal = terminals.supported && local;
 	const version = useAppState((s) => s.filesVersion[workspace.id] ?? 0);
 	const { dirs, expanded, reload, toggle, collapseAll } = useWorkspaceTree(workspace.id);
 	const [selected, setSelected] = useState<string>();
@@ -239,7 +242,7 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 				"separator",
 				{ label: "复制工作区路径", icon: <IconCopy size={14} />, onSelect: () => copyText(workspace.path) },
 				"separator",
-				terminals.supported && {
+				canTerminal && {
 					label: "在终端中打开",
 					icon: <IconTerminal size={14} />,
 					onSelect: () => terminals.create({ workspace, cwd: workspace.path }),
@@ -279,7 +282,7 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 			},
 			{ label: "复制名称", icon: <IconCopy size={14} />, onSelect: () => copyText(entry.name, entry.path) },
 			"separator",
-			terminals.supported && {
+			canTerminal && {
 				label: isDir ? "在终端中打开" : "在所在目录打开终端",
 				icon: <IconTerminal size={14} />,
 				onSelect: () =>
@@ -367,7 +370,7 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 									{entry.symlink ? <IconLink size={11} className="files-link" /> : null}
 								</button>
 								<span className="files-actions">
-									{isDir && terminals.supported ? (
+									{isDir && canTerminal ? (
 										<button
 											type="button"
 											className="ghost icon"

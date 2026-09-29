@@ -32,7 +32,16 @@ import {
 	type Transport,
 } from "./connection.ts";
 import type { ManagedSession } from "./managed-session.ts";
-import { accountPath, configPath, defaultPierDir, extensionTrashDir, locksDir, sessionTrashDir } from "./paths.ts";
+import {
+	accountPath,
+	configPath,
+	defaultPierDir,
+	extensionTrashDir,
+	locksDir,
+	peersPath,
+	sessionTrashDir,
+} from "./paths.ts";
+import { PeerManager, type PeerManagerOptions } from "./peers/peers.ts";
 import { AccountManager } from "./pi/account.ts";
 import { PI_VERSION, PiEnvironment, type PiEnvironmentOptions, toModelInfo } from "./pi/environment.ts";
 import { ExtensionManager, type ExtensionTarget } from "./pi/extensions.ts";
@@ -59,6 +68,8 @@ export interface PierHostOptions {
 	sweepIntervalMs?: number;
 	/** Remote access overrides (tests, CLI flags). Saved settings live in config.json. */
 	remote?: RemoteAccessOptions;
+	/** Outgoing connections to paired computers (tests). */
+	peers?: PeerManagerOptions;
 	/** Diagnostic log sink (stderr in the sidecar). */
 	log?: (message: string) => void;
 	/** Site of the personal center (tests). Defaults to 云链API. */
@@ -145,6 +156,7 @@ export class PierHost implements RequestHandler {
 	readonly newapi: NewApiManager;
 	readonly account: AccountManager;
 	readonly extensions: ExtensionManager;
+	readonly peers: PeerManager;
 	private readonly log: (message: string) => void;
 	private readonly connections = new Set<Connection>();
 	private readonly localToken: string;
@@ -220,6 +232,19 @@ export class PierHost implements RequestHandler {
 			},
 			options.remote,
 		);
+		this.peers = new PeerManager(
+			peersPath(this.pierDir),
+			{
+				hostId: () => this.config.hostId,
+				hostName: () => this.config.hostName,
+				hostVersion: () => PIER_HOST_VERSION,
+				identity: () => this.remote.identity,
+				verifyLocalToken: (token) => this.verifyLocalToken(token),
+				broadcastLocal: (event) => this.broadcast(event),
+				log,
+			},
+			options.peers,
+		);
 		this.handlers = this.createHandlers();
 	}
 
@@ -242,6 +267,11 @@ export class PierHost implements RequestHandler {
 			piVersion: PI_VERSION,
 			agentDir: this.env.agentDir,
 		};
+	}
+
+	/** Whether `token` is this host's local token (the desktop UI and local tools). */
+	verifyLocalToken(token: unknown): boolean {
+		return typeof token === "string" && tokensEqual(token, this.localToken);
 	}
 
 	get connectionCount(): number {
@@ -385,7 +415,7 @@ export class PierHost implements RequestHandler {
 				}
 				const device = ctx.connection.device;
 				if (ctx.connection.kind === "local") {
-					if (!params.token || !tokensEqual(params.token, this.localToken)) {
+					if (!this.verifyLocalToken(params.token)) {
 						throw new PierProtocolError("UNAUTHENTICATED", "Invalid local token");
 					}
 				} else if (!device || !this.remote.isRegistered(device.id)) {
@@ -643,6 +673,10 @@ export class PierHost implements RequestHandler {
 
 			"remote.status": () => this.remote.status(),
 			"remote.configure": (_ctx, params) => this.remote.configure(params),
+
+			"peer.list": () => ({ peers: this.peers.list() }),
+			"peer.pair": async (_ctx, params) => ({ peer: await this.peers.pair(params.uri) }),
+			"peer.remove": (_ctx, params) => ({ removed: this.peers.remove(params.peerId) }),
 		};
 	}
 
@@ -653,6 +687,7 @@ export class PierHost implements RequestHandler {
 		this.providers.shutdown();
 		this.account.shutdown();
 		this.newapi.shutdown();
+		this.peers.shutdown();
 		await this.remote.shutdown();
 		await this.pool.disposeAll();
 		for (const connection of [...this.connections]) connection.close(1001, "Host shutting down");

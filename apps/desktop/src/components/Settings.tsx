@@ -85,9 +85,9 @@ const GROUPS: Array<{ title: string; items: SectionDef[] }> = [
 		items: [
 			{
 				id: "remote",
-				label: "手机与远程",
+				label: "设备与远程",
 				icon: IconSmartphone,
-				keywords: "手机 远程 配对 二维码 设备 局域网 端口 指纹",
+				keywords: "手机 电脑 其他电脑 节点 互联 切换 远程 配对 二维码 链接 设备 局域网 端口 指纹",
 				online: true,
 			},
 		],
@@ -109,7 +109,7 @@ const GENERAL = SECTIONS.find((item) => item.id === "general") as SectionDef;
 function GeneralSettings() {
 	const store = useStore();
 	const host = useAppState((s) => s.host);
-	const hostInfo = useAppState((s) => s.hostInfo);
+	const hostInfo = useAppState((s) => s.localHostInfo);
 	const status = useHostStatus();
 	const tauri = store.bridgeKind === "tauri";
 	const [confirmQuit, setConfirmQuit] = useState(false);
@@ -251,12 +251,12 @@ function WorkspaceCard({ workspace }: { workspace: WorkspaceInfo }) {
 }
 
 function WorkspacesSettings() {
-	const workspaces = useAppState((s) => s.workspaces);
+	const workspaces = useAppState((s) => s.localWorkspaces);
 	const addWorkspace = useAddWorkspace();
 	return (
 		<>
 			<p className="settings-intro">
-				每个工作区可以单独设置 Agent 调用工具时的审批策略。危险命令（rm -r、sudo、git push --force
+				这里管理本机的工作区。每个工作区可以单独设置 Agent 调用工具时的审批策略。危险命令（rm -r、sudo、git push --force
 				等）在“逐项审批”和“智能”策略下总是需要批准。移除工作区不会删除任何文件。
 			</p>
 			<SettingsGroup

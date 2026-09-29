@@ -2,7 +2,7 @@ import type { WorkspaceFileContent } from "@pier/protocol";
 import { type KeyboardEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatBytes, languageForPath, relativeTime } from "../lib/format.ts";
 import { isSensitiveFile } from "../lib/sensitive-files.ts";
-import { useAppState, useStore } from "../lib/store.tsx";
+import { LOCAL_NODE, useAppState, useStore } from "../lib/store.tsx";
 import {
 	IconAlert,
 	IconFile,
@@ -182,7 +182,9 @@ export function FileViewer({
 
 	const name = path.split("/").pop() ?? path;
 	const isMarkdown = MARKDOWN.test(path) && file?.kind === "text";
-	const editable = file?.kind === "text" && !file.truncated;
+	// Workspace files can be written only on this computer (remote devices may only read them).
+	const local = useAppState((s) => s.node === LOCAL_NODE);
+	const editable = local && file?.kind === "text" && !file.truncated;
 	const editing = draft !== undefined && !!file;
 	const original = useMemo(() => toLf(file?.text ?? ""), [file?.text]);
 	const dirty = editing && draft !== original;

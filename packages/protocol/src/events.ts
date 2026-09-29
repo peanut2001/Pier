@@ -95,6 +95,8 @@ export type PierHostEvent =
 	| { type: "device.changed" }
 	| { type: "pairing.request"; request: PairingRequest }
 	| { type: "pairing.resolved"; requestId: string; resolution: PairingResolution; deviceId?: string }
+	/** Paired peer computers were added, removed, renamed or (dis)connected (1.9). Local only. */
+	| { type: "peer.changed" }
 	/** Providers, credentials, models.json or the default model changed (1.2). Sent to every connection. */
 	| { type: "provider.changed" }
 	/**
@@ -132,6 +134,7 @@ export const LOCAL_ONLY_EVENTS: ReadonlySet<string> = new Set([
 	"device.changed",
 	"pairing.request",
 	"pairing.resolved",
+	"peer.changed",
 	"auth.prompt",
 	"auth.promptClosed",
 	"auth.notice",

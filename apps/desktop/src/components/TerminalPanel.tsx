@@ -1,6 +1,7 @@
 import "@xterm/xterm/css/xterm.css";
 import type { WorkspaceInfo } from "@pier/protocol";
 import { type PointerEvent as ReactPointerEvent, useEffect, useLayoutEffect, useRef } from "react";
+import { LOCAL_NODE, useAppState } from "../lib/store.tsx";
 import { TERMINAL_DEFAULT_HEIGHT, type TerminalTab, terminalLabel, terminals, useTerminals } from "../lib/terminals.ts";
 import { IconChevronDown, IconPlus, IconTerminal, IconTrash, IconX } from "./Icons.tsx";
 
@@ -147,7 +148,8 @@ export function TerminalPanel({ workspace }: { workspace?: WorkspaceInfo }) {
 /** Header button that shows or hides the terminal panel. */
 export function TerminalToggle({ workspace }: { workspace?: WorkspaceInfo | undefined }) {
 	const open = useTerminals((s) => s.open);
-	if (!terminals.supported) return null;
+	const local = useAppState((s) => s.node === LOCAL_NODE);
+	if (!terminals.supported || !local) return null;
 	return (
 		<button
 			type="button"

@@ -34,6 +34,11 @@ export function devicesPath(pierDir: string): string {
 	return join(pierDir, "devices.json");
 }
 
+/** Other computers this host paired with as a device. */
+export function peersPath(pierDir: string): string {
+	return join(pierDir, "peers.json");
+}
+
 /** Append-only log of actions taken by remote devices. */
 export function auditLogPath(pierDir: string): string {
 	return join(pierDir, "audit.log");

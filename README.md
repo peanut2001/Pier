@@ -6,6 +6,7 @@ Pier 是编码 Agent 在桌面上的停靠点：Agent 常驻在你的电脑上�
 
 - 桌面端：Tauri 2，内置 Pier Host（当前 Agent 运行时为 pi SDK）
 - 手机端：Expo / React Native 原生 App，通过配对后的加密连接驱动桌面 Agent
+- 电脑之间：每台电脑都是一个节点，桌面端可以添加其他电脑并切换过去，直接查看和驱动那台电脑上的 Agent
 
 开发计划见 [docs/PLAN.md](docs/PLAN.md)，协议见 [docs/protocol.md](docs/protocol.md)，远程访问的安全设计见 [docs/security.md](docs/security.md)，技术验证结论见 [docs/spikes.md](docs/spikes.md)。
 
@@ -20,7 +21,7 @@ M0–M2（Host 核心、桌面端 MVP）已完成；M3（手机端 MVP，局域�
 | `packages/crypto` | Noise XX / IK（X25519、ChaCha20‑Poly1305、SHA‑256，纯 JS）、加密通道帧、配对链接、性能测试 |
 | `packages/client` | 通用客户端（握手、请求关联、自动重连、按 seq 恢复）、加密 WebSocket 与配对，以及调试 CLI `pier-cli` |
 | `packages/chat-state` | 快照 + 事件 → 聊天视图状态的纯逻辑 reducer、会话控制器与斜杠命令解析执行（桌面端与手机端共用） |
-| `apps/desktop` | Tauri 2 桌面应用：管理 Host sidecar（启动、崩溃重启、日志）、托盘常驻、单实例；React 界面含工作区与会话管理、流式聊天、工具卡片（终端输出、diff、文件预览）、审批、模型与思考等级切换、压缩、分叉、斜杠命令菜单、右侧工作区文件面板、底部内置终端（xterm.js + 本机 PTY，只在桌面端可用）、pi 扩展与扩展包管理（安装、移除、更新、启用 / 停用），以及远程访问、配对二维码与设备管理 |
+| `apps/desktop` | Tauri 2 桌面应用：管理 Host sidecar（启动、崩溃重启、日志）、托盘常驻、单实例；React 界面含工作区与会话管理、流式聊天、工具卡片（终端输出、diff、文件预览）、审批、模型与思考等级切换、压缩、分叉、斜杠命令菜单、右侧工作区文件面板、底部内置终端（xterm.js + 本机 PTY，只在桌面端可用）、pi 扩展与扩展包管理（安装、移除、更新、启用 / 停用），远程访问、配对二维码与设备管理，以及电脑之间互联（添加其他电脑、在侧边栏切换查看和驱动它们的会话） |
 | `apps/mobile` | Expo（SDK 57）手机 App：扫码配对、多台电脑、会话列表、流式聊天、工具卡片、审批、steer / follow-up / 中止、附图、模型切换、斜杠命令、断线重连补发 |
 
 ## 开发
@@ -105,6 +106,8 @@ packages/host/bin/pier-host --help
 ```
 
 Pier 自身状态保存在 `~/.pier`（可用 `PIER_DIR` 覆盖）：`config.json`（工作区、审批策略与远程访问设置）、`run/host.json`（运行中 Host 的端口与本地 token，权限 0600）、`locks/`（会话文件锁）、`identity.json`（Host 的 X25519 私钥）、`devices.json`（已配对设备）、`audit.log`（远程设备的操作记录）。后三个文件权限均为 0600。
+
+配对过的其他电脑保存在 `peers.json`（0600）中；桌面界面经本地 Gateway 的 `/peer/<id>` 连接它们，由 Host 用自己的密钥完成加密握手（见 [docs/security.md](docs/security.md) §4.4）。
 
 远程访问相关的命令行参数：`--no-remote`（本次运行不开启远程访问）、`--remote-port <n>`、`--remote-address <host:port>`（写进配对二维码的地址，可重复，例如 Tailscale 域名）、`--no-mdns`。
 

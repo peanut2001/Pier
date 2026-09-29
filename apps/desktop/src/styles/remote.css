@@ -109,3 +109,43 @@ button.small-icon {
 .pairing-request .host-facts {
 	margin-top: 10px;
 }
+
+.device-kind {
+	flex: none;
+	color: var(--text-muted);
+}
+
+.device-name .pill {
+	margin-left: 6px;
+	font-weight: 500;
+}
+
+/* ---- add a computer ------------------------------------------------------------- */
+
+.add-peer p {
+	margin: 0 0 10px;
+}
+
+.add-peer-steps {
+	margin: 0 0 12px;
+	padding-left: 20px;
+	font-size: 13px;
+	line-height: 1.8;
+}
+
+.add-peer-link {
+	width: 100%;
+	resize: vertical;
+	font-size: 12px;
+	margin-bottom: 10px;
+	word-break: break-all;
+}
+
+.add-peer-status {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 10px;
+	font-size: 13px;
+	color: var(--text-muted);
+}
