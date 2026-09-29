@@ -296,6 +296,54 @@ export interface ProviderListResult {
 	error?: string;
 }
 
+// ---- NewAPI sign-in (1.3) --------------------------------------------------------------
+
+/** An API token (令牌) of a NewAPI account. The key itself never leaves the host. */
+export interface NewApiToken {
+	id: number;
+	name: string;
+	/** Masked key for display, e.g. `sk-abcd**********wxyz`. */
+	maskedKey: string;
+	/** NewAPI token status: 1 enabled, 2 disabled, 3 expired, 4 exhausted. */
+	status: number;
+	/** Empty for the user's default group. */
+	group?: string;
+	/** Unix seconds; absent when the token never expires. */
+	expiresAt?: number;
+	unlimitedQuota: boolean;
+	remainQuota?: number;
+	/** Models the token is restricted to, when model limits are enabled. */
+	modelLimits?: string[];
+}
+
+/** A group the NewAPI user may create tokens in. */
+export interface NewApiGroup {
+	name: string;
+	description?: string;
+	/** Effective price ratio, or a label such as “自动”. */
+	ratio?: number | string;
+}
+
+export interface NewApiAccount {
+	site: {
+		/** The site's `system_name`. */
+		name: string;
+		/** Normalized site address, e.g. `https://api.example.com`. */
+		url: string;
+		version?: string;
+		logo?: string;
+	};
+	user: { id?: number; username: string; displayName?: string; group?: string };
+	tokens: NewApiToken[];
+	groups: NewApiGroup[];
+}
+
+/** Result of `newapi.login` / `newapi.verify`. */
+export type NewApiLoginResult =
+	| { status: "ok"; sessionId: string; account: NewApiAccount }
+	/** The account asks for a two-factor code; answer with `newapi.verify`. */
+	| { status: "verify"; sessionId: string; methods: string[] };
+
 /** A question asked during a provider sign-in. */
 export interface AuthPromptInfo {
 	id: string;

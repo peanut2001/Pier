@@ -12,6 +12,8 @@ import type {
 	EventFrame,
 	HostInfo,
 	ModelInfo,
+	NewApiLoginResult,
+	NewApiToken,
 	PairingRequest,
 	PairingResolution,
 	ProviderInfo,
@@ -509,12 +511,16 @@ export class PierStore {
 	}
 
 	/** Save a custom endpoint. Throws so the form can show the error next to the fields. */
-	async saveCustomProvider(provider: CustomProvider, apiKey: string | undefined, create: boolean): Promise<void> {
+	async saveCustomProvider(
+		provider: CustomProvider,
+		key: { apiKey?: string | undefined; apiKeyRef?: string | undefined },
+		create: boolean,
+	): Promise<void> {
 		const client = this.client;
 		if (!client) throw new Error("尚未连接到 Pier Host");
 		const result = await client.request("provider.saveCustom", {
 			provider,
-			...(apiKey ? { apiKey } : {}),
+			...(key.apiKeyRef ? { apiKeyRef: key.apiKeyRef } : key.apiKey ? { apiKey: key.apiKey } : {}),
 			create,
 		});
 		this.toast(
@@ -539,11 +545,54 @@ export class PierStore {
 		api: CustomProviderApi;
 		baseUrl: string;
 		apiKey?: string;
+		apiKeyRef?: string;
 		providerId?: string;
 	}): Promise<Array<{ id: string; name?: string }>> {
 		const client = this.client;
 		if (!client) throw new Error("尚未连接到 Pier Host");
 		return (await client.request("provider.probeModels", params, { timeoutMs: 30_000 })).models;
+	}
+
+	// ---- NewAPI sign-in (errors are thrown so the dialog can show them) ----------------------
+
+	private hostClient(): PierClient {
+		const client = this.client;
+		if (!client) throw new Error("尚未连接到 Pier Host");
+		return client;
+	}
+
+	newApiLogin(
+		params: { baseUrl: string } & ({ username: string; password: string } | { accessToken: string; userId?: number }),
+	): Promise<NewApiLoginResult> {
+		return this.hostClient().request("newapi.login", params, { timeoutMs: 45_000 });
+	}
+
+	newApiVerify(sessionId: string, code: string): Promise<NewApiLoginResult> {
+		return this.hostClient().request("newapi.verify", { sessionId, code }, { timeoutMs: 45_000 });
+	}
+
+	newApiCreateToken(
+		sessionId: string,
+		name: string,
+		group?: string,
+	): Promise<{ tokenId: number; tokens: NewApiToken[] }> {
+		return this.hostClient().request(
+			"newapi.createToken",
+			{ sessionId, name, ...(group ? { group } : {}) },
+			{ timeoutMs: 45_000 },
+		);
+	}
+
+	newApiUseToken(
+		sessionId: string,
+		tokenId: number,
+	): Promise<{ keyRef: string; models: Array<{ id: string; name?: string }>; modelsError?: string }> {
+		return this.hostClient().request("newapi.useToken", { sessionId, tokenId }, { timeoutMs: 45_000 });
+	}
+
+	/** Forget a NewAPI login (fire and forget). */
+	newApiClose(sessionId: string): void {
+		void this.client?.request("newapi.close", { sessionId }).catch(() => undefined);
 	}
 
 	async refreshSessions(workspaceId: string): Promise<void> {

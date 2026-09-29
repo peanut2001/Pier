@@ -32,6 +32,7 @@ import {
 import type { ManagedSession } from "./managed-session.ts";
 import { configPath, defaultPierDir, locksDir } from "./paths.ts";
 import { PI_VERSION, PiEnvironment, type PiEnvironmentOptions, toModelInfo } from "./pi/environment.ts";
+import { NewApiManager } from "./pi/newapi.ts";
 import { ProviderManager } from "./pi/providers.ts";
 import { RemoteAccess, type RemoteAccessOptions } from "./remote/remote-access.ts";
 import { SessionPool } from "./session-pool.ts";
@@ -132,6 +133,7 @@ export class PierHost implements RequestHandler {
 	readonly pool: SessionPool;
 	readonly remote: RemoteAccess;
 	readonly providers: ProviderManager;
+	readonly newapi: NewApiManager;
 	private readonly connections = new Set<Connection>();
 	private readonly localToken: string;
 	private readonly handlers: Handlers;
@@ -175,6 +177,7 @@ export class PierHost implements RequestHandler {
 			onChanged: () => this.broadcast({ type: "provider.changed" }),
 			log,
 		});
+		this.newapi = new NewApiManager({ log });
 		this.remote = new RemoteAccess(
 			this.pierDir,
 			this.config,
@@ -229,6 +232,7 @@ export class PierHost implements RequestHandler {
 	disconnected(connection: Connection): void {
 		this.connections.delete(connection);
 		this.providers.connectionClosed(connection.connectionId);
+		this.newapi.connectionClosed(connection.connectionId);
 		for (const session of connection.subscriptions) session.unsubscribe(connection.connectionId);
 		connection.subscriptions.clear();
 	}
@@ -460,12 +464,30 @@ export class PierHost implements RequestHandler {
 				cancelled: this.providers.cancel(ctx.connection.connectionId, params.flowId),
 			}),
 			"provider.logout": async (_ctx, params) => ({ removed: await this.providers.logout(params.providerId) }),
-			"provider.saveCustom": (_ctx, params) =>
-				this.providers.saveCustom(params.provider, params.apiKey, params.create ?? false),
+			"provider.saveCustom": (ctx, params) =>
+				this.providers.saveCustom(
+					params.provider,
+					params.apiKeyRef ? this.newapi.resolveKey(ctx.connection.connectionId, params.apiKeyRef) : params.apiKey,
+					params.create ?? false,
+				),
 			"provider.removeCustom": async (_ctx, params) => ({
 				removed: await this.providers.removeCustom(params.providerId),
 			}),
-			"provider.probeModels": async (_ctx, params) => ({ models: await this.providers.probeModels(params) }),
+			"provider.probeModels": async (ctx, { apiKeyRef, ...params }) => ({
+				models: await this.providers.probeModels(
+					apiKeyRef ? { ...params, apiKey: this.newapi.resolveKey(ctx.connection.connectionId, apiKeyRef) } : params,
+				),
+			}),
+
+			"newapi.login": (ctx, params) => this.newapi.login(ctx.connection.connectionId, params),
+			"newapi.verify": (ctx, params) => this.newapi.verify(ctx.connection.connectionId, params.sessionId, params.code),
+			"newapi.createToken": (ctx, params) =>
+				this.newapi.createToken(ctx.connection.connectionId, params.sessionId, params.name, params.group),
+			"newapi.useToken": (ctx, params) =>
+				this.newapi.useToken(ctx.connection.connectionId, params.sessionId, params.tokenId),
+			"newapi.close": async (ctx, params) => ({
+				closed: await this.newapi.close(ctx.connection.connectionId, params.sessionId),
+			}),
 
 			"ui.respond": (ctx, params) => ({
 				accepted: this.pool
@@ -490,6 +512,7 @@ export class PierHost implements RequestHandler {
 		this.shuttingDown = true;
 		this.broadcast({ type: "host.notice", level: "warning", message: "Pier host is shutting down" });
 		this.providers.shutdown();
+		this.newapi.shutdown();
 		await this.remote.shutdown();
 		await this.pool.disposeAll();
 		for (const connection of [...this.connections]) connection.close(1001, "Host shutting down");

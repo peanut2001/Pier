@@ -290,6 +290,84 @@ button.chip-button.added:disabled {
 	height: 28px;
 }
 
+/* ---- NewAPI sign-in ------------------------------------------------------------------ */
+
+.newapi-form {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+
+.newapi-form > p {
+	margin: 0;
+}
+
+.newapi-form .modal-actions {
+	margin-top: 4px;
+}
+
+.segmented {
+	display: inline-flex;
+	align-self: flex-start;
+	padding: 2px;
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	background: var(--bg-elevated);
+}
+
+.newapi-form .segmented button {
+	border: none;
+	border-radius: 6px;
+	background: transparent;
+	padding: 4px 12px;
+	font-size: 12.5px;
+	color: var(--text-muted);
+}
+
+.newapi-form .segmented button.active {
+	background: var(--bg-active);
+	color: var(--text);
+}
+
+.newapi-account {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 10px 14px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-lg);
+	background: var(--bg-elevated);
+}
+
+.newapi-logo {
+	width: 32px;
+	height: 32px;
+	border-radius: 8px;
+	object-fit: contain;
+}
+
+.newapi-tokens {
+	max-height: 280px;
+	overflow-y: auto;
+}
+
+label.provider-row.option-row {
+	cursor: pointer;
+}
+
+label.provider-row.option-row:hover {
+	background: var(--accent-soft);
+}
+
+label.provider-row.option-row.disabled {
+	cursor: default;
+	opacity: 0.55;
+}
+
+label.provider-row.option-row.disabled:hover {
+	background: transparent;
+}
+
 /* ---- entry points ------------------------------------------------------------------- */
 
 .no-models {

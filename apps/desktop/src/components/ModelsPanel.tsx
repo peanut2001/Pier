@@ -27,6 +27,7 @@ import {
 } from "./Icons.tsx";
 import { CopyButton } from "./Markdown.tsx";
 import { Modal } from "./Modal.tsx";
+import { NewApiConnect, type NewApiPreset, newApiBaseUrl } from "./NewApiConnect.tsx";
 import { SettingRow, SettingsCard, SettingsGroup } from "./SettingsUi.tsx";
 
 /** Providers listed first when adding one. */
@@ -300,7 +301,7 @@ function AddProviderList({ providers }: { providers: ProviderInfo[] }) {
 	);
 }
 
-function ProviderList({ onCustom }: { onCustom: (provider?: ProviderInfo) => void }) {
+function ProviderList({ onCustom, onNewApi }: { onCustom: (provider?: ProviderInfo) => void; onNewApi: () => void }) {
 	const store = useStore();
 	const providers = useAppState((s) => s.providers);
 	if (!providers) return <p className="muted">正在读取模型配置…</p>;
@@ -344,14 +345,21 @@ function ProviderList({ onCustom }: { onCustom: (provider?: ProviderInfo) => voi
 			<SettingsGroup
 				title="添加服务商"
 				actions={
-					<button type="button" className="primary" onClick={() => onCustom()}>
-						<IconPlus size={14} />
-						自定义接口
-					</button>
+					<div className="row-actions">
+						<button type="button" onClick={onNewApi} title="登录 NewAPI 中转站，自动获取令牌和模型">
+							<IconKey size={13} />
+							NewAPI 登录
+						</button>
+						<button type="button" className="primary" onClick={() => onCustom()}>
+							<IconPlus size={14} />
+							自定义接口
+						</button>
+					</div>
 				}
 			>
 				<p className="muted small settings-note">
-					使用中转站、公司网关或本地模型（Ollama、LM Studio、vLLM 等）时，选择「自定义接口」填写 Base URL 和 API Key。
+					使用中转站、公司网关或本地模型（Ollama、LM Studio、vLLM 等）时，选择「自定义接口」填写 Base URL 和 API
+					Key；NewAPI 中转站可以直接「NewAPI 登录」，自动获取令牌和模型列表。
 				</p>
 				<AddProviderList providers={others} />
 			</SettingsGroup>
@@ -524,19 +532,37 @@ interface ModelRow extends CustomModel {
 let nextRowKey = 1;
 const row = (model: CustomModel): ModelRow => ({ ...model, key: nextRowKey++ });
 
-function CustomProviderForm({ editing, onDone }: { editing?: ProviderInfo; onDone: () => void }) {
+/** Most models a custom provider may list (see `CustomProviderSchema`). */
+const MAX_MODELS = 500;
+
+function CustomProviderForm({
+	editing,
+	preset,
+	onDone,
+	onBack,
+}: {
+	editing?: ProviderInfo;
+	/** Values found by the NewAPI sign-in. */
+	preset?: NewApiPreset;
+	onDone: () => void;
+	/** “返回” handler when it should not close the dialog. */
+	onBack?: () => void;
+}) {
 	const store = useStore();
 	const providers = useAppState((s) => s.providers);
 	const initial = editing?.custom;
-	const [name, setName] = useState(initial?.name ?? editing?.name ?? "");
-	const [id, setId] = useState(initial?.id ?? "");
-	const [idTouched, setIdTouched] = useState(Boolean(initial));
-	const [api, setApi] = useState<CustomProviderApi>(initial?.api ?? "openai-completions");
-	const [baseUrl, setBaseUrl] = useState(initial?.baseUrl ?? "");
+	const [name, setName] = useState(initial?.name ?? editing?.name ?? preset?.name ?? "");
+	const [id, setId] = useState(initial?.id ?? preset?.id ?? "");
+	const [idTouched, setIdTouched] = useState(Boolean(initial || preset));
+	const [api, setApi] = useState<CustomProviderApi>(initial?.api ?? preset?.api ?? "openai-completions");
+	const [baseUrl, setBaseUrl] = useState(initial?.baseUrl ?? (preset ? newApiBaseUrl(preset.siteUrl, preset.api) : ""));
 	const [apiKey, setApiKey] = useState("");
-	const [models, setModels] = useState<ModelRow[]>(() => (initial?.models ?? [{ id: "" }]).map(row));
+	const [keyRef, setKeyRef] = useState(preset?.keyRef);
+	const [models, setModels] = useState<ModelRow[]>(() =>
+		(initial?.models ?? (preset?.models.length ? preset.models.slice(0, MAX_MODELS) : [{ id: "" }])).map(row),
+	);
 	const [probe, setProbe] = useState<{ busy?: boolean; error?: string; models?: Array<{ id: string; name?: string }> }>(
-		{},
+		() => (preset ? (preset.modelsError ? { error: preset.modelsError } : { models: preset.models }) : {}),
 	);
 	const [saving, setSaving] = useState(false);
 	const [error, setError] = useState<string | undefined>();
@@ -555,7 +581,7 @@ function CustomProviderForm({ editing, onDone }: { editing?: ProviderInfo; onDon
 			const found = await store.probeModels({
 				api,
 				baseUrl: baseUrl.trim(),
-				...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
+				...(apiKey.trim() ? { apiKey: apiKey.trim() } : keyRef ? { apiKeyRef: keyRef } : {}),
 				...(editing ? { providerId: editing.id } : {}),
 			});
 			setProbe({ models: found });
@@ -578,7 +604,8 @@ function CustomProviderForm({ editing, onDone }: { editing?: ProviderInfo; onDon
 		if (!PROVIDER_ID_RE.test(effectiveId)) return "ID 只能包含小写字母、数字、“.”、“_”和“-”，并以字母或数字开头";
 		if (taken) return `ID “${effectiveId}” 已被使用，请换一个`;
 		if (!/^https?:\/\/\S+$/i.test(baseUrl.trim())) return "Base URL 必须以 http:// 或 https:// 开头";
-		if (!editing && !apiKey.trim()) return "请填写 API Key（本地服务不需要密钥时可以随便填，例如 ollama）";
+		if (cleaned.length > MAX_MODELS) return `最多添加 ${MAX_MODELS} 个模型`;
+		if (!editing && !apiKey.trim() && !keyRef) return "请填写 API Key（本地服务不需要密钥时可以随便填，例如 ollama）";
 		if (!cleaned.length) return "至少添加一个模型";
 		return undefined;
 	};
@@ -604,7 +631,11 @@ function CustomProviderForm({ editing, onDone }: { editing?: ProviderInfo; onDon
 		};
 		setSaving(true);
 		try {
-			await store.saveCustomProvider(provider, apiKey.trim() || undefined, !editing);
+			await store.saveCustomProvider(
+				provider,
+				apiKey.trim() ? { apiKey: apiKey.trim() } : { apiKeyRef: keyRef },
+				!editing,
+			);
 			onDone();
 		} catch (err) {
 			setError(errorText(err));
@@ -643,7 +674,17 @@ function CustomProviderForm({ editing, onDone }: { editing?: ProviderInfo; onDon
 				</label>
 				<label className="form-field">
 					<span className="field-label">接口类型</span>
-					<select value={api} onChange={(e) => setApi(e.target.value as CustomProviderApi)}>
+					<select
+						value={api}
+						onChange={(e) => {
+							const next = e.target.value as CustomProviderApi;
+							// Follow the API type while the NewAPI address has not been edited.
+							if (preset && baseUrl.trim() === newApiBaseUrl(preset.siteUrl, api)) {
+								setBaseUrl(newApiBaseUrl(preset.siteUrl, next));
+							}
+							setApi(next);
+						}}
+					>
 						{CUSTOM_PROVIDER_APIS.map((value) => (
 							<option key={value} value={value}>
 								{API_LABEL[value]}
@@ -661,17 +702,29 @@ function CustomProviderForm({ editing, onDone }: { editing?: ProviderInfo; onDon
 						onChange={(e) => setBaseUrl(e.target.value)}
 					/>
 				</label>
-				<label className="form-field wide">
-					<span className="field-label">API Key</span>
-					<input
-						type="password"
-						autoComplete="off"
-						spellCheck={false}
-						placeholder={hasKey ? "已保存，留空则保持不变" : "sk-…"}
-						value={apiKey}
-						onChange={(e) => setApiKey(e.target.value)}
-					/>
-				</label>
+				{keyRef && preset ? (
+					<div className="form-field wide">
+						<span className="field-label">API Key</span>
+						<div className="auth-input-row">
+							<input disabled value={`NewAPI 令牌 ${preset.keyLabel}`} />
+							<button type="button" onClick={() => setKeyRef(undefined)}>
+								手动填写
+							</button>
+						</div>
+					</div>
+				) : (
+					<label className="form-field wide">
+						<span className="field-label">API Key</span>
+						<input
+							type="password"
+							autoComplete="off"
+							spellCheck={false}
+							placeholder={hasKey ? "已保存，留空则保持不变" : "sk-…"}
+							value={apiKey}
+							onChange={(e) => setApiKey(e.target.value)}
+						/>
+					</label>
+				)}
 			</div>
 			<p className="muted small">{BASE_URL_NOTE[api]}</p>
 
@@ -788,7 +841,7 @@ function CustomProviderForm({ editing, onDone }: { editing?: ProviderInfo; onDon
 				</div>
 			) : null}
 			<div className="modal-actions">
-				<button type="button" onClick={onDone}>
+				<button type="button" onClick={onBack ?? onDone}>
 					返回
 				</button>
 				<button type="submit" className="primary" disabled={saving}>
@@ -805,9 +858,32 @@ function CustomProviderForm({ editing, onDone }: { editing?: ProviderInfo; onDon
 /** The “models and providers” settings page. */
 export function ModelsSettings() {
 	const [custom, setCustom] = useState<{ provider?: ProviderInfo } | undefined>();
+	const [newApi, setNewApi] = useState<{ preset?: NewApiPreset } | undefined>();
+	const providers = useAppState((s) => s.providers);
+	const takenIds = useMemo(() => new Set(providers?.providers.map((p) => p.id) ?? []), [providers]);
 	return (
 		<>
-			<ProviderList onCustom={(provider) => setCustom(provider ? { provider } : {})} />
+			<ProviderList onCustom={(provider) => setCustom(provider ? { provider } : {})} onNewApi={() => setNewApi({})} />
+			{newApi ? (
+				<Modal
+					title={newApi.preset ? `添加 · ${newApi.preset.name}` : "连接 NewAPI"}
+					onClose={() => setNewApi(undefined)}
+					wide={Boolean(newApi.preset)}
+				>
+					{/* Kept mounted so “返回” shows the token list again and the login stays open. */}
+					<div hidden={Boolean(newApi.preset)}>
+						<NewApiConnect takenIds={takenIds} onReady={(preset) => setNewApi({ preset })} />
+					</div>
+					{newApi.preset ? (
+						<CustomProviderForm
+							key={newApi.preset.keyRef}
+							preset={newApi.preset}
+							onDone={() => setNewApi(undefined)}
+							onBack={() => setNewApi({})}
+						/>
+					) : null}
+				</Modal>
+			) : null}
 			{custom ? (
 				<Modal
 					title={custom.provider ? `编辑 · ${custom.provider.name}` : "添加自定义接口"}

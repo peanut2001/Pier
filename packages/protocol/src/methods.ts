@@ -10,6 +10,8 @@ import {
 	type HostInfo,
 	ImageInputSchema,
 	type ModelInfo,
+	type NewApiLoginResult,
+	type NewApiToken,
 	type ProviderInfo,
 	type ProviderListResult,
 	type QueueState,
@@ -107,6 +109,8 @@ export const MethodParamsSchemas = {
 		provider: CustomProviderSchema,
 		/** Saved to auth.json. Omit to keep the existing key. */
 		apiKey: z.string().trim().min(1).max(20_000).optional(),
+		/** A key held by the host (from `newapi.useToken`), used instead of `apiKey`. Added in 1.3. */
+		apiKeyRef: Id.optional(),
 		/** True when creating: fails if the id is already taken. */
 		create: z.boolean().optional(),
 	}),
@@ -116,8 +120,38 @@ export const MethodParamsSchemas = {
 		api: CustomProviderApiSchema,
 		baseUrl: z.string().trim().min(1).max(2000),
 		apiKey: z.string().trim().max(20_000).optional(),
+		/** A key held by the host (from `newapi.useToken`). Added in 1.3. */
+		apiKeyRef: Id.optional(),
 		providerId: Id.optional(),
 	}),
+
+	/**
+	 * Sign in to a NewAPI site (1.3), with a password or a system access token. The host keeps
+	 * the login session in memory for this connection only.
+	 */
+	"newapi.login": z.union([
+		z.object({
+			baseUrl: z.string().trim().min(1).max(2000),
+			username: z.string().trim().min(1).max(200),
+			password: z.string().min(1).max(1000),
+		}),
+		z.object({
+			baseUrl: z.string().trim().min(1).max(2000),
+			accessToken: z.string().trim().min(1).max(2000),
+			/** Numeric user id; older NewAPI versions require it next to an access token. */
+			userId: z.number().int().positive().optional(),
+		}),
+	]),
+	/** Answer the two-factor question of a `verify` login result. */
+	"newapi.verify": z.object({ sessionId: Id, code: z.string().trim().min(1).max(100) }),
+	"newapi.createToken": z.object({
+		sessionId: Id,
+		name: z.string().trim().min(1).max(50),
+		group: z.string().max(100).optional(),
+	}),
+	/** Fetch the key of a token (kept on the host as `keyRef`) and the models it can use. */
+	"newapi.useToken": z.object({ sessionId: Id, tokenId: z.number().int().positive() }),
+	"newapi.close": z.object({ sessionId: Id }),
 
 	"ui.respond": z.object({ ...SessionRef, requestId: Id, response: UiResponseSchema }),
 
@@ -165,6 +199,11 @@ export const LOCAL_ONLY_METHODS: ReadonlySet<MethodName> = new Set([
 	"provider.saveCustom",
 	"provider.removeCustom",
 	"provider.probeModels",
+	"newapi.login",
+	"newapi.verify",
+	"newapi.createToken",
+	"newapi.useToken",
+	"newapi.close",
 ]);
 
 export interface HelloResult {
@@ -222,6 +261,17 @@ export interface MethodResults {
 	"provider.saveCustom": { provider: ProviderInfo; defaultModel?: DefaultModelRef };
 	"provider.removeCustom": { removed: boolean };
 	"provider.probeModels": { models: Array<{ id: string; name?: string }> };
+	"newapi.login": NewApiLoginResult;
+	"newapi.verify": NewApiLoginResult;
+	"newapi.createToken": { tokenId: number; tokens: NewApiToken[] };
+	"newapi.useToken": {
+		keyRef: string;
+		/** Models the token can call (`GET /v1/models` with its key). */
+		models: Array<{ id: string; name?: string }>;
+		/** Why the model list could not be read, when it could not. */
+		modelsError?: string;
+	};
+	"newapi.close": { closed: boolean };
 	"ui.respond": { accepted: boolean };
 	"device.list": { devices: DeviceInfo[] };
 	"device.revoke": { revoked: boolean };
