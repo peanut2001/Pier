@@ -64,6 +64,17 @@ img.account-logo {
 	margin: 0;
 }
 
+.account-waiting {
+	display: flex;
+	align-items: flex-start;
+	gap: 8px;
+}
+
+.account-waiting > svg {
+	flex: none;
+	margin-top: 3px;
+}
+
 .account-actions {
 	display: flex;
 	align-items: center;

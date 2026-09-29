@@ -1,5 +1,5 @@
 /**
- * The npm-compatible package managers pi can use for `npmCommand` (`host.packageManagers`, 1.16):
+ * The npm-compatible package managers pi can use for `npmCommand` (`host.packageManagers`, 1.17):
  * npm, pnpm and bun, found on the host's `PATH` and in the directories their installers use.
  */
 import { spawn } from "node:child_process";
