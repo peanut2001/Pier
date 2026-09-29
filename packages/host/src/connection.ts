@@ -57,6 +57,11 @@ export class Connection implements SessionSubscriber {
 		return this.closed;
 	}
 
+	/** Bytes queued on the transport but not yet sent (0 when it cannot tell). */
+	get bufferedAmount(): number {
+		return this.transport.bufferedAmount ?? 0;
+	}
+
 	setCoalesceWindow(ms: number): void {
 		this.coalescer?.flush();
 		this.coalescer = ms > 0 ? new DeltaCoalescer(ms, (frame) => this.write(frame)) : undefined;

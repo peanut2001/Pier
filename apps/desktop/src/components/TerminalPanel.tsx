@@ -1,7 +1,7 @@
 import "@xterm/xterm/css/xterm.css";
 import type { WorkspaceInfo } from "@pier/protocol";
 import { type PointerEvent as ReactPointerEvent, useEffect, useLayoutEffect, useRef } from "react";
-import { LOCAL_NODE, useAppState } from "../lib/store.tsx";
+import { useCanOpenTerminal } from "../lib/remote-terminals.ts";
 import { TERMINAL_DEFAULT_HEIGHT, type TerminalTab, terminalLabel, terminals, useTerminals } from "../lib/terminals.ts";
 import { IconChevronDown, IconPlus, IconTerminal, IconTrash, IconX } from "./Icons.tsx";
 
@@ -37,7 +37,7 @@ function ResizeHandle() {
 }
 
 function tabTitle(tab: TerminalTab): string {
-	const parts = [tab.title, tab.cwd].filter(Boolean);
+	const parts = [tab.title, tab.hostName ? `${tab.hostName}：${tab.cwd ?? "~"}` : tab.cwd].filter(Boolean);
 	if (tab.status === "exited") parts.push(tab.exitCode === null ? "已结束" : `已退出（${tab.exitCode}）`);
 	if (tab.status === "failed") parts.push("启动失败");
 	return parts.join("\n") || terminalLabel(tab);
@@ -50,6 +50,7 @@ function tabTitle(tab: TerminalTab): string {
 export function TerminalPanel({ workspace }: { workspace?: WorkspaceInfo }) {
 	const { tabs, active, height } = useTerminals((s) => s);
 	const body = useRef<HTMLDivElement>(null);
+	const canOpen = useCanOpenTerminal(workspace);
 
 	useLayoutEffect(() => {
 		if (active && body.current) terminals.attach(active, body.current);
@@ -111,7 +112,14 @@ export function TerminalPanel({ workspace }: { workspace?: WorkspaceInfo }) {
 					<button
 						type="button"
 						className="ghost icon"
-						title={workspace ? `新建终端（${workspace.name}）` : "新建终端"}
+						title={
+							!canOpen
+								? "这个工作区所在的电脑暂时不能打开终端"
+								: workspace
+									? `新建终端（${workspace.name}）`
+									: "新建终端"
+						}
+						disabled={!canOpen}
 						onClick={newTerminal}
 					>
 						<IconPlus size={14} />
@@ -148,8 +156,9 @@ export function TerminalPanel({ workspace }: { workspace?: WorkspaceInfo }) {
 /** Header button that shows or hides the terminal panel. */
 export function TerminalToggle({ workspace }: { workspace?: WorkspaceInfo | undefined }) {
 	const open = useTerminals((s) => s.open);
-	const local = useAppState((s) => s.node === LOCAL_NODE);
-	if (!terminals.supported || !local) return null;
+	const hasTabs = useTerminals((s) => s.tabs.length > 0);
+	const canOpen = useCanOpenTerminal(workspace);
+	if (!canOpen && !hasTabs) return null;
 	return (
 		<button
 			type="button"

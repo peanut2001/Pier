@@ -110,6 +110,11 @@ export function hostUpdatesRemotely(info: HostInfo | undefined): boolean {
 	return hostSpeaks(info, 13);
 }
 
+/** Whether a computer can run terminals for this one (`terminal.*`, 1.18, inside its desktop app). */
+export function hostRunsTerminals(info: HostInfo | undefined): boolean {
+	return info?.terminals === true && hostSpeaks(info, 18);
+}
+
 /** Pier's updater on a paired computer, driven through its host. */
 export interface PeerUpdateEntry {
 	/** The updater's last known status there. */
@@ -607,6 +612,11 @@ export class PierStore {
 	/** The client of the computer a workspace belongs to. */
 	private clientFor(workspaceId: string): PierClient | undefined {
 		return this.clients.get(this.nodeOf(workspaceId));
+	}
+
+	/** The client of a computer (`LOCAL_NODE` or a paired computer's id), e.g. for its terminals. */
+	nodeClient(node: string): PierClient | undefined {
+		return this.clients.get(node);
 	}
 
 	/** Display name of a computer (the one on screen by default). */

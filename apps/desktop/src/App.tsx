@@ -15,7 +15,8 @@ import { Sidebar, SidebarToggle } from "./components/Sidebar.tsx";
 import { StatusBar } from "./components/StatusBar.tsx";
 import { TerminalPanel } from "./components/TerminalPanel.tsx";
 import { TitleBar } from "./components/TitleBar.tsx";
-import { LOCAL_NODE, NEW_CHAT_DRAFT, useAppState, useStore } from "./lib/store.tsx";
+import { useCanOpenTerminal } from "./lib/remote-terminals.ts";
+import { NEW_CHAT_DRAFT, useAppState, useStore } from "./lib/store.tsx";
 import { terminals, useTerminals } from "./lib/terminals.ts";
 
 function Toasts() {
@@ -103,11 +104,12 @@ export function App() {
 	const filesPanelWidth = useAppState((s) => s.filesPanelWidth);
 	const hasWorkspace = useAppState((s) => s.workspaces.length > 0);
 	const sidebar = useAppState((s) => s.sidebar);
-	// Integrated terminals run on this computer, so they are hidden while another one is shown.
-	const local = useAppState((s) => s.node === LOCAL_NODE);
-	const terminalOpen = useTerminals((s) => s.open) && local;
+	// Terminals run on the computer of the workspace they were opened for; the panel shows them all.
+	const terminalOpen = useTerminals((s) => s.open);
+	const hasTerminals = useTerminals((s) => s.tabs.length > 0);
 	const screen = useScreenWorkspace();
 	const screenWorkspace = screen.workspace;
+	const canOpenTerminal = useCanOpenTerminal(screenWorkspace);
 	const showFiles = filesPanel && hasWorkspace;
 	// The sidebar stays mounted and its shell animates between open and collapsed widths.
 	const columns = ["auto", "minmax(0, 1fr)", ...(showFiles ? [`${filesPanelWidth}px`] : [])];
@@ -118,7 +120,7 @@ export function App() {
 		if (settings) return;
 		const onKey = (e: KeyboardEvent) => {
 			if (e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && e.key === "`") {
-				if (!terminals.supported || !local) return;
+				if (!hasTerminals && !canOpenTerminal) return;
 				e.preventDefault();
 				terminals.toggle(screenWorkspace ? { workspace: screenWorkspace } : {});
 				return;
@@ -135,7 +137,7 @@ export function App() {
 		};
 		window.addEventListener("keydown", onKey);
 		return () => window.removeEventListener("keydown", onKey);
-	}, [store, settings, screenWorkspace, local]);
+	}, [store, settings, screenWorkspace, hasTerminals, canOpenTerminal]);
 
 	return (
 		<div className="window">

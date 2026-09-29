@@ -1,4 +1,4 @@
-# Pier 协议 v1.17
+# Pier 协议 v1.18
 
 > 实现：`packages/protocol`（zod schema + TS 类型，Host 与所有客户端共享）。
 > 本文档描述线上格式与语义；字段的权威定义以 `packages/protocol/src` 为准。
@@ -59,7 +59,7 @@
 
 ```jsonc
 { "type": "req", "id": "h", "method": "host.hello", "params": {
-  "protocolVersion": "1.17",
+  "protocolVersion": "1.18",
   "client": { "name": "pier-desktop", "version": "0.1.0", "platform": "darwin" },
   "token": "<本地 token>",       // 本地连接必填；远程连接由加密通道认证，不需要
   "coalesceMs": 50               // 可选：合并流式增量的窗口（0–1000ms，默认 0）
@@ -98,6 +98,25 @@ Host 在桌面端中运行时（Tauri 以 `--watch-stdin` 启动 sidecar），�
 没有可驱动的更新器时，`update.check` / `update.install` 返回 `UNSUPPORTED`，`update.status` 返回 `state: "unsupported"`；桌面端无法回答时返回 `INTERNAL`。更新器的每次状态变化（下载进度约每 200ms 一次）都以 `update.status` 事件发给所有连接。
 
 sidecar 的 stdio 协议（每行一个 JSON 对象，stdout 上 `pier.ready` 之后）：Host 在 stdout 写 `{"type":"pier.shell.request","id","method":"update.check"|"update.install"}`，桌面端在 stdin 回 `{"type":"pier.shell.response","id","ok":true,"result":AppUpdateStatus}` 或 `{"type":"pier.shell.response","id","ok":false,"error"}`，并在 Host 就绪时和每次状态变化时推送 `{"type":"pier.shell.updateStatus","status":AppUpdateStatus}`（缺省字段为 `null`）。
+
+### 终端（1.18）
+
+Host 在桌面端中运行时，可以在它所在的电脑上用桌面端的伪终端启动用户的 shell（Unix 上为 `$SHELL` 登录 shell，Windows 上为 PowerShell），让已配对的电脑远程打开终端。桌面端在 Host 就绪时声明支持终端，此后 `HostInfo.terminals` 为 `true`；独立运行的 `pier-host`、旧版桌面端没有终端，`terminal.open` 返回 `UNSUPPORTED`。这些方法对已配对设备开放（配对即完全信任，远程终端与在那台电脑上登录等价），远程调用 `terminal.open` 写入审计日志（含目录，不记录输入内容）。
+
+终端属于打开它的连接：输出和结束只发给这个连接，其他连接既看不到也不能操作（`NOT_FOUND`）；连接断开、Host 停止或桌面端退出时终端随之挂断，重连后不会恢复。每个连接最多 16 个、每个 Host 最多 64 个终端，超出时 `CONFLICT`。
+
+| 方法 | 参数 | 结果 |
+|---|---|---|
+| `terminal.open` | `{ cwd?(绝对路径), cols, rows }` | `TerminalInfo`：`{ terminalId, shell, cwd }`。`cwd` 省略或不存在时从用户主目录启动；相对路径为 `BAD_REQUEST`，启动失败为 `INTERNAL`。`cols` / `rows` 为 2–1000。响应之前 shell 已经输出的内容在响应之后才以事件送达，所以客户端总是先拿到 `terminalId` |
+| `terminal.write` | `{ terminalId, data, binary? }` | `{ written }`：写入输入（`data` 最长 1 MB，更长的粘贴请分段）。`binary` 表示每个字符是一个字节（xterm 的 `onBinary`）。终端已结束时 `written: false` 或 `NOT_FOUND` |
+| `terminal.resize` | `{ terminalId, cols, rows }` | `{ resized }` |
+| `terminal.close` | `{ terminalId }` | `{ closed }`：挂断 shell，随后收到 `terminal.exit` |
+
+事件（§4.3）：`terminal.output` 带 `{ terminalId, data }`，`data` 为原始输出字节的 base64（UTF-8 字符可能跨两个事件）；`terminal.exit` 带 `{ terminalId, code, error? }`，之后不再有该终端的事件，`code` 为退出码（被信号结束或未知时为 `null`），`error` 表示终端丢失（例如桌面端退出）而不是程序结束。
+
+输出有流量控制：某个连接待发送的数据超过约 2 MB 时（网络较慢），Host 让桌面端暂停读取该连接终端的输出（shell 写满伪终端缓冲区后阻塞），降到约 512 KB 以下再恢复，因此输出大量内容不会撑爆连接。
+
+sidecar 的 stdio 协议：桌面端在 Host 就绪时推送 `{"type":"pier.shell.capabilities","terminals":true}`。Host 用 `{"type":"pier.shell.request","id","method":"terminal.spawn","params":{"key","cwd"?,"cols","rows"}}` 启动 shell，桌面端回 `{"type":"pier.shell.response","id","ok":true,"result":{"id","shell","cwd"}}`；之后 Host 写 `{"type":"pier.shell.terminal","op":"write"|"resize"|"pause"|"resume"|"kill","id",…}`，桌面端推送 `{"type":"pier.shell.terminalOutput","key","data":"<base64>"}` 与最后一条 `{"type":"pier.shell.terminalExit","key","code"}`。`key` 由 Host 选定，所以在响应之前到达的输出也能对上终端；数字 `id` 用来发送输入。这些 shell 属于启动它们的那次 Host 运行，Host 停止、重启或崩溃时桌面端会把它们全部挂断。桌面窗口自己的内置终端与此无关，不经过 Host。
 
 ### workspace
 
@@ -345,6 +364,13 @@ Host 保存已配对的电脑于 `~/.pier/peers.json`（0600），每次经代�
 | `extension.changed` | `workspaceId?` | 扩展或扩展包设置变化（1.8）；只改了某个工作区的项目设置时带 `workspaceId`。重新调用 `extension.list`，会话的斜杠命令也可能变化 |
 | `update.status` | `status: AppUpdateStatus` | 桌面端更新器的状态或下载进度变化（1.13），见「应用更新」 |
 | `settings.changed` | `scope, workspaceId?` | 通过 `settings.update` / `settings.write` 修改了 pi 的 settings 文件（1.15）；`scope: "project"` 时带 `workspaceId`。重新调用 `settings.get`。在 Pier 之外修改文件（终端 pi、手动编辑）不会触发 |
+
+终端事件（1.18），只发给打开该终端的连接，见「终端」：
+
+| 事件 | 字段 | 说明 |
+|---|---|---|
+| `terminal.output` | `terminalId, data` | 终端输出，`data` 为原始字节的 base64 |
+| `terminal.exit` | `terminalId, code, error?` | 终端结束；`error` 表示终端丢失（桌面端退出等） |
 
 仅发给本地（桌面）连接（`LOCAL_ONLY_EVENTS`）：
 

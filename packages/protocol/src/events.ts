@@ -115,6 +115,14 @@ export type PierHostEvent =
 	 * `workspaceId` is set for a workspace's project settings. Sent to every connection.
 	 */
 	| { type: "settings.changed"; scope: "user" | "project"; workspaceId?: string }
+	// Terminals (1.18), sent only to the connection that opened the terminal.
+	/** Output of a terminal: raw bytes, base64-encoded (UTF-8 sequences may be split across events). */
+	| { type: "terminal.output"; terminalId: string; data: string }
+	/**
+	 * A terminal ended; no more events follow for it. `code` is the shell's exit code (null when
+	 * unknown or killed by a signal). `error` is set when the host lost it (the desktop app went away).
+	 */
+	| { type: "terminal.exit"; terminalId: string; code: number | null; error?: string }
 	/** Progress of `extension.install` / `remove` / `update` (1.8). Local connections only. */
 	| {
 			type: "extension.progress";

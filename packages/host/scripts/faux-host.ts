@@ -15,19 +15,28 @@
  * put into pairing codes (e.g. `10.0.2.2:7433` for the Android emulator).
  * `--account-site <url>` points the personal center at another NewAPI site (e.g. a local one)
  * instead of 云链API. `--demo-updates` pretends the host runs in a desktop app whose updater
- * finds v9.9.9 and fakes installing it (`update.*`, for the remote update UI). State lives in a
- * temporary directory that is removed on exit.
+ * finds v9.9.9 and fakes installing it (`update.*`, for the remote update UI).
+ * `--demo-terminals` lets clients open terminals (`terminal.*`, for the remote terminal UI):
+ * a real `bash` through `script(1)` on Linux (no resizing), a line-echo shell elsewhere. State
+ * lives in a temporary directory that is removed on exit.
  *
  * Sample slash commands for the command menu: the extension command `/greet`, the prompt
  * template `/explain <topic>`, and `/skill:faux-skill`.
  */
+import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxText, fauxThinking, fauxToolCall } from "@earendil-works/pi-ai";
 import { type AppUpdateStatus, PROTOCOL_VERSION } from "@pier/protocol";
 import { PIER_HOST_VERSION } from "../src/host.ts";
-import type { AppShell, ShellMethod } from "../src/shell.ts";
+import type {
+	AppShell,
+	ShellMethod,
+	ShellTerminal,
+	ShellTerminalHandlers,
+	ShellTerminalOptions,
+} from "../src/shell.ts";
 import { startTestHost, TOKEN } from "../test/helpers.ts";
 
 type Context = { messages: Array<{ role: string; content?: unknown }> };
@@ -148,9 +157,12 @@ function sampleResources(): string {
 	return dir;
 }
 
-/** `--demo-updates`: a desktop app updater that finds v9.9.9 and fakes installing it. */
+/**
+ * `--demo-updates`: a desktop app updater that finds v9.9.9 and fakes installing it.
+ * `--demo-terminals`: terminals for clients.
+ */
 class DemoShell implements AppShell {
-	updateStatus: AppUpdateStatus = {
+	private status: AppUpdateStatus = {
 		state: "idle",
 		currentVersion: PIER_HOST_VERSION,
 		autoCheck: true,
@@ -158,15 +170,68 @@ class DemoShell implements AppShell {
 	};
 	private readonly listeners = new Set<(status: AppUpdateStatus) => void>();
 
+	constructor(
+		private readonly updates: boolean,
+		readonly terminals: boolean,
+	) {}
+
+	get updateStatus(): AppUpdateStatus | undefined {
+		return this.updates ? this.status : undefined;
+	}
+
+	async openTerminal(options: ShellTerminalOptions, handlers: ShellTerminalHandlers): Promise<ShellTerminal> {
+		const cwd = options.cwd ?? homedir();
+		const out = (text: string) => handlers.output(Buffer.from(text).toString("base64"));
+		if (process.platform === "linux") {
+			const child = spawn("script", ["-qfec", "exec bash -i", "/dev/null"], {
+				cwd,
+				env: { ...process.env, TERM: "xterm-256color", COLUMNS: String(options.cols), LINES: String(options.rows) },
+			});
+			child.stdout.on("data", (chunk: Buffer) => handlers.output(chunk.toString("base64")));
+			child.on("exit", (code) => handlers.exit(code));
+			child.on("error", (error) => handlers.exit(null, error.message));
+			return {
+				shell: "bash",
+				cwd,
+				write: (data) => child.stdin.write(data),
+				resize: () => {},
+				pause: (paused) => (paused ? child.stdout.pause() : child.stdout.resume()),
+				kill: () => child.kill("SIGHUP"),
+			};
+		}
+		let line = "";
+		setTimeout(() => out(`demo shell · ${cwd}\r\n$ `), 20);
+		return {
+			shell: "demo",
+			cwd,
+			write: (data) => {
+				for (const ch of data) {
+					if (ch === "\r") {
+						const command = line.trim();
+						line = "";
+						if (command === "exit") return handlers.exit(0);
+						out(`\r\n${command ? `${command}\r\n` : ""}$ `);
+					} else {
+						line += ch;
+						out(ch);
+					}
+				}
+			},
+			resize: () => {},
+			pause: () => {},
+			kill: () => handlers.exit(null),
+		};
+	}
+
 	onUpdateStatus(listener: (status: AppUpdateStatus) => void): () => void {
 		this.listeners.add(listener);
 		return () => this.listeners.delete(listener);
 	}
 
 	private set(patch: Partial<AppUpdateStatus>): AppUpdateStatus {
-		this.updateStatus = { ...this.updateStatus, ...patch };
-		for (const listener of this.listeners) listener(this.updateStatus);
-		return this.updateStatus;
+		this.status = { ...this.status, ...patch };
+		for (const listener of this.listeners) listener(this.status);
+		return this.status;
 	}
 
 	private async check(): Promise<AppUpdateStatus> {
@@ -182,10 +247,10 @@ class DemoShell implements AppShell {
 	}
 
 	async request(method: ShellMethod): Promise<AppUpdateStatus> {
-		const busy = ["checking", "downloading", "installing"].includes(this.updateStatus.state);
-		if (busy) return this.updateStatus;
+		const busy = ["checking", "downloading", "installing"].includes(this.status.state);
+		if (busy) return this.status;
 		if (method === "update.check") return this.check();
-		if (!this.updateStatus.version && (await this.check()).state !== "available") return this.updateStatus;
+		if (!this.status.version && (await this.check()).state !== "available") return this.status;
 		const total = 48 * 1024 * 1024;
 		const status = this.set({ state: "downloading", downloaded: 0, total });
 		void (async () => {
@@ -208,12 +273,14 @@ function sleep(ms: number): Promise<void> {
 }
 
 const remote = process.argv.includes("--remote");
+const demoUpdates = process.argv.includes("--demo-updates");
+const demoTerminals = process.argv.includes("--demo-terminals");
 const resources = sampleResources();
 const remoteAddress = flag("--remote-address");
 const accountSite = flag("--account-site");
 const t = await startTestHost({
 	...(accountSite ? { accountSite } : {}),
-	...(process.argv.includes("--demo-updates") ? { shell: new DemoShell() } : {}),
+	...(demoUpdates || demoTerminals ? { shell: new DemoShell(demoUpdates, demoTerminals) } : {}),
 	tokensPerSecond: Number(process.env.FAUX_TPS ?? 400),
 	log: (message) => process.stderr.write(`[faux-host] ${message}\n`),
 	extraResources: {

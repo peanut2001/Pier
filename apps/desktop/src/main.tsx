@@ -6,6 +6,7 @@ import { createRoot } from "react-dom/client";
 import { App } from "./App.tsx";
 import { customTitleBar } from "./components/TitleBar.tsx";
 import { bridge } from "./lib/bridge.ts";
+import { installTerminalResolver } from "./lib/remote-terminals.ts";
 import { PierStore, StoreContext } from "./lib/store.tsx";
 
 if (/Linux/.test(navigator.userAgent) && !/Android/.test(navigator.userAgent)) {
@@ -15,6 +16,7 @@ if (/Linux/.test(navigator.userAgent) && !/Android/.test(navigator.userAgent)) {
 if (customTitleBar) document.documentElement.classList.add("custom-titlebar");
 
 const store = new PierStore(bridge);
+installTerminalResolver(store);
 
 function Root() {
 	useEffect(() => store.start(), []);

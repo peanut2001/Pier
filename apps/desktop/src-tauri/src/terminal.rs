@@ -3,14 +3,18 @@
 //! `terminal_spawn` starts the user's shell in a PTY and returns its id. Output flows to the
 //! webview over the `Channel` passed at spawn time: raw PTY bytes arrive as `ArrayBuffer`s
 //! (xterm.js decodes UTF-8 itself, so split multi-byte sequences are fine), and a final JSON
-//! message `{"type":"exit","code":…}` reports that the shell ended. Terminals are local to
-//! the desktop app; they do not go through the Pier Host or its protocol.
+//! message `{"type":"exit","code":…}` reports that the shell ended. These terminals are
+//! local to the desktop app and do not go through the Pier Host or its protocol.
+//!
+//! The host sidecar has its own `TerminalManager` (see `host.rs`) for the terminals it runs
+//! for its clients (`terminal.*` in the Pier protocol); the webview's `terminal_kill_all`
+//! never touches those.
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{mpsc, Arc, Mutex, MutexGuard};
+use std::sync::{mpsc, Arc, Condvar, Mutex, MutexGuard};
 use std::thread;
 use std::time::Duration;
 
@@ -23,8 +27,31 @@ const READ_BUFFER: usize = 64 * 1024;
 /// After the shell exits, how long to keep draining output before reporting the exit.
 const DRAIN_GRACE: Duration = Duration::from_millis(500);
 
+/// Holds the reader back while its consumer catches up (flow control for terminals whose
+/// output crosses a network). Opening it for good lets a parked reader finish.
+#[derive(Default)]
+struct Gate {
+    paused: Mutex<bool>,
+    changed: Condvar,
+}
+
+impl Gate {
+    fn set(&self, paused: bool) {
+        *self.paused.lock().unwrap_or_else(|e| e.into_inner()) = paused;
+        self.changed.notify_all();
+    }
+
+    fn wait_open(&self) {
+        let mut paused = self.paused.lock().unwrap_or_else(|e| e.into_inner());
+        while *paused {
+            paused = self.changed.wait(paused).unwrap_or_else(|e| e.into_inner());
+        }
+    }
+}
+
 struct Session {
     master: Box<dyn MasterPty + Send>,
+    gate: Arc<Gate>,
     /// Input for the writer thread. Writes can block (a paste into a program that is not
     /// reading), and commands run on the main thread, so they only queue here, in order.
     input: mpsc::Sender<Vec<u8>>,
@@ -40,10 +67,10 @@ pub struct TerminalManager {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SpawnedTerminal {
-    id: u32,
+    pub(crate) id: u32,
     /// The shell program, for the tab title.
-    shell: String,
-    cwd: String,
+    pub(crate) shell: String,
+    pub(crate) cwd: String,
 }
 
 #[derive(Serialize)]
@@ -59,7 +86,7 @@ pub enum Output {
 }
 
 /// Delivers output; returns `false` once nobody listens any more.
-type Sink = Arc<dyn Fn(Output) -> bool + Send + Sync>;
+pub(crate) type Sink = Arc<dyn Fn(Output) -> bool + Send + Sync>;
 
 fn channel_sink(channel: Channel<InvokeResponseBody>) -> Sink {
     Arc::new(move |output| match output {
@@ -75,7 +102,7 @@ impl TerminalManager {
         self.sessions.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    fn spawn(
+    pub(crate) fn spawn(
         &self,
         cwd: Option<String>,
         cols: u16,
@@ -122,6 +149,7 @@ impl TerminalManager {
         let killer = child.clone_killer();
         let id = self.next_id.fetch_add(1, Ordering::Relaxed) + 1;
 
+        let gate = Arc::new(Gate::default());
         let (input, input_rx) = mpsc::channel::<Vec<u8>>();
         thread::Builder::new()
             .name(format!("terminal-{id}-writer"))
@@ -143,6 +171,7 @@ impl TerminalManager {
             id,
             Session {
                 master: pair.master,
+                gate: gate.clone(),
                 input,
                 killer,
             },
@@ -150,11 +179,13 @@ impl TerminalManager {
 
         let (drained_tx, drained_rx) = mpsc::channel::<()>();
         let reader_output = output.clone();
+        let reader_gate = gate.clone();
         thread::Builder::new()
             .name(format!("terminal-{id}-reader"))
             .spawn(move || {
                 let mut buf = vec![0u8; READ_BUFFER];
                 loop {
+                    reader_gate.wait_open();
                     match reader.read(&mut buf) {
                         Ok(0) | Err(_) => break,
                         Ok(n) => {
@@ -173,6 +204,8 @@ impl TerminalManager {
             .name(format!("terminal-{id}-wait"))
             .spawn(move || {
                 let code = child.wait().ok().map(|status| status.exit_code());
+                // A paused reader must still drain the last output and see EOF.
+                gate.set(false);
                 // Let the reader deliver what the shell printed last. On Windows the ConPTY
                 // only reaches EOF once the master is dropped, so this simply times out.
                 let _ = drained_rx.recv_timeout(DRAIN_GRACE);
@@ -188,7 +221,7 @@ impl TerminalManager {
         Ok(SpawnedTerminal { id, shell, cwd })
     }
 
-    fn write(&self, id: u32, bytes: Vec<u8>) -> Result<(), String> {
+    pub(crate) fn write(&self, id: u32, bytes: Vec<u8>) -> Result<(), String> {
         let sessions = self.lock();
         let session = sessions.get(&id).ok_or("终端已关闭")?;
         session
@@ -197,7 +230,7 @@ impl TerminalManager {
             .map_err(|_| "终端已关闭".to_string())
     }
 
-    fn resize(&self, id: u32, cols: u16, rows: u16) -> Result<(), String> {
+    pub(crate) fn resize(&self, id: u32, cols: u16, rows: u16) -> Result<(), String> {
         let sessions = self.lock();
         let session = sessions.get(&id).ok_or("终端已关闭")?;
         session
@@ -211,8 +244,16 @@ impl TerminalManager {
             .map_err(|e| format!("调整终端大小失败：{e}"))
     }
 
+    /// Stop or resume reading the shell's output; a paused shell blocks once the PTY's buffer
+    /// is full, so a slow consumer slows the program down instead of piling up output.
+    pub(crate) fn pause(&self, id: u32, paused: bool) {
+        if let Some(session) = self.lock().get(&id) {
+            session.gate.set(paused);
+        }
+    }
+
     /// Hang up the shell. The wait thread reports the exit and cleans up.
-    fn kill(&self, id: u32) {
+    pub(crate) fn kill(&self, id: u32) {
         let mut sessions = self.lock();
         if let Some(session) = sessions.get_mut(&id) {
             let _ = session.killer.kill();
@@ -224,6 +265,7 @@ impl TerminalManager {
         let mut sessions = self.lock();
         for session in sessions.values_mut() {
             let _ = session.killer.kill();
+            session.gate.set(false);
         }
         // Dropping the masters also hangs up anything else attached to the terminals.
         sessions.clear();
@@ -305,6 +347,16 @@ fn clean_env(command: &mut CommandBuilder) {
     }
 }
 
+/// Bytes for the PTY. `binary` input (xterm's `onBinary`, e.g. some mouse reports) carries
+/// one byte per char.
+pub(crate) fn input_bytes(data: String, binary: bool) -> Vec<u8> {
+    if binary {
+        data.chars().map(|c| c as u32 as u8).collect()
+    } else {
+        data.into_bytes()
+    }
+}
+
 #[tauri::command]
 pub fn terminal_spawn(
     manager: State<'_, TerminalManager>,
@@ -316,7 +368,6 @@ pub fn terminal_spawn(
     manager.spawn(cwd, cols, rows, channel_sink(output))
 }
 
-/// `binary` input (xterm's `onBinary`, e.g. some mouse reports) carries one byte per char.
 #[tauri::command]
 pub fn terminal_write(
     manager: State<'_, TerminalManager>,
@@ -324,12 +375,7 @@ pub fn terminal_write(
     data: String,
     binary: Option<bool>,
 ) -> Result<(), String> {
-    if binary == Some(true) {
-        let bytes: Vec<u8> = data.chars().map(|c| c as u32 as u8).collect();
-        manager.write(id, bytes)
-    } else {
-        manager.write(id, data.into_bytes())
-    }
+    manager.write(id, input_bytes(data, binary == Some(true)))
 }
 
 #[tauri::command]
@@ -431,5 +477,36 @@ mod tests {
             "kill did not end the shell"
         );
         assert!(manager.write(id, b"x".to_vec()).is_err());
+    }
+
+    #[test]
+    fn pause_holds_output_back_until_resumed_and_kill_still_ends_it() {
+        let manager = TerminalManager::default();
+        let (id, collected) = spawn(&manager, None);
+        manager.write(id, b"echo ready\r".to_vec()).unwrap();
+        assert!(wait_for(&collected, |c| String::from_utf8_lossy(&c.data)
+            .contains("ready\r\n")));
+        manager.pause(id, true);
+        // A read already in progress still completes: give it something, then let it park.
+        manager.write(id, b"\r".to_vec()).unwrap();
+        thread::sleep(Duration::from_millis(300));
+        let before = collected.lock().unwrap().data.len();
+        manager
+            .write(id, b"echo \"held-$((6*7))\"\r".to_vec())
+            .unwrap();
+        thread::sleep(Duration::from_millis(500));
+        let paused =
+            String::from_utf8_lossy(&collected.lock().unwrap().data[before..]).into_owned();
+        assert!(!paused.contains("held-42"), "output while paused: {paused}");
+        manager.pause(id, false);
+        assert!(wait_for(&collected, |c| String::from_utf8_lossy(&c.data)
+            .contains("held-42")));
+
+        manager.pause(id, true);
+        manager.kill(id);
+        assert!(
+            wait_for(&collected, |c| c.exit.is_some()),
+            "kill did not end a paused shell"
+        );
     }
 }

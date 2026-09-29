@@ -43,6 +43,7 @@ import {
 	type SessionSnapshot,
 	type SessionSummary,
 	StreamingBehaviorSchema,
+	type TerminalInfo,
 	ThinkingLevelSchema,
 	UiResponseSchema,
 	type WorkspaceFileContent,
@@ -369,6 +370,32 @@ export const MethodParamsSchemas = {
 
 	"ui.respond": z.object({ ...SessionRef, requestId: Id, response: UiResponseSchema }),
 
+	/**
+	 * Start the user's shell in a pseudo-terminal on the host's computer (1.18), for this
+	 * connection only: output arrives as `terminal.output` events, the end as `terminal.exit`,
+	 * and the shell is hung up when the connection closes. `cwd` must be absolute; the shell
+	 * starts in the home directory when it is omitted or missing. `UNSUPPORTED` unless
+	 * `HostInfo.terminals` is set.
+	 */
+	"terminal.open": z.object({
+		cwd: z.string().min(1).max(4096).optional(),
+		cols: z.number().int().min(2).max(1000),
+		rows: z.number().int().min(2).max(1000),
+	}),
+	/** Type into a terminal. `binary` input carries one byte per character (xterm's `onBinary`). */
+	"terminal.write": z.object({
+		terminalId: Id,
+		data: z.string().min(1).max(1_000_000),
+		binary: z.boolean().optional(),
+	}),
+	"terminal.resize": z.object({
+		terminalId: Id,
+		cols: z.number().int().min(2).max(1000),
+		rows: z.number().int().min(2).max(1000),
+	}),
+	/** Hang up a terminal; its `terminal.exit` event follows. */
+	"terminal.close": z.object({ terminalId: Id }),
+
 	"device.list": z.object({}).optional(),
 	"device.revoke": z.object({ deviceId: Id }),
 	"device.rename": z.object({ deviceId: Id, name: z.string().trim().min(1).max(100) }),
@@ -533,6 +560,10 @@ export interface MethodResults {
 	"settings.update": PiSettingsChangeResult;
 	"settings.write": PiSettingsChangeResult;
 	"ui.respond": { accepted: boolean };
+	"terminal.open": TerminalInfo;
+	"terminal.write": { written: boolean };
+	"terminal.resize": { resized: boolean };
+	"terminal.close": { closed: boolean };
 	"device.list": { devices: DeviceInfo[] };
 	"device.revoke": { revoked: boolean };
 	"device.rename": { device: DeviceInfo };

@@ -58,6 +58,7 @@ import { RemoteAccess, type RemoteAccessOptions } from "./remote/remote-access.t
 import { SessionArchiveStore } from "./session-archive.ts";
 import { SessionPool } from "./session-pool.ts";
 import type { AppShell, ShellMethod } from "./shell.ts";
+import { HostTerminals } from "./terminals.ts";
 import {
 	deleteWorkspacePath,
 	listWorkspaceDirectory,
@@ -94,7 +95,7 @@ export interface PierHostOptions {
 	log?: (message: string) => void;
 	/** Site of the personal center (tests). Defaults to 云链API. */
 	accountSite?: string;
-	/** The desktop app the host runs in (its updater), when there is one. */
+	/** The desktop app the host runs in (its updater and terminals), when there is one. */
 	shell?: AppShell;
 }
 
@@ -143,6 +144,8 @@ const AUDITED_METHODS = new Set<MethodName>([
 	"update.install",
 	"settings.update",
 	"settings.write",
+	// Opening a shell on this computer (1.18); what is typed into it is not recorded.
+	"terminal.open",
 ]);
 
 function auditDetail(method: MethodName, params: Record<string, unknown>): Record<string, unknown> | undefined {
@@ -225,6 +228,8 @@ function auditDetail(method: MethodName, params: Record<string, unknown>): Recor
 				...(params.workspaceId ? { workspaceId: params.workspaceId } : {}),
 				bytes: typeof params.text === "string" ? Buffer.byteLength(params.text) : 0,
 			};
+		case "terminal.open":
+			return params.cwd ? { cwd: params.cwd } : undefined;
 		default:
 			return undefined;
 	}
@@ -272,6 +277,7 @@ export class PierHost implements RequestHandler {
 	private readonly handlers: Handlers;
 	private readonly stats = new HostStatsSampler();
 	private readonly shell: AppShell | undefined;
+	private readonly terminals: HostTerminals;
 	private readonly offShellStatus: (() => void) | undefined;
 	private shuttingDown = false;
 
@@ -360,6 +366,7 @@ export class PierHost implements RequestHandler {
 			options.peers,
 		);
 		this.shell = options.shell;
+		this.terminals = new HostTerminals(this.shell, { log });
 		this.offShellStatus = this.shell?.onUpdateStatus((status) => this.broadcast({ type: "update.status", status }));
 		this.handlers = this.createHandlers();
 	}
@@ -382,6 +389,7 @@ export class PierHost implements RequestHandler {
 			platform: platform(),
 			piVersion: PI_VERSION,
 			agentDir: this.env.agentDir,
+			...(this.terminals.supported ? { terminals: true } : {}),
 		};
 	}
 
@@ -444,6 +452,7 @@ export class PierHost implements RequestHandler {
 		this.connections.delete(connection);
 		this.providers.connectionClosed(connection.connectionId);
 		this.newapi.connectionClosed(connection.connectionId);
+		this.terminals.connectionClosed(connection);
 		for (const session of connection.subscriptions) session.unsubscribe(connection.connectionId);
 		connection.subscriptions.clear();
 	}
@@ -918,6 +927,19 @@ export class PierHost implements RequestHandler {
 					.respondUi(params.requestId, params.response, ctx.connection.connectionId),
 			}),
 
+			"terminal.open": async (ctx, params) => {
+				const { info, start } = await this.terminals.open(ctx.connection, params);
+				ctx.after(start);
+				return info;
+			},
+			"terminal.write": (ctx, params) => ({
+				written: this.terminals.write(ctx.connection, params.terminalId, params.data, params.binary ?? false),
+			}),
+			"terminal.resize": (ctx, params) => ({
+				resized: this.terminals.resize(ctx.connection, params.terminalId, params.cols, params.rows),
+			}),
+			"terminal.close": (ctx, params) => ({ closed: this.terminals.close(ctx.connection, params.terminalId) }),
+
 			"device.list": () => ({ devices: this.remote.listDevices() }),
 			"device.revoke": (_ctx, params) => ({ revoked: this.remote.revoke(params.deviceId) }),
 			"device.rename": (_ctx, params) => ({ device: this.remote.rename(params.deviceId, params.name) }),
@@ -943,6 +965,7 @@ export class PierHost implements RequestHandler {
 		this.account.shutdown();
 		this.newapi.shutdown();
 		this.peers.shutdown();
+		this.terminals.shutdown();
 		await this.remote.shutdown();
 		await this.pool.disposeAll();
 		for (const connection of [...this.connections]) connection.close(1001, "Host shutting down");
