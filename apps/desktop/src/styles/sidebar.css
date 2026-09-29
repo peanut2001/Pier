@@ -366,66 +366,65 @@
 	padding: 8px 10px 10px;
 }
 
-/* ---- computer (node) switcher ---------------------------------------------------- */
+/* ---- workspaces of other computers --------------------------------------------- */
 
-.node-switcher {
-	padding: 0 12px 8px;
-}
-
-.node-button {
-	width: 100%;
-	justify-content: flex-start;
-	gap: 8px;
-	height: 32px;
-	padding: 0 10px;
-	border-radius: var(--radius);
-	border-color: transparent;
-	background: transparent;
-	color: var(--text-muted);
-	font-size: 12.5px;
-}
-
-.node-button:hover:not(:disabled) {
-	background: var(--bg-hover);
-	color: var(--text);
-}
-
-/* Another computer is shown: make that obvious. */
-.node-button.remote {
-	background: var(--accent-soft);
-	border-color: var(--accent-ring);
-	color: var(--text);
-}
-
-.node-button .node-icon {
-	flex: none;
-}
-
-.node-name {
-	flex: 1;
-	min-width: 0;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-	text-align: left;
-	font-weight: 500;
-}
-
-.node-tag {
-	flex: none;
+/* The paired computer a workspace lives on (this computer's workspaces show no tag). */
+.workspace-node {
+	display: inline-flex;
+	/* Shrinks before the workspace name does. */
+	flex: 0 4 auto;
+	align-items: center;
+	gap: 3px;
+	min-width: 26px;
+	max-width: 45%;
+	margin-left: auto;
 	font-size: 11px;
 	color: var(--text-faint);
 }
 
-.node-button .chip-caret {
+.workspace-name .workspace-node .icon-svg {
 	flex: none;
-	color: var(--text-faint);
 }
 
-.dropdown-menu.node-menu {
-	left: 12px;
-	right: 12px;
-	min-width: 0;
+.workspace-node-name {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.workspace-node.offline {
+	opacity: 0.7;
+}
+
+.workspace-node.offline::after {
+	content: "";
+	flex: none;
+	width: 6px;
+	height: 6px;
+	margin-left: 2px;
+	border-radius: 50%;
+	background: var(--text-faint);
+}
+
+.workspace-row.offline .workspace-icon,
+.workspace-row.offline .workspace-label {
+	opacity: 0.6;
+}
+
+/* ---- add-workspace menu: pick the computer ------------------------------------ */
+
+.sidebar-section-title .dropdown {
+	display: flex;
+}
+
+.dropdown-menu.add-workspace-menu {
+	left: auto;
+	right: 0;
+	width: 236px;
+	letter-spacing: normal;
+	font-weight: 400;
+	font-size: 13px;
+	color: var(--text);
 }
 
 .node-item-text {
@@ -449,7 +448,8 @@
 	font-weight: 500;
 }
 
-.node-menu .node-item-name .icon-svg {
+.node-menu .node-item-name .icon-svg,
+.workspaces .node-item-name .icon-svg {
 	flex: none;
 	color: var(--text-muted);
 }

@@ -108,16 +108,17 @@ function HostCard({
 	name,
 	subtitle,
 	current,
-	onSwitch,
 }: {
 	node: string;
 	name: string;
 	subtitle: string;
 	current: boolean;
-	onSwitch: () => void;
 }) {
+	const store = useStore();
 	const entry = useAppState((s) => s.hostStats[node]);
+	const connection = useAppState((s) => s.nodes[node]?.connection);
 	const dot = entry?.state === "ok" ? "ok" : entry?.state === "offline" || entry?.state === "error" ? "bad" : "wait";
+	const canRetry = node !== LOCAL_NODE && entry?.state === "offline" && connection !== "connecting";
 	return (
 		<div className={`host-card${current ? " current" : ""}`}>
 			<div className="host-card-head">
@@ -126,13 +127,15 @@ function HostCard({
 					<span className="host-card-name">{name}</span>
 					<span className="host-card-sub">{subtitle}</span>
 				</span>
-				{current ? (
-					<span className="host-card-badge">正在查看</span>
-				) : (
-					<button type="button" className="ghost host-card-switch" onClick={onSwitch}>
-						切换
+				{canRetry ? (
+					<button type="button" className="ghost host-card-action" onClick={() => store.retryNode(node)}>
+						重新连接
 					</button>
-				)}
+				) : current ? (
+					<span className="host-card-badge" title="当前打开的工作区在这台电脑上">
+						当前
+					</span>
+				) : null}
 			</div>
 			<HostStatsBody entry={entry} />
 		</div>
@@ -146,10 +149,6 @@ function HostStatusPopover({ onClose }: { onClose: () => void }) {
 	const peers = useAppState((s) => s.peers);
 	const localInfo = useAppState((s) => s.localHostInfo);
 	useEffect(() => store.watchHostStats(true), [store]);
-	const pick = (id: string) => {
-		onClose();
-		store.switchNode(id);
-	};
 	return (
 		<div className="dropdown-menu up host-status-menu">
 			<div className="dropdown-group-title no-caps">主机状态</div>
@@ -159,7 +158,6 @@ function HostStatusPopover({ onClose }: { onClose: () => void }) {
 					name={localInfo?.hostName ?? "本机"}
 					subtitle={["本机", platformName(localInfo?.platform)].filter(Boolean).join(" · ")}
 					current={node === LOCAL_NODE}
-					onSwitch={() => pick(LOCAL_NODE)}
 				/>
 				{peers.length ? <div className="dropdown-group-title no-caps">远程主机</div> : null}
 				{peers.map((peer) => (
@@ -169,7 +167,6 @@ function HostStatusPopover({ onClose }: { onClose: () => void }) {
 						name={peer.name}
 						subtitle={["远程", platformName(peer.platform), peer.addresses[0] ?? ""].filter(Boolean).join(" · ")}
 						current={node === peer.id}
-						onSwitch={() => pick(peer.id)}
 					/>
 				))}
 			</div>
@@ -207,7 +204,10 @@ function HostStatusPopover({ onClose }: { onClose: () => void }) {
 	);
 }
 
-/** The status bar's host status: the shown computer's usage; opens every computer's usage. */
+/**
+ * The status bar's host status: usage of the computer of the workspace on screen; opens the
+ * usage of this and every paired computer.
+ */
 function HostStatus() {
 	const store = useStore();
 	const node = useAppState((s) => s.node);

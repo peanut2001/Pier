@@ -40,6 +40,10 @@
 	text-overflow: ellipsis;
 }
 
+.session-crumb-node {
+	white-space: pre;
+}
+
 .session-title {
 	display: block;
 	max-width: 100%;
