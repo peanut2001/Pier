@@ -51,6 +51,52 @@ export interface HostDirectoryListing {
 	total?: number;
 }
 
+/** Resource usage of the computer a host runs on (`host.stats`, 1.12). Sizes are bytes. */
+export interface HostStats {
+	/** When the host took the sample (ISO 8601). */
+	sampledAt: string;
+	/** Host OS (`darwin`, `linux`, `win32`, …). */
+	platform: string;
+	/** Seconds since the computer booted. */
+	uptime: number;
+	cpu: {
+		/** Busy share of all cores since the previous sample, 0–1. */
+		usage: number;
+		/** Logical cores. */
+		cores: number;
+		model?: string;
+		/** 1, 5 and 15 minute load averages (omitted on Windows). */
+		loadAverage?: [number, number, number];
+	};
+	memory: {
+		total: number;
+		/** In use by programs (excludes reclaimable caches where the OS reports them). */
+		used: number;
+	};
+	/** The filesystem holding the user's home directory; omitted when it cannot be read. */
+	disk?: {
+		/** The directory that was measured (the home directory). */
+		path: string;
+		total: number;
+		used: number;
+		/** Free space available to the user. */
+		available: number;
+	};
+	/**
+	 * Traffic of the physical network interfaces (all non-loopback ones when none is physical),
+	 * omitted when the OS does not report it. Rates are bytes per second since the previous sample.
+	 */
+	network?: {
+		rxRate: number;
+		txRate: number;
+		/** Bytes received / sent since the counters started (usually boot). */
+		rxTotal: number;
+		txTotal: number;
+	};
+	/** Memory of the Pier Host process (resident set size). */
+	hostRss: number;
+}
+
 /** One entry of a workspace directory listing (`workspace.files`, 1.5). */
 export interface WorkspaceFileEntry {
 	name: string;

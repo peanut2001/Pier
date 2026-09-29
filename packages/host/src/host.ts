@@ -32,6 +32,7 @@ import {
 	type Transport,
 } from "./connection.ts";
 import { listHostDirectories } from "./host-directories.ts";
+import { HostStatsSampler } from "./host-stats.ts";
 import type { ManagedSession } from "./managed-session.ts";
 import {
 	accountPath,
@@ -223,6 +224,7 @@ export class PierHost implements RequestHandler {
 	private readonly connections = new Set<Connection>();
 	private readonly localToken: string;
 	private readonly handlers: Handlers;
+	private readonly stats = new HostStatsSampler();
 	private shuttingDown = false;
 
 	private constructor(options: PierHostOptions, env: PiEnvironment) {
@@ -496,6 +498,7 @@ export class PierHost implements RequestHandler {
 			},
 			"host.info": () => this.info(),
 			"host.listDirectories": (_ctx, params) => listHostDirectories(params?.path),
+			"host.stats": () => this.stats.sample(),
 
 			"workspace.list": () => ({ workspaces: this.config.listWorkspaces() }),
 			"workspace.add": (_ctx, params) => {

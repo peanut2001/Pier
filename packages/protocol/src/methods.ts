@@ -20,6 +20,7 @@ import {
 	type ExtensionUpdateInfo,
 	type HostDirectoryListing,
 	type HostInfo,
+	type HostStats,
 	ImageInputSchema,
 	type ModelInfo,
 	type NewApiAuthorizeResult,
@@ -74,6 +75,8 @@ export const MethodParamsSchemas = {
 	 * a workspace on another computer. Omit `path` for the user's home directory.
 	 */
 	"host.listDirectories": z.object({ path: z.string().min(1).max(4096).optional() }).optional(),
+	/** CPU, memory, disk and network usage of the host's computer (1.12). */
+	"host.stats": z.object({}).optional(),
 
 	"workspace.list": z.object({}).optional(),
 	"workspace.add": z.object({
@@ -354,6 +357,7 @@ export interface MethodResults {
 	"host.hello": HelloResult;
 	"host.info": HostInfo;
 	"host.listDirectories": HostDirectoryListing;
+	"host.stats": HostStats;
 	"workspace.list": { workspaces: WorkspaceInfo[] };
 	"workspace.add": { workspace: WorkspaceInfo };
 	"workspace.remove": { removed: boolean };

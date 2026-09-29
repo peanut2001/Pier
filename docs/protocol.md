@@ -1,4 +1,4 @@
-# Pier 协议 v1.11
+# Pier 协议 v1.12
 
 > 实现：`packages/protocol`（zod schema + TS 类型，Host 与所有客户端共享）。
 > 本文档描述线上格式与语义；字段的权威定义以 `packages/protocol/src` 为准。
@@ -59,7 +59,7 @@
 
 ```jsonc
 { "type": "req", "id": "h", "method": "host.hello", "params": {
-  "protocolVersion": "1.11",
+  "protocolVersion": "1.12",
   "client": { "name": "pier-desktop", "version": "0.1.0", "platform": "darwin" },
   "token": "<本地 token>",       // 本地连接必填；远程连接由加密通道认证，不需要
   "coalesceMs": 50               // 可选：合并流式增量的窗口（0–1000ms，默认 0）
@@ -83,6 +83,7 @@
 | `host.hello` | 见上 | `{ protocolVersion, host, connectionId }` |
 | `host.info` | – | `HostInfo`（hostId、hostName、version、protocolVersion、platform、piVersion、agentDir） |
 | `host.listDirectories` | `{ path?(绝对路径) }` | `HostDirectoryListing`：`{ path, parent?, home, separator, entries: { name, path, symlink? }[], truncated?, total? }`；列出 Host 上一个目录的子目录（含指向目录的符号链接），用于在其他电脑上选择工作区（1.10）。省略 `path` 时为用户主目录；`path` 不做 realpath，`parent` 在文件系统根目录时省略。按名称自然排序，最多 2000 项，超出时 `truncated: true` 并给出 `total`。相对路径或不是目录时 `BAD_REQUEST`，不存在时 `NOT_FOUND`，无权限时 `FORBIDDEN` |
+| `host.stats` | – | `HostStats`：`{ sampledAt, platform, uptime(秒), cpu: { usage(0–1), cores, model?, loadAverage?[1/5/15 分钟] }, memory: { total, used }, disk?: { path, total, used, available }, network?: { rxRate, txRate, rxTotal, txTotal }, hostRss }`；Host 所在电脑的资源占用（1.12），大小单位为字节，速率为字节/秒。`cpu.usage` 与网络速率按与上一次采样的差值计算（上一次采样超过 10 秒时先取 0.4 秒的基线），1 秒内的重复调用共用一次采样。内存 `used` 不含可回收的缓存（Linux 为 `MemTotal - MemAvailable`，macOS 按 `vm_stat` 计算）；`disk` 为用户主目录所在的文件系统；`network` 统计物理网卡（Linux 上没有物理网卡时统计除回环外的全部网卡，macOS 为 `en*`，Windows 为 `netstat -e` 的总计），无法读取时省略；Windows 上没有 `loadAverage`；`hostRss` 为 Pier Host 进程的常驻内存。对已配对设备开放 |
 
 ### workspace
 
