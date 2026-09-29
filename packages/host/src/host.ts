@@ -58,7 +58,7 @@ import {
 	writeWorkspaceFile,
 } from "./workspace-files.ts";
 
-export const PIER_HOST_VERSION = "0.2.7";
+export const PIER_HOST_VERSION = "0.2.8";
 
 /** Unauthenticated connections are closed after this long without a successful `host.hello`. */
 export const HELLO_TIMEOUT_MS = 10_000;
