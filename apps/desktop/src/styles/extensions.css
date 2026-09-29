@@ -1,0 +1,71 @@
+/* Settings → Extensions: pi packages, standalone extensions and other resources. */
+
+.extension-warning {
+	margin: -8px 0 24px;
+	align-items: flex-start;
+	line-height: 1.6;
+}
+
+.extension-install-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.extension-install-row input {
+	flex: 1;
+	min-width: 0;
+}
+
+.extension-search {
+	margin-bottom: 16px;
+}
+
+.extension-name {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.provider-row.extension-row.disabled .extension-name {
+	color: var(--text-muted);
+}
+
+.mini-tag.warn {
+	background: var(--warning-soft);
+	color: var(--warning);
+}
+
+.extension-package + .extension-package {
+	border-top: 1px solid var(--border);
+}
+
+.extension-package > .provider-row {
+	align-items: flex-start;
+}
+
+.extension-package .provider-main {
+	gap: 2px;
+}
+
+button.extension-toggle {
+	flex: none;
+	width: 24px;
+	height: 24px;
+	margin-top: -2px;
+	padding: 0;
+}
+
+.extension-children {
+	margin: 0 14px 10px 50px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	background: var(--bg);
+	overflow: hidden;
+}
+
+.provider-row.extension-row.nested {
+	min-height: 44px;
+	padding: 7px 12px;
+}

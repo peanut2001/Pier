@@ -97,6 +97,19 @@ export type PierHostEvent =
 	| { type: "pairing.resolved"; requestId: string; resolution: PairingResolution; deviceId?: string }
 	/** Providers, credentials, models.json or the default model changed (1.2). Sent to every connection. */
 	| { type: "provider.changed" }
+	/**
+	 * pi extension or package settings changed (1.8). `workspaceId` is set when only that
+	 * workspace's project settings changed. Sent to every connection.
+	 */
+	| { type: "extension.changed"; workspaceId?: string }
+	/** Progress of `extension.install` / `remove` / `update` (1.8). Local connections only. */
+	| {
+			type: "extension.progress";
+			action: "install" | "remove" | "update" | "clone" | "pull";
+			phase: "start" | "progress" | "complete" | "error";
+			source: string;
+			message?: string;
+	  }
 	// Sign-in progress (1.2), sent only to the connection that called `provider.login`.
 	| { type: "auth.prompt"; flowId: string; prompt: AuthPromptInfo }
 	/** A prompt was answered elsewhere (e.g. the browser callback arrived first) and should be closed. */
@@ -123,6 +136,7 @@ export const LOCAL_ONLY_EVENTS: ReadonlySet<string> = new Set([
 	"auth.promptClosed",
 	"auth.notice",
 	"auth.done",
+	"extension.progress",
 ]);
 
 export type PierEvent = PierSessionEvent | PierHostEvent;

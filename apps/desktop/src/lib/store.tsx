@@ -11,6 +11,13 @@ import type {
 	DefaultModelRef,
 	DeviceInfo,
 	EventFrame,
+	ExtensionListResult,
+	ExtensionPackageInfo,
+	ExtensionReloadSummary,
+	ExtensionResourceInfo,
+	ExtensionResourceType,
+	ExtensionScope,
+	ExtensionUpdateInfo,
 	HostInfo,
 	MethodName,
 	MethodParams,
@@ -71,7 +78,23 @@ export interface YunlianLoginState {
 }
 
 /** Pages of the settings screen. */
-export type SettingsSection = "account" | "general" | "models" | "workspaces" | "remote" | "logs" | "about";
+export type SettingsSection =
+	| "account"
+	| "general"
+	| "models"
+	| "workspaces"
+	| "extensions"
+	| "remote"
+	| "logs"
+	| "about";
+
+/** Progress of the running extension install / remove / update, as reported by the host. */
+export interface ExtensionProgressState {
+	action: string;
+	phase: "start" | "progress" | "complete" | "error";
+	source: string;
+	message?: string;
+}
 
 export interface AppState {
 	host: HostStatus;
@@ -118,6 +141,9 @@ export interface AppState {
 	 * dialog's "insert" button targets, when there is one.
 	 */
 	filePreview?: { workspaceId: string; path: string; composerKey?: string } | undefined;
+	/** Bumped when pi extension or package settings changed, so the extensions page reloads. */
+	extensionsVersion: number;
+	extensionProgress?: ExtensionProgressState | undefined;
 }
 
 const PAIRING_RESULT_TEXT: Record<PairingResolution, string> = {
@@ -217,6 +243,7 @@ export class PierStore {
 			filesPanel: panel.open === true,
 			filesPanelWidth: clampPanelWidth(panel.width ?? FILES_PANEL_DEFAULT_WIDTH),
 			filesVersion: {},
+			extensionsVersion: 0,
 		};
 	}
 
@@ -350,6 +377,11 @@ export class PierStore {
 			this.scheduleRefresh(DEVICES_KEY);
 		} else if (event.type === "provider.changed") {
 			this.scheduleRefresh(PROVIDERS_KEY);
+		} else if (event.type === "extension.changed") {
+			this.set((s) => ({ extensionsVersion: s.extensionsVersion + 1 }));
+		} else if (event.type === "extension.progress") {
+			const { type: _type, ...progress } = event as unknown as ExtensionProgressState & { type: string };
+			this.set({ extensionProgress: progress });
 		} else if (event.type.startsWith("auth.")) {
 			this.onAuthEvent(frame);
 		} else if (event.type === "pairing.request") {
@@ -760,6 +792,108 @@ export class PierStore {
 			this.toast("error", `${action}失败：${errorText(error)}`);
 			return undefined;
 		}
+	}
+
+	// ---- pi extensions and packages -----------------------------------------------------
+
+	/** List extensions and packages (user settings, plus a workspace's project settings); rejects with the host's error. */
+	async listExtensions(workspaceId?: string): Promise<ExtensionListResult> {
+		const client = this.client;
+		if (!client) throw new Error("尚未连接到 Pier Host");
+		return client.request("extension.list", workspaceId ? { workspaceId } : {});
+	}
+
+	/** Tell the user about sessions that still run the old extensions. */
+	private reportReload(done: string, reload: ExtensionReloadSummary): void {
+		const parts = [done];
+		if (reload.reloaded) parts.push(`已重新加载 ${reload.reloaded} 个打开的会话`);
+		if (reload.pending) parts.push(`${reload.pending} 个会话正在运行，完成后在会话中执行 /reload 生效`);
+		if (reload.failed) parts.push(`${reload.failed} 个会话重新加载失败（详见日志）`);
+		this.toast(reload.failed ? "warning" : "info", parts.join("；"));
+	}
+
+	private async extensionOperation<T extends { reload: ExtensionReloadSummary }>(
+		action: string,
+		done: string,
+		fn: (client: PierClient) => Promise<T>,
+	): Promise<T | undefined> {
+		this.set({ extensionProgress: undefined });
+		const result = await this.call(action, fn);
+		this.set({ extensionProgress: undefined });
+		if (result) this.reportReload(done, result.reload);
+		return result;
+	}
+
+	async installExtension(
+		source: string,
+		scope: ExtensionScope,
+		workspaceId?: string,
+	): Promise<ExtensionPackageInfo | undefined | false> {
+		const result = await this.extensionOperation("安装", `已安装 ${source}`, (c) =>
+			c.request(
+				"extension.install",
+				{ source, scope, ...(workspaceId ? { workspaceId } : {}) },
+				{ timeoutMs: 15 * 60_000 },
+			),
+		);
+		return result ? result.package : false;
+	}
+
+	async removeExtensionPackage(pkg: ExtensionPackageInfo, workspaceId?: string): Promise<boolean> {
+		const result = await this.extensionOperation("移除", `已移除 ${pkg.name ?? pkg.source}`, (c) =>
+			c.request(
+				"extension.remove",
+				{ source: pkg.source, scope: pkg.scope, ...(workspaceId ? { workspaceId } : {}) },
+				{ timeoutMs: 5 * 60_000 },
+			),
+		);
+		return result?.removed ?? false;
+	}
+
+	async updateExtensions(source?: string, workspaceId?: string): Promise<boolean> {
+		const result = await this.extensionOperation("更新", source ? `已更新 ${source}` : "已更新所有扩展包", (c) =>
+			c.request(
+				"extension.update",
+				{ ...(source ? { source } : {}), ...(workspaceId ? { workspaceId } : {}) },
+				{ timeoutMs: 15 * 60_000 },
+			),
+		);
+		return result !== undefined;
+	}
+
+	async checkExtensionUpdates(workspaceId?: string): Promise<ExtensionUpdateInfo[] | undefined> {
+		const result = await this.call("检查更新", (c) =>
+			c.request("extension.checkUpdates", workspaceId ? { workspaceId } : {}, { timeoutMs: 5 * 60_000 }),
+		);
+		return result?.updates;
+	}
+
+	async setExtensionEnabled(
+		resource: ExtensionResourceInfo,
+		enabled: boolean,
+		workspaceId?: string,
+	): Promise<ExtensionResourceInfo | undefined> {
+		const result = await this.extensionOperation(
+			enabled ? "启用" : "停用",
+			`已${enabled ? "启用" : "停用"} ${resource.name}`,
+			(c) =>
+				c.request("extension.setEnabled", {
+					type: resource.type as ExtensionResourceType,
+					path: resource.path,
+					enabled,
+					...(workspaceId ? { workspaceId } : {}),
+				}),
+		);
+		return result?.resource;
+	}
+
+	async deleteExtension(resource: ExtensionResourceInfo, workspaceId?: string): Promise<boolean> {
+		const result = await this.extensionOperation(
+			"删除",
+			resource.source === "auto" ? `已删除 ${resource.name}（已移到 Pier 回收站）` : `已从配置中移除 ${resource.name}`,
+			(c) => c.request("extension.delete", { path: resource.path, ...(workspaceId ? { workspaceId } : {}) }),
+		);
+		return result?.deleted ?? false;
 	}
 
 	// ---- workspaces --------------------------------------------------------------------
