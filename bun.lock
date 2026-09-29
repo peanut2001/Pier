@@ -14,8 +14,9 @@
     },
     "apps/desktop": {
       "name": "@pier/desktop",
-      "version": "0.2.4",
+      "version": "0.2.5",
       "dependencies": {
+        "@fontsource-variable/inter": "5.3.0",
         "@pier/chat-state": "workspace:*",
         "@pier/client": "workspace:*",
         "@pier/protocol": "workspace:*",
@@ -43,7 +44,7 @@
     },
     "apps/mobile": {
       "name": "@pier/mobile",
-      "version": "0.2.4",
+      "version": "0.2.5",
       "dependencies": {
         "@expo/metro-runtime": "~57.0.16",
         "@pier/chat-state": "workspace:*",
@@ -78,7 +79,7 @@
     },
     "packages/chat-state": {
       "name": "@pier/chat-state",
-      "version": "0.2.4",
+      "version": "0.2.5",
       "dependencies": {
         "@pier/client": "workspace:*",
         "@pier/protocol": "workspace:*",
@@ -86,7 +87,7 @@
     },
     "packages/client": {
       "name": "@pier/client",
-      "version": "0.2.4",
+      "version": "0.2.5",
       "dependencies": {
         "@pier/crypto": "workspace:*",
         "@pier/protocol": "workspace:*",
@@ -94,7 +95,7 @@
     },
     "packages/crypto": {
       "name": "@pier/crypto",
-      "version": "0.2.4",
+      "version": "0.2.5",
       "dependencies": {
         "@noble/ciphers": "^2.4.0",
         "@noble/curves": "^2.4.0",
@@ -104,7 +105,7 @@
     },
     "packages/host": {
       "name": "@pier/host",
-      "version": "0.2.4",
+      "version": "0.2.5",
       "bin": {
         "pier-host": "./src/main.ts",
       },
@@ -125,7 +126,7 @@
     },
     "packages/protocol": {
       "name": "@pier/protocol",
-      "version": "0.2.4",
+      "version": "0.2.5",
       "dependencies": {
         "zod": "^4.6.5",
       },
@@ -465,6 +466,8 @@
     "@expo/ws-tunnel": ["@expo/ws-tunnel@2.0.0", "", { "peerDependencies": { "ws": "^8.0.0" } }, "sha512-j+JfTRdCk820J9dU0sA2SqshQIKFOMo7ED84w9MJFcebfbNQgsLztEY/SABDkGnjatrW4xGqnUhVRxSBVyCkXw=="],
 
     "@expo/xcpretty": ["@expo/xcpretty@4.4.5", "", { "dependencies": { "@babel/code-frame": "7.29.7", "chalk": "4.1.2", "js-yaml": "4.3.2" }, "bin": { "excpretty": "build/cli.js" } }, "sha512-J3eL4n4h5QTwfD0SIz8OIk6/+sOL/hFZAMacgCM07UNlxBQfJipEpIC2AQxvGkbYeStByJ0TVhQAJo+DeNgaSQ=="],
+
+    "@fontsource-variable/inter": ["@fontsource-variable/inter@5.3.0", "", {}, "sha512-OupL48va4JNofb97w6NYeF9S7W/kHNKM0Er8Dem5nqi4jeOLrVJDoE8tZEpnMJmtkvNbB1EIPPwHcdkF6b1oUA=="],
 
     "@google/genai": ["@google/genai@2.21.0", "", { "dependencies": { "google-auth-library": "10.9.1", "p-retry": "4.6.2", "protobufjs": "7.6.6", "ws": "8.22.0" }, "peerDependencies": { "@modelcontextprotocol/sdk": "^1.25.2" }, "optionalPeers": ["@modelcontextprotocol/sdk"] }, "sha512-+PDtco2/Z0ONdzCGekCoCT+O1VJS9xJQNN4XzQpXG/t3El/SWWMkCWlFRO1KmivOHPa4Q0VjUYu1HBKCZ/v33Q=="],
 

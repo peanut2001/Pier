@@ -3,7 +3,7 @@
 .home {
 	flex: 1;
 	overflow-y: auto;
-	background: radial-gradient(900px 360px at 50% -140px, var(--accent-soft), transparent 70%), var(--bg);
+	background: var(--hero-glow), var(--bg);
 }
 
 .home-inner {
@@ -16,7 +16,7 @@
 .home h1 {
 	font-size: 30px;
 	font-weight: 700;
-	letter-spacing: -0.02em;
+	letter-spacing: -0.03em;
 	line-height: 1.2;
 	margin: 0 0 12px;
 }
@@ -53,15 +53,18 @@
 	position: relative;
 	padding: 18px 18px 20px;
 	border-radius: var(--radius-lg);
-	background: var(--bg-elevated);
+	background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 60%), var(--bg-elevated);
 	border: 1px solid var(--border);
+	box-shadow: var(--highlight);
 	transition:
 		border-color 0.2s var(--ease),
+		box-shadow 0.2s var(--ease),
 		transform 0.2s var(--ease);
 }
 
 .step-card:hover {
 	border-color: var(--border-strong);
+	box-shadow: var(--shadow-md), var(--highlight);
 	transform: translateY(-2px);
 }
 
