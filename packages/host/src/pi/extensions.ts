@@ -60,6 +60,15 @@ function patternTarget(entry: string): string {
 	return isOverride(entry) ? entry.slice(1) : entry;
 }
 
+/**
+ * Compare settings patterns the way pi matches them: pi writes patterns with the platform
+ * separator but converts them to `/` before matching, so on Windows `extensions\a.js` and
+ * `extensions/a.js` name the same resource.
+ */
+function samePattern(a: string, b: string): boolean {
+	return a.split(sep).join("/") === b.split(sep).join("/");
+}
+
 function expandHome(path: string): string {
 	if (path === "~") return homedir();
 	if (path.startsWith("~/") || path.startsWith("~\\")) return join(homedir(), path.slice(2));
@@ -401,7 +410,7 @@ export class ExtensionManager {
 		const base = raw.metadata.baseDir ?? this.baseDir(ctx, info.scope);
 		const pattern = relative(base, info.path);
 		const current = (this.scopeSettings(ctx, info.scope)[info.type] ?? []) as string[];
-		const updated = current.filter((entry) => !(isOverride(entry) && patternTarget(entry) === pattern));
+		const updated = current.filter((entry) => !(isOverride(entry) && samePattern(patternTarget(entry), pattern)));
 		updated.push(`${enabled ? "+" : "-"}${pattern}`);
 		this.setTopLevelPaths(ctx, info.scope, info.type, updated);
 	}
@@ -421,7 +430,7 @@ export class ExtensionManager {
 		const pkg = typeof found === "string" ? { source: found } : { ...found };
 		const pattern = relative(raw.metadata.baseDir ?? dirname(info.path), info.path);
 		const current = pkg[info.type] ?? [];
-		const updated = current.filter((entry) => patternTarget(entry) !== pattern);
+		const updated = current.filter((entry) => !samePattern(patternTarget(entry), pattern));
 		updated.push(`${enabled ? "+" : "-"}${pattern}`);
 		pkg[info.type] = updated;
 		packages[index] = pkg;
@@ -484,9 +493,11 @@ export class ExtensionManager {
 				this.options.log?.(`extension moved to trash: ${action.path} -> ${moved}`);
 			} else {
 				const base = this.baseDir(ctx, info.scope);
-				const targets = new Set([action.entry, relative(base, info.path)]);
+				const targets = [action.entry, relative(base, info.path)];
 				const current = (this.scopeSettings(ctx, info.scope).extensions ?? []) as string[];
-				const updated = current.filter((e) => e !== action.entry && !(isOverride(e) && targets.has(patternTarget(e))));
+				const updated = current.filter(
+					(e) => e !== action.entry && !(isOverride(e) && targets.some((t) => samePattern(patternTarget(e), t))),
+				);
 				this.setTopLevelPaths(ctx, info.scope, "extensions", updated);
 				await this.save(ctx);
 			}
