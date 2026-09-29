@@ -3,6 +3,7 @@ import {
 	type CustomModel,
 	type CustomProvider,
 	type CustomProviderApi,
+	type NewApiModel,
 	type ProviderInfo,
 	YUNLIAN_SITE_URL,
 } from "@pier/protocol";
@@ -73,13 +74,18 @@ export function newApiBaseUrl(siteUrl: string, api: CustomProviderApi): string {
 /**
  * The custom provider to save for a token's models. Saving again keeps the existing entry's
  * name, API type, Base URL and per-model settings, and adds the token's new models.
+ *
+ * Each model is called with the wire API the site detected for it (e.g. Anthropic Messages for
+ * Claude models), stored per model when it differs from the provider's; models the site gave no
+ * preference for keep their previous API.
  */
 export function relayProvider(
 	target: { id: string; name: string; siteUrl: string },
-	models: ReadonlyArray<{ id: string; name?: string }>,
+	models: ReadonlyArray<NewApiModel>,
 	existing?: CustomProvider,
 	modelsError?: string,
 ): CustomProvider {
+	const api = existing?.api ?? "openai-completions";
 	const previous = new Map((existing?.models ?? []).map((m) => [m.id, m]));
 	const seen = new Set<string>();
 	const list: CustomModel[] = [];
@@ -87,7 +93,12 @@ export function relayProvider(
 		const id = model.id.trim();
 		if (!id || seen.has(id)) continue;
 		seen.add(id);
-		list.push(previous.get(id) ?? { id, ...(model.name && model.name !== id ? { name: model.name } : {}) });
+		const { api: previousApi, ...kept } = previous.get(id) ?? {
+			id,
+			...(model.name && model.name !== id ? { name: model.name } : {}),
+		};
+		const modelApi = model.api ?? previousApi;
+		list.push({ ...kept, ...(modelApi && modelApi !== api ? { api: modelApi } : {}) });
 	}
 	// The site could not list models this time: keep what was configured before.
 	const kept = list.length ? list : (existing?.models ?? []);
@@ -96,7 +107,6 @@ export function relayProvider(
 			modelsError ? `无法获取${target.name}的模型列表：${modelsError}` : `${target.name} 没有返回可用的模型`,
 		);
 	}
-	const api = existing?.api ?? "openai-completions";
 	return {
 		id: existing?.id ?? target.id,
 		...(existing ? (existing.name ? { name: existing.name } : {}) : { name: target.name }),
@@ -108,7 +118,7 @@ export function relayProvider(
 
 /** The browser sign-in entry (`yunlian`) for the approved token's models. */
 export function yunlianProvider(
-	models: ReadonlyArray<{ id: string; name?: string }>,
+	models: ReadonlyArray<NewApiModel>,
 	existing?: CustomProvider,
 	modelsError?: string,
 ): CustomProvider {

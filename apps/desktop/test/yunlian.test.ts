@@ -55,6 +55,54 @@ describe("云链API provider", () => {
 		expect(yunlianProvider([], existing, "timeout").models).toEqual(existing.models);
 	});
 
+	it("calls each model with the wire API the site detected", () => {
+		const provider = yunlianProvider([
+			{ id: "gpt-5", api: "openai-completions" },
+			{ id: "claude-opus-5", api: "anthropic-messages" },
+			{ id: "other" },
+		]);
+		expect(provider.api).toBe("openai-completions");
+		expect(provider.models).toEqual([
+			{ id: "gpt-5" },
+			{ id: "claude-opus-5", api: "anthropic-messages" },
+			{ id: "other" },
+		]);
+
+		// Re-importing applies what the site says now and keeps other per-model settings.
+		const existing = {
+			id: "yunlian",
+			api: "openai-completions" as const,
+			baseUrl: "https://api.yunnet.top/v1",
+			models: [
+				{ id: "claude-opus-5", reasoning: true },
+				{ id: "manual", api: "openai-responses" as const },
+			],
+		};
+		expect(
+			yunlianProvider([{ id: "claude-opus-5", api: "anthropic-messages" }, { id: "manual" }], existing).models,
+		).toEqual([
+			{ id: "claude-opus-5", reasoning: true, api: "anthropic-messages" },
+			{ id: "manual", api: "openai-responses" },
+		]);
+		// On an Anthropic provider, Claude models need no override.
+		expect(
+			yunlianProvider(
+				[
+					{ id: "claude-opus-5", api: "anthropic-messages" },
+					{ id: "gpt-5", api: "openai-completions" },
+				],
+				{
+					...existing,
+					api: "anthropic-messages",
+					baseUrl: "https://api.yunnet.top",
+				},
+			).models,
+		).toEqual([
+			{ id: "claude-opus-5", reasoning: true },
+			{ id: "gpt-5", api: "openai-completions" },
+		]);
+	});
+
 	it("fails when no models are available for a new provider", () => {
 		expect(() => yunlianProvider([], undefined, "HTTP 401")).toThrow("HTTP 401");
 		expect(() => yunlianProvider([])).toThrow("没有返回可用的模型");

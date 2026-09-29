@@ -10,7 +10,8 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { startLocalGateway } from "../src/gateway/local-gateway.ts";
 import { PierHost } from "../src/host.ts";
 import { PiEnvironment } from "../src/pi/environment.ts";
-import { mergeCustomProvider, stripJsonComments, toCustomProvider } from "../src/pi/models-json.ts";
+import { mergeCustomProvider, modelBaseUrl, stripJsonComments, toCustomProvider } from "../src/pi/models-json.ts";
+import { detectNewApiModelApi } from "../src/pi/newapi.ts";
 import { Recorder, TOKEN } from "./helpers.ts";
 
 const SECRET = "sk-test-SECRET-0123456789";
@@ -139,6 +140,69 @@ describe("models.json helpers", () => {
 			hasConfiguredKey: true,
 		});
 		expect(toCustomProvider("p", { baseUrl: "http://x", models: [{ id: "a" }] })).toBeUndefined();
+	});
+
+	it("stores per-model wire APIs with derived Base URLs", () => {
+		const form = {
+			id: "relay",
+			api: "openai-completions" as const,
+			baseUrl: "https://relay.example/v1",
+			models: [{ id: "gpt-5" }, { id: "claude-opus-5", api: "anthropic-messages" as const }],
+		};
+		const merged = mergeCustomProvider(undefined, form);
+		expect(merged.models).toEqual([
+			{ id: "gpt-5", input: ["text"] },
+			{ id: "claude-opus-5", input: ["text"], api: "anthropic-messages", baseUrl: "https://relay.example" },
+		]);
+		expect(toCustomProvider("relay", merged)?.models).toEqual([
+			{ id: "gpt-5", images: false },
+			{ id: "claude-opus-5", images: false, api: "anthropic-messages" },
+		]);
+		// Back to the provider's API: the derived Base URL goes too.
+		const reset = mergeCustomProvider(merged, { ...form, models: [{ id: "claude-opus-5" }] });
+		expect(reset.models).toEqual([{ id: "claude-opus-5", input: ["text"] }]);
+		// A model's own Base URL for the provider's API is kept.
+		const custom = { ...merged, models: [{ id: "gpt-5", baseUrl: "https://other/v1" }] };
+		expect(mergeCustomProvider(custom, { ...form, models: [{ id: "gpt-5" }] }).models).toEqual([
+			{ id: "gpt-5", baseUrl: "https://other/v1", input: ["text"] },
+		]);
+		// Models on APIs Pier cannot edit still make the provider read-only.
+		expect(toCustomProvider("x", { ...merged, models: [{ id: "a", api: "bedrock-converse-stream" }] })).toBeUndefined();
+	});
+
+	it("derives Base URLs between wire APIs", () => {
+		expect(modelBaseUrl("https://r.example/v1/", "openai-completions", "anthropic-messages")).toBe("https://r.example");
+		expect(modelBaseUrl("https://r.example/v1", "openai-completions", "google-generative-ai")).toBe(
+			"https://r.example/v1beta",
+		);
+		expect(modelBaseUrl("https://r.example", "anthropic-messages", "openai-responses")).toBe("https://r.example/v1");
+		expect(modelBaseUrl("https://r.example/v1beta", "google-generative-ai", "openai-completions")).toBe(
+			"https://r.example/v1",
+		);
+		expect(modelBaseUrl("https://r.example/v1", "openai-completions", "openai-completions")).toBe(
+			"https://r.example/v1",
+		);
+	});
+
+	it("detects the wire API of NewAPI models", () => {
+		// Pass-through channels (NewAPI, Sub2API) list every endpoint type.
+		const all = ["openai", "openai-response", "openai-response-compact", "anthropic", "gemini"];
+		expect(detectNewApiModelApi("claude-sonnet-5", all)).toBe("anthropic-messages");
+		expect(detectNewApiModelApi("gpt-5", all)).toBe("openai-completions");
+		expect(detectNewApiModelApi("anthropic/claude-opus-4.5", ["anthropic", "openai"])).toBe("anthropic-messages");
+		expect(detectNewApiModelApi("my-alias", ["anthropic", "openai"])).toBe("openai-completions");
+		expect(detectNewApiModelApi("my-alias", ["anthropic"])).toBe("anthropic-messages");
+		expect(detectNewApiModelApi("gpt-5-codex", ["openai-response", "openai-response-compact"])).toBe(
+			"openai-responses",
+		);
+		expect(detectNewApiModelApi("gemini-3-pro", ["gemini", "openai"])).toBe("openai-completions");
+		expect(detectNewApiModelApi("gemini-3-pro", ["gemini"])).toBe("google-generative-ai");
+		expect(detectNewApiModelApi("claude-sonnet-5", ["openai"])).toBe("openai-completions");
+		expect(detectNewApiModelApi("text-embedding-3", ["embeddings"])).toBeUndefined();
+		// Older versions list no endpoint types: Claude models are recognised by name.
+		expect(detectNewApiModelApi("claude-haiku-4-5-20251001", undefined)).toBe("anthropic-messages");
+		expect(detectNewApiModelApi("gpt-5", [])).toBeUndefined();
+		expect(detectNewApiModelApi("claudette", undefined)).toBeUndefined();
 	});
 });
 

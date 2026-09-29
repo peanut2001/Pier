@@ -24,6 +24,7 @@ import {
 	toCustomProvider,
 	writeModelsJson,
 } from "./models-json.ts";
+import { detectNewApiModelApi } from "./newapi.ts";
 
 const CANCELLED = "Login cancelled";
 const CREDENTIAL_TIMEOUT_MS = 15_000;
@@ -672,7 +673,7 @@ export class ProviderManager {
 					? (body as { models: unknown[] }).models
 					: undefined;
 		if (!list) throw new PierProtocolError("BAD_REQUEST", `${url} 的返回中没有模型列表`);
-		const models = new Map<string, { id: string; name?: string }>();
+		const models = new Map<string, CustomModel>();
 		const index = this.capabilityIndex();
 		for (const item of list) {
 			if (typeof item === "string") {
@@ -690,7 +691,15 @@ export class ProviderManager {
 					: typeof record.displayName === "string"
 						? record.displayName
 						: undefined;
-			models.set(id, { id, ...(name && name !== id ? { name } : {}) });
+			// NewAPI sites list the wire APIs each model supports (e.g. Anthropic Messages for Claude).
+			const api = Array.isArray(record.supported_endpoint_types)
+				? detectNewApiModelApi(id, record.supported_endpoint_types)
+				: undefined;
+			models.set(id, {
+				id,
+				...(name && name !== id ? { name } : {}),
+				...(api && api !== params.api ? { api } : {}),
+			});
 		}
 		return [...models.values()].sort((a, b) => a.id.localeCompare(b.id)).map((model) => index.fill(model));
 	}

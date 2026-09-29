@@ -296,8 +296,22 @@ export const CustomModelSchema = z.object({
 	images: z.boolean().optional(),
 	contextWindow: z.number().int().positive().max(100_000_000).optional(),
 	maxTokens: z.number().int().positive().max(100_000_000).optional(),
+	/**
+	 * Wire API of this model when it differs from the provider's, e.g. Claude models of a relay
+	 * that are called with Anthropic Messages. The host derives the model's Base URL from the
+	 * provider's. Added in 1.7.
+	 */
+	api: CustomProviderApiSchema.optional(),
 });
 export type CustomModel = z.infer<typeof CustomModelSchema>;
+
+/** A model a NewAPI token can use, with the wire API the site says it supports best. */
+export interface NewApiModel {
+	id: string;
+	name?: string;
+	/** Detected from the site's `supported_endpoint_types` (or the model family on older sites). */
+	api?: CustomProviderApi;
+}
 
 /** An OpenAI-, Anthropic- or Google-compatible endpoint stored in pi's `models.json`. */
 export const CustomProviderSchema = z.object({
@@ -419,7 +433,7 @@ export interface NewApiAuthorizeResult {
 	token: { id: number; name: string; group?: string; maskedKey: string };
 	/** Host-side reference to the token key, as from `newapi.useToken`. */
 	keyRef: string;
-	models: Array<{ id: string; name?: string }>;
+	models: NewApiModel[];
 	modelsError?: string;
 }
 

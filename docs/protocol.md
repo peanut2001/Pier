@@ -150,9 +150,9 @@ pi 终端界面自带的命令（`/model`、`/compact`、`/new`、`/fork`、`/na
 | `provider.loginRespond` 🔒 | `{ flowId, promptId, value?, cancelled? }` | `{ accepted }`；回答 `auth.prompt`，`cancelled: true` 取消整个登录 |
 | `provider.loginCancel` 🔒 | `{ flowId }` | `{ cancelled }` |
 | `provider.logout` 🔒 | `{ providerId }` | `{ removed }`；删除 pi 当前使用的凭据：优先删除 `auth.json` 中保存的凭据；没有时，如果密钥来自 `models.json` 里该服务商的 `apiKey`（明文密钥或 `!命令`），则删除这个字段（只剩 `name` 的条目整项删除，pi 无法加载时回滚并返回 `BAD_REQUEST`）。不影响环境变量及 `$VAR` 形式的引用 |
-| `provider.saveCustom` 🔒 | `{ provider: CustomProvider, apiKey?, apiKeyRef?, create? }` | `{ provider, defaultModel? }`；`CustomProvider = { id, name?, api, baseUrl, models: { id, name?, reasoning?, images?, contextWindow?, maxTokens? }[] }`，`api` 为 `openai-completions`、`openai-responses`、`anthropic-messages`、`google-generative-ai` 之一。只改动表单涉及的字段，文件中的其他内容保留（含注释的文件先备份为 `models.json.bak`）；pi 无法加载时回滚并返回 `BAD_REQUEST`。新建时必须提供 `apiKey`（或 1.3 起的 `apiKeyRef`，见下文 NewAPI），编辑时省略则保留原密钥 |
+| `provider.saveCustom` 🔒 | `{ provider: CustomProvider, apiKey?, apiKeyRef?, create? }` | `{ provider, defaultModel? }`；`CustomProvider = { id, name?, api, baseUrl, models: { id, name?, reasoning?, images?, contextWindow?, maxTokens?, api? }[] }`，`api` 为 `openai-completions`、`openai-responses`、`anthropic-messages`、`google-generative-ai` 之一。模型的 `api`（1.7）表示该模型使用与服务商不同的接口：写入 `models.json` 时同时写入该模型的 `api` 和按服务商 Base URL 换算的 `baseUrl`（去掉末尾的 `/v1` / `/v1beta` 得到根地址，OpenAI 类接口加 `/v1`，Anthropic 用根地址，Google 加 `/v1beta`）；改回服务商的接口时一并删除换算出的 `baseUrl`。只改动表单涉及的字段，文件中的其他内容保留（含注释的文件先备份为 `models.json.bak`）；pi 无法加载时回滚并返回 `BAD_REQUEST`。新建时必须提供 `apiKey`（或 1.3 起的 `apiKeyRef`，见下文 NewAPI），编辑时省略则保留原密钥 |
 | `provider.removeCustom` 🔒 | `{ providerId }` | `{ removed }`；同时删除保存的密钥 |
-| `provider.probeModels` 🔒 | `{ api, baseUrl, apiKey?, apiKeyRef?, providerId? }` | `{ models: CustomModel[] }`；请求接口的模型列表（OpenAI：`GET <baseUrl>/models`）。省略 `apiKey` 时使用 `apiKeyRef`（1.3）或 `providerId` 已保存的密钥。1.6 起，pi 内置模型目录认识的模型会带上 `reasoning` / `images` / `contextWindow` / `maxTokens` |
+| `provider.probeModels` 🔒 | `{ api, baseUrl, apiKey?, apiKeyRef?, providerId? }` | `{ models: CustomModel[] }`；请求接口的模型列表（OpenAI：`GET <baseUrl>/models`）。省略 `apiKey` 时使用 `apiKeyRef`（1.3）或 `providerId` 已保存的密钥。1.6 起，pi 内置模型目录认识的模型会带上 `reasoning` / `images` / `contextWindow` / `maxTokens`；1.7 起，NewAPI 站点在模型列表中给出 `supported_endpoint_types` 时，与 `api` 不同的推荐接口会作为模型的 `api` 返回 |
 
 **模型能力自动识别（1.6）**：`GET /models` 只返回模型 ID，因此 Host 会按 pi 内置的模型目录补全能力。ID 会先规范化再匹配：统一小写，去掉 `anthropic/` 这类前缀和 `:free` 这类标签，忽略日期后缀（`-20250929`）以及 `4.5` / `4-5` 的写法差异；`-thinking` / `-nothinking` 后缀分别视为推理 / 非推理变体。目录里没有的模型，只按常见推理系列的名称推断 `reasoning` 和 `images`，其他仍视为未知。`provider.saveCustom` 保存时，模型中未设置（省略）的字段按此补全；显式传入的值（包括 `reasoning: false`、`images: false`）保持不变，并原样写入 `models.json`。Host 启动时也会为 `models.json` 中自定义服务商（不含内置服务商的覆盖配置）缺少 `reasoning`、`input`、`contextWindow`、`maxTokens` 的模型补全这些字段，已有字段不会改动；pi 因此无法加载时回滚。服务商配置变化后，已打开的会话会重新解析当前模型并发送 `session.model`；如果模型刚被识别为推理模型、而会话的思考等级是 `off`，会改用配置的默认思考等级。
 
@@ -162,6 +162,8 @@ pi 终端界面自带的命令（`/model`、`/compact`、`/new`、`/fork`、`/na
 
 登录 [NewAPI](https://github.com/QuantumNous/new-api) 中转站，读取令牌和可用模型，再用 `provider.saveCustom` 保存为自定义接口。登录会话只保存在 Host 内存中，只属于发起的连接；连接断开、调用 `newapi.close` 或 30 分钟未使用后丢弃。令牌密钥由 Host 直接读取，客户端只拿到 `keyRef`，可在同一连接的 `provider.saveCustom` / `provider.probeModels` 中代替 `apiKey`。所有方法均为 🔒。
 
+**模型接口识别（1.7）**：NewAPI 的 `GET /v1/models` 为每个模型列出 `supported_endpoint_types`（服务该模型的所有渠道的并集：Anthropic 渠道为 `anthropic`、`openai`，Gemini 渠道为 `gemini`、`openai`，Codex 渠道只有 `openai-response`，NewAPI / Sub2API 这类透传渠道为全部类型）。Host 据此给出模型的 `api`：支持 `anthropic` 的 Claude 模型（ID 中含 `claude`），以及只支持 `anthropic` 的模型，用 `anthropic-messages`；其余支持 `openai` 的用 `openai-completions`，只支持 `openai-response` 的用 `openai-responses`，只支持 `gemini` 的用 `google-generative-ai`；都不支持（如嵌入模型）时省略。不返回该字段的旧版本只按名称把 Claude 模型识别为 `anthropic-messages`。客户端保存时，把与服务商 `api` 不同的推荐接口写入模型的 `api`。
+
 同时支持当前版本的仪表盘登录（登录返回 Bearer 访问令牌，可选的 RSA 密码加密、`/api/user/login/verify` 两步验证）和旧版本的 Cookie 会话（`New-Api-User` 请求头、`/api/user/login/2fa`）。开启 Turnstile 或只能第三方登录的站点，改用「系统访问令牌」。
 
 | 方法 | 参数 | 结果 |
@@ -169,7 +171,7 @@ pi 终端界面自带的命令（`/model`、`/compact`、`/new`、`/fork`、`/na
 | `newapi.login` 🔒 | `{ baseUrl, username, password }` 或 `{ baseUrl, accessToken, userId? }` | `NewApiLoginResult`：`{ status: "ok", sessionId, account }` 或需要两步验证时 `{ status: "verify", sessionId, methods }`。`baseUrl` 可以带 `/v1`、`/console/...` 等路径，Host 会规范为站点根地址。`account = { site: { name, url, version?, logo? }, user: { id?, username, displayName?, group? }, tokens: NewApiToken[], groups: { name, description?, ratio? }[] }`，`NewApiToken = { id, name, maskedKey, status, group?, expiresAt?, unlimitedQuota, remainQuota?, modelLimits? }`（`status`：1 启用、2 禁用、3 过期、4 额度用尽） |
 | `newapi.verify` 🔒 | `{ sessionId, code }` | `NewApiLoginResult`；提交两步验证码（或备用码） |
 | `newapi.createToken` 🔒 | `{ sessionId, name, group? }` | `{ tokenId, tokens }`；新建无限额度、永不过期、不限模型的令牌 |
-| `newapi.useToken` 🔒 | `{ sessionId, tokenId }` | `{ keyRef, models: { id }[], modelsError? }`；读取令牌密钥（`POST /api/token/:id/key`，旧版本从令牌列表读取），并用它请求 `GET /v1/models` |
+| `newapi.useToken` 🔒 | `{ sessionId, tokenId }` | `{ keyRef, models: { id, api? }[], modelsError? }`；读取令牌密钥（`POST /api/token/:id/key`，旧版本从令牌列表读取），并用它请求 `GET /v1/models`。`api`（1.7）是推荐的调用接口，见下文「模型接口识别」 |
 | `newapi.close` 🔒 | `{ sessionId }` | `{ closed }`；丢弃登录，并退出 Host 用密码建立的仪表盘会话（不会吊销用户自己的访问令牌） |
 
 #### 浏览器授权（1.4）

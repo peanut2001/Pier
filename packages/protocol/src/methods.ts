@@ -17,6 +17,7 @@ import {
 	type NewApiAuthorizeResult,
 	type NewApiAuthorizeStart,
 	type NewApiLoginResult,
+	type NewApiModel,
 	type NewApiToken,
 	type ProviderInfo,
 	type ProviderListResult,
@@ -339,8 +340,8 @@ export interface MethodResults {
 	"newapi.createToken": { tokenId: number; tokens: NewApiToken[] };
 	"newapi.useToken": {
 		keyRef: string;
-		/** Models the token can call (`GET /v1/models` with its key). */
-		models: Array<{ id: string; name?: string }>;
+		/** Models the token can call (`GET /v1/models` with its key), with the detected wire API (1.7). */
+		models: NewApiModel[];
 		/** Why the model list could not be read, when it could not. */
 		modelsError?: string;
 	};
@@ -357,7 +358,7 @@ export interface MethodResults {
 	"account.createToken": { tokenId: number; tokens: NewApiToken[] };
 	"account.useToken": {
 		keyRef: string;
-		models: Array<{ id: string; name?: string }>;
+		models: NewApiModel[];
 		modelsError?: string;
 	};
 	"account.logout": { loggedOut: boolean };

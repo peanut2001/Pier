@@ -54,6 +54,14 @@ const API_LABEL: Record<CustomProviderApi, string> = {
 	"google-generative-ai": "Google Gemini",
 };
 
+/** Short labels for a model's own wire API in the model list. */
+const MODEL_API_LABEL: Record<CustomProviderApi, string> = {
+	"openai-completions": "Chat",
+	"openai-responses": "Responses",
+	"anthropic-messages": "Anthropic",
+	"google-generative-ai": "Gemini",
+};
+
 const BASE_URL_HINT: Record<CustomProviderApi, string> = {
 	"openai-completions": "https://api.example.com/v1",
 	"openai-responses": "https://api.example.com/v1",
@@ -647,10 +655,11 @@ function CustomProviderForm({ editing, onDone }: { editing?: ProviderInfo; onDon
 	const save = async (e: FormEvent) => {
 		e.preventDefault();
 		const cleaned: CustomModel[] = models
-			.map(({ key: _k, name: modelName, ...m }) => ({
+			.map(({ key: _k, name: modelName, api: modelApi, ...m }) => ({
 				...m,
 				id: m.id.trim(),
 				...(modelName?.trim() ? { name: modelName.trim() } : {}),
+				...(modelApi && modelApi !== api ? { api: modelApi } : {}),
 			}))
 			.filter((m) => m.id);
 		const invalid = validate(cleaned);
@@ -791,6 +800,7 @@ function CustomProviderForm({ editing, onDone }: { editing?: ProviderInfo; onDon
 						<span>模型 ID</span>
 						<span>显示名称</span>
 						<span title="上下文窗口（tokens），留空为 128000">上下文</span>
+						<span title="调用该模型使用的接口；“默认”跟随服务商的接口类型">接口</span>
 						<span>推理</span>
 						<span>图片</span>
 						<span />
@@ -818,6 +828,23 @@ function CustomProviderForm({ editing, onDone }: { editing?: ProviderInfo; onDon
 									update(m.key, { contextWindow: n > 0 ? n : undefined });
 								}}
 							/>
+							<select
+								className="model-api"
+								title={
+									m.api && m.api !== api
+										? `${API_LABEL[m.api]}，Base URL 由服务商的 Base URL 自动换算`
+										: "跟随服务商的接口类型"
+								}
+								value={m.api && m.api !== api ? m.api : ""}
+								onChange={(e) => update(m.key, { api: (e.target.value || undefined) as CustomProviderApi | undefined })}
+							>
+								<option value="">默认</option>
+								{CUSTOM_PROVIDER_APIS.filter((value) => value !== api).map((value) => (
+									<option key={value} value={value}>
+										{MODEL_API_LABEL[value]}
+									</option>
+								))}
+							</select>
 							<input
 								type="checkbox"
 								title="推理模型（支持思考等级）"

@@ -160,7 +160,11 @@ describe("NewAPI sign-in", () => {
 		expect(dashboard.every((r) => r.headers.authorization === `Bearer ${DASHBOARD_TOKEN}`)).toBe(true);
 
 		const used = await t.client.request("newapi.useToken", { sessionId: result.sessionId, tokenId: 2 });
-		expect(used.models).toEqual([{ id: "m-a" }, { id: "m-b" }, { id: "only-main" }]);
+		expect(used.models).toEqual([
+			{ id: "m-a", api: "openai-completions" },
+			{ id: "m-b", api: "anthropic-messages" },
+			{ id: "only-main", api: "openai-completions" },
+		]);
 		expect(JSON.stringify([result, used])).not.toContain(TOKEN_KEY_B);
 
 		// The key reference works for probing and saving, but only on this connection.
@@ -169,13 +173,17 @@ describe("NewAPI sign-in", () => {
 			baseUrl: `${site.url}/v1`,
 			apiKeyRef: used.keyRef,
 		});
-		expect(probe.models).toHaveLength(3);
+		expect(probe.models.map((m) => [m.id, m.api])).toEqual([
+			["m-a", undefined],
+			["m-b", "anthropic-messages"],
+			["only-main", undefined],
+		]);
 		const provider = {
 			id: "test-site",
 			name: "测试站",
 			api: "openai-completions" as const,
 			baseUrl: `${site.url}/v1`,
-			models: [{ id: "m-a" }, { id: "m-b" }],
+			models: [{ id: "m-a" }, { id: "m-b", api: "anthropic-messages" as const }],
 		};
 		await expect(
 			t.second.request("provider.saveCustom", { provider, apiKeyRef: used.keyRef, create: true }),
@@ -185,6 +193,13 @@ describe("NewAPI sign-in", () => {
 		expect(saved.defaultModel).toEqual({ provider: "test-site", modelId: "m-a" });
 		expect(await t.credentials.read("test-site")).toEqual({ type: "api_key", key: `sk-${TOKEN_KEY_B}` });
 		expect(readFileSync(t.modelsPath, "utf8")).not.toContain(TOKEN_KEY_B);
+		// Models on another wire API get their own API and a Base URL derived from the provider's.
+		const entry = JSON.parse(readFileSync(t.modelsPath, "utf8")).providers["test-site"];
+		expect(entry.models.map((m: Record<string, unknown>) => [m.id, m.api, m.baseUrl])).toEqual([
+			["m-a", undefined, undefined],
+			["m-b", "anthropic-messages", site.url],
+		]);
+		expect(saved.provider.custom?.models.map((m) => m.api)).toEqual([undefined, "anthropic-messages"]);
 
 		expect(await t.client.request("newapi.close", { sessionId: result.sessionId })).toEqual({ closed: true });
 		expect(site.logouts).toBe(1);
@@ -278,7 +293,11 @@ describe("NewAPI sign-in", () => {
 			site: { name: "测试站", url: site.url },
 			user: { id: 7, username: "alice", displayName: "Alice" },
 			token: { id: created?.id, name: created?.name, maskedKey: `sk-APP${created?.id}**********ykey` },
-			models: [{ id: "m-a" }, { id: "m-b" }, { id: `only-${created?.name}` }],
+			models: [
+				{ id: "m-a", api: "openai-completions" },
+				{ id: "m-b", api: "anthropic-messages" },
+				{ id: `only-${created?.name}`, api: "openai-completions" },
+			],
 		});
 		expect(JSON.stringify(result)).not.toContain(created?.key);
 

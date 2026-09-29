@@ -13,6 +13,8 @@ Pier 的所有重要变更都记录在这里。版本号规则：日常发版只
 
 ### 变更
 
+- **NewAPI 模型自动选择接口**：从云链API（一键登录或个人中心「配置到本地」）导入模型时，Pier 会按站点报告的各模型支持的接口（NewAPI 的 `supported_endpoint_types`）选择调用方式：Claude 模型改用 Anthropic Messages（`/v1/messages`），只提供 Responses 的模型（如 Codex 渠道）用 OpenAI Responses，其他模型仍用 Chat Completions；不报告接口的旧版站点按名称识别 Claude 模型。服务商仍按原来的接口类型保存，只有需要不同接口的模型单独记录接口，Base URL 自动换算。已经导入的服务商，再次点「更新本地配置」或重新登录即可生效。自定义接口的模型列表新增「接口」列，可以为单个模型指定接口（「默认」跟随服务商）；对 NewAPI 站点点「从接口获取」时也会自动识别。
+- **协议 1.7**（向后兼容）：`CustomModel` 新增可选的 `api`；`newapi.useToken`、`account.useToken`、`newapi.authorizeWait` 返回的模型带上识别出的 `api`。
 - **个人中心只列出已配置的分组**：「分组与令牌」默认只显示已配置到本地的分组，不再一次列出账号的全部分组；点右上角「添加分组」从下拉框中选择要使用的分组，加入列表后再选择令牌并「配置到本地」。还没配置的分组可以点 × 移除。
 
 ## v0.2.4 — 2026-09-29

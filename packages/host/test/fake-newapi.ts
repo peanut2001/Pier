@@ -167,7 +167,13 @@ export function startFakeNewApi(options: FakeOptions): Promise<FakeNewApi> {
 			const key = req.headers.authorization?.replace(/^Bearer sk-/, "");
 			const token = fake.tokens.find((t) => t.key === key);
 			if (!token) return send(res, { error: { message: `invalid key ${req.headers.authorization}` } }, 401);
-			return send(res, { object: "list", data: [{ id: "m-b" }, { id: "m-a" }, { id: `only-${token.name}` }] });
+			const data = [{ id: "m-b" }, { id: "m-a" }, { id: `only-${token.name}` }];
+			// Current versions list the endpoint types of each model; `m-b` is served by an Anthropic-only channel.
+			const typed =
+				options.variant === "modern"
+					? data.map((m) => ({ ...m, supported_endpoint_types: m.id === "m-b" ? ["anthropic"] : ["openai"] }))
+					: data;
+			return send(res, { object: "list", data: typed });
 		}
 		if (path === "/api/status") {
 			return send(res, {

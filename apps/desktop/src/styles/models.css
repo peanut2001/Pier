@@ -272,13 +272,17 @@ button.chip-button.added:disabled {
 
 .model-row {
 	display: grid;
-	grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) 96px 40px 40px 30px;
+	grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) 96px 104px 40px 40px 30px;
 	align-items: center;
 	gap: 8px;
 }
 
 .model-row.head {
 	padding: 0 2px;
+}
+
+.model-row select.model-api {
+	min-width: 0;
 }
 
 .model-row input[type="checkbox"] {

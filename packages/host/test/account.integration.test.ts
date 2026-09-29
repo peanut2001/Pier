@@ -237,7 +237,11 @@ describe("personal center", () => {
 		expect(created.tokens[0]).toMatchObject({ id: created.tokenId, name: "Pier", group: "vip", status: 1 });
 
 		const used = await t.client.request("account.useToken", { tokenId: 2 });
-		expect(used.models).toEqual([{ id: "m-a" }, { id: "m-b" }, { id: "only-main" }]);
+		expect(used.models).toEqual([
+			{ id: "m-a", api: "openai-completions" },
+			{ id: "m-b", api: "anthropic-messages" },
+			{ id: "only-main", api: "openai-completions" },
+		]);
 		expect(JSON.stringify(used)).not.toContain(TOKEN_KEY_B);
 		const provider = {
 			id: "yunlian-vip",

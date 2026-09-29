@@ -11,11 +11,13 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from "node:net";
 import { hostname } from "node:os";
 import {
+	type CustomProviderApi,
 	type NewApiAccount,
 	type NewApiAuthorizeResult,
 	type NewApiAuthorizeStart,
 	type NewApiGroup,
 	type NewApiLoginResult,
+	type NewApiModel,
 	type NewApiToken,
 	PierProtocolError,
 } from "@pier/protocol";
@@ -140,6 +142,33 @@ export function encryptNewApiPassword(password: string, publicKeyPem: string, ke
 	cipher.setAAD(Buffer.from(`password-v2:${keyId}`));
 	const ciphertext = Buffer.concat([cipher.update(password, "utf8"), cipher.final(), cipher.getAuthTag()]);
 	return ["v2", wrapped.toString("base64"), nonce.toString("base64"), ciphertext.toString("base64")].join(".");
+}
+
+const CLAUDE_MODEL = /(?:^|[/:._-])claude(?:$|[/:._-])/i;
+
+/**
+ * The wire API to call a model of a NewAPI site with.
+ *
+ * Current versions list `supported_endpoint_types` for each model (the union over the channels
+ * that serve it): Anthropic channels offer `anthropic` and `openai`, Gemini channels `gemini` and
+ * `openai`, Codex channels only `openai-response`, and pass-through channels (another NewAPI or
+ * Sub2API) every type. Claude models prefer Anthropic Messages, everything else stays on Chat
+ * Completions when the site offers it. Older versions do not list endpoint types, so Claude
+ * models are recognised by name. Undefined means no preference (the provider's API is used).
+ */
+export function detectNewApiModelApi(id: string, endpointTypes: unknown): CustomProviderApi | undefined {
+	const types = Array.isArray(endpointTypes)
+		? endpointTypes.filter((t): t is string => typeof t === "string").map((t) => t.toLowerCase())
+		: [];
+	const claude = CLAUDE_MODEL.test(id);
+	if (!types.length) return claude ? "anthropic-messages" : undefined;
+	const has = (type: string) => types.includes(type);
+	if (has("anthropic") && (claude || (!has("openai") && !has("openai-response")))) return "anthropic-messages";
+	if (has("openai")) return "openai-completions";
+	if (has("openai-response")) return "openai-responses";
+	if (has("anthropic")) return "anthropic-messages";
+	if (has("gemini")) return "google-generative-ai";
+	return undefined;
 }
 
 /** Masked display form of a token key (lists of recent versions are already masked). */
@@ -710,7 +739,7 @@ export class NewApiManager {
 		connectionId: string,
 		sessionId: string,
 		tokenId: number,
-	): Promise<{ keyRef: string; models: Array<{ id: string; name?: string }>; modelsError?: string }> {
+	): Promise<{ keyRef: string; models: NewApiModel[]; modelsError?: string }> {
 		return this.useTokenIn(this.session(connectionId, sessionId), connectionId, tokenId);
 	}
 
@@ -719,7 +748,7 @@ export class NewApiManager {
 		session: Session,
 		connectionId: string,
 		tokenId: number,
-	): Promise<{ keyRef: string; models: Array<{ id: string; name?: string }>; modelsError?: string }> {
+	): Promise<{ keyRef: string; models: NewApiModel[]; modelsError?: string }> {
 		let key: string | undefined;
 		let problem: string | undefined;
 		try {
@@ -746,7 +775,7 @@ export class NewApiManager {
 		}
 	}
 
-	private async models(origin: string, key: string): Promise<Array<{ id: string; name?: string }>> {
+	private async models(origin: string, key: string): Promise<NewApiModel[]> {
 		let response: Response;
 		try {
 			response = await this.fetchImpl(`${origin}/v1/models`, {
@@ -768,12 +797,14 @@ export class NewApiManager {
 			return fail(`读取模型列表失败（HTTP ${response.status}）${message ? `：${message.split(key).join("***")}` : ""}`);
 		}
 		const list = isObject(body) && Array.isArray(body.data) ? body.data : [];
-		const ids = new Set<string>();
+		const models = new Map<string, NewApiModel>();
 		for (const item of list) {
 			const id = isObject(item) ? str(item.id) : str(item);
-			if (id) ids.add(id);
+			if (!id || models.has(id)) continue;
+			const api = detectNewApiModelApi(id, isObject(item) ? item.supported_endpoint_types : undefined);
+			models.set(id, { id, ...(api ? { api } : {}) });
 		}
-		return [...ids].sort((a, b) => a.localeCompare(b)).map((id) => ({ id }));
+		return [...models.values()].sort((a, b) => a.id.localeCompare(b.id));
 	}
 
 	/** The key behind a reference from `useToken`, for the connection that created it. */
@@ -1032,7 +1063,7 @@ export class NewApiManager {
 		const userId = num(rawUser.id);
 		const ref = randomUUID();
 		this.keyRefs.set(ref, { key, connectionId: flow.connectionId, expiresAt: this.now() + SESSION_TTL_MS });
-		let models: Array<{ id: string; name?: string }> = [];
+		let models: NewApiModel[] = [];
 		let modelsError: string | undefined;
 		try {
 			models = await this.models(flow.origin, key);

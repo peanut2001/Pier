@@ -102,8 +102,30 @@ function asCustomApi(value: unknown): CustomProviderApi | undefined {
 }
 
 /**
+ * Base URL for calling a model with `api` on the endpoint the provider reaches at `baseUrl` with
+ * `providerApi`. The wire APIs differ in the version path pi expects: OpenAI-compatible APIs
+ * append their paths to `…/v1`, Anthropic Messages appends `/v1/messages` itself, and Google
+ * uses `…/v1beta`. Relays such as NewAPI serve all of them under one root.
+ */
+export function modelBaseUrl(baseUrl: string, providerApi: CustomProviderApi, api: CustomProviderApi): string {
+	const trimmed = baseUrl.trim().replace(/\/+$/, "");
+	if (api === providerApi) return trimmed;
+	const root =
+		providerApi === "anthropic-messages" ? trimmed.replace(/\/v1$/i, "") : trimmed.replace(/\/v1(?:beta)?$/i, "");
+	switch (api) {
+		case "anthropic-messages":
+			return root;
+		case "google-generative-ai":
+			return `${root}/v1beta`;
+		default:
+			return `${root}/v1`;
+	}
+}
+
+/**
  * The editable view of a models.json provider, or undefined when it is not a plain custom
- * endpoint (no base URL, an unsupported API, per-model APIs, or no models).
+ * endpoint (no base URL, an unsupported API, or no models). Models may use another supported
+ * API than the provider (see `CustomModel.api`).
  */
 export function toCustomProvider(
 	id: string,
@@ -116,7 +138,8 @@ export function toCustomProvider(
 	const models: CustomModel[] = [];
 	for (const model of rawModels) {
 		if (typeof model.id !== "string" || !model.id) continue;
-		if (model.api !== undefined && model.api !== api) return undefined;
+		const modelApi = model.api === undefined ? api : asCustomApi(model.api);
+		if (!modelApi) return undefined;
 		models.push({
 			id: model.id,
 			...(typeof model.name === "string" && model.name !== model.id ? { name: model.name } : {}),
@@ -124,6 +147,7 @@ export function toCustomProvider(
 			...(Array.isArray(model.input) ? { images: model.input.includes("image") } : {}),
 			...(typeof model.contextWindow === "number" ? { contextWindow: model.contextWindow } : {}),
 			...(typeof model.maxTokens === "number" ? { maxTokens: model.maxTokens } : {}),
+			...(modelApi !== api ? { api: modelApi } : {}),
 		});
 	}
 	if (!models.length) return undefined;
@@ -142,6 +166,7 @@ export function mergeCustomProvider(previous: Json | undefined, provider: Custom
 	const next: Json = { ...(previous ?? {}) };
 	if (provider.name && provider.name !== provider.id) next.name = provider.name;
 	else delete next.name;
+	const previousApi = asCustomApi(previous?.api);
 	next.api = provider.api;
 	next.baseUrl = provider.baseUrl.replace(/\/+$/, "");
 	const oldModels = new Map<string, Json>();
@@ -157,7 +182,16 @@ export function mergeCustomProvider(previous: Json | undefined, provider: Custom
 		})
 		.map((model) => {
 			const out: Json = { ...(oldModels.get(model.id) ?? {}), id: model.id };
-			delete out.api;
+			const oldApi = out.api === undefined ? previousApi : asCustomApi(out.api);
+			if (model.api && model.api !== provider.api) {
+				// The model's Base URL follows the provider's, adjusted for its own API.
+				out.api = model.api;
+				out.baseUrl = modelBaseUrl(provider.baseUrl, provider.api, model.api);
+			} else {
+				delete out.api;
+				// Drop a Base URL that was derived for another API.
+				if (oldApi !== undefined && oldApi !== previousApi) delete out.baseUrl;
+			}
 			if (model.name && model.name !== model.id) out.name = model.name;
 			else delete out.name;
 			// `false` is kept so a model the user marked as non-reasoning is not filled in again.
