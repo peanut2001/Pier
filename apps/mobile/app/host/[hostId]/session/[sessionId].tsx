@@ -17,10 +17,17 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Composer } from "../../../../src/components/Composer.tsx";
 import { PendingRequests } from "../../../../src/components/PendingRequests.tsx";
 import { Transcript } from "../../../../src/components/Transcript.tsx";
-import { Button, confirmDestructive, Muted, Title } from "../../../../src/components/ui.tsx";
+import {
+	Button,
+	confirmDestructive,
+	HeaderAction,
+	Muted,
+	SectionLabel,
+	StatusDot,
+} from "../../../../src/components/ui.tsx";
 import { isBusy, RUN_STATE_LABEL, sessionTitle } from "../../../../src/format.ts";
 import { useChatView, useMobileState, useStore } from "../../../../src/store.ts";
-import { usePalette } from "../../../../src/theme.ts";
+import { RADIUS, usePalette } from "../../../../src/theme.ts";
 
 const THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
 
@@ -65,44 +72,70 @@ function SessionMenu({ chat, onClose }: { chat: ChatController; onClose: () => v
 		<Modal transparent animationType="slide" onRequestClose={onClose}>
 			<Pressable style={styles.backdrop} onPress={onClose} />
 			<View style={[styles.sheet, { backgroundColor: p.card, paddingBottom: insets.bottom + 16 }]}>
+				<View style={[styles.grabber, { backgroundColor: p.border }]} />
 				<ScrollView contentContainerStyle={styles.sheetContent}>
-					<Title>模型</Title>
+					<SectionLabel>模型</SectionLabel>
 					{!models ? <ActivityIndicator color={p.accent} /> : null}
-					{models?.map((model) => {
-						const selected = current?.provider === model.provider && current.id === model.id;
-						return (
-							<Pressable
-								key={`${model.provider}/${model.id}`}
-								style={[styles.option, { borderColor: selected ? p.accent : p.border }]}
-								onPress={async () => {
-									await chat.setModel(model.provider, model.id);
-									onClose();
-								}}
-							>
-								<Text style={{ color: p.text, fontWeight: selected ? "700" : "400" }}>{model.name}</Text>
-								<Muted>{model.provider}</Muted>
-							</Pressable>
-						);
-					})}
+					{models?.length ? (
+						<View style={[styles.group, { backgroundColor: p.bg }]}>
+							{models.map((model, index) => {
+								const selected = current?.provider === model.provider && current.id === model.id;
+								return (
+									<Pressable
+										key={`${model.provider}/${model.id}`}
+										style={({ pressed }) => [
+											styles.option,
+											index > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderColor: p.border },
+											selected && { backgroundColor: p.accentSoft },
+											pressed && { backgroundColor: p.elevated },
+										]}
+										onPress={async () => {
+											await chat.setModel(model.provider, model.id);
+											onClose();
+										}}
+									>
+										<View style={styles.flex}>
+											<Text style={[styles.optionName, { color: selected ? p.accent : p.text }]} numberOfLines={1}>
+												{model.name}
+											</Text>
+											<Muted>{model.provider}</Muted>
+										</View>
+										{selected ? <Text style={[styles.check, { color: p.accent }]}>✓</Text> : null}
+									</Pressable>
+								);
+							})}
+						</View>
+					) : null}
 					{current?.reasoning ? (
 						<>
-							<Title style={styles.sectionTitle}>思考等级</Title>
-							<View style={styles.levels}>
-								{THINKING_LEVELS.map((level) => (
-									<Button
-										key={level}
-										title={level}
-										small
-										variant={chat.chat.thinkingLevel === level ? "primary" : "secondary"}
-										onPress={() => void chat.setThinking(level)}
-									/>
-								))}
+							<SectionLabel style={styles.sectionTitle}>思考等级</SectionLabel>
+							<View style={[styles.levels, { backgroundColor: p.elevated }]}>
+								{THINKING_LEVELS.map((level) => {
+									const selected = chat.chat.thinkingLevel === level;
+									return (
+										<Pressable
+											key={level}
+											accessibilityRole="button"
+											accessibilityLabel={level}
+											onPress={() => void chat.setThinking(level)}
+											style={[styles.level, selected && { backgroundColor: p.card }]}
+										>
+											<Text
+												style={[styles.levelText, { color: selected ? p.accent : p.muted }]}
+												numberOfLines={1}
+												adjustsFontSizeToFit
+											>
+												{level}
+											</Text>
+										</Pressable>
+									);
+								})}
 							</View>
 						</>
 					) : null}
 					{chat.chat.capabilities?.compact === false ? null : (
 						<>
-							<Title style={styles.sectionTitle}>上下文</Title>
+							<SectionLabel style={styles.sectionTitle}>上下文</SectionLabel>
 							<Button
 								title="压缩上下文"
 								loading={busy}
@@ -115,7 +148,7 @@ function SessionMenu({ chat, onClose }: { chat: ChatController; onClose: () => v
 							/>
 						</>
 					)}
-					<Title style={styles.sectionTitle}>会话</Title>
+					<SectionLabel style={styles.sectionTitle}>会话</SectionLabel>
 					<Button
 						title="删除会话"
 						variant="danger"
@@ -188,26 +221,40 @@ export default function SessionScreen() {
 			<Stack.Screen
 				options={{
 					title,
-					headerRight: () =>
-						chat ? (
-							<Pressable hitSlop={10} onPress={() => setMenu(true)} accessibilityLabel="会话选项">
-								<Text style={{ color: p.accent, fontSize: 16 }}>选项</Text>
-							</Pressable>
-						) : null,
+					headerRight: () => (chat ? <HeaderAction label="会话选项" glyph="⋯" onPress={() => setMenu(true)} /> : null),
 				}}
 			/>
 			<View style={[styles.statusBar, { borderColor: p.border }]}>
-				<Text style={[styles.statusText, { color: p.muted }]} numberOfLines={1}>
-					{revoked
-						? "这台设备已被电脑移除，请返回重新配对"
-						: connection === "open"
-							? state
-								? RUN_STATE_LABEL[state.runState]
-								: "加载中"
-							: "未连接，正在重连…"}
-					{state?.model ? ` · ${state.model.name}` : ""}
-					{state?.model?.reasoning ? ` · 思考 ${state.thinkingLevel}` : ""}
-				</Text>
+				<View style={[styles.chip, { backgroundColor: p.elevated }]}>
+					<StatusDot
+						size={7}
+						color={
+							revoked ? p.danger : connection !== "open" ? p.warning : state && isBusy(state.runState) ? p.accent : p.ok
+						}
+					/>
+					<Text style={[styles.statusText, { color: p.muted }]} numberOfLines={1}>
+						{revoked
+							? "这台设备已被电脑移除，请返回重新配对"
+							: connection === "open"
+								? state
+									? RUN_STATE_LABEL[state.runState]
+									: "加载中"
+								: "未连接，正在重连…"}
+					</Text>
+				</View>
+				{state?.model ? (
+					<Pressable
+						onPress={() => chat && setMenu(true)}
+						style={[styles.chip, styles.chipShrink, { backgroundColor: p.elevated }]}
+						accessibilityLabel="切换模型"
+					>
+						<Text style={[styles.statusText, { color: p.text }]} numberOfLines={1}>
+							{state.model.name}
+							{state.model.reasoning ? <Text style={{ color: p.muted }}> · {state.thinkingLevel}</Text> : null}
+						</Text>
+						<Text style={[styles.statusText, { color: p.faint }]}>▾</Text>
+					</Pressable>
+				) : null}
 			</View>
 			<ScrollView
 				ref={scroller}
@@ -250,15 +297,38 @@ export default function SessionScreen() {
 
 const styles = StyleSheet.create({
 	flex: { flex: 1 },
-	statusBar: { paddingHorizontal: 14, paddingVertical: 6, borderBottomWidth: StyleSheet.hairlineWidth },
-	statusText: { fontSize: 12 },
+	statusBar: {
+		flexDirection: "row",
+		alignItems: "center",
+		gap: 8,
+		paddingHorizontal: 14,
+		paddingBottom: 8,
+		borderBottomWidth: StyleSheet.hairlineWidth,
+	},
+	chip: {
+		flexDirection: "row",
+		alignItems: "center",
+		gap: 6,
+		paddingHorizontal: 10,
+		paddingVertical: 5,
+		borderRadius: RADIUS.pill,
+		maxWidth: "60%",
+	},
+	chipShrink: { flexShrink: 1 },
+	statusText: { fontSize: 12.5, fontWeight: "500", flexShrink: 1 },
 	loading: { marginTop: 40 },
 	error: { padding: 20 },
-	queue: { paddingHorizontal: 14, paddingTop: 6 },
-	backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)" },
-	sheet: { maxHeight: "75%", borderTopLeftRadius: 16, borderTopRightRadius: 16 },
-	sheetContent: { padding: 18, gap: 10 },
-	option: { borderWidth: 1, borderRadius: 10, padding: 12, gap: 2 },
-	sectionTitle: { marginTop: 10 },
-	levels: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+	queue: { paddingHorizontal: 16, paddingTop: 6 },
+	backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)" },
+	sheet: { maxHeight: "78%", borderTopLeftRadius: RADIUS.xl, borderTopRightRadius: RADIUS.xl },
+	grabber: { alignSelf: "center", width: 38, height: 5, borderRadius: 3, marginTop: 8 },
+	sheetContent: { padding: 18, paddingTop: 12, gap: 10 },
+	group: { borderRadius: RADIUS.md, overflow: "hidden" },
+	option: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 14, paddingVertical: 11 },
+	optionName: { fontSize: 15, fontWeight: "600" },
+	check: { fontSize: 17, fontWeight: "700" },
+	sectionTitle: { marginTop: 12 },
+	levels: { flexDirection: "row", padding: 3, borderRadius: RADIUS.md, gap: 2 },
+	level: { flex: 1, paddingVertical: 8, borderRadius: RADIUS.sm + 1, alignItems: "center" },
+	levelText: { fontSize: 13, fontWeight: "600" },
 });

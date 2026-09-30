@@ -25,14 +25,20 @@ export default function RootLayout() {
 				<StatusBar style="auto" />
 				<Stack
 					screenOptions={{
-						headerStyle: { backgroundColor: p.card },
+						headerStyle: { backgroundColor: p.bg },
+						headerShadowVisible: false,
 						headerTintColor: p.text,
-						headerTitleStyle: { color: p.text },
+						headerTitleStyle: { color: p.text, fontWeight: "700", fontSize: 18 },
+						headerBackButtonDisplayMode: "minimal",
 						contentStyle: { backgroundColor: p.bg },
+						animation: "slide_from_right",
 					}}
 				>
 					<Stack.Screen name="index" options={{ title: "Pier" }} />
-					<Stack.Screen name="pair" options={{ title: "添加电脑", presentation: "modal" }} />
+					<Stack.Screen
+						name="pair"
+						options={{ title: "添加电脑", presentation: "modal", animation: "slide_from_bottom" }}
+					/>
 					<Stack.Screen name="settings" options={{ title: "设置" }} />
 					<Stack.Screen name="host/[hostId]/index" options={{ title: "" }} />
 					<Stack.Screen name="host/[hostId]/session/[sessionId]" options={{ title: "" }} />

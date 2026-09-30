@@ -164,12 +164,12 @@ export default function Pair() {
 const styles = StyleSheet.create({
 	flex: { flex: 1 },
 	content: { padding: 16, gap: 14 },
-	cameraBox: { aspectRatio: 1, borderRadius: 16, overflow: "hidden", borderWidth: StyleSheet.hairlineWidth },
+	cameraBox: { aspectRatio: 1, borderRadius: 24, overflow: "hidden", borderWidth: StyleSheet.hairlineWidth },
 	camera: { flex: 1 },
 	status: { gap: 14, alignItems: "stretch", paddingVertical: 24 },
 	center: { textAlign: "center" },
 	fingerprint: { fontFamily: MONO, fontSize: 18, textAlign: "center", letterSpacing: 1 },
 	manual: { gap: 10 },
-	input: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 14 },
+	input: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 11, fontSize: 14 },
 	row: { flexDirection: "row", gap: 8 },
 });

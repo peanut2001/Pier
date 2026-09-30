@@ -158,16 +158,16 @@ export function PendingRequests({
 
 const styles = StyleSheet.create({
 	list: { gap: 10, paddingHorizontal: 12, paddingTop: 8 },
-	card: { borderWidth: 1.5, borderRadius: 12, padding: 12, gap: 8 },
+	card: { borderWidth: 1, borderRadius: 16, padding: 14, gap: 10 },
 	titleRow: { flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" },
 	badge: { fontSize: 12, fontWeight: "700" },
 	tool: { fontSize: 14, fontWeight: "600", flexShrink: 1 },
 	countdown: { fontSize: 12, marginLeft: "auto" },
-	summary: { fontFamily: MONO, fontSize: 12.5, padding: 8, borderRadius: 6 },
+	summary: { fontFamily: MONO, fontSize: 12.5, padding: 10, borderRadius: 10, overflow: "hidden" },
 	reason: { fontSize: 13, lineHeight: 18 },
 	actions: { gap: 8 },
 	row: { flexDirection: "row", gap: 8 },
 	grow: { flex: 1 },
-	input: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 15 },
+	input: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15 },
 	editor: { minHeight: 100, textAlignVertical: "top" },
 });

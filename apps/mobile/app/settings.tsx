@@ -100,8 +100,8 @@ export default function Settings() {
 const styles = StyleSheet.create({
 	content: { padding: 16, gap: 14 },
 	card: { gap: 10 },
-	input: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 15 },
+	input: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 11, fontSize: 15 },
 	mono: { fontFamily: MONO, fontSize: 16, letterSpacing: 1 },
-	bench: { borderRadius: 8, padding: 10, gap: 4 },
+	bench: { borderRadius: 12, padding: 10, gap: 4 },
 	benchLine: { fontFamily: MONO, fontSize: 12 },
 });
