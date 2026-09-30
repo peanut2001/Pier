@@ -330,7 +330,7 @@ function FieldControl(props: FieldRowProps) {
 			const encode = (value: JsonScalar) => JSON.stringify(value);
 			return (
 				<select
-					className="setting-select compact"
+					className="setting-select pi-setting-select"
 					value={valid ? encode(own as JsonScalar) : ""}
 					disabled={disabled}
 					onChange={(e) => set(e.target.value === "" ? undefined : (JSON.parse(e.target.value) as JsonScalar))}
@@ -348,7 +348,7 @@ function FieldControl(props: FieldRowProps) {
 		}
 		case "number":
 			return (
-				<>
+				<span className="pi-setting-number">
 					<DraftInput
 						value={valid ? String(own) : ""}
 						placeholder={fallback === undefined ? field.defaultLabel : String(fallback)}
@@ -363,8 +363,8 @@ function FieldControl(props: FieldRowProps) {
 							set(parsed.value);
 						}}
 					/>
-					{kind.unit ? <span className="muted small pi-setting-unit">{kind.unit}</span> : null}
-				</>
+					{kind.unit ? <span className="pi-setting-unit">{kind.unit}</span> : null}
+				</span>
 			);
 		case "string":
 			return (
