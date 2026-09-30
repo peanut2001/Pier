@@ -187,6 +187,34 @@ select {
 		box-shadow 0.15s var(--ease);
 }
 
+/* One look for drop-downs on every platform (macOS draws its own stepper-like arrows). */
+select {
+	appearance: none;
+	-webkit-appearance: none;
+	padding-right: 30px;
+	background-image: var(--select-chevron);
+	background-repeat: no-repeat;
+	background-position: right 10px center;
+	background-size: 12px 12px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	cursor: pointer;
+}
+
+select:hover:not(:disabled):not(:focus) {
+	border-color: var(--text-faint);
+}
+
+select:disabled {
+	opacity: 0.55;
+	cursor: default;
+}
+
+select option {
+	background: var(--bg-raised);
+	color: var(--text);
+}
+
 input::placeholder,
 textarea::placeholder {
 	color: var(--text-faint);

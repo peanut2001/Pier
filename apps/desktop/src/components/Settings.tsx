@@ -577,7 +577,7 @@ function NavBadge({ id }: { id: SettingsSection }): ReactNode {
 			</span>
 		);
 	}
-	if (id === "remote" && remote?.running) {
+	if (id === "remote" && remote?.running && connected > 0) {
 		return (
 			<span className="nav-count" title={`${connected} 台设备在线`}>
 				{connected}

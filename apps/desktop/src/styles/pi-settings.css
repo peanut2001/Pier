@@ -41,19 +41,58 @@
 	font-size: 11.5px;
 }
 
+/* Single-line controls of the settings forms share one width, so their edges line up down
+   the card whatever the kind (text, number with unit, drop-down, credential). */
+.settings-content {
+	--field-width: 240px;
+}
+
 input.pi-setting-input {
-	width: 260px;
+	width: var(--field-width);
 	max-width: 100%;
 	min-width: 0;
 }
 
-input.pi-setting-input.numeric {
-	width: 130px;
+select.setting-select.pi-setting-select {
+	width: var(--field-width);
+}
+
+/* A number with its unit shown inside the field's frame. */
+.pi-setting-number {
+	display: inline-flex;
+	align-items: center;
+	width: var(--field-width);
+	max-width: 100%;
+	min-width: 0;
+	border: 1px solid var(--border-strong);
+	border-radius: 9px;
+	background: var(--bg-input);
+	transition:
+		border-color 0.15s var(--ease),
+		box-shadow 0.15s var(--ease);
+}
+
+.pi-setting-number:focus-within {
+	border-color: var(--accent-ring);
+	box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.pi-setting-number input.pi-setting-input.numeric,
+.pi-setting-number input.pi-setting-input.numeric:focus {
+	flex: 1;
+	width: auto;
+	border: none;
+	background: transparent;
+	box-shadow: none;
 	text-align: right;
 }
 
 .pi-setting-unit {
 	flex: none;
+	padding: 0 11px 0 2px;
+	color: var(--text-faint);
+	font-size: 12px;
+	white-space: nowrap;
 }
 
 /* Keeps switches and selects aligned with rows that show a reset button. */
@@ -221,16 +260,38 @@ code.pi-pm-path {
 
 /* Settings → Claude Code / Codex: credentials, environment variables, providers. */
 
+/* A credential field: the reveal button sits inside the field's frame. */
 .config-secret {
 	display: inline-flex;
 	align-items: center;
-	gap: 4px;
+	width: var(--field-width);
 	min-width: 0;
 	max-width: 100%;
+	padding-right: 3px;
+	border: 1px solid var(--border-strong);
+	border-radius: 9px;
+	background: var(--bg-input);
+	transition:
+		border-color 0.15s var(--ease),
+		box-shadow 0.15s var(--ease);
 }
 
-.config-secret input.pi-setting-input {
-	width: 232px;
+.config-secret:focus-within {
+	border-color: var(--accent-ring);
+	box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.config-secret input.pi-setting-input,
+.config-secret input.pi-setting-input:focus {
+	flex: 1;
+	width: auto;
+	border: none;
+	background: transparent;
+	box-shadow: none;
+}
+
+.config-secret button.ghost.icon {
+	flex: none;
 }
 
 .config-map {
