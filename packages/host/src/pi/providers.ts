@@ -207,9 +207,9 @@ export class ProviderManager {
 	}
 
 	/**
-	 * Fill in the capabilities (reasoning, image input, context window, output limit) that
-	 * custom providers in models.json leave out, from pi's model catalog. Settings that are
-	 * present are kept. Returns the number of models that changed.
+	 * Fill in the capabilities (reasoning, image input, context window, output limit, and the
+	 * official thinking levels) that custom providers in models.json leave out, from pi's model
+	 * catalog. Settings that are present are kept. Returns the number of models that changed.
 	 */
 	fillCapabilities(): Promise<number> {
 		return this.serialize(async () => {
@@ -538,9 +538,12 @@ export class ProviderManager {
 				}
 			}
 
+			const merged = mergeCustomProvider(previous, input);
+			// Official thinking levels (and adaptive thinking) of the models come from pi's catalog too.
+			const entry = fillModelsJsonProviders(index, { [id]: merged }, new Set())?.providers[id] ?? merged;
 			const doc = {
 				...loaded.doc,
-				providers: { ...loaded.doc.providers, [id]: mergeCustomProvider(previous, input) },
+				providers: { ...loaded.doc.providers, [id]: entry },
 			};
 			const rollback = async () => {
 				restoreModelsJson(path, loaded.raw);

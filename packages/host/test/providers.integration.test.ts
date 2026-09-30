@@ -362,6 +362,8 @@ describe("provider configuration", () => {
 		expect(saved[1]).toMatchObject({ id: "claude-opus-4-5", reasoning: true, input: ["text", "image"] });
 		expect(saved[1].contextWindow).toBeGreaterThan(0);
 		expect(saved[1].maxTokens).toBeGreaterThan(0);
+		// Claude thinking values do not carry over to an OpenAI-compatible endpoint.
+		expect(saved[1].thinkingLevelMap).toBeUndefined();
 		// An explicit choice is kept, and survives a round trip through the form.
 		expect(saved[2]).toMatchObject({ id: "anthropic/claude-sonnet-4-5", reasoning: false });
 		const listed = (await t.client.request("provider.list")).providers.find((p) => p.id === "relay");
@@ -537,6 +539,15 @@ describe("model capabilities in an existing models.json", () => {
 						{ id: "unknown-model" },
 					],
 				},
+				official: {
+					api: "openai-responses",
+					baseUrl: "http://127.0.0.1:9/v1",
+					apiKey: "x",
+					models: [
+						{ id: "gpt-5.5", reasoning: true },
+						{ id: "claude-opus-4-7", api: "anthropic-messages" },
+					],
+				},
 				openai: { apiKey: "y" },
 			},
 		});
@@ -549,6 +560,16 @@ describe("model capabilities in an existing models.json", () => {
 			expect(doc.providers.openai).toEqual({ apiKey: "y" });
 			const list = await t.client.request("model.list");
 			expect(list.models.find((m) => m.id === "claude-opus-4-5")).toMatchObject({ reasoning: true });
+
+			// The official thinking levels, e.g. xhigh / max, come from the catalog entry of the same API.
+			const [gpt55, opus47] = doc.providers.official.models;
+			expect(gpt55.thinkingLevelMap).toMatchObject({ xhigh: "xhigh" });
+			expect(opus47).toMatchObject({ reasoning: true, compat: { forceAdaptiveThinking: true } });
+			expect(opus47.thinkingLevelMap).toMatchObject({ max: "max" });
+			const levels = (id: string) =>
+				list.models.find((m) => m.provider === "official" && m.id === id)?.thinkingLevels ?? [];
+			expect(levels("gpt-5.5")).toContain("xhigh");
+			expect(levels("claude-opus-4-7")).toContain("max");
 		} finally {
 			await t.close();
 		}

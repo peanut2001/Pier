@@ -10,6 +10,7 @@ import {
 } from "node:fs";
 import { dirname } from "node:path";
 import { CUSTOM_PROVIDER_APIS, type CustomModel, type CustomProvider, type CustomProviderApi } from "@pier/protocol";
+import { sameThinkingFamily } from "./model-capabilities.ts";
 
 /**
  * Reading and editing pi's `models.json` for custom endpoints.
@@ -183,6 +184,9 @@ export function mergeCustomProvider(previous: Json | undefined, provider: Custom
 		.map((model) => {
 			const out: Json = { ...(oldModels.get(model.id) ?? {}), id: model.id };
 			const oldApi = out.api === undefined ? previousApi : asCustomApi(out.api);
+			// Thinking values are wire values of the old API: they are filled in again for the new one.
+			const newApi = model.api ?? provider.api;
+			if (out.thinkingLevelMap !== undefined && !sameThinkingFamily(oldApi, newApi)) delete out.thinkingLevelMap;
 			if (model.api && model.api !== provider.api) {
 				// The model's Base URL follows the provider's, adjusted for its own API.
 				out.api = model.api;
