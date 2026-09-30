@@ -5,7 +5,8 @@ import { parseProtocolVersion } from "@pier/protocol";
  * Settings pages that manage the Pier of the computer chosen in the settings screen (this one
  * or a paired one), with the protocol minor version that computer needs for this computer to
  * manage the page remotely: paired devices may manage providers, the 云链API account and
- * extensions since 1.10, and pi's settings files since 1.15.
+ * extensions since 1.10, pi's settings files since 1.15, and Claude Code's and Codex's
+ * configuration files since 1.23.
  *
  * Every other page is about this computer only (pairing, remote access, logs, this app's
  * updates) or already lists every computer (workspaces).
@@ -16,6 +17,8 @@ export const HOST_SETTINGS_PAGES = {
 	models: 10,
 	extensions: 10,
 	pi: 15,
+	claude: 23,
+	codex: 23,
 } as const;
 
 export type HostSettingsPage = keyof typeof HOST_SETTINGS_PAGES;

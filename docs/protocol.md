@@ -1,4 +1,4 @@
-# Pier 协议 v1.22
+# Pier 协议 v1.23
 
 > 实现：`packages/protocol`（zod schema + TS 类型，Host 与所有客户端共享）。
 > 本文档描述线上格式与语义；字段的权威定义以 `packages/protocol/src` 为准。
@@ -59,7 +59,7 @@
 
 ```jsonc
 { "type": "req", "id": "h", "method": "host.hello", "params": {
-  "protocolVersion": "1.22",
+  "protocolVersion": "1.23",
   "client": { "name": "pier-desktop", "version": "0.1.0", "platform": "darwin" },
   "token": "<本地 token>",       // 本地连接必填；远程连接由加密通道认证，不需要
   "coalesceMs": 50               // 可选：合并流式增量的窗口（0–1000ms，默认 0）
@@ -317,6 +317,25 @@ settings 文件无法解析时，修改类方法返回 `CONFLICT`，避免覆盖
 
 Host 由桌面端启动时（`--watch-stdin`，macOS / Linux），启动过程中会以交互式登录 Shell（`$SHELL -i -l -c`，环境变量 `PIER_RESOLVING_ENVIRONMENT=1`，最多 5 秒）读取一次 `PATH`，放在继承的 `PATH` 之前，使 pi（扩展安装、bash 工具等）能找到终端中可用的 npm / pnpm / bun / git（nvm、fnm、mise、Volta、Homebrew 等）。AppImage 注入的 `$APPDIR` 条目不会传给这个 Shell。`--no-login-shell-path` 关闭这一行为；Windows 不需要。
 
+### Claude Code 与 Codex 配置（1.23）
+
+直接读写 Claude Code 与 Codex 自己的配置文件，供「设置 → Claude Code 配置 / Codex 配置」可视化编辑（终端中的 `claude` / `codex` 读取同一份文件）。`runtime` 为 `claude-code` 或 `codex`，`scope`：
+
+| `runtime` | `user` | `project` | `local` |
+|---|---|---|---|
+| `claude-code`（JSON） | `<CLAUDE_CONFIG_DIR 或 ~/.claude>/settings.json` | `<工作区>/.claude/settings.json` | `<工作区>/.claude/settings.local.json` |
+| `codex`（TOML） | `<CODEX_HOME 或 ~/.codex>/config.toml` | `<工作区>/.codex/config.toml` | –（`BAD_REQUEST`） |
+
+`project` / `local` 需要 `workspaceId`。Host 不校验各设置项的含义，只保证 Claude Code 的文件是 JSON 对象、Codex 的文件是有效的 TOML。这两个 CLI 不使用文件锁，写入为直接替换。对已配对设备开放，远程调用写入审计日志（只记录修改的键名和字节数，不记录值——其中可能有 API Key）。
+
+文件有实际变化时，Host 让该运行时丢弃从配置读取的缓存（模型列表；Codex 没有打开的会话时还会停止共用的 `codex app-server`，下次使用时按新配置启动），并广播 `agentConfig.changed`。已经打开的会话保持原来的配置，新建或重新打开后生效。Pier 按工作区审批策略设置的项（Claude Code 的 `permissions.defaultMode`、Codex 的 `approval_policy` / `sandbox_mode` / `sandbox_workspace_write`）只影响终端中的 CLI。
+
+| 方法 | 参数 | 结果 |
+|---|---|---|
+| `agentConfig.get` | `{ runtime, workspaceId? }` | `AgentConfigResult = { runtime, format: "json"\|"toml", configDir, scopes, files, workspaceId?, available }`。`scopes` 是该运行时的全部范围（优先级从低到高），`files` 为 `user` 文件，带 `workspaceId` 时还有该工作区的文件，顺序同 `scopes`；每项 `AgentConfigFile = { scope, path, exists, text, settings?, error?, modifiedAt? }`，语义同 `PiSettingsFile`。TOML 的 `settings` 转换为 JSON：日期时间为 ISO 字符串，超出安全范围的整数为字符串。`available` 表示这台电脑上装了该 CLI（没装也可以编辑文件） |
+| `agentConfig.update` | `{ runtime, scope, workspaceId?, changes: { path: string[], value? }[] }` | `AgentConfigChangeResult = { file, changed }`；与 `settings.update` 相同地逐项设置或删除键，其他内容保持不变。JSON 以两个空格缩进写回；TOML 在原文上修改，保留注释、顺序与格式，在已有表中新增的子表（如另一个 `[model_providers.x]`）写成紧跟在同级表后的节，内联表保持内联；写入前重新解析校验，结果与预期不符时 `INTERNAL` 且不写入。TOML 不能存 `null`（`BAD_REQUEST`）。文件无法解析时 `CONFLICT`（改用 `agentConfig.write` 修复） |
+| `agentConfig.write` | `{ runtime, scope, workspaceId?, text, expectedModifiedAt? }` | `AgentConfigChangeResult`；用 `text`（最多 1 MiB）整体替换文件，原样写入。Claude Code 的必须是 JSON 对象，Codex 的必须是有效的 TOML（可以为空），否则 `BAD_REQUEST`；`expectedModifiedAt` 同 `settings.write` |
+
 ### UI
 
 | 方法 | 参数 | 结果 |
@@ -392,6 +411,7 @@ Claude Code 与 Codex 会话（1.22）发出同样形态的事件与 `AgentMessa
 | `extension.changed` | `workspaceId?` | 扩展或扩展包设置变化（1.8）；只改了某个工作区的项目设置时带 `workspaceId`。重新调用 `extension.list`，会话的斜杠命令也可能变化 |
 | `update.status` | `status: AppUpdateStatus` | 桌面端更新器的状态或下载进度变化（1.13），见「应用更新」 |
 | `settings.changed` | `scope, workspaceId?` | 通过 `settings.update` / `settings.write` 修改了 pi 的 settings 文件（1.15）；`scope: "project"` 时带 `workspaceId`。重新调用 `settings.get`。在 Pier 之外修改文件（终端 pi、手动编辑）不会触发 |
+| `agentConfig.changed` | `runtime, scope, workspaceId?` | 通过 `agentConfig.update` / `agentConfig.write` 修改了 Claude Code 或 Codex 的配置文件（1.23）；工作区文件带 `workspaceId`。重新调用 `agentConfig.get`。在 Pier 之外修改文件不会触发 |
 
 终端事件（1.18），只发给打开该终端的连接，见「终端」：
 

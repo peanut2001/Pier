@@ -4,41 +4,22 @@
  * editable in the JSON view, and the host keeps unknown keys when a field is changed.
  */
 
-export type SettingsObject = Record<string, unknown>;
+import type { GroupDef, SettingsObject } from "./config-fields.ts";
 
-export type JsonScalar = string | number | boolean;
-
-export type FieldKind =
-	| { type: "boolean"; default: boolean }
-	| { type: "enum"; options: Array<{ value: JsonScalar; label: string }>; default?: JsonScalar }
-	| { type: "number"; default?: number; min?: number; max?: number; unit?: string }
-	| { type: "string"; placeholder?: string; mono?: boolean }
-	| { type: "list"; placeholder?: string }
-	| { type: "tools" };
-
-export interface FieldDef {
-	path: string[];
-	label: string;
-	description?: string;
-	kind: FieldKind;
-	/** pi only reads it from the user settings (`<agentDir>/settings.json`). */
-	globalOnly?: boolean;
-	/** Only the terminal pi uses it; changing it does not reload Pier's sessions. */
-	terminal?: boolean;
-	/** Shown instead of a default value when the field has none. */
-	defaultLabel?: string;
-	/** Offer values detected on the host below the control. */
-	suggest?: "packageManagers";
-}
-
-export interface GroupDef {
-	id: string;
-	title: string;
-	description?: string;
-	/** Collapsed until opened (terminal-only settings). */
-	collapsed?: boolean;
-	fields: FieldDef[];
-}
+export {
+	builtinDefault,
+	type FieldDef,
+	type FieldKind,
+	formatValue,
+	type GroupDef,
+	getPath,
+	isValidValue,
+	type JsonScalar,
+	parseListInput,
+	parseNumberInput,
+	type SettingsObject,
+	sameValue,
+} from "./config-fields.ts";
 
 export const THINKING_LEVEL_OPTIONS: Array<{ value: string; label: string }> = [
 	{ value: "off", label: "不思考" },
@@ -155,7 +136,7 @@ export const SETTINGS_GROUPS: GroupDef[] = [
 				path: ["defaultTools"],
 				label: "默认内置工具",
 				description: "新会话启用的内置工具。全部取消会停用所有内置工具（扩展提供的工具不受影响）。",
-				kind: { type: "tools" },
+				kind: { type: "tools", options: BUILTIN_TOOLS, default: DEFAULT_TOOLS },
 			},
 			{
 				path: ["shellPath"],
@@ -626,88 +607,6 @@ const HANDLED_KEYS = new Set([
 /** Keys of `settings` the form does not show (edited in the JSON view). */
 export function unhandledKeys(settings: SettingsObject | undefined): string[] {
 	return Object.keys(settings ?? {}).filter((key) => !HANDLED_KEYS.has(key));
-}
-
-export function getPath(settings: SettingsObject | undefined, path: readonly string[]): unknown {
-	let node: unknown = settings;
-	for (const key of path) {
-		if (typeof node !== "object" || node === null || Array.isArray(node) || !Object.hasOwn(node, key)) {
-			return undefined;
-		}
-		node = (node as SettingsObject)[key];
-	}
-	return node;
-}
-
-/** Whether `value` is something the field's editor can show. */
-export function isValidValue(kind: FieldKind, value: unknown): boolean {
-	switch (kind.type) {
-		case "boolean":
-			return typeof value === "boolean";
-		case "enum":
-			return kind.options.some((option) => option.value === value);
-		case "number":
-			return typeof value === "number" && Number.isFinite(value);
-		case "string":
-			return typeof value === "string";
-		case "list":
-		case "tools":
-			return Array.isArray(value) && value.every((item) => typeof item === "string");
-	}
-}
-
-/** The built-in default, or undefined when pi decides at run time. */
-export function builtinDefault(field: FieldDef): unknown {
-	if (field.kind.type === "tools") return DEFAULT_TOOLS;
-	return "default" in field.kind ? field.kind.default : undefined;
-}
-
-/** Human-readable form of a value for the field. */
-export function formatValue(field: FieldDef, value: unknown): string {
-	if (value === undefined) return field.defaultLabel ?? "未设置";
-	const kind = field.kind;
-	switch (kind.type) {
-		case "boolean":
-			return value ? "开启" : "关闭";
-		case "enum":
-			return kind.options.find((option) => option.value === value)?.label ?? JSON.stringify(value);
-		case "number":
-			return `${value}${kind.unit ? ` ${kind.unit}` : ""}`;
-		case "list":
-		case "tools":
-			return Array.isArray(value) ? (value.length ? value.join(kind.type === "tools" ? "、" : ", ") : "无") : "";
-		default:
-			return String(value);
-	}
-}
-
-/**
- * Parse what the user typed into a number field. Returns `undefined` for an empty input
- * (remove the setting) or an error message.
- */
-export function parseNumberInput(field: FieldDef, text: string): { value?: number; error?: string } {
-	const kind = field.kind;
-	if (kind.type !== "number") return { error: "不是数字设置" };
-	const trimmed = text.trim();
-	if (!trimmed) return {};
-	const value = Number(trimmed);
-	if (!Number.isSafeInteger(value)) return { error: `${field.label}需要是整数` };
-	if (kind.min !== undefined && value < kind.min) return { error: `${field.label}不能小于 ${kind.min}` };
-	if (kind.max !== undefined && value > kind.max) return { error: `${field.label}不能大于 ${kind.max}` };
-	return { value };
-}
-
-/** Lines of a list editor (trimmed, empty lines dropped); undefined when there are none. */
-export function parseListInput(text: string): string[] | undefined {
-	const items = text
-		.split(/\r?\n/)
-		.map((line) => line.trim())
-		.filter(Boolean);
-	return items.length ? items : undefined;
-}
-
-export function sameValue(a: unknown, b: unknown): boolean {
-	return JSON.stringify(a) === JSON.stringify(b);
 }
 
 /** Validate the JSON editor's text: a JSON object, or an error message. */

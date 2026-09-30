@@ -20,7 +20,7 @@ const host = (protocolVersion: string): HostInfo => ({
 
 describe("settings pages of the managed computer", () => {
 	it("splits pages into per-computer, all-computer and this-computer ones", () => {
-		for (const page of ["general", "account", "models", "extensions", "pi"]) {
+		for (const page of ["general", "account", "models", "extensions", "pi", "claude", "codex"]) {
 			expect(pageFollowsHost(page)).toBe(true);
 			expect(pageIsLocalOnly(page)).toBe(false);
 		}
@@ -49,6 +49,8 @@ describe("settings pages of the managed computer", () => {
 		expect(remotePageBlocker("models", "studio", host("1.10"))).toBeUndefined();
 		expect(remotePageBlocker("pi", "studio", host("1.14"))).toMatch(/1\.15/);
 		expect(remotePageBlocker("pi", "studio", host("1.18"))).toBeUndefined();
+		expect(remotePageBlocker("claude", "studio", host("1.22"))).toMatch(/1\.23/);
+		expect(remotePageBlocker("codex", "studio", host("1.23"))).toBeUndefined();
 		// The general page only shows the computer's info; other pages do not follow it.
 		expect(remotePageBlocker("general", "studio", host("1.0"))).toBeUndefined();
 		expect(remotePageBlocker("remote", "studio", host("1.0"))).toBeUndefined();

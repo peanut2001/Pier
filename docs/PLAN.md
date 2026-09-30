@@ -267,6 +267,7 @@ Pier/
 - [x] 接入 Claude Code（Claude Agent SDK，驱动用户安装的 `claude`）：会话、流式输出、工具调用与权限审批映射到 Pier 协议（`packages/host/src/claude/`）。
 - [x] 接入 Codex（`codex app-server`）：同上，并按工作区策略设置其沙箱与审批模式（`packages/host/src/codex/`）。
 - [x] 桌面与手机端：新建会话时选择 Agent，按运行时显示可用的模型、思考等级与能力（压缩、分叉等）。
+- [x] 桌面端可视化编辑 Claude Code 的 `settings.json`（全局 / 项目 / 本地）与 Codex 的 `config.toml`（全局 / 项目，保留注释与格式），包括中转接口、模型、权限与 Codex 服务商（协议 1.23 `agentConfig.*`）。
 - [ ] 真机验证：Codex 的完整回合（本次只用模拟的 app-server 与未登录的真实 CLI 验证过）、Windows / macOS 上的 CLI 查找与启动。
 - 验收：同一台电脑上 pi、Claude Code、Codex 会话可以并存，手机端均可驱动和审批。
 

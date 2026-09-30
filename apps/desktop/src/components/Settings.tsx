@@ -11,10 +11,12 @@ import {
 	useStore,
 } from "../lib/store.tsx";
 import { AccountSettings } from "./AccountPanel.tsx";
+import { ClaudeSettings, CodexSettings } from "./AgentConfigPanel.tsx";
 import { ExtensionsSettings } from "./ExtensionsPanel.tsx";
 import { HostBanner, LogsSettings, useHostStatus } from "./HostPanels.tsx";
 import {
 	IconArrowLeft,
+	IconBot,
 	IconFolder,
 	IconFolderPlus,
 	IconInfo,
@@ -30,6 +32,7 @@ import {
 	IconSliders,
 	IconSmartphone,
 	IconSparkles,
+	IconTerminal,
 	IconUser,
 	IconX,
 } from "./Icons.tsx";
@@ -97,6 +100,22 @@ const GROUPS: Array<{ title: string; items: SectionDef[] }> = [
 				icon: IconSliders,
 				keywords:
 					"pi settings settings.json 配置文件 思考 压缩 重试 超时 代理 proxy shell 工具 tools 传输 缓存 主题 终端 json 编辑",
+				online: true,
+			},
+			{
+				id: "claude",
+				label: "Claude Code 配置",
+				icon: IconBot,
+				keywords:
+					"claude code anthropic settings.json 配置文件 中转 base url api key token 令牌 模型 思考 权限 permissions 沙箱 mcp hooks 环境变量 env 代理 json 编辑",
+				online: true,
+			},
+			{
+				id: "codex",
+				label: "Codex 配置",
+				icon: IconTerminal,
+				keywords:
+					"codex openai config.toml toml 配置文件 服务商 model_providers 中转 base url api key 模型 思考 reasoning 审批 沙箱 sandbox 网页搜索 mcp profile 编辑",
 				online: true,
 			},
 		],
@@ -424,6 +443,8 @@ const PAGES: Record<SettingsSection, ComponentType> = {
 	workspaces: WorkspacesSettings,
 	extensions: ExtensionsSettings,
 	pi: PiSettings,
+	claude: ClaudeSettings,
+	codex: CodexSettings,
 	remote: RemoteSettings,
 	logs: LogsSettings,
 	about: UpdateSettings,

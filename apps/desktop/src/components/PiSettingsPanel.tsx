@@ -1,37 +1,19 @@
 import type { ExtensionScope, PackageManagerInfo, PiSettingsFile, PiSettingsResult } from "@pier/protocol";
-import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { type FieldDef, filterGroups, getPath, type SettingsChange, sameValue } from "../lib/config-fields.ts";
 import {
-	BUILTIN_TOOLS,
 	builtinDefault,
 	currentPackageManager,
-	type FieldDef,
-	formatValue,
-	getPath,
 	isValidValue,
-	type JsonScalar,
-	parseListInput,
-	parseNumberInput,
 	parseSettingsText,
 	SETTINGS_GROUPS,
-	sameValue,
 	unhandledKeys,
 } from "../lib/pi-settings.ts";
 import { useAppState, useSettingsTarget, useSettingsWorkspaces, useStore } from "../lib/store.tsx";
-import {
-	IconAlert,
-	IconBraces,
-	IconChevronDown,
-	IconChevronRight,
-	IconInfo,
-	IconLoader,
-	IconRefresh,
-	IconSearch,
-	IconSliders,
-	IconUndo,
-	IconX,
-} from "./Icons.tsx";
+import { ConfigGroups, FieldRow, TextFileEditor } from "./ConfigFields.tsx";
+import { IconAlert, IconBraces, IconLoader, IconRefresh, IconSearch, IconSliders, IconX } from "./Icons.tsx";
 import { CopyButton } from "./Markdown.tsx";
-import { SettingRow, SettingsCard, SettingsGroup, Switch } from "./SettingsUi.tsx";
+import { SettingRow, SettingsCard, SettingsGroup } from "./SettingsUi.tsx";
 
 type Mode = "form" | "json";
 
@@ -43,290 +25,13 @@ function errorText(error: unknown): string {
 	return message;
 }
 
-// ---- field editors -----------------------------------------------------------------------
-
-/** A text input that keeps what the user types until it is committed (Enter / blur) or reverted (Esc). */
-function DraftInput({
-	value,
-	placeholder,
-	mono,
-	numeric,
-	disabled,
-	onCommit,
-}: {
-	value: string;
-	placeholder?: string;
-	mono?: boolean;
-	numeric?: boolean;
-	disabled?: boolean;
-	onCommit: (text: string) => void;
-}) {
-	const [draft, setDraft] = useState(value);
-	const focused = useRef(false);
-	useEffect(() => {
-		if (!focused.current) setDraft(value);
-	}, [value]);
-	const commit = () => {
-		if (draft !== value) onCommit(draft);
-	};
-	const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
-		if (e.key === "Enter") {
-			e.preventDefault();
-			(e.target as HTMLInputElement).blur();
-		} else if (e.key === "Escape" && draft !== value) {
-			// Keep Esc from leaving the settings screen while reverting.
-			e.stopPropagation();
-			setDraft(value);
-		}
-	};
-	return (
-		<input
-			className={`pi-setting-input${mono ? " mono" : ""}${numeric ? " numeric" : ""}`}
-			value={draft}
-			placeholder={placeholder}
-			disabled={disabled}
-			inputMode={numeric ? "numeric" : undefined}
-			spellCheck={false}
-			autoCapitalize="off"
-			autoCorrect="off"
-			onFocus={() => {
-				focused.current = true;
-			}}
-			onBlur={() => {
-				focused.current = false;
-				commit();
-			}}
-			onChange={(e) => setDraft(e.target.value)}
-			onKeyDown={onKeyDown}
-		/>
-	);
+function validateJson(text: string): string | undefined {
+	return parseSettingsText(text).error;
 }
 
-function DraftList({
-	value,
-	placeholder,
-	disabled,
-	onCommit,
-}: {
-	value: string[] | undefined;
-	placeholder?: string;
-	disabled?: boolean;
-	onCommit: (items: string[] | undefined) => void;
-}) {
-	const text = (value ?? []).join("\n");
-	const [draft, setDraft] = useState(text);
-	const focused = useRef(false);
-	useEffect(() => {
-		if (!focused.current) setDraft(text);
-	}, [text]);
-	return (
-		<textarea
-			className="pi-setting-list mono"
-			rows={Math.min(8, Math.max(2, draft.split("\n").length))}
-			value={draft}
-			placeholder={placeholder}
-			disabled={disabled}
-			spellCheck={false}
-			onFocus={() => {
-				focused.current = true;
-			}}
-			onBlur={() => {
-				focused.current = false;
-				const items = parseListInput(draft);
-				if (!sameValue(items, value)) onCommit(items);
-				else setDraft(text);
-			}}
-			onChange={(e) => setDraft(e.target.value)}
-			onKeyDown={(e) => {
-				if (e.key === "Escape") {
-					e.stopPropagation();
-					setDraft(text);
-				}
-			}}
-		/>
-	);
-}
-
-interface FieldProps {
-	field: FieldDef;
-	/** Value stored in the edited file. */
-	own: unknown;
-	/** What applies when the file does not set it (inherited user value or built-in default). */
-	fallback: unknown;
-	/** The fallback comes from the user settings (editing a project file). */
-	inherited: boolean;
-	disabled: boolean;
-	saving: boolean;
-	onChange: (field: FieldDef, value: unknown) => void;
-}
-
-function FieldControl({ field, own, fallback, inherited, disabled, onChange }: FieldProps) {
-	const store = useStore();
-	const kind = field.kind;
-	const valid = own !== undefined && isValidValue(kind, own);
-	const shown = valid ? own : fallback;
-	switch (kind.type) {
-		case "boolean":
-			return (
-				<Switch
-					checked={shown === true}
-					disabled={disabled}
-					label={field.label}
-					onChange={(checked) => onChange(field, checked)}
-				/>
-			);
-		case "enum": {
-			const encode = (value: JsonScalar) => JSON.stringify(value);
-			return (
-				<select
-					className="setting-select compact"
-					value={valid ? encode(own as JsonScalar) : ""}
-					disabled={disabled}
-					onChange={(e) =>
-						onChange(field, e.target.value === "" ? undefined : (JSON.parse(e.target.value) as JsonScalar))
-					}
-				>
-					<option value="">
-						{inherited ? "继承全局" : "默认"}（{formatValue(field, fallback)}）
-					</option>
-					{kind.options.map((option) => (
-						<option key={encode(option.value)} value={encode(option.value)}>
-							{option.label}
-						</option>
-					))}
-				</select>
-			);
-		}
-		case "number":
-			return (
-				<>
-					<DraftInput
-						value={valid ? String(own) : ""}
-						placeholder={fallback === undefined ? field.defaultLabel : String(fallback)}
-						numeric
-						disabled={disabled}
-						onCommit={(text) => {
-							const parsed = parseNumberInput(field, text);
-							if (parsed.error) {
-								store.toast("error", parsed.error);
-								return;
-							}
-							onChange(field, parsed.value);
-						}}
-					/>
-					{kind.unit ? <span className="muted small pi-setting-unit">{kind.unit}</span> : null}
-				</>
-			);
-		case "string":
-			return (
-				<DraftInput
-					value={valid ? String(own) : ""}
-					placeholder={typeof fallback === "string" && fallback ? fallback : kind.placeholder}
-					{...(kind.mono ? { mono: true } : {})}
-					disabled={disabled}
-					onCommit={(text) => onChange(field, text.trim() ? text : undefined)}
-				/>
-			);
-		case "list":
-			return (
-				<DraftList
-					value={valid ? (own as string[]) : undefined}
-					placeholder={Array.isArray(fallback) && fallback.length ? fallback.join("\n") : kind.placeholder}
-					disabled={disabled}
-					onCommit={(items) => onChange(field, items)}
-				/>
-			);
-		case "tools": {
-			const selected = new Set((shown as string[] | undefined) ?? []);
-			const extra = [...selected].filter((tool) => !(BUILTIN_TOOLS as readonly string[]).includes(tool));
-			return (
-				<div className="pi-tool-chips">
-					{[...BUILTIN_TOOLS, ...extra].map((tool) => (
-						<button
-							type="button"
-							key={tool}
-							className={`pi-tool-chip mono${selected.has(tool) ? " on" : ""}`}
-							aria-pressed={selected.has(tool)}
-							disabled={disabled}
-							onClick={() => {
-								const next = new Set(selected);
-								if (next.has(tool)) next.delete(tool);
-								else next.add(tool);
-								const order = [...BUILTIN_TOOLS, ...extra];
-								onChange(
-									field,
-									order.filter((t) => next.has(t)),
-								);
-							}}
-						>
-							{tool}
-						</button>
-					))}
-				</div>
-			);
-		}
-	}
-}
-
-function FieldRow(props: FieldProps & { disabledReason?: string | undefined }) {
-	const { field, own, fallback, inherited, disabled, saving, onChange, disabledReason } = props;
-	const set = own !== undefined;
-	const valid = set && isValidValue(field.kind, own);
-	const stacked = field.kind.type === "list" || field.kind.type === "tools";
-	const key = field.path.join(".");
-	const fallbackText = `${inherited ? "继承全局" : "默认"}：${formatValue(field, fallback)}`;
-	const control = <FieldControl {...props} disabled={disabled || saving} />;
-	return (
-		<SettingRow
-			stack={stacked}
-			title={
-				<span className="pi-setting-title">
-					{field.label}
-					{set ? (
-						<span className={`mini-tag${valid ? " accent" : " warn"}`} title={valid ? undefined : JSON.stringify(own)}>
-							{valid ? "已设置" : "值无效"}
-						</span>
-					) : null}
-					{field.globalOnly ? <span className="mini-tag">仅全局</span> : null}
-					{saving ? <IconLoader size={12} className="spin" /> : null}
-				</span>
-			}
-			description={
-				<>
-					{field.description ? <span>{field.description} </span> : null}
-					<span className="pi-setting-meta">
-						<code>{key}</code> · {disabledReason ?? fallbackText}
-					</span>
-				</>
-			}
-		>
-			{field.suggest === "packageManagers" ? (
-				<div className="pi-setting-suggested">
-					{control}
-					<PackageManagerPicker
-						command={valid ? (own as string[]) : Array.isArray(fallback) ? (fallback as string[]) : undefined}
-						disabled={disabled || saving}
-						onPick={(command) => onChange(field, command)}
-					/>
-				</div>
-			) : (
-				control
-			)}
-			{set ? (
-				<button
-					type="button"
-					className="ghost icon"
-					title={inherited ? "移除这一项（改用全局设置）" : "恢复默认（从 settings.json 中移除这一项）"}
-					disabled={disabled || saving}
-					onClick={() => onChange(field, undefined)}
-				>
-					<IconUndo size={14} />
-				</button>
-			) : stacked ? null : (
-				<span className="pi-setting-reset-placeholder" />
-			)}
-		</SettingRow>
-	);
+function formatJson(text: string): string | undefined {
+	const { settings } = parseSettingsText(text);
+	return settings ? `${JSON.stringify(settings, null, 2)}\n` : undefined;
 }
 
 // ---- package manager detection -----------------------------------------------------------
@@ -437,152 +142,6 @@ function PackageManagerPicker({
 	);
 }
 
-// ---- JSON editor -------------------------------------------------------------------------
-
-function JsonEditor({
-	file,
-	scope,
-	workspaceId,
-	onSaved,
-	onReload,
-}: {
-	file: PiSettingsFile;
-	scope: ExtensionScope;
-	workspaceId: string | undefined;
-	onSaved: (file: PiSettingsFile) => void;
-	onReload: () => Promise<void>;
-}) {
-	const store = useStore();
-	const [draft, setDraft] = useState(file.text);
-	const [base, setBase] = useState(file.text);
-	const [saving, setSaving] = useState(false);
-	const [conflict, setConflict] = useState(false);
-	const dirty = draft !== base;
-	const external = file.text !== base;
-
-	// Follow the file while there are no unsaved edits.
-	useEffect(() => {
-		if (!dirty) {
-			setDraft(file.text);
-			setBase(file.text);
-		}
-	}, [file.text, dirty]);
-
-	const parsed = useMemo(() => (draft.trim() ? parseSettingsText(draft) : { settings: {} }), [draft]);
-
-	const save = async (force = false) => {
-		if (saving || parsed.error) return;
-		setSaving(true);
-		try {
-			const text = draft.trim() ? draft : "{}\n";
-			const expected = force ? undefined : file.exists ? file.modifiedAt : undefined;
-			const result = await store.writePiSettings(scope, workspaceId, text, expected);
-			setConflict(false);
-			setBase(result.file.text);
-			setDraft(result.file.text);
-			onSaved(result.file);
-			store.toast("info", result.changed ? "已保存 settings.json" : "内容没有变化");
-		} catch (error) {
-			if ((error as { code?: string }).code === "CONFLICT") setConflict(true);
-			else store.toast("error", `保存失败：${errorText(error)}`);
-		} finally {
-			setSaving(false);
-		}
-	};
-
-	const format = () => {
-		if (!parsed.settings) return;
-		setDraft(`${JSON.stringify(parsed.settings, null, 2)}\n`);
-	};
-
-	/** Drop the edits; the effect above then follows the freshly read file. */
-	const discard = () => {
-		setConflict(false);
-		setDraft(base);
-		void onReload();
-	};
-
-	return (
-		<SettingsCard className="pi-json-card">
-			<div className="pi-json-head">
-				<span className="muted small">
-					{file.exists ? "直接编辑文件内容，保存前会检查 JSON 格式。" : "文件尚不存在，保存时创建。"}
-				</span>
-				<span className="pi-json-actions">
-					<button type="button" className="ghost" disabled={!parsed.settings || saving} onClick={format}>
-						格式化
-					</button>
-					<button
-						type="button"
-						className="ghost"
-						disabled={!dirty || saving}
-						onClick={() => {
-							setDraft(base);
-							setConflict(false);
-						}}
-					>
-						撤销修改
-					</button>
-					<button
-						type="button"
-						className="primary"
-						disabled={!dirty || saving || Boolean(parsed.error)}
-						onClick={() => void save()}
-					>
-						{saving ? <IconLoader size={13} className="spin" /> : null}
-						保存
-					</button>
-				</span>
-			</div>
-			{conflict ? (
-				<div className="banner warning inline">
-					<IconAlert size={15} />
-					<span>文件在读取后被修改过（可能是终端中的 pi 或其他设备）。</span>
-					<span className="banner-actions">
-						<button type="button" onClick={discard}>
-							放弃修改并重新读取
-						</button>
-						<button type="button" className="danger" onClick={() => void save(true)}>
-							仍然覆盖
-						</button>
-					</span>
-				</div>
-			) : dirty && external ? (
-				<div className="banner info inline">
-					<IconInfo size={15} />
-					<span>文件已在别处更新；保存时会提示冲突。</span>
-				</div>
-			) : null}
-			<textarea
-				className="pi-json-editor mono"
-				value={draft}
-				spellCheck={false}
-				autoCapitalize="off"
-				autoCorrect="off"
-				placeholder="{}"
-				onChange={(e) => setDraft(e.target.value)}
-				onKeyDown={(e) => {
-					if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
-						e.preventDefault();
-						void save();
-					} else if (e.key === "Escape") {
-						e.stopPropagation();
-					} else if (e.key === "Tab" && !e.shiftKey) {
-						e.preventDefault();
-						const target = e.currentTarget;
-						const { selectionStart, selectionEnd } = target;
-						setDraft(`${draft.slice(0, selectionStart)}  ${draft.slice(selectionEnd)}`);
-						requestAnimationFrame(() => target.setSelectionRange(selectionStart + 2, selectionStart + 2));
-					}
-				}}
-			/>
-			<div className={`pi-json-status small${parsed.error ? " error-text" : " muted"}`}>
-				{parsed.error ? `JSON 无效：${parsed.error}` : dirty ? "有未保存的修改（Ctrl/⌘ + S 保存）" : "与文件一致"}
-			</div>
-		</SettingsCard>
-	);
-}
-
 // ---- page --------------------------------------------------------------------------------
 
 export function PiSettings() {
@@ -596,7 +155,6 @@ export function PiSettings() {
 	const [loading, setLoading] = useState(false);
 	const [saving, setSaving] = useState<string>();
 	const [query, setQuery] = useState("");
-	const [open, setOpen] = useState<Record<string, boolean>>({});
 	const workspace = workspaces.find((w) => w.id === workspaceId);
 	const scope: ExtensionScope = workspace ? "project" : "user";
 
@@ -631,18 +189,14 @@ export function PiSettings() {
 		if (broken) setMode("json");
 	}, [broken]);
 
-	const onChange = async (field: FieldDef, value: unknown) => {
+	const onChanges = async (field: FieldDef, changes: SettingsChange[]) => {
 		const key = field.path.join(".");
 		if (saving || !file) return;
-		if (sameValue(getPath(own, field.path), value)) return;
+		const change = changes[0];
+		if (!change || sameValue(getPath(own, change.path), change.value)) return;
 		setSaving(key);
 		try {
-			const result = await store.updatePiSettings(
-				scope,
-				workspace?.id,
-				[value === undefined ? { path: field.path } : { path: field.path, value }],
-				!field.terminal,
-			);
+			const result = await store.updatePiSettings(scope, workspace?.id, changes, !field.terminal);
 			if (result) {
 				setData((current) =>
 					current
@@ -667,17 +221,7 @@ export function PiSettings() {
 		);
 
 	const q = query.trim().toLowerCase();
-	const groups = useMemo(
-		() =>
-			SETTINGS_GROUPS.map((group) => ({
-				...group,
-				fields: group.fields.filter(
-					(field) =>
-						!q || `${field.label} ${field.description ?? ""} ${field.path.join(".")}`.toLowerCase().includes(q),
-				),
-			})).filter((group) => group.fields.length),
-		[q],
-	);
+	const groups = useMemo(() => filterGroups(SETTINGS_GROUPS, q), [q]);
 	const extraKeys = unhandledKeys(own);
 
 	return (
@@ -784,64 +328,66 @@ export function PiSettings() {
 					) : null}
 
 					{mode === "json" ? (
-						<JsonEditor
+						<TextFileEditor
 							key={file.path}
 							file={file}
-							scope={scope}
-							workspaceId={workspace?.id}
+							fileName="settings.json"
+							validate={validateJson}
+							format={formatJson}
+							emptyText={"{}\n"}
+							placeholder="{}"
+							externalHint="可能是终端中的 pi 或其他设备"
+							save={async (text, expected) => {
+								const result = await store.writePiSettings(scope, workspace?.id, text, expected);
+								return result;
+							}}
 							onSaved={onSaved}
 							onReload={load}
 						/>
 					) : (
 						<>
-							{groups.map((group) => {
-								const collapsed = group.collapsed && !q && !open[group.id];
-								return (
-									<SettingsGroup
-										key={group.id}
-										title={
-											group.collapsed && !q ? (
-												<button
-													type="button"
-													className="ghost pi-group-toggle"
-													onClick={() => setOpen((s) => ({ ...s, [group.id]: !s[group.id] }))}
-												>
-													{collapsed ? <IconChevronRight size={14} /> : <IconChevronDown size={14} />}
-													{group.title}
-												</button>
-											) : (
-												group.title
-											)
-										}
-									>
-										{group.description ? <p className="muted small settings-note">{group.description}</p> : null}
-										{collapsed ? null : (
-											<SettingsCard className="pi-settings-card">
-												{group.fields.map((field) => {
-													const projectOnlyBlocked = scope === "project" && field.globalOnly;
-													const inherited = scope === "project" ? getPath(userSettings, field.path) : undefined;
-													const useInherited = inherited !== undefined && isValidValue(field.kind, inherited);
-													return (
-														<FieldRow
-															key={field.path.join(".")}
-															field={field}
-															own={getPath(own, field.path)}
-															fallback={useInherited ? inherited : builtinDefault(field)}
-															inherited={useInherited}
-															disabled={
-																Boolean(projectOnlyBlocked) || (saving !== undefined && saving !== field.path.join("."))
-															}
-															disabledReason={projectOnlyBlocked ? "只能在全局设置中配置" : undefined}
-															saving={saving === field.path.join(".")}
-															onChange={(f, v) => void onChange(f, v)}
-														/>
-													);
-												})}
-											</SettingsCard>
-										)}
-									</SettingsGroup>
-								);
-							})}
+							<ConfigGroups
+								groups={groups}
+								searching={Boolean(q)}
+								row={(field) => {
+									const key = field.path.join(".");
+									const projectOnlyBlocked = scope === "project" && field.globalOnly;
+									const inherited = scope === "project" ? getPath(userSettings, field.path) : undefined;
+									const useInherited = inherited !== undefined && isValidValue(field.kind, inherited);
+									const ownValue = getPath(own, field.path);
+									const fallback = useInherited ? inherited : builtinDefault(field);
+									const disabled = Boolean(projectOnlyBlocked) || (saving !== undefined && saving !== key);
+									return (
+										<FieldRow
+											key={key}
+											field={field}
+											own={ownValue}
+											fallback={fallback}
+											inheritedFrom={useInherited ? "全局" : undefined}
+											fileName="settings.json"
+											disabled={disabled}
+											disabledReason={projectOnlyBlocked ? "只能在全局设置中配置" : undefined}
+											saving={saving === key}
+											extra={
+												field.suggest === "packageManagers" ? (
+													<PackageManagerPicker
+														command={
+															ownValue !== undefined && isValidValue(field.kind, ownValue)
+																? (ownValue as string[])
+																: Array.isArray(fallback)
+																	? (fallback as string[])
+																	: undefined
+														}
+														disabled={disabled || saving === key}
+														onPick={(command) => void onChanges(field, [{ path: field.path, value: command }])}
+													/>
+												) : undefined
+											}
+											onChanges={(f, changes) => void onChanges(f, changes)}
+										/>
+									);
+								}}
+							/>
 							{!groups.length ? (
 								<SettingsCard>
 									<div className="settings-empty">没有匹配的设置，可以在 JSON 中直接编辑。</div>
