@@ -247,6 +247,42 @@ select.setting-select.settings-host-select:hover:not(:disabled):not(:focus) {
 	letter-spacing: -0.03em;
 }
 
+/* Tabs under a page title: the pages of one navigation entry (the agents in “Agent 配置”). */
+.settings-tabs {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+	margin: -8px 0 24px;
+	border-bottom: 1px solid var(--border);
+}
+
+button.settings-tab {
+	position: relative;
+	gap: 7px;
+	margin-bottom: -1px;
+	padding: 8px 12px 10px;
+	border: none;
+	border-bottom: 2px solid transparent;
+	border-radius: 8px 8px 0 0;
+	background: transparent;
+	color: var(--text-muted);
+	font-size: 13.5px;
+	font-weight: 500;
+}
+
+button.settings-tab:hover:not(:disabled) {
+	background: var(--bg-hover);
+	color: var(--text);
+}
+
+button.settings-tab.active,
+button.settings-tab.active:hover:not(:disabled) {
+	border-bottom-color: var(--accent);
+	background: transparent;
+	color: var(--text);
+	font-weight: 600;
+}
+
 .settings-intro {
 	margin: -12px 0 24px;
 	color: var(--text-muted);
@@ -427,7 +463,8 @@ select.setting-select.compact {
 
 /* The selected settings page's icon takes the accent (kept after the rule above for biome's
    specificity ordering). */
-button.settings-nav-item.selected .icon-svg {
+button.settings-nav-item.selected .icon-svg,
+button.settings-tab.active .icon-svg {
 	color: var(--accent-text);
 }
 
