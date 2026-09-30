@@ -93,7 +93,7 @@ describe("Codex runtime", () => {
 		});
 		expect(items[2]?.kind === "assistant" && items[2].blocks.map((b) => b.kind)).toEqual(["thinking", "text"]);
 		const last = await runtime().server().request<Record<string, unknown>>("fake/lastTurn", { threadId: session.id });
-		expect(last).toMatchObject({ approvalPolicy: "on-request", effort: "medium", cwd: t.workspaceDir });
+		expect(last).toMatchObject({ approvalPolicy: "on-request", effort: "medium", cwd: workspace.path });
 
 		await client.request("session.close", { sessionId: session.id });
 		const { sessions } = await client.request("session.list", { workspaceId: workspace.id });

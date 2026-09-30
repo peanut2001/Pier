@@ -197,7 +197,7 @@ describe("Claude Code runtime", () => {
 		});
 		await rec.waitForType("agent_settled");
 		expect(rec.text()).toBe("refused: Denied by the user: no");
-		expect(fake.options[0]).toMatchObject({ sessionId: session.id, cwd: t.workspaceDir });
+		expect(fake.options[0]).toMatchObject({ sessionId: session.id, cwd: workspace.path });
 
 		// A second prompt reuses the running process; a new process resumes the session.
 		fake.responder = async function* () {
