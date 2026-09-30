@@ -24,7 +24,7 @@ import type {
 } from "@pier/protocol";
 import { PierClient } from "./client.ts";
 
-export const PIER_CLI_VERSION = "0.2.14";
+export const PIER_CLI_VERSION = "0.2.15";
 
 const HELP = `Commands:
   /ws                        list workspaces
