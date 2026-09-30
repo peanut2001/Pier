@@ -261,10 +261,11 @@ jobs:
         if: always()
         run: rm -f "$RUNNER_TEMP/pier-release.jks"
 
-  # latest.json for the in-app updater (also built on dry runs to validate the signatures).
+  # latest.json for the desktop in-app updater and latest-android.json for the Android app
+  # (also built on dry runs to validate the signatures).
   updater-manifest:
     name: updater manifest
-    needs: [verify, desktop]
+    needs: [verify, desktop, android]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -280,7 +281,13 @@ jobs:
           pattern: pier-desktop-*
           merge-multiple: true
 
-      - name: Build latest.json
+      - uses: actions/download-artifact@v5
+        with:
+          path: android
+          pattern: pier-mobile-*
+          merge-multiple: true
+
+      - name: Build latest.json and latest-android.json
         run: |
           version="${{ needs.verify.outputs.version }}"
           awk -v heading="## v${version}" '
@@ -300,11 +307,15 @@ jobs:
             --assets desktop --version "${version}" --tag "${GITHUB_REF_NAME}" \
             --repo "${GITHUB_REPOSITORY}" --notes notes.md --out manifest/latest.json
           cat manifest/latest.json
+          node apps/mobile/scripts/android-update-manifest.mjs \
+            --apk "android/pier-mobile-${GITHUB_REF_NAME}-android.apk" --version "${version}" --tag "${GITHUB_REF_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" --notes notes.md --out manifest/latest-android.json
+          cat manifest/latest-android.json
 
       - uses: actions/upload-artifact@v5
         with:
           name: updater-manifest
-          path: manifest/latest.json
+          path: manifest/*.json
           if-no-files-found: error
 
   publish:

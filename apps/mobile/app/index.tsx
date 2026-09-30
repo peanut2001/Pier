@@ -1,5 +1,6 @@
 import { Stack, useRouter } from "expo-router";
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from "react-native";
+import { UpdateBanner } from "../src/components/Update.tsx";
 import {
 	Avatar,
 	Button,
@@ -86,7 +87,12 @@ export default function Home() {
 					keyExtractor={(h) => h.hostId}
 					contentContainerStyle={styles.list}
 					renderItem={({ item }) => <HostRow host={item} />}
-					ListHeaderComponent={hosts.length ? <SectionLabel>我的电脑</SectionLabel> : null}
+					ListHeaderComponent={
+						<>
+							<UpdateBanner />
+							{hosts.length ? <SectionLabel>我的电脑</SectionLabel> : null}
+						</>
+					}
 					ListEmptyComponent={
 						<View style={styles.empty}>
 							<View style={[styles.hero, { backgroundColor: p.accentSoft }]}>
