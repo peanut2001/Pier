@@ -1,6 +1,6 @@
 import type { ChatController, ChatState } from "@pier/chat-state";
 import type { ModelInfo, ThinkingLevel, WorkspaceInfo } from "@pier/protocol";
-import { type KeyboardEvent, type PointerEvent, useEffect, useRef, useState } from "react";
+import { type KeyboardEvent, type PointerEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { LOCAL_NODE, useAppState, useStore } from "../lib/store.tsx";
 import {
 	IconArrowLeft,
@@ -52,48 +52,74 @@ export function clampThinking(level: string, levels: ThinkingLevel[]): ThinkingL
 	return levels[0] ?? "off";
 }
 
-/** A stepped slider for the thinking level, like a progress bar with one stop per level. */
-function ThinkingSlider({
+/**
+ * The thinking-level panel: a stepped slider, like a progress bar with one stop per level.
+ * The thumb follows the pointer while dragging and glides to the nearest stop on release;
+ * the picked stop shows right away instead of waiting for the host to confirm it.
+ */
+function ThinkingPanel({
 	levels,
 	value,
 	onChange,
 }: {
 	levels: ThinkingLevel[];
 	value: ThinkingLevel;
-	onChange: (level: ThinkingLevel) => void;
+	onChange: (level: ThinkingLevel) => unknown;
 }) {
-	const track = useRef<HTMLDivElement>(null);
-	const [dragging, setDragging] = useState<number | undefined>();
-	const committed = Math.max(0, levels.indexOf(value));
-	const index = dragging ?? committed;
+	const rail = useRef<HTMLDivElement>(null);
+	const press = useRef<number | undefined>(undefined);
+	const request = useRef(0);
+	/** Where the thumb is (0–1) while it's being dragged. */
+	const [drag, setDrag] = useState<number | undefined>();
+	/** The stop just picked, shown until the change lands. */
+	const [pending, setPending] = useState<number | undefined>();
 	const last = levels.length - 1;
-	const percent = last > 0 ? (index / last) * 100 : 0;
+	const settled = pending ?? Math.max(0, levels.indexOf(value));
+	const index = drag !== undefined ? Math.round(drag * last) : settled;
+	const position = drag ?? (last > 0 ? settled / last : 0);
+	const percent = position * 100;
+	const label = thinkingLabel(levels[index] ?? value);
 
-	const indexAt = (clientX: number): number => {
-		const rect = track.current?.getBoundingClientRect();
-		if (!rect || last <= 0) return 0;
-		const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
-		return Math.round(ratio * last);
+	const ratioAt = (clientX: number): number => {
+		const rect = rail.current?.getBoundingClientRect();
+		if (!rect || rect.width <= 0) return 0;
+		return Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
 	};
 	const commit = (next: number) => {
 		const level = levels[next];
-		if (level && level !== value) onChange(level);
+		if (!level) return;
+		const id = ++request.current;
+		if (level === value) {
+			setPending(undefined);
+			return;
+		}
+		setPending(next);
+		void Promise.resolve(onChange(level)).finally(() => {
+			if (request.current === id) setPending(undefined);
+		});
 	};
 
 	const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
 		if (e.button !== 0) return;
 		e.currentTarget.setPointerCapture(e.pointerId);
 		e.currentTarget.focus();
-		setDragging(indexAt(e.clientX));
+		press.current = e.clientX;
 	};
 	const onPointerMove = (e: PointerEvent<HTMLDivElement>) => {
-		if (dragging !== undefined) setDragging(indexAt(e.clientX));
+		if (press.current === undefined) return;
+		// A click just picks a stop; only a real drag makes the thumb follow the pointer.
+		if (drag === undefined && Math.abs(e.clientX - press.current) < 3) return;
+		setDrag(ratioAt(e.clientX));
 	};
 	const onPointerUp = (e: PointerEvent<HTMLDivElement>) => {
-		if (dragging === undefined) return;
-		const next = indexAt(e.clientX);
-		setDragging(undefined);
-		commit(next);
+		if (press.current === undefined) return;
+		press.current = undefined;
+		setDrag(undefined);
+		commit(Math.round(ratioAt(e.clientX) * last));
+	};
+	const onPointerCancel = () => {
+		press.current = undefined;
+		setDrag(undefined);
 	};
 	const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
 		const step: Record<string, number> = {
@@ -103,7 +129,7 @@ function ThinkingSlider({
 			ArrowUp: 1,
 		};
 		let next: number | undefined;
-		if (e.key in step) next = Math.min(last, Math.max(0, committed + (step[e.key] ?? 0)));
+		if (e.key in step) next = Math.min(last, Math.max(0, settled + (step[e.key] ?? 0)));
 		else if (e.key === "Home") next = 0;
 		else if (e.key === "End") next = last;
 		if (next === undefined) return;
@@ -112,33 +138,47 @@ function ThinkingSlider({
 	};
 
 	return (
-		<div
-			ref={track}
-			className={`thinking-slider${dragging !== undefined ? " dragging" : ""}`}
-			role="slider"
-			tabIndex={0}
-			aria-label="思考程度"
-			aria-valuemin={0}
-			aria-valuemax={last}
-			aria-valuenow={index}
-			aria-valuetext={thinkingLabel(levels[index] ?? value)}
-			onPointerDown={onPointerDown}
-			onPointerMove={onPointerMove}
-			onPointerUp={onPointerUp}
-			onPointerCancel={() => setDragging(undefined)}
-			onKeyDown={onKeyDown}
-		>
-			<div className="thinking-slider-rail">
-				<div className="thinking-slider-fill" style={{ width: `calc(${percent}% + 24px)` }} />
-				{levels.map((level, i) => (
-					<span
-						key={level}
-						className={`thinking-slider-stop${i <= index ? " passed" : ""}`}
-						style={{ left: `${last > 0 ? (i / last) * 100 : 0}%` }}
-						title={thinkingLabel(level)}
-					/>
-				))}
-				<span className="thinking-slider-thumb" style={{ left: `${percent}%` }} />
+		<div className="thinking-panel">
+			<div className="thinking-panel-head">
+				<span className="thinking-panel-title">
+					<IconBrain size={14} />
+					思考程度
+				</span>
+				<span key={label} className="thinking-panel-value">
+					{label}
+				</span>
+			</div>
+			<div
+				className={`thinking-slider${drag !== undefined ? " dragging" : ""}`}
+				role="slider"
+				tabIndex={0}
+				aria-label="思考程度"
+				aria-valuemin={0}
+				aria-valuemax={last}
+				aria-valuenow={index}
+				aria-valuetext={label}
+				onPointerDown={onPointerDown}
+				onPointerMove={onPointerMove}
+				onPointerUp={onPointerUp}
+				onPointerCancel={onPointerCancel}
+				onKeyDown={onKeyDown}
+			>
+				<div ref={rail} className="thinking-slider-rail">
+					<div className="thinking-slider-fill" style={{ width: `calc(${percent}% + 24px)` }} />
+					{levels.map((level, i) => (
+						<span
+							key={level}
+							className={`thinking-slider-stop${last > 0 && i / last <= position + 1e-6 ? " passed" : ""}`}
+							style={{ left: `${last > 0 ? (i / last) * 100 : 0}%` }}
+							title={thinkingLabel(level)}
+						/>
+					))}
+					<span className="thinking-slider-thumb" style={{ left: `${percent}%` }} />
+				</div>
+			</div>
+			<div className="thinking-panel-scale">
+				<span>更快</span>
+				<span>更深入</span>
 			</div>
 		</div>
 	);
@@ -156,7 +196,7 @@ interface ModelMenuProps {
 	/** Models come from Pier's providers (pi); other agents bring their own. */
 	manageable?: boolean;
 	onModel: (model: ModelInfo) => void;
-	onThinking: (level: ThinkingLevel) => void;
+	onThinking: (level: ThinkingLevel) => unknown;
 }
 
 /**
@@ -177,6 +217,11 @@ function ModelMenu({
 	const store = useStore();
 	const [open, setOpen] = useState(false);
 	const [view, setView] = useState<"main" | "models">("main");
+	/** Which way the last view switch went, so the new view slides in from that side. */
+	const [motion, setMotion] = useState<"forward" | "back" | undefined>();
+	/** The open menu's content height, so it can animate when the view or list changes. */
+	const [height, setHeight] = useState<number | undefined>();
+	const body = useRef<HTMLDivElement>(null);
 	const [models, setModels] = useState<ModelInfo[] | undefined>();
 	const [error, setError] = useState<string | undefined>();
 	const [filter, setFilter] = useState("");
@@ -185,6 +230,22 @@ function ModelMenu({
 	const levels = supportedThinkingLevels(model);
 	const canThink = levels.length > 1;
 	const level = clampThinking(thinkingLevel ?? "medium", levels);
+
+	useLayoutEffect(() => {
+		const el = body.current;
+		if (!open || !el) return;
+		const observer = new ResizeObserver(() => setHeight(el.offsetHeight));
+		observer.observe(el);
+		return () => {
+			observer.disconnect();
+			setHeight(undefined);
+		};
+	}, [open]);
+
+	const go = (next: "main" | "models") => {
+		setMotion(next === "models" ? "forward" : "back");
+		setView(next);
+	};
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies: load once per opening.
 	useEffect(() => {
@@ -201,6 +262,7 @@ function ModelMenu({
 			close();
 			return;
 		}
+		setMotion(undefined);
 		setView(model ? "main" : "models");
 		setOpen(true);
 	};
@@ -239,104 +301,103 @@ function ModelMenu({
 				<span className="composer-model-name">
 					{model ? model.name || model.id : loading ? "加载模型…" : "选择模型"}
 				</span>
-				{model && canThink ? <span className="composer-model-thinking">{thinkingLabel(level)}</span> : null}
+				{model && canThink ? (
+					<span key={level} className="composer-model-thinking">
+						{thinkingLabel(level)}
+					</span>
+				) : null}
 				<IconChevronUp size={13} className="chip-caret" />
 			</button>
 			{open ? (
 				<div className={`dropdown-menu up right model-menu${view === "models" ? " list" : ""}`}>
-					{view === "main" && model ? (
-						<>
-							{canThink ? (
-								<div className="thinking-panel">
-									<div className="thinking-panel-head">
-										<span className="thinking-panel-title">
-											<IconBrain size={14} />
-											思考程度
-										</span>
-										<span className="thinking-panel-value">{thinkingLabel(level)}</span>
-									</div>
-									<ThinkingSlider levels={levels} value={level} onChange={onThinking} />
-									<div className="thinking-panel-scale">
-										<span>更快</span>
-										<span>更深入</span>
-									</div>
-								</div>
-							) : (
-								<div className="thinking-panel-none muted">这个模型不支持调节思考程度</div>
-							)}
-							<div className="dropdown-separator" />
-							<button type="button" className="dropdown-item model-menu-current" onClick={() => setView("models")}>
-								<span className="menu-label">
-									<IconSparkles size={14} />
-									<span className="model-menu-current-text">
-										<span className="model-menu-current-name">{model.name || model.id}</span>
-										<span className="muted">{model.provider}</span>
-									</span>
-								</span>
-								<span className="model-menu-switch">
-									切换模型
-									<IconChevronRight size={14} />
-								</span>
-							</button>
-						</>
-					) : (
-						<>
-							<div className="model-menu-header">
-								{model ? (
-									<button type="button" className="ghost icon" title="返回" onClick={() => setView("main")}>
-										<IconArrowLeft size={14} />
-									</button>
-								) : null}
-								<span>选择模型</span>
-							</div>
-							<div className="dropdown-search">
-								<IconSearch size={14} />
-								<input
-									// biome-ignore lint/a11y/noAutofocus: the list was just opened to search.
-									autoFocus
-									placeholder="搜索模型"
-									value={filter}
-									onChange={(e) => setFilter(e.target.value)}
-								/>
-							</div>
-							<div className="model-menu-list">
-								{error ? <div className="dropdown-empty error">{error}</div> : null}
-								{!models && !error ? <div className="dropdown-empty">加载中…</div> : null}
-								{models && !visible.length ? (
-									<div className="dropdown-empty">{models.length ? "没有匹配的模型。" : "还没有可用的模型。"}</div>
-								) : null}
-								{[...groups].map(([provider, list]) => (
-									<div key={provider} className="dropdown-group">
-										<div className="dropdown-group-title">{provider}</div>
-										{list.map((m) => {
-											const selected = model?.provider === m.provider && model.id === m.id;
-											return (
-												<button
-													type="button"
-													key={m.id}
-													className={`dropdown-item${selected ? " selected" : ""}`}
-													onClick={() => {
-														setView("main");
-														if (!selected) onModel(m);
-													}}
-												>
-													<span className="model-item-text">
-														<span className="model-item-name">
-															{m.name || m.id}
-															{m.reasoning ? <span className="mini-tag">推理</span> : null}
-														</span>
-														<span className="muted">{m.id}</span>
-													</span>
-													{selected ? <IconCheck size={15} className="policy-check" /> : null}
+					<div className="model-menu-frame" style={height === undefined ? undefined : { height }}>
+						<div ref={body}>
+							<div key={view} className={`model-menu-view${motion ? ` ${motion}` : ""}`}>
+								{view === "main" && model ? (
+									<>
+										{canThink ? (
+											<ThinkingPanel levels={levels} value={level} onChange={onThinking} />
+										) : (
+											<div className="thinking-panel-none muted">这个模型不支持调节思考程度</div>
+										)}
+										<div className="dropdown-separator" />
+										<button type="button" className="dropdown-item model-menu-current" onClick={() => go("models")}>
+											<span className="menu-label">
+												<IconSparkles size={14} />
+												<span className="model-menu-current-text">
+													<span className="model-menu-current-name">{model.name || model.id}</span>
+													<span className="muted">{model.provider}</span>
+												</span>
+											</span>
+											<span className="model-menu-switch">
+												切换模型
+												<IconChevronRight size={14} />
+											</span>
+										</button>
+									</>
+								) : (
+									<>
+										<div className="model-menu-header">
+											{model ? (
+												<button type="button" className="ghost icon" title="返回" onClick={() => go("main")}>
+													<IconArrowLeft size={14} />
 												</button>
-											);
-										})}
-									</div>
-								))}
+											) : null}
+											<span>选择模型</span>
+										</div>
+										<div className="dropdown-search">
+											<IconSearch size={14} />
+											<input
+												// biome-ignore lint/a11y/noAutofocus: the list was just opened to search.
+												autoFocus
+												placeholder="搜索模型"
+												value={filter}
+												onChange={(e) => setFilter(e.target.value)}
+											/>
+										</div>
+										<div className="model-menu-list">
+											{error ? <div className="dropdown-empty error">{error}</div> : null}
+											{!models && !error ? <div className="dropdown-empty">加载中…</div> : null}
+											{models && !visible.length ? (
+												<div className="dropdown-empty">
+													{models.length ? "没有匹配的模型。" : "还没有可用的模型。"}
+												</div>
+											) : null}
+											{[...groups].map(([provider, list]) => (
+												<div key={provider} className="dropdown-group">
+													<div className="dropdown-group-title">{provider}</div>
+													{list.map((m) => {
+														const selected = model?.provider === m.provider && model.id === m.id;
+														return (
+															<button
+																type="button"
+																key={m.id}
+																className={`dropdown-item${selected ? " selected" : ""}`}
+																onClick={() => {
+																	go("main");
+																	if (!selected) onModel(m);
+																}}
+															>
+																<span className="model-item-text">
+																	<span className="model-item-name">
+																		{m.name || m.id}
+																		{m.reasoning ? <span className="mini-tag">推理</span> : null}
+																	</span>
+																	<span className="muted">{m.id}</span>
+																</span>
+																{selected ? <IconCheck size={15} className="policy-check" /> : null}
+															</button>
+														);
+													})}
+												</div>
+											))}
+										</div>
+										{manage}
+									</>
+								)}
 							</div>
-							{manage}
-						</>
-					)}
+						</div>
+					</div>
 				</div>
 			) : null}
 		</div>
@@ -356,7 +417,7 @@ export function SessionModelPicker({ chat, controller }: { chat: ChatState; cont
 			manageable={(chat.session?.runtime ?? "pi") === "pi"}
 			loadModels={() => controller.listModels().then((r) => r.models)}
 			onModel={(m) => void controller.setModel(m.provider, m.id)}
-			onThinking={(level) => void controller.setThinking(level)}
+			onThinking={(level) => controller.setThinking(level)}
 		/>
 	);
 }

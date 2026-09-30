@@ -692,9 +692,11 @@
 }
 
 .composer-model-thinking {
+	display: inline-block;
 	flex: none;
 	color: var(--accent-text);
 	font-weight: 500;
+	animation: thinking-value-in 0.22s var(--ease);
 }
 
 .dropdown-menu.model-menu {
@@ -703,10 +705,48 @@
 	overflow: visible;
 	padding: 6px;
 	transform-origin: bottom right;
+	transition: width 0.26s var(--ease);
 }
 
 .dropdown-menu.model-menu.list {
 	width: 360px;
+}
+
+/* Animates the menu's height when switching views or when the model list loads/filters. */
+.model-menu-frame {
+	/* clip, not hidden: the list autofocuses its search box mid-slide, which must not scroll this. */
+	overflow: clip;
+	transition: height 0.26s var(--ease);
+}
+
+.model-menu-view.forward {
+	animation: model-menu-forward 0.26s var(--ease);
+}
+
+.model-menu-view.back {
+	animation: model-menu-back 0.26s var(--ease);
+}
+
+@keyframes model-menu-forward {
+	from {
+		opacity: 0;
+		transform: translateX(24px);
+	}
+	to {
+		opacity: 1;
+		transform: none;
+	}
+}
+
+@keyframes model-menu-back {
+	from {
+		opacity: 0;
+		transform: translateX(-24px);
+	}
+	to {
+		opacity: 1;
+		transform: none;
+	}
 }
 
 .thinking-panel {
@@ -729,9 +769,22 @@
 }
 
 .thinking-panel-value {
+	display: inline-block;
 	font-size: 15px;
 	font-weight: 600;
 	color: var(--accent-text);
+	animation: thinking-value-in 0.22s var(--ease);
+}
+
+@keyframes thinking-value-in {
+	from {
+		opacity: 0;
+		transform: translateY(5px);
+	}
+	to {
+		opacity: 1;
+		transform: none;
+	}
 }
 
 .thinking-panel-scale {
@@ -748,6 +801,8 @@
 }
 
 .thinking-slider {
+	/* A long ease-out, so the thumb glides onto a stop and settles softly. */
+	--slider-ease: cubic-bezier(0.22, 1, 0.36, 1);
 	position: relative;
 	height: 24px;
 	padding: 0 12px;
@@ -776,7 +831,7 @@
 	left: -12px;
 	border-radius: 999px;
 	background: var(--accent);
-	transition: width 0.16s var(--ease);
+	transition: width 0.3s var(--slider-ease);
 }
 
 .thinking-slider-stop {
@@ -788,6 +843,9 @@
 	border-radius: 50%;
 	background: var(--text-faint);
 	opacity: 0.7;
+	transition:
+		background 0.2s var(--ease),
+		opacity 0.2s var(--ease);
 }
 
 .thinking-slider-stop.passed {
@@ -807,18 +865,28 @@
 		0 1px 4px rgba(0, 0, 0, 0.28),
 		0 0 0 1px rgba(0, 0, 0, 0.06);
 	transition:
-		left 0.16s var(--ease),
-		transform 0.12s var(--ease);
+		left 0.3s var(--slider-ease),
+		transform 0.16s var(--ease),
+		box-shadow 0.16s var(--ease);
 }
 
 .thinking-slider.dragging .thinking-slider-fill,
 .thinking-slider.dragging .thinking-slider-thumb {
-	transition: none;
+	transition:
+		transform 0.16s var(--ease),
+		box-shadow 0.16s var(--ease);
 }
 
-.thinking-slider.dragging .thinking-slider-thumb,
 .thinking-slider:hover .thinking-slider-thumb {
 	transform: scale(1.08);
+}
+
+.thinking-slider:active .thinking-slider-thumb,
+.thinking-slider.dragging .thinking-slider-thumb {
+	transform: scale(1.14);
+	box-shadow:
+		0 2px 8px rgba(0, 0, 0, 0.3),
+		0 0 0 1px rgba(0, 0, 0, 0.06);
 }
 
 .model-menu-current-text {
