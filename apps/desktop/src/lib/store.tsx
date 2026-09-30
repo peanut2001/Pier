@@ -57,6 +57,7 @@ import { PierProtocolError, parseProtocolVersion } from "@pier/protocol";
 import { createContext, useContext, useMemo, useSyncExternalStore } from "react";
 import type { Bridge, HostStatus, LocalFileSink, UpdateStatus } from "./bridge.ts";
 import { fileToken } from "./composer-text.ts";
+import { newSessionDefaultsFromSettings } from "./new-session-defaults.ts";
 import { remotePageBlocker } from "./settings-target.ts";
 import { isYunlianProvider, YUNLIAN_SITE, yunlianGroupOf, yunlianProvider } from "./yunlian.ts";
 
@@ -2191,7 +2192,14 @@ export class PierStore {
 	async listModels(workspaceId: string, runtime: AgentRuntimeId = "pi"): Promise<MethodResult<"model.list">> {
 		const client = this.clientFor(workspaceId);
 		if (!client) throw new Error("未连接到工作区所在的电脑");
-		return client.request("model.list", { workspaceId, ...(runtime !== "pi" ? { runtime } : {}) });
+		const result = await client.request("model.list", { workspaceId, ...(runtime !== "pi" ? { runtime } : {}) });
+		if (runtime !== "pi" || result.current || !result.models.length || hostSpeaks(client.host, 19)) return result;
+		// Hosts before 1.19 do not say which model a new session starts with: work it out from
+		// the workspace's pi settings (1.15), so the chip shows the default model.
+		if (!hostSpeaks(client.host, 15)) return result;
+		const settings = await client.request("settings.get", { workspaceId }).catch(() => undefined);
+		if (!settings) return result;
+		return { ...result, ...newSessionDefaultsFromSettings(result.models, settings) };
 	}
 
 	/**
