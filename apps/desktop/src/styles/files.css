@@ -1,13 +1,39 @@
 /* Right-hand workspace file panel. */
 
-.app.with-files .main {
+/* The files shell always provides the main panel's right gap (8px when collapsed). */
+.app.with-files-shell .main {
 	margin-right: 0;
+}
+
+/*
+ * Mirrors the left sidebar: the panel sits in a shell whose width animates, anchored to the
+ * right edge so it is clipped from the left, while the panel itself slides and fades out.
+ */
+.files-shell {
+	display: flex;
+	justify-content: flex-end;
+	width: var(--files-width);
+	min-width: 0;
+	min-height: 0;
+	overflow: hidden;
+	transition: width var(--sidebar-duration) var(--sidebar-ease);
+}
+
+.files-shell.collapsed {
+	width: 8px;
+}
+
+/* Dragging the resize handle must track the pointer without easing. */
+body.resizing-panel .files-shell {
+	transition: none;
 }
 
 .files-panel {
 	position: relative;
 	display: flex;
 	flex-direction: column;
+	flex: none;
+	width: calc(var(--files-width, 280px) - 16px);
 	min-width: 0;
 	min-height: 0;
 	margin: 8px 8px 8px 8px;
@@ -15,13 +41,28 @@
 	border-radius: var(--radius-lg);
 	box-shadow: var(--panel-shadow);
 	overflow: hidden;
-	animation: files-in 0.18s var(--ease);
+	/* `transform: none` when open so fixed-position menus inside are not contained. */
+	transform: none;
+	animation: files-in var(--sidebar-duration) var(--sidebar-ease);
+	transition:
+		opacity 0.22s var(--ease) 0.04s,
+		transform var(--sidebar-duration) var(--sidebar-ease);
+}
+
+.files-shell.collapsed > .files-panel {
+	opacity: 0;
+	transform: translateX(28px);
+	visibility: hidden;
+	transition:
+		opacity 0.14s ease-out,
+		transform var(--sidebar-duration) var(--sidebar-ease),
+		visibility 0s linear var(--sidebar-duration);
 }
 
 @keyframes files-in {
 	from {
 		opacity: 0;
-		transform: translateX(8px);
+		transform: translateX(28px);
 	}
 }
 

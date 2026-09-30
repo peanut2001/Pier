@@ -1,5 +1,5 @@
 import type { WorkspaceInfo } from "@pier/protocol";
-import { useEffect } from "react";
+import { type CSSProperties, useEffect, useState } from "react";
 import { DirectoryPicker } from "./components/DirectoryPicker.tsx";
 import { FilesPanel } from "./components/FilesPanel.tsx";
 import { FilePreview } from "./components/FileViewer.tsx";
@@ -92,6 +92,9 @@ function useScreenWorkspace(): { workspace?: WorkspaceInfo; composerKey?: string
 	return { ...(workspace ? { workspace } : {}), ...(composerKey ? { composerKey } : {}) };
 }
 
+/** Matches `--sidebar-duration` in base.css, plus a little slack. */
+const FILES_CLOSE_MS = 320;
+
 function RightPanel({ workspace, composerKey }: { workspace?: WorkspaceInfo; composerKey?: string }) {
 	if (!workspace) return null;
 	return <FilesPanel key={workspace.id} workspace={workspace} {...(composerKey ? { composerKey } : {})} />;
@@ -111,8 +114,19 @@ export function App() {
 	const screenWorkspace = screen.workspace;
 	const canOpenTerminal = useCanOpenTerminal(screenWorkspace);
 	const showFiles = filesPanel && hasWorkspace;
-	// The sidebar stays mounted and its shell animates between open and collapsed widths.
-	const columns = ["auto", "minmax(0, 1fr)", ...(showFiles ? [`${filesPanelWidth}px`] : [])];
+	// Both side panels sit in shells that animate between open and collapsed widths. The file
+	// panel stays mounted only until its closing animation ends, so a hidden panel does not keep
+	// reloading and closing still cancels its pending upload questions.
+	const [filesMounted, setFilesMounted] = useState(showFiles);
+	useEffect(() => {
+		if (showFiles) {
+			setFilesMounted(true);
+			return;
+		}
+		const timer = setTimeout(() => setFilesMounted(false), FILES_CLOSE_MS);
+		return () => clearTimeout(timer);
+	}, [showFiles]);
+	const columns = ["auto", "minmax(0, 1fr)", "auto"];
 
 	// Ctrl/⌘+Shift+E toggles the file panel, like the explorer in editors; Ctrl/⌘+B the sidebar;
 	// Ctrl+` the terminal (Ctrl on macOS too, as in editors: ⌘+` cycles windows there).
@@ -146,7 +160,7 @@ export function App() {
 				<SettingsPage section={settings} />
 			) : (
 				<div
-					className={`app${showFiles ? " with-files" : ""}${sidebar ? "" : " no-sidebar"}`}
+					className={`app with-files-shell${sidebar ? "" : " no-sidebar"}`}
 					style={{ gridTemplateColumns: columns.join(" ") }}
 				>
 					<div className={`sidebar-shell${sidebar ? "" : " collapsed"}`} inert={!sidebar}>
@@ -159,7 +173,13 @@ export function App() {
 						</div>
 						{terminalOpen ? <TerminalPanel {...(screenWorkspace ? { workspace: screenWorkspace } : {})} /> : null}
 					</main>
-					{showFiles ? <RightPanel {...screen} /> : null}
+					<div
+						className={`files-shell${showFiles ? "" : " collapsed"}`}
+						style={{ "--files-width": `${filesPanelWidth}px` } as CSSProperties}
+						inert={!showFiles}
+					>
+						{showFiles || filesMounted ? <RightPanel {...screen} /> : null}
+					</div>
 				</div>
 			)}
 			<StatusBar />
