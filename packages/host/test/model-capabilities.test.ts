@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
+import { type Api, getSupportedThinkingLevels, InMemoryCredentialStore, type Model } from "@earendil-works/pi-ai";
 import { getBuiltinProviders } from "@earendil-works/pi-ai/providers/all";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
@@ -110,6 +110,77 @@ describe("ModelCapabilityIndex", () => {
 		expect(fillModelsJsonProviders(index, { relay: { models: [unknown] } }, new Set())).toBeUndefined();
 	});
 
+	it("fills the official thinking levels of the same API family", () => {
+		const thinking = new ModelCapabilityIndex([
+			{
+				provider: "openrouter",
+				id: "openai/gpt-9",
+				api: "openai-completions",
+				reasoning: true,
+				thinkingLevelMap: { off: "none" },
+			},
+			{
+				provider: "openrouter",
+				id: "vendor/gateway-only",
+				api: "openai-completions",
+				reasoning: true,
+				thinkingLevelMap: { off: "none", max: "max" },
+			},
+			{
+				provider: "openai",
+				id: "gpt-9",
+				api: "openai-responses",
+				reasoning: true,
+				thinkingLevelMap: { off: null, minimal: null, xhigh: "xhigh", max: "max" },
+			},
+			{
+				provider: "anthropic",
+				id: "claude-opus-9",
+				api: "anthropic-messages",
+				reasoning: true,
+				thinkingLevelMap: { off: null, xhigh: "xhigh", max: "max" },
+				compat: { forceAdaptiveThinking: true, supportsStrictTools: true },
+			},
+		]);
+		// Chat Completions and Responses share reasoning_effort values; the first party wins.
+		expect(thinking.thinking("gpt-9", "openai-completions")).toEqual({
+			thinkingLevelMap: { off: null, minimal: null, xhigh: "xhigh", max: "max" },
+		});
+		expect(thinking.thinking("claude-opus-9", "openai-completions")).toBeUndefined();
+		// Gateways use their own wire values: only vendors' entries are official.
+		expect(thinking.thinking("gateway-only", "openai-completions")).toBeUndefined();
+		expect(thinking.thinking("claude-opus-9-20260101", "anthropic-messages")).toEqual({
+			thinkingLevelMap: { off: null, xhigh: "xhigh", max: "max" },
+			forceAdaptiveThinking: true,
+		});
+
+		const providers = {
+			relay: {
+				api: "openai-responses",
+				models: [
+					{ id: "gpt-9", reasoning: true },
+					{ id: "claude-opus-9", api: "anthropic-messages", reasoning: true, compat: { x: 1 } },
+					{ id: "gpt-9", reasoning: false },
+					{ id: "gpt-9", reasoning: true, thinkingLevelMap: { max: null } },
+				],
+			},
+		};
+		const result = fillModelsJsonProviders(thinking, providers, new Set());
+		expect(result?.filled).toBe(2);
+		expect(result?.providers.relay?.models).toEqual([
+			{ id: "gpt-9", reasoning: true, thinkingLevelMap: { off: null, minimal: null, xhigh: "xhigh", max: "max" } },
+			{
+				id: "claude-opus-9",
+				api: "anthropic-messages",
+				reasoning: true,
+				compat: { x: 1, forceAdaptiveThinking: true },
+				thinkingLevelMap: { off: null, xhigh: "xhigh", max: "max" },
+			},
+			{ id: "gpt-9", reasoning: false },
+			{ id: "gpt-9", reasoning: true, thinkingLevelMap: { max: null } },
+		]);
+	});
+
 	it("knows the models relays commonly offer from pi's catalog", async () => {
 		const root = mkdtempSync(join(tmpdir(), "pier-capabilities-"));
 		try {
@@ -124,6 +195,15 @@ describe("ModelCapabilityIndex", () => {
 			expect(real.lookup("gpt-5")).toMatchObject({ reasoning: true });
 			expect(real.lookup("gemini-2.5-pro")).toMatchObject({ reasoning: true });
 			expect(real.lookup("gpt-4o")).toMatchObject({ reasoning: false });
+			// pi's catalog lists xhigh / max for its newest models.
+			const levels = (id: string, api: string) =>
+				getSupportedThinkingLevels({
+					reasoning: true,
+					thinkingLevelMap: real.thinking(id, api)?.thinkingLevelMap,
+				} as Model<Api>);
+			expect(levels("gpt-5.5", "openai-completions")).toContain("xhigh");
+			expect(levels("claude-opus-4-7", "anthropic-messages")).toContain("max");
+			expect(real.thinking("claude-opus-4-7", "anthropic-messages")?.forceAdaptiveThinking).toBe(true);
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}

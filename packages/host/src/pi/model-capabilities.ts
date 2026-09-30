@@ -6,6 +6,11 @@
  * relays usually use the same ids (sometimes with a vendor prefix or a date suffix), so the
  * catalog tells whether a model reasons, accepts images, and how large its context is. Ids the
  * catalog does not know fall back to name patterns for the reasoning and image flags only.
+ *
+ * The catalog also says which thinking levels a model officially offers (`thinkingLevelMap`,
+ * e.g. `xhigh` / `max`, or no `off`) and, for Claude, whether it uses adaptive thinking. Those
+ * values are wire values of an API family, so they are only taken from the model vendor's own
+ * catalog entries (not gateways') that speak the same family as the custom endpoint.
  */
 
 /** What is known about a model. Absent fields are unknown. */
@@ -16,14 +21,49 @@ export interface ModelCapabilities {
 	maxTokens?: number;
 }
 
+/** pi's per-level thinking values (`null` = the level is not offered). */
+export type ThinkingLevelMap = Readonly<Record<string, string | null | undefined>>;
+
 /** A catalog model (pi's `Model`, reduced to what is needed here). */
 export interface CatalogModel {
 	provider: string;
 	id: string;
+	api?: string;
 	reasoning?: boolean;
 	input?: readonly string[];
 	contextWindow?: number;
 	maxTokens?: number;
+	thinkingLevelMap?: ThinkingLevelMap;
+	compat?: unknown;
+}
+
+/** How a model thinks, per its catalog entry for the same API family. */
+export interface ThinkingSettings {
+	thinkingLevelMap?: Record<string, string | null>;
+	/** Claude models that only accept adaptive thinking (`compat.forceAdaptiveThinking`). */
+	forceAdaptiveThinking?: boolean;
+}
+
+/**
+ * APIs whose thinking values mean the same thing. OpenAI's Responses and Chat Completions both
+ * take `reasoning_effort` strings; Anthropic takes `effort`; Google takes Gemini levels.
+ */
+const API_FAMILY: Record<string, string> = {
+	"openai-completions": "openai",
+	"openai-responses": "openai",
+	"azure-openai-responses": "openai",
+	"anthropic-messages": "anthropic",
+	"google-generative-ai": "google",
+	"google-vertex": "google",
+};
+
+function apiFamily(api: unknown): string | undefined {
+	return typeof api === "string" ? API_FAMILY[api] : undefined;
+}
+
+/** Whether thinking values written for API `a` mean the same for API `b`. */
+export function sameThinkingFamily(a: unknown, b: unknown): boolean {
+	return a === b || (apiFamily(a) !== undefined && apiFamily(a) === apiFamily(b));
 }
 
 /** Providers whose catalog entry for a model is the most authoritative, best first. */
@@ -45,6 +85,14 @@ const PROVIDER_RANK = [
 function rank(provider: string): number {
 	const index = PROVIDER_RANK.indexOf(provider);
 	return index === -1 ? PROVIDER_RANK.length : index;
+}
+
+/**
+ * Model vendors' own APIs. Gateways (OpenRouter, Vercel, OpenCode, ...) map thinking levels to
+ * their own wire values (e.g. `off` → `none`), so only vendors' entries count as official.
+ */
+function firstParty(provider: string): boolean {
+	return rank(provider) < PROVIDER_RANK.indexOf("openrouter");
 }
 
 /** Lowercase id without a vendor path (`anthropic/…`, `models/…`) or a `:variant` tag. */
@@ -102,13 +150,44 @@ function byName(id: string): ModelCapabilities {
 /** Looks up model capabilities in a catalog of known models. */
 export class ModelCapabilityIndex {
 	private readonly byId = new Map<string, CatalogModel>();
+	/** Catalog models with a thinking level map, by `family:id`. */
+	private readonly thinkingById = new Map<string, CatalogModel>();
 
 	constructor(models: Iterable<CatalogModel>) {
 		for (const model of models) {
 			const key = baseId(model.id);
 			const current = this.byId.get(key);
 			if (!current || rank(model.provider) < rank(current.provider)) this.byId.set(key, model);
+			const family = apiFamily(model.api);
+			if (family && model.reasoning === true && isObject(model.thinkingLevelMap) && firstParty(model.provider)) {
+				const thinkingKey = `${family}:${key}`;
+				const known = this.thinkingById.get(thinkingKey);
+				if (!known || rank(model.provider) < rank(known.provider)) this.thinkingById.set(thinkingKey, model);
+			}
 		}
+	}
+
+	/**
+	 * The official thinking settings of `id` when called with `api`, from the best catalog entry
+	 * of the same API family. Undefined when the catalog does not know the model for that family.
+	 */
+	thinking(id: string, api: unknown): ThinkingSettings | undefined {
+		const family = apiFamily(api);
+		if (!family) return undefined;
+		const model = candidates(id)
+			.map((key) => this.thinkingById.get(`${family}:${key}`))
+			.find(Boolean);
+		if (!model?.thinkingLevelMap) return undefined;
+		const map: Record<string, string | null> = {};
+		for (const [level, value] of Object.entries(model.thinkingLevelMap)) {
+			if (typeof value === "string" || value === null) map[level] = value;
+		}
+		const out: ThinkingSettings = {};
+		if (Object.keys(map).length) out.thinkingLevelMap = map;
+		if (family === "anthropic" && isObject(model.compat) && model.compat.forceAdaptiveThinking === true) {
+			out.forceAdaptiveThinking = true;
+		}
+		return out.thinkingLevelMap || out.forceAdaptiveThinking ? out : undefined;
 	}
 
 	get size(): number {
@@ -156,10 +235,13 @@ function isObject(value: unknown): value is Json {
 
 /**
  * Fill the capability fields a models.json model entry leaves out (`reasoning`, `input`,
- * `contextWindow`, `maxTokens`). Fields that are present, including `reasoning: false`, are
- * kept. Returns the entry unchanged (same object) when nothing is known to add.
+ * `contextWindow`, `maxTokens`) and, for reasoning models called with `api` (the model's own
+ * `api`, else the provider's), the official thinking levels (`thinkingLevelMap`) and
+ * `compat.forceAdaptiveThinking`. Fields that are present, including `reasoning: false` and a
+ * hand-written `thinkingLevelMap`, are kept. Returns the entry unchanged (same object) when
+ * nothing is known to add.
  */
-export function fillModelEntry(index: ModelCapabilityIndex, entry: Json): Json {
+export function fillModelEntry(index: ModelCapabilityIndex, entry: Json, providerApi?: unknown): Json {
 	if (typeof entry.id !== "string" || !entry.id) return entry;
 	const known = index.lookup(entry.id);
 	const next: Json = { ...entry };
@@ -179,6 +261,18 @@ export function fillModelEntry(index: ModelCapabilityIndex, entry: Json): Json {
 	if (entry.maxTokens === undefined && known.maxTokens !== undefined) {
 		next.maxTokens = known.maxTokens;
 		changed = true;
+	}
+	const thinking = next.reasoning === true ? index.thinking(entry.id, entry.api ?? providerApi) : undefined;
+	if (thinking?.thinkingLevelMap && entry.thinkingLevelMap === undefined) {
+		next.thinkingLevelMap = thinking.thinkingLevelMap;
+		changed = true;
+	}
+	if (thinking?.forceAdaptiveThinking && (entry.compat === undefined || isObject(entry.compat))) {
+		const compat = (entry.compat ?? {}) as Json;
+		if (compat.forceAdaptiveThinking === undefined) {
+			next.compat = { ...compat, forceAdaptiveThinking: true };
+			changed = true;
+		}
 	}
 	return changed ? next : entry;
 }
@@ -200,7 +294,7 @@ export function fillModelsJsonProviders(
 		let changed = false;
 		const models = provider.models.map((model) => {
 			if (!isObject(model)) return model;
-			const out = fillModelEntry(index, model);
+			const out = fillModelEntry(index, model, provider.api);
 			if (out !== model) {
 				changed = true;
 				filled++;
