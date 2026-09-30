@@ -6,6 +6,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ToastHost } from "../src/components/ui.tsx";
 import { MobileStore, StoreContext } from "../src/store.ts";
 import { usePalette } from "../src/theme.ts";
+import { updater } from "../src/updater.ts";
 
 const store = new MobileStore();
 
@@ -13,9 +14,12 @@ export default function RootLayout() {
 	const p = usePalette();
 	useEffect(() => {
 		void store.init();
+		void updater.init();
 		// iOS suspends sockets in the background; resume (with seq replay) right away on return.
 		const subscription = AppState.addEventListener("change", (state) => {
-			if (state === "active") store.onForeground();
+			if (state !== "active") return;
+			store.onForeground();
+			updater.onForeground();
 		});
 		return () => subscription.remove();
 	}, []);

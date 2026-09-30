@@ -3,6 +3,7 @@ import Constants from "expo-constants";
 import * as Device from "expo-device";
 import { useEffect, useState } from "react";
 import { Platform, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { UpdateSettingsCard } from "../src/components/Update.tsx";
 import { Button, Card, Muted, Screen, Title } from "../src/components/ui.tsx";
 import { APP_VERSION, useMobileState, useStore } from "../src/store.ts";
 import { MONO, usePalette } from "../src/theme.ts";
@@ -83,6 +84,8 @@ export default function Settings() {
 						</View>
 					) : null}
 				</Card>
+
+				<UpdateSettingsCard />
 
 				<Card style={styles.card}>
 					<Title>关于</Title>
