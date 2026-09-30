@@ -112,7 +112,7 @@ export function SlashMenu({ menu, onPick }: { menu: SlashMenuModel; onPick: (ent
 	const p = usePalette();
 	if (!menu.open) return null;
 	return (
-		<View style={[styles.root, { borderColor: p.border, backgroundColor: p.bg }]}>
+		<View style={[styles.root, { borderColor: p.border, backgroundColor: p.card }]}>
 			<ScrollView keyboardShouldPersistTaps="always" style={styles.list}>
 				{menu.entries.map((entry) => (
 					<Pressable
@@ -144,9 +144,9 @@ export function SlashMenu({ menu, onPick }: { menu: SlashMenuModel; onPick: (ent
 }
 
 const styles = StyleSheet.create({
-	root: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, overflow: "hidden" },
+	root: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 16, overflow: "hidden" },
 	list: { maxHeight: 240 },
-	item: { paddingHorizontal: 12, paddingVertical: 8, gap: 2 },
+	item: { paddingHorizontal: 14, paddingVertical: 10, gap: 2 },
 	itemHead: { flexDirection: "row", alignItems: "center", gap: 8 },
 	name: { flex: 1, fontSize: 14, fontFamily: Platform.select({ ios: "Menlo", default: "monospace" }) },
 	badge: { fontSize: 11 },

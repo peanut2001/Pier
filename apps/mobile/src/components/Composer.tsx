@@ -6,7 +6,7 @@ import { useState } from "react";
 import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { isBusy } from "../format.ts";
 import { useStore } from "../store.ts";
-import { usePalette } from "../theme.ts";
+import { SHADOW, usePalette } from "../theme.ts";
 import { type SlashEntry, SlashMenu, useSlashMenu } from "./SlashMenu.tsx";
 
 const MAX_IMAGES = 8;
@@ -99,7 +99,7 @@ export function Composer({ chat, runState }: { chat: ChatController; runState: s
 	};
 
 	return (
-		<View style={[styles.root, { borderColor: p.border, backgroundColor: p.card }]}>
+		<View style={[styles.root, { backgroundColor: p.bg }]}>
 			<SlashMenu menu={menu} onPick={pick} />
 			{images.length ? (
 				<ScrollView horizontal style={styles.images} contentContainerStyle={styles.imagesContent}>
@@ -116,9 +116,13 @@ export function Composer({ chat, runState }: { chat: ChatController; runState: s
 					))}
 				</ScrollView>
 			) : null}
-			<View style={styles.row}>
-				<Pressable onPress={() => void pickImages()} style={styles.iconButton} accessibilityLabel="添加图片">
-					<Text style={[styles.icon, { color: p.muted }]}>＋</Text>
+			<View style={[styles.row, SHADOW, { backgroundColor: p.card, borderColor: p.border }]}>
+				<Pressable
+					onPress={() => void pickImages()}
+					style={({ pressed }) => [styles.iconButton, { backgroundColor: pressed ? p.border : p.elevated }]}
+					accessibilityLabel="添加图片"
+				>
+					<Text style={[styles.icon, { color: p.muted }]}>+</Text>
 				</Pressable>
 				<TextInput
 					testID="composer-input"
@@ -127,7 +131,7 @@ export function Composer({ chat, runState }: { chat: ChatController; runState: s
 					multiline
 					placeholder={busy ? "引导 Agent，或排队下一条…" : "给 Agent 发消息，/ 使用命令"}
 					placeholderTextColor={p.faint}
-					style={[styles.input, { color: p.text, backgroundColor: p.bg, borderColor: p.border }]}
+					style={[styles.input, { color: p.text }]}
 				/>
 				{busy && !canSend ? (
 					<Pressable
@@ -166,36 +170,47 @@ export function Composer({ chat, runState }: { chat: ChatController; runState: s
 }
 
 const styles = StyleSheet.create({
-	root: { borderTopWidth: StyleSheet.hairlineWidth, paddingHorizontal: 8, paddingTop: 8, paddingBottom: 8, gap: 6 },
-	row: { flexDirection: "row", alignItems: "flex-end", gap: 6 },
-	iconButton: { width: 36, height: 40, alignItems: "center", justifyContent: "center" },
-	icon: { fontSize: 24 },
+	root: { paddingHorizontal: 10, paddingTop: 6, paddingBottom: 8, gap: 6 },
+	row: {
+		flexDirection: "row",
+		alignItems: "flex-end",
+		gap: 6,
+		padding: 5,
+		borderRadius: 25,
+		borderWidth: StyleSheet.hairlineWidth,
+	},
+	iconButton: { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center" },
+	icon: { fontSize: 22, fontWeight: "500", marginTop: -2 },
 	input: {
 		flex: 1,
-		minHeight: 40,
+		minHeight: 38,
 		maxHeight: 140,
-		borderWidth: StyleSheet.hairlineWidth,
-		borderRadius: 20,
-		paddingHorizontal: 14,
-		paddingTop: 10,
-		paddingBottom: 10,
-		fontSize: 15,
+		paddingHorizontal: 6,
+		paddingTop: 9,
+		paddingBottom: 9,
+		fontSize: 15.5,
 	},
-	send: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
-	sendText: { fontSize: 18, fontWeight: "700" },
-	modes: { flexDirection: "row", alignItems: "center", gap: 14, paddingHorizontal: 44 },
+	send: { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center" },
+	sendText: { fontSize: 18, fontWeight: "800" },
+	modes: { flexDirection: "row", alignItems: "center", gap: 14, paddingHorizontal: 12 },
 	hint: { fontSize: 12, flex: 1 },
 	link: { fontSize: 13, fontWeight: "600" },
 	images: { maxHeight: 72 },
-	imagesContent: { gap: 6, paddingHorizontal: 42 },
-	thumb: { width: 64, height: 64, borderRadius: 8 },
+	imagesContent: { gap: 8, paddingHorizontal: 4 },
+	thumb: { width: 64, height: 64, borderRadius: 12 },
 	remove: {
 		position: "absolute",
-		top: 2,
+		top: 4,
 		right: 4,
+		width: 20,
+		height: 20,
+		borderRadius: 10,
+		overflow: "hidden",
+		backgroundColor: "rgba(0,0,0,0.6)",
 		color: "#fff",
+		fontSize: 14,
+		lineHeight: 20,
+		textAlign: "center",
 		fontWeight: "700",
-		textShadowColor: "#000",
-		textShadowRadius: 3,
 	},
 });

@@ -1,6 +1,18 @@
-import { Link, Stack, useRouter } from "expo-router";
+import { Stack, useRouter } from "expo-router";
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from "react-native";
-import { Button, Card, confirmDestructive, Muted, Screen, StatusDot, Title } from "../src/components/ui.tsx";
+import {
+	Avatar,
+	Button,
+	Card,
+	confirmDestructive,
+	HeaderAction,
+	Muted,
+	Pill,
+	Screen,
+	SectionLabel,
+	StatusDot,
+	Title,
+} from "../src/components/ui.tsx";
 import { relativeTime } from "../src/format.ts";
 import type { PairedHost } from "../src/hosts.ts";
 import { useMobileState, useStore } from "../src/store.ts";
@@ -25,11 +37,18 @@ function HostRow({ host }: { host: PairedHost }) {
 					() => void store.forgetHost(host.hostId),
 				)
 			}
+			style={({ pressed }) => pressed && styles.pressed}
 		>
 			<Card style={styles.hostCard}>
-				<StatusDot color={dot} size={10} />
+				<Avatar name={host.hostName} size={46}>
+					<View style={styles.avatarDot}>
+						<StatusDot color={dot} size={12} ring={p.card} />
+					</View>
+				</Avatar>
 				<View style={styles.hostMain}>
-					<Title>{host.hostName}</Title>
+					<Text style={[styles.hostName, { color: p.text }]} numberOfLines={1}>
+						{host.hostName}
+					</Text>
 					<Muted>
 						{revoked
 							? "已被电脑移除，需要重新配对"
@@ -40,7 +59,8 @@ function HostRow({ host }: { host: PairedHost }) {
 									: `配对于 ${relativeTime(host.pairedAt)}`}
 					</Muted>
 				</View>
-				<Text style={{ color: p.faint, fontSize: 22 }}>›</Text>
+				{revoked ? <Pill text="需重新配对" tone="danger" /> : null}
+				<Text style={[styles.chevron, { color: p.faint }]}>›</Text>
 			</Card>
 		</Pressable>
 	);
@@ -55,13 +75,7 @@ export default function Home() {
 		<Screen>
 			<Stack.Screen
 				options={{
-					headerRight: () => (
-						<Link href="/settings" asChild>
-							<Pressable hitSlop={10} accessibilityLabel="设置">
-								<Text style={{ color: p.accent, fontSize: 16 }}>设置</Text>
-							</Pressable>
-						</Link>
-					),
+					headerRight: () => <HeaderAction label="设置" onPress={() => router.push("/settings")} />,
 				}}
 			/>
 			{!ready ? (
@@ -72,9 +86,13 @@ export default function Home() {
 					keyExtractor={(h) => h.hostId}
 					contentContainerStyle={styles.list}
 					renderItem={({ item }) => <HostRow host={item} />}
+					ListHeaderComponent={hosts.length ? <SectionLabel>我的电脑</SectionLabel> : null}
 					ListEmptyComponent={
 						<View style={styles.empty}>
-							<Title style={styles.center}>连接你的电脑</Title>
+							<View style={[styles.hero, { backgroundColor: p.accentSoft }]}>
+								<Text style={[styles.heroGlyph, { color: p.accent }]}>💻</Text>
+							</View>
+							<Title style={[styles.center, styles.emptyTitle]}>连接你的电脑</Title>
 							<Muted style={styles.center}>
 								在电脑上的 Pier 中打开“手机”→ 开启远程访问 →
 								显示配对二维码，然后在这里扫码。手机需要和电脑在同一局域网（或同一 Tailscale 网络）。
@@ -82,7 +100,14 @@ export default function Home() {
 						</View>
 					}
 					ListFooterComponent={
-						<Button title="添加电脑" variant="primary" onPress={() => router.push("/pair")} testID="add-host" />
+						<Button
+							title="添加电脑"
+							icon="+"
+							variant={hosts.length ? "tonal" : "primary"}
+							onPress={() => router.push("/pair")}
+							testID="add-host"
+							style={styles.add}
+						/>
 					}
 				/>
 			)}
@@ -92,9 +117,17 @@ export default function Home() {
 
 const styles = StyleSheet.create({
 	loading: { marginTop: 48 },
-	list: { padding: 16, gap: 12 },
-	hostCard: { flexDirection: "row", alignItems: "center", gap: 12 },
-	hostMain: { flex: 1, gap: 2 },
-	empty: { gap: 10, paddingVertical: 32, paddingHorizontal: 8 },
+	list: { padding: 16, gap: 12, flexGrow: 1 },
+	pressed: { opacity: 0.75, transform: [{ scale: 0.99 }] },
+	hostCard: { flexDirection: "row", alignItems: "center", gap: 14, paddingVertical: 14 },
+	avatarDot: { position: "absolute", right: -3, bottom: -3 },
+	hostMain: { flex: 1, gap: 3 },
+	hostName: { fontSize: 17, fontWeight: "700" },
+	chevron: { fontSize: 26, marginTop: -3 },
+	empty: { gap: 12, paddingTop: 56, paddingBottom: 24, paddingHorizontal: 12, alignItems: "center" },
+	hero: { width: 84, height: 84, borderRadius: 28, alignItems: "center", justifyContent: "center", marginBottom: 8 },
+	heroGlyph: { fontSize: 38, fontWeight: "600" },
+	emptyTitle: { fontSize: 22 },
 	center: { textAlign: "center" },
+	add: { marginTop: 8 },
 });

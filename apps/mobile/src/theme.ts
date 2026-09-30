@@ -24,15 +24,15 @@ export interface Palette {
 }
 
 const dark: Palette = {
-	bg: "#111317",
-	card: "#171a20",
-	elevated: "#1f232b",
-	border: "#262b34",
-	text: "#e6e8eb",
-	muted: "#8b93a1",
-	faint: "#5d6573",
-	accent: "#3fb6ad",
-	accentSoft: "rgba(63,182,173,0.16)",
+	bg: "#0e1013",
+	card: "#171a1f",
+	elevated: "#20242b",
+	border: "#262a31",
+	text: "#eceef1",
+	muted: "#959cab",
+	faint: "#5f6674",
+	accent: "#3fc1b6",
+	accentSoft: "rgba(63,193,182,0.15)",
 	onAccent: "#0b1614",
 	danger: "#ef5b5b",
 	dangerSoft: "rgba(239,91,91,0.14)",
@@ -41,21 +41,21 @@ const dark: Palette = {
 	ok: "#3fb950",
 	code: "#0b0d10",
 	codeText: "#c9ced6",
-	userBubble: "#1f3b39",
+	userBubble: "#1d3634",
 	add: "#7ee2a8",
 	del: "#ff9b94",
 };
 
 const light: Palette = {
-	bg: "#f6f7f9",
+	bg: "#f3f4f7",
 	card: "#ffffff",
-	elevated: "#eef0f3",
-	border: "#dde1e6",
-	text: "#16191d",
-	muted: "#5f6773",
-	faint: "#9aa1ab",
-	accent: "#1f8f87",
-	accentSoft: "rgba(31,143,135,0.12)",
+	elevated: "#eceef2",
+	border: "#e3e6eb",
+	text: "#14171b",
+	muted: "#646c78",
+	faint: "#a0a7b1",
+	accent: "#14897f",
+	accentSoft: "rgba(20,137,127,0.10)",
 	onAccent: "#ffffff",
 	danger: "#d43d3d",
 	dangerSoft: "rgba(212,61,61,0.10)",
@@ -64,7 +64,7 @@ const light: Palette = {
 	ok: "#2da44e",
 	code: "#f0f2f5",
 	codeText: "#24292f",
-	userBubble: "#dff3f1",
+	userBubble: "#dcf1ee",
 	add: "#1a7f37",
 	del: "#cf222e",
 };
@@ -74,3 +74,13 @@ export function usePalette(): Palette {
 }
 
 export const MONO = Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" });
+
+export const RADIUS = { sm: 8, md: 12, lg: 16, xl: 22, pill: 999 } as const;
+
+/** Soft card elevation that reads well on both themes. */
+export const SHADOW: object =
+	Platform.select({
+		ios: { shadowColor: "#000", shadowOpacity: 0.06, shadowRadius: 10, shadowOffset: { width: 0, height: 3 } },
+		android: { elevation: 1 },
+		default: { boxShadow: "0 2px 10px rgba(0,0,0,0.06)" },
+	}) ?? {};

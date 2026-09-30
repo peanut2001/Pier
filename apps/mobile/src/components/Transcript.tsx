@@ -128,7 +128,7 @@ function Thinking({ text, redacted, live }: { text: string; redacted: boolean; l
 	const p = usePalette();
 	const [open, setOpen] = useState(false);
 	return (
-		<Pressable onPress={() => setOpen(!open)} style={[styles.thinking, { borderColor: p.border }]}>
+		<Pressable onPress={() => setOpen(!open)} style={[styles.thinking, { backgroundColor: p.elevated }]}>
 			<Text style={[styles.thinkingLabel, { color: p.muted }]}>
 				{redacted ? "思考内容已隐藏" : live ? "思考中…" : "思考过程"}
 				{redacted ? "" : open ? "  ▾" : "  ▸"}
@@ -226,9 +226,11 @@ export function Transcript({ chat }: { chat: ChatState }) {
 				<TranscriptRow key={item.key} item={item} />
 			))}
 			{waiting ? (
-				<View style={styles.waiting}>
+				<View style={[styles.waiting, { backgroundColor: p.accentSoft }]}>
 					<ActivityIndicator size="small" color={p.accent} />
-					<Text style={{ color: p.muted }}>{chat.runState === "compacting" ? "正在压缩上下文…" : "Agent 工作中…"}</Text>
+					<Text style={[styles.waitingText, { color: p.accent }]}>
+						{chat.runState === "compacting" ? "正在压缩上下文…" : "Agent 工作中…"}
+					</Text>
 				</View>
 			) : null}
 			{chat.errorMessage && !isBusy(chat.runState) ? (
@@ -239,24 +241,41 @@ export function Transcript({ chat }: { chat: ChatState }) {
 }
 
 const styles = StyleSheet.create({
-	transcript: { gap: 14, paddingHorizontal: 14, paddingTop: 12, paddingBottom: 20 },
-	user: { alignSelf: "flex-end", maxWidth: "88%", borderRadius: 14, padding: 10, gap: 6 },
-	userText: { fontSize: 15, lineHeight: 21 },
-	userImage: { width: 160, height: 120, borderRadius: 8 },
+	transcript: { gap: 16, paddingHorizontal: 16, paddingTop: 14, paddingBottom: 24 },
+	user: {
+		alignSelf: "flex-end",
+		maxWidth: "86%",
+		borderRadius: 20,
+		borderBottomRightRadius: 6,
+		paddingHorizontal: 14,
+		paddingVertical: 10,
+		gap: 6,
+	},
+	userText: { fontSize: 15.5, lineHeight: 22 },
+	userImage: { width: 160, height: 120, borderRadius: 12 },
 	assistant: { gap: 10 },
-	tool: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 10, overflow: "hidden" },
-	toolHeader: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 10, paddingVertical: 9 },
+	tool: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, overflow: "hidden" },
+	toolHeader: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, paddingVertical: 10 },
 	toolName: { fontSize: 12, fontWeight: "700" },
 	toolSummary: { flex: 1, fontFamily: MONO, fontSize: 12.5 },
-	toolStatus: { fontSize: 12 },
+	toolStatus: { fontSize: 12, fontWeight: "500" },
 	toolBody: { gap: 6, paddingHorizontal: 8, paddingBottom: 8 },
-	output: { borderRadius: 6, padding: 8, maxHeight: 280 },
+	output: { borderRadius: 8, padding: 10, maxHeight: 280 },
 	mono: { fontFamily: MONO, fontSize: 12, lineHeight: 17 },
-	pad: { padding: 10 },
-	thinking: { borderLeftWidth: 2, paddingLeft: 10 },
-	thinkingLabel: { fontSize: 13 },
-	thinkingText: { fontSize: 13, lineHeight: 19, marginTop: 4 },
+	pad: { padding: 12 },
+	thinking: { alignSelf: "flex-start", maxWidth: "100%", borderRadius: 12, paddingHorizontal: 12, paddingVertical: 7 },
+	thinkingLabel: { fontSize: 13, fontWeight: "500" },
+	thinkingText: { fontSize: 13, lineHeight: 19, marginTop: 6 },
 	notice: { textAlign: "center", fontSize: 12 },
-	waiting: { flexDirection: "row", alignItems: "center", gap: 8 },
-	error: { padding: 10, borderRadius: 8, fontSize: 13 },
+	waiting: {
+		alignSelf: "flex-start",
+		flexDirection: "row",
+		alignItems: "center",
+		gap: 8,
+		paddingHorizontal: 12,
+		paddingVertical: 7,
+		borderRadius: 999,
+	},
+	waitingText: { fontSize: 13, fontWeight: "600" },
+	error: { padding: 12, borderRadius: 12, fontSize: 13, overflow: "hidden" },
 });

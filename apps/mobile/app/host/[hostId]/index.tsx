@@ -13,10 +13,10 @@ import {
 	Text,
 	View,
 } from "react-native";
-import { Button, Card, confirmDestructive, Muted, Pill, Screen, Title } from "../../../src/components/ui.tsx";
+import { Avatar, Button, Card, confirmDestructive, Muted, Pill, Screen, Title } from "../../../src/components/ui.tsx";
 import { isBusy, RUN_STATE_LABEL, relativeTime, sessionTitle } from "../../../src/format.ts";
 import { useMobileState, useStore } from "../../../src/store.ts";
-import { usePalette } from "../../../src/theme.ts";
+import { MONO, RADIUS, usePalette } from "../../../src/theme.ts";
 
 const SESSIONS_PER_WORKSPACE = 15;
 
@@ -27,7 +27,7 @@ function ConnectionBanner({ hostId }: { hostId: string }) {
 	const view = useMobileState((s) => s.host);
 	if (view.revoked) {
 		return (
-			<Card style={[styles.banner, { borderColor: p.danger }]}>
+			<Card flat style={[styles.banner, { borderColor: p.danger, backgroundColor: p.dangerSoft }]}>
 				<Title>无法连接</Title>
 				<Muted>{view.error}</Muted>
 				<Button
@@ -48,7 +48,7 @@ function ConnectionBanner({ hostId }: { hostId: string }) {
 	}
 	if (view.connection === "open") return null;
 	return (
-		<Card style={styles.banner}>
+		<Card flat style={styles.banner}>
 			<View style={styles.bannerRow}>
 				<ActivityIndicator color={p.accent} />
 				<Text style={{ color: p.text, flex: 1 }}>
@@ -61,15 +61,31 @@ function ConnectionBanner({ hostId }: { hostId: string }) {
 	);
 }
 
-function SessionRow({ session, hostId }: { session: SessionSummary; hostId: string }) {
+function SessionRow({
+	session,
+	hostId,
+	first,
+	last,
+}: {
+	session: SessionSummary;
+	hostId: string;
+	first: boolean;
+	last: boolean;
+}) {
 	const store = useStore();
 	const router = useRouter();
 	const p = usePalette();
 	const pending = session.pendingUi ?? 0;
+	const busy = isBusy(session.state);
 	return (
 		<Pressable
 			testID={`session-${session.id}`}
-			style={({ pressed }) => [styles.session, { borderColor: p.border }, pressed && { backgroundColor: p.elevated }]}
+			style={({ pressed }) => [
+				styles.session,
+				{ backgroundColor: pressed ? p.elevated : p.card, borderColor: p.border },
+				first && styles.sessionFirst,
+				last && styles.sessionLast,
+			]}
 			onPress={() =>
 				router.push({
 					pathname: "/host/[hostId]/session/[sessionId]",
@@ -100,21 +116,24 @@ function SessionRow({ session, hostId }: { session: SessionSummary; hostId: stri
 				]);
 			}}
 		>
+			{!first ? <View style={[styles.separator, { backgroundColor: p.border }]} /> : null}
 			<View style={styles.sessionMain}>
-				<Text style={[styles.sessionTitle, { color: p.text }]} numberOfLines={2}>
+				<Text style={[styles.sessionTitle, { color: session.archived ? p.muted : p.text }]} numberOfLines={2}>
 					{sessionTitle(session)}
 				</Text>
-				<Text style={[styles.sessionMeta, { color: p.muted }]}>
+				<Text style={[styles.sessionMeta, { color: p.faint }]} numberOfLines={1}>
 					{session.archived ? "已归档 · " : ""}
 					{session.runtime && session.runtime !== "pi" ? `${agentRuntimeLabel(session.runtime)} · ` : ""}
 					{relativeTime(session.modifiedAt)} · {session.messageCount} 条消息
 				</Text>
 			</View>
 			{pending ? (
-				<Pill text={`待批准 ${pending}`} tone="warning" />
-			) : isBusy(session.state) ? (
-				<Pill text={RUN_STATE_LABEL[session.state]} tone="accent" />
-			) : null}
+				<Pill text={`待批准 ${pending}`} tone="warning" dot />
+			) : busy ? (
+				<Pill text={RUN_STATE_LABEL[session.state]} tone="accent" dot />
+			) : (
+				<Text style={[styles.chevron, { color: p.faint }]}>›</Text>
+			)}
 		</Pressable>
 	);
 }
@@ -185,12 +204,12 @@ export default function HostScreen() {
 					<View style={styles.header}>
 						{hostId ? <ConnectionBanner hostId={hostId} /> : null}
 						{pendingTotal ? (
-							<Card style={[styles.banner, { borderColor: p.warning, backgroundColor: p.warningSoft }]}>
+							<Card flat style={[styles.banner, { borderColor: p.warning, backgroundColor: p.warningSoft }]}>
 								<Text style={{ color: p.warning, fontWeight: "600" }}>有 {pendingTotal} 个请求等待你批准</Text>
 							</Card>
 						) : null}
 						{view.connection === "open" && view.workspaces && !view.workspaces.length ? (
-							<Card>
+							<Card flat>
 								<Muted>电脑上还没有工作区。请先在电脑的 Pier 中添加一个工作区目录。</Muted>
 							</Card>
 						) : null}
@@ -198,12 +217,17 @@ export default function HostScreen() {
 				}
 				renderSectionHeader={({ section }) => (
 					<View style={styles.sectionHeader}>
+						<Avatar name={section.workspace.name} size={38} />
 						<View style={styles.flex}>
-							<Title>{section.workspace.name}</Title>
-							<Muted style={styles.path}>{section.workspace.path}</Muted>
+							<Title numberOfLines={1}>{section.workspace.name}</Title>
+							<Text style={[styles.path, { color: p.faint }]} numberOfLines={1} ellipsizeMode="head">
+								{section.workspace.path}
+							</Text>
 						</View>
 						<Button
 							title="新建"
+							icon="+"
+							variant="primary"
 							small
 							disabled={view.connection !== "open"}
 							onPress={async () => {
@@ -231,7 +255,9 @@ export default function HostScreen() {
 						/>
 					</View>
 				)}
-				renderItem={({ item }) => <SessionRow session={item} hostId={hostId} />}
+				renderItem={({ item, index, section }) => (
+					<SessionRow session={item} hostId={hostId} first={index === 0} last={index === section.data.length - 1} />
+				)}
 				renderSectionFooter={({ section }) => (
 					<>
 						{section.total > section.limit ? (
@@ -242,7 +268,9 @@ export default function HostScreen() {
 								<Text style={{ color: p.accent }}>显示更多（还有 {section.total - section.limit} 个）</Text>
 							</Pressable>
 						) : section.total === 0 ? (
-							<Muted style={styles.none}>{section.archived ? "没有未归档的会话" : "还没有会话"}</Muted>
+							<View style={[styles.none, { backgroundColor: p.card, borderColor: p.border }]}>
+								<Muted>{section.archived ? "没有未归档的会话" : "还没有会话，点“新建”开始"}</Muted>
+							</View>
 						) : null}
 						{section.archived ? (
 							<Pressable
@@ -263,23 +291,49 @@ export default function HostScreen() {
 
 const styles = StyleSheet.create({
 	flex: { flex: 1 },
-	list: { padding: 14, paddingBottom: 40 },
-	header: { gap: 10, marginBottom: 6 },
+	list: { paddingHorizontal: 16, paddingTop: 4, paddingBottom: 48 },
+	header: { gap: 10 },
 	banner: { gap: 10 },
 	bannerRow: { flexDirection: "row", alignItems: "center", gap: 10 },
-	sectionHeader: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 18, marginBottom: 8 },
-	path: { fontSize: 12 },
+	sectionHeader: {
+		flexDirection: "row",
+		alignItems: "center",
+		gap: 12,
+		marginTop: 16,
+		marginBottom: 12,
+		paddingHorizontal: 2,
+	},
+	path: { fontSize: 11.5, fontFamily: MONO, marginTop: 2 },
 	session: {
 		flexDirection: "row",
 		alignItems: "center",
-		gap: 10,
-		paddingVertical: 12,
-		paddingHorizontal: 4,
+		gap: 12,
+		paddingVertical: 14,
+		paddingHorizontal: 16,
+		borderLeftWidth: StyleSheet.hairlineWidth,
+		borderRightWidth: StyleSheet.hairlineWidth,
+	},
+	sessionFirst: {
+		borderTopLeftRadius: RADIUS.lg,
+		borderTopRightRadius: RADIUS.lg,
+		borderTopWidth: StyleSheet.hairlineWidth,
+	},
+	sessionLast: {
+		borderBottomLeftRadius: RADIUS.lg,
+		borderBottomRightRadius: RADIUS.lg,
 		borderBottomWidth: StyleSheet.hairlineWidth,
 	},
-	sessionMain: { flex: 1, gap: 3 },
-	sessionTitle: { fontSize: 15 },
-	sessionMeta: { fontSize: 12 },
+	separator: { position: "absolute", top: 0, left: 16, right: 0, height: StyleSheet.hairlineWidth },
+	sessionMain: { flex: 1, gap: 5 },
+	sessionTitle: { fontSize: 15.5, lineHeight: 22, fontWeight: "500" },
+	sessionMeta: { fontSize: 12.5 },
+	chevron: { fontSize: 22, marginTop: -2 },
 	more: { paddingVertical: 12, alignItems: "center" },
-	none: { paddingVertical: 8, paddingHorizontal: 4 },
+	none: {
+		paddingVertical: 18,
+		paddingHorizontal: 16,
+		borderRadius: RADIUS.lg,
+		borderWidth: StyleSheet.hairlineWidth,
+		alignItems: "center",
+	},
 });
