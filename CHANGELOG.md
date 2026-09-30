@@ -2,6 +2,28 @@
 
 Pier 的所有重要变更都记录在这里。版本号规则：日常发版只递增最后一位（0.2.1、0.2.2……），`x.y.0` 留给大版本；1.0 之前，大版本可能包含不兼容的变更。
 
+## v0.2.14 — 2026-09-30
+
+除了 pi，还可以在 Pier 中运行电脑上安装的 Claude Code 与 Codex，并在设置中可视化编辑它们的配置；文件面板可以上传与下载文件；手机端界面全新设计。
+
+### 新增
+
+- **Claude Code 与 Codex 会话**：新建会话时，输入框下方的「Agent」选择框可以选择 pi、Claude Code 或 Codex（手机端点「新建」时选择）。Claude Code 通过 Claude Agent SDK 驱动电脑上安装的 `claude` CLI，Codex 通过 `codex app-server` 驱动 `codex` CLI，都沿用它们自己的登录、配置与会话目录，Pier 不需要另外配置模型或凭据；在终端里创建的会话也会列在侧边栏中（带「Claude Code」「Codex」标记），可以在 Pier 中继续，Pier 中的会话也能用 `claude --resume` / `codex resume` 在终端继续。流式输出、工具卡片、模型与思考程度、压缩、分叉、重命名与断线恢复都可以使用，界面按运行时的能力隐藏不支持的操作。工作区的审批策略同样适用：Claude Code 请求许可、Codex 请求审批时按策略放行或在桌面端和手机端询问你，Codex 的沙箱按策略设置。CLI 不在 `PATH` 中时可以用 `PIER_CLAUDE_PATH` / `PIER_CODEX_PATH` 指定路径；pi 的扩展、技能与 `settings.json` 只作用于 pi 会话。
+- **协议 1.22**（向后兼容）：新增 `runtime.list`；`session.create` 与 `model.list` 新增 `runtime` 参数，`SessionSummary` 新增 `runtime`，`SessionSnapshot` 新增 `capabilities`。
+- **Claude Code 与 Codex 配置**：新增「设置 → Claude Code 配置」与「设置 → Codex 配置」，直接编辑它们自己的配置文件（与终端中的 CLI 共用），可以选择全局或某个工作区的设置。Claude Code（`~/.claude/settings.json`、工作区的 `.claude/settings.json` 与 `.claude/settings.local.json`）包括接口与认证（便于使用中转接口，密钥默认隐藏）、默认模型与别名、思考程度、权限规则、沙箱、MCP 与 Hooks 开关、隐私与其他环境变量；Codex（`~/.codex/config.toml` 与工作区的 `.codex/config.toml`）包括默认模型、思考程度、服务商（添加兼容 OpenAI 的中转接口并设为当前）、工具、审批与沙箱、项目信任等，修改时保留文件中的注释与格式。表单标出继承值与默认值，也可以切换到 JSON / TOML 直接编辑整个文件（检测冲突）。修改对之后新建或重新打开的会话生效；设置其他电脑时修改那台电脑上的文件。
+- **协议 1.23**（向后兼容）：新增 `agentConfig.get` / `agentConfig.update` / `agentConfig.write` 与 `agentConfig.changed` 事件，对已配对设备开放（审计日志只记录键名）。
+- **上传与下载文件**：文件面板中右键文件可以「下载…」到本地；右键文件夹或空白处可以「上传文件…」「上传文件夹…」，也可以把文件或文件夹直接拖进文件面板。已有同名文件时先询问是否覆盖，面板中显示传输列表、进度并可以取消。其他电脑的工作区同样可以上传下载（那台电脑需要升级到这个版本）。
+- **协议 1.21**（向后兼容）：新增 `workspace.readBytes` 与 `workspace.uploadStart` / `uploadChunk` / `uploadFinish` / `uploadCancel`，分块传输任意文件。
+
+### 变更
+
+- **手机端界面改版**：新的配色、圆角与阴影；电脑列表、会话列表与会话页面全部重新设计，输入框改为悬浮样式，模型与思考程度在底部面板中选择。
+- **更顺滑的思考程度滑块**：拖动时滑块跟随指针，松开后滑到最近的档位；思考面板与模型列表之间切换带过渡动画。
+
+### 修复
+
+- **文件右键菜单意外关闭**：在文件面板中打开右键菜单后，会话内容自动滚动等无关区域的滚动不再关闭菜单。
+
 ## v0.2.13 — 2026-09-30
 
 可以在设置中搜索并一键安装 pi 官方扩展仓库中的扩展包；可以在设置页直接修改其他电脑上的 Pier；输入框中可以选择模型与思考程度；用户消息不再显示 pi 附加的图片尺寸说明。
