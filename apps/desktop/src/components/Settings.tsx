@@ -1,5 +1,5 @@
 import type { ApprovalPolicy, WorkspaceInfo } from "@pier/protocol";
-import { type ComponentType, type ReactNode, useEffect, useState } from "react";
+import { type ComponentType, type ReactNode, useEffect, useRef, useState } from "react";
 import { POLICY_DESCRIPTION, POLICY_LABEL } from "../lib/format.ts";
 import { pageFollowsHost, pageIsLocalOnly } from "../lib/settings-target.ts";
 import {
@@ -54,7 +54,40 @@ interface SectionDef {
 	keywords: string;
 	/** Needs a live connection to the host. */
 	online?: boolean;
+	/** Pages shown as tabs under this navigation entry (the entry's own id is the first tab). */
+	tabs?: SectionDef[];
 }
+
+/**
+ * Agents whose own configuration files the “Agent 配置” page edits, one tab each. A new agent
+ * runtime gets its settings page by adding a tab here.
+ */
+const AGENT_PAGES: SectionDef[] = [
+	{
+		id: "pi",
+		label: "pi",
+		icon: IconSliders,
+		keywords:
+			"pi 配置 settings settings.json 配置文件 思考 压缩 重试 超时 代理 proxy shell 工具 tools 传输 缓存 主题 终端 json 编辑",
+		online: true,
+	},
+	{
+		id: "claude",
+		label: "Claude Code",
+		icon: IconBot,
+		keywords:
+			"claude code 配置 anthropic settings.json 配置文件 中转 base url api key token 令牌 模型 思考 权限 permissions 沙箱 mcp hooks 环境变量 env 代理 json 编辑",
+		online: true,
+	},
+	{
+		id: "codex",
+		label: "Codex",
+		icon: IconTerminal,
+		keywords:
+			"codex 配置 openai config.toml toml 配置文件 服务商 model_providers 中转 base url api key 模型 思考 reasoning 审批 沙箱 sandbox 网页搜索 mcp profile 编辑",
+		online: true,
+	},
+];
 
 const GROUPS: Array<{ title: string; items: SectionDef[] }> = [
 	{
@@ -96,27 +129,11 @@ const GROUPS: Array<{ title: string; items: SectionDef[] }> = [
 			},
 			{
 				id: "pi",
-				label: "pi 配置",
-				icon: IconSliders,
-				keywords:
-					"pi settings settings.json 配置文件 思考 压缩 重试 超时 代理 proxy shell 工具 tools 传输 缓存 主题 终端 json 编辑",
-				online: true,
-			},
-			{
-				id: "claude",
-				label: "Claude Code 配置",
+				label: "Agent 配置",
 				icon: IconBot,
-				keywords:
-					"claude code anthropic settings.json 配置文件 中转 base url api key token 令牌 模型 思考 权限 permissions 沙箱 mcp hooks 环境变量 env 代理 json 编辑",
+				keywords: "agent 智能体 配置 配置文件 编辑",
 				online: true,
-			},
-			{
-				id: "codex",
-				label: "Codex 配置",
-				icon: IconTerminal,
-				keywords:
-					"codex openai config.toml toml 配置文件 服务商 model_providers 中转 base url api key 模型 思考 reasoning 审批 沙箱 sandbox 网页搜索 mcp profile 编辑",
-				online: true,
+				tabs: AGENT_PAGES,
 			},
 		],
 	},
@@ -141,7 +158,19 @@ const GROUPS: Array<{ title: string; items: SectionDef[] }> = [
 	},
 ];
 
-const SECTIONS = GROUPS.flatMap((group) => group.items);
+/** Navigation entries, each standing for itself or for the pages of its tabs. */
+const NAV_ITEMS = GROUPS.flatMap((group) => group.items);
+/** Every page, tabs included. */
+const SECTIONS = NAV_ITEMS.flatMap((item) => item.tabs ?? [item]);
+
+/** The navigation entry a page belongs to. */
+function navItemOf(page: SettingsSection): SectionDef | undefined {
+	return NAV_ITEMS.find((item) => item.id === page || item.tabs?.some((tab) => tab.id === page));
+}
+
+function sectionMatches(item: SectionDef, q: string): boolean {
+	return !q || `${item.label} ${item.keywords}`.toLowerCase().includes(q);
+}
 const GENERAL = SECTIONS.find((item) => item.id === "general") as SectionDef;
 
 // ---- pages -----------------------------------------------------------------------------
@@ -612,9 +641,22 @@ export function SettingsPage({ section }: { section: SettingsSection }) {
 	const q = query.trim().toLowerCase();
 	const groups = GROUPS.map((group) => ({
 		...group,
-		items: group.items.filter((item) => !q || `${item.label} ${item.keywords}`.toLowerCase().includes(q)),
+		items: group.items.filter((item) => sectionMatches(item, q) || item.tabs?.some((tab) => sectionMatches(tab, q))),
 	})).filter((group) => group.items.length);
 	const current = SECTIONS.find((item) => item.id === section) ?? GENERAL;
+	const nav = navItemOf(current.id) ?? GENERAL;
+	// The tab last shown under each entry with tabs, so coming back to it returns there.
+	const lastTab = useRef<Partial<Record<SettingsSection, SettingsSection>>>({});
+	if (nav.tabs) lastTab.current[nav.id] = current.id;
+	const openNav = (item: SectionDef) => {
+		if (!item.tabs) {
+			store.openSettings(item.id);
+			return;
+		}
+		const matching = q ? item.tabs.find((tab) => sectionMatches(tab, q)) : undefined;
+		if (!matching && item.id === nav.id) return;
+		store.openSettings(matching?.id ?? lastTab.current[item.id] ?? item.id);
+	};
 	const Page = PAGES[current.id];
 	const followsHost = pageFollowsHost(current.id);
 	const remoteTarget = followsHost && !target.local;
@@ -661,8 +703,8 @@ export function SettingsPage({ section }: { section: SettingsSection }) {
 								<button
 									type="button"
 									key={item.id}
-									className={`settings-nav-item${item.id === current.id ? " selected" : ""}`}
-									onClick={() => store.openSettings(item.id)}
+									className={`settings-nav-item${item.id === nav.id ? " selected" : ""}`}
+									onClick={() => openNav(item)}
 								>
 									<item.icon size={15} />
 									<span className="settings-nav-label">{item.label}</span>
@@ -678,7 +720,24 @@ export function SettingsPage({ section }: { section: SettingsSection }) {
 				<HostBanner onShowLogs={() => store.openSettings("logs")} />
 				<div className="settings-scroll">
 					<div className="settings-content">
-						<h1 className="settings-title">{current.label}</h1>
+						<h1 className="settings-title">{nav.label}</h1>
+						{nav.tabs ? (
+							<div className="settings-tabs" role="tablist" aria-label={nav.label}>
+								{nav.tabs.map((tab) => (
+									<button
+										type="button"
+										role="tab"
+										key={tab.id}
+										aria-selected={tab.id === current.id}
+										className={`settings-tab${tab.id === current.id ? " active" : ""}`}
+										onClick={() => store.openSettings(tab.id)}
+									>
+										<tab.icon size={14} />
+										{tab.label}
+									</button>
+								))}
+							</div>
+						) : null}
 						{remoteTarget && current.id !== "general" ? <RemoteTargetBanner /> : null}
 						{!target.local && pageIsLocalOnly(current.id) ? (
 							<p className="muted small settings-note">

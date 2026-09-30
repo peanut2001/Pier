@@ -1,5 +1,5 @@
 /**
- * The pi settings shown in Settings → pi 配置: which keys exist, how to edit them, and their
+ * The pi settings shown in Settings → Agent 配置 → pi: which keys exist, how to edit them, and their
  * built-in defaults (from pi's settings reference). Anything not described here stays
  * editable in the JSON view, and the host keeps unknown keys when a field is changed.
  */

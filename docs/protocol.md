@@ -304,7 +304,7 @@ settings 文件无法解析时，修改类方法返回 `CONFLICT`，避免覆盖
 
 ### pi 设置（1.15）
 
-直接读写 pi 的 settings 文件，供「设置 → pi 配置」可视化编辑（终端里的 pi 读取同一份文件）。与 `extension.*` 相同，`scope: "user"` 为 `<agentDir>/settings.json`，`scope: "project"` 为 `<工作区>/.pi/settings.json`，需要带 `workspaceId`。Host 不校验各设置项的含义，只保证文件是 JSON 对象；写入时与 pi 使用同一把文件锁（`proper-lockfile`），不会与正在保存设置的 pi 进程交错。对已配对设备开放，远程调用写入审计日志（只记录修改的键名和字节数，不记录值）。
+直接读写 pi 的 settings 文件，供「设置 → Agent 配置 → pi」可视化编辑（终端里的 pi 读取同一份文件）。与 `extension.*` 相同，`scope: "user"` 为 `<agentDir>/settings.json`，`scope: "project"` 为 `<工作区>/.pi/settings.json`，需要带 `workspaceId`。Host 不校验各设置项的含义，只保证文件是 JSON 对象；写入时与 pi 使用同一把文件锁（`proper-lockfile`），不会与正在保存设置的 pi 进程交错。对已配对设备开放，远程调用写入审计日志（只记录修改的键名和字节数，不记录值）。
 
 文件有实际变化时，Host 对受影响的空闲会话执行 `session.reload`（全局改动为所有会话，项目改动为该工作区的会话；运行中的会话计入 `pending`），然后广播 `settings.changed`、`extension.changed`（settings 中也有扩展包与资源），全局改动再广播 `provider.changed`（默认模型也在其中）。个别设置（如 `defaultTools`、`transport`）只在创建会话时读取，重新加载不会改变已打开会话的这些值。
 
@@ -319,7 +319,7 @@ Host 由桌面端启动时（`--watch-stdin`，macOS / Linux），启动过程�
 
 ### Claude Code 与 Codex 配置（1.23）
 
-直接读写 Claude Code 与 Codex 自己的配置文件，供「设置 → Claude Code 配置 / Codex 配置」可视化编辑（终端中的 `claude` / `codex` 读取同一份文件）。`runtime` 为 `claude-code` 或 `codex`，`scope`：
+直接读写 Claude Code 与 Codex 自己的配置文件，供「设置 → Agent 配置 → Claude Code / Codex」可视化编辑（终端中的 `claude` / `codex` 读取同一份文件）。`runtime` 为 `claude-code` 或 `codex`，`scope`：
 
 | `runtime` | `user` | `project` | `local` |
 |---|---|---|---|
