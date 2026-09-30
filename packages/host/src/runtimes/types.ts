@@ -58,5 +58,7 @@ export interface AgentRuntime {
 	listModels(): Promise<ModelInfo[]>;
 	/** The model and thinking level a new session in `cwd` starts with. */
 	newSessionDefaults(cwd: string): Promise<{ model?: ModelInfo; thinkingLevel: ThinkingLevel }>;
+	/** The runtime's own configuration files changed (1.23): drop what was read from them. */
+	configChanged?(): void;
 	dispose(): Promise<void>;
 }

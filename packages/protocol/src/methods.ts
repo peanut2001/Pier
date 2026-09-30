@@ -4,6 +4,10 @@ import {
 	type AccountLoginResult,
 	type AccountOverview,
 	type AccountStatus,
+	type AgentConfigChangeResult,
+	type AgentConfigResult,
+	AgentConfigRuntimeSchema,
+	AgentConfigScopeSchema,
 	type AgentRuntimeInfo,
 	ApprovalPolicySchema,
 	type AppUpdateStatus,
@@ -442,6 +446,33 @@ export const MethodParamsSchemas = {
 		expectedModifiedAt: z.string().max(64).optional(),
 	}),
 
+	/**
+	 * Configuration files of Claude Code or Codex (1.23): the user file and, with `workspaceId`,
+	 * that workspace's files, as stored (not merged).
+	 */
+	"agentConfig.get": z.object({ runtime: AgentConfigRuntimeSchema, workspaceId: Id.optional() }),
+	/**
+	 * Set or remove individual settings of one file, keeping everything else (TOML comments and
+	 * formatting included). Like `settings.update`; `project` and `local` scopes need `workspaceId`.
+	 */
+	"agentConfig.update": z.object({
+		runtime: AgentConfigRuntimeSchema,
+		scope: AgentConfigScopeSchema,
+		workspaceId: Id.optional(),
+		changes: z
+			.array(z.object({ path: SettingsKeyPath, value: z.unknown().optional() }))
+			.min(1)
+			.max(200),
+	}),
+	/** Replace one file with `text` (a JSON object, or TOML for Codex). Like `settings.write`. */
+	"agentConfig.write": z.object({
+		runtime: AgentConfigRuntimeSchema,
+		scope: AgentConfigScopeSchema,
+		workspaceId: Id.optional(),
+		text: z.string().max(1024 * 1024),
+		expectedModifiedAt: z.string().max(64).optional(),
+	}),
+
 	"ui.respond": z.object({ ...SessionRef, requestId: Id, response: UiResponseSchema }),
 
 	/**
@@ -644,6 +675,9 @@ export interface MethodResults {
 	"settings.get": PiSettingsResult;
 	"settings.update": PiSettingsChangeResult;
 	"settings.write": PiSettingsChangeResult;
+	"agentConfig.get": AgentConfigResult;
+	"agentConfig.update": AgentConfigChangeResult;
+	"agentConfig.write": AgentConfigChangeResult;
 	"ui.respond": { accepted: boolean };
 	"terminal.open": TerminalInfo;
 	"terminal.write": { written: boolean };

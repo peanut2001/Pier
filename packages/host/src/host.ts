@@ -3,6 +3,8 @@ import { existsSync, mkdirSync, realpathSync, statSync } from "node:fs";
 import { platform } from "node:os";
 import { basename, isAbsolute, resolve } from "node:path";
 import {
+	type AgentConfigRuntime,
+	type AgentConfigScope,
 	type AppUpdateStatus,
 	type EventFrame,
 	type ExtensionReloadSummary,
@@ -24,8 +26,8 @@ import {
 	type WorkspaceInfo,
 	YUNLIAN_SITE_URL,
 } from "@pier/protocol";
-import { ClaudeCodeRuntime, type ClaudeCodeRuntimeOptions } from "./claude/claude-runtime.ts";
-import { CodexRuntime, type CodexRuntimeOptions } from "./codex/codex-runtime.ts";
+import { ClaudeCodeRuntime, type ClaudeCodeRuntimeOptions, claudeConfigDir } from "./claude/claude-runtime.ts";
+import { CodexRuntime, type CodexRuntimeOptions, codexHome } from "./codex/codex-runtime.ts";
 import { ConfigStore } from "./config.ts";
 import {
 	badFrameResponse,
@@ -59,6 +61,7 @@ import { PiRuntime } from "./pi/pi-runtime.ts";
 import { ProviderManager } from "./pi/providers.ts";
 import { PiSettingsFiles } from "./pi/settings-files.ts";
 import { RemoteAccess, type RemoteAccessOptions } from "./remote/remote-access.ts";
+import { AgentConfigFiles } from "./runtimes/agent-config.ts";
 import { SessionArchiveStore } from "./session-archive.ts";
 import { SessionPool } from "./session-pool.ts";
 import type { AppShell, ShellMethod } from "./shell.ts";
@@ -113,6 +116,11 @@ export interface PierHostOptions {
 		claudeCode?: ClaudeCodeRuntimeOptions | false;
 		codex?: CodexRuntimeOptions | false;
 	};
+	/**
+	 * Configuration directories of Claude Code and Codex for `agentConfig.*` (tests). Default to
+	 * the runtimes' own (`CLAUDE_CONFIG_DIR` / `CODEX_HOME`, else `~/.claude` / `~/.codex`).
+	 */
+	agentConfigDirs?: Partial<Record<AgentConfigRuntime, string>>;
 }
 
 /** Remote methods recorded in the audit log. */
@@ -162,6 +170,8 @@ const AUDITED_METHODS = new Set<MethodName>([
 	"update.install",
 	"settings.update",
 	"settings.write",
+	"agentConfig.update",
+	"agentConfig.write",
 	// Opening a shell on this computer (1.18); what is typed into it is not recorded.
 	"terminal.open",
 ]);
@@ -257,6 +267,23 @@ function auditDetail(method: MethodName, params: Record<string, unknown>): Recor
 			};
 		case "terminal.open":
 			return params.cwd ? { cwd: params.cwd } : undefined;
+		case "agentConfig.update":
+			// Key names only: values may be API keys.
+			return {
+				runtime: params.runtime,
+				scope: params.scope,
+				...(params.workspaceId ? { workspaceId: params.workspaceId } : {}),
+				keys: Array.isArray(params.changes)
+					? params.changes.map((c) => ((c as { path?: string[] }).path ?? []).join("."))
+					: [],
+			};
+		case "agentConfig.write":
+			return {
+				runtime: params.runtime,
+				scope: params.scope,
+				...(params.workspaceId ? { workspaceId: params.workspaceId } : {}),
+				bytes: typeof params.text === "string" ? Buffer.byteLength(params.text) : 0,
+			};
 		default:
 			return undefined;
 	}
@@ -298,6 +325,7 @@ export class PierHost implements RequestHandler {
 	readonly extensions: ExtensionManager;
 	readonly packageCatalog: PackageCatalog;
 	readonly settings: PiSettingsFiles;
+	readonly agentConfig: AgentConfigFiles;
 	readonly peers: PeerManager;
 	private readonly log: (message: string) => void;
 	private readonly connections = new Set<Connection>();
@@ -361,6 +389,12 @@ export class PierHost implements RequestHandler {
 		});
 		this.packageCatalog = new PackageCatalog({ userAgent: pierUserAgent(), log, ...options.packageCatalog });
 		this.settings = new PiSettingsFiles(env.agentDir);
+		this.agentConfig = new AgentConfigFiles({
+			"claude-code": () =>
+				options.agentConfigDirs?.["claude-code"] ??
+				claudeConfigDir(agents.claudeCode ? agents.claudeCode.configDir : undefined),
+			codex: () => options.agentConfigDirs?.codex ?? codexHome(agents.codex ? agents.codex.env : undefined),
+		});
 		this.providers = new ProviderManager(env, {
 			onChanged: () => {
 				// Open sessions keep the model object they resolved; pick up edited capabilities.
@@ -624,6 +658,31 @@ export class PierHost implements RequestHandler {
 		if (scope === "project" && !workspaceId)
 			throw new PierProtocolError("BAD_REQUEST", "Project scope needs a workspaceId");
 		return scope === "project" && workspaceId ? this.requireWorkspace(workspaceId).path : undefined;
+	}
+
+	/** The workspace directory an agent configuration file of `scope` lives in (none for `user`). */
+	private agentConfigWorkspace(scope: AgentConfigScope, workspaceId: string | undefined): string | undefined {
+		if (scope === "user") return undefined;
+		if (!workspaceId) throw new PierProtocolError("BAD_REQUEST", `The ${scope} scope needs a workspaceId`);
+		return this.requireWorkspace(workspaceId).path;
+	}
+
+	/**
+	 * A Claude Code or Codex configuration file changed: the runtime forgets what it read from
+	 * it (models), and every connection is told. Open sessions keep their settings until reopened.
+	 */
+	private applyAgentConfigChange(
+		runtime: AgentConfigRuntime,
+		scope: AgentConfigScope,
+		workspaceId: string | undefined,
+	): void {
+		this.pool.runtimes.find((r) => r.id === runtime)?.configChanged?.();
+		this.broadcast({
+			type: "agentConfig.changed",
+			runtime,
+			scope,
+			...(scope !== "user" && workspaceId ? { workspaceId } : {}),
+		});
 	}
 
 	private subscribeConnection(ctx: HandlerContext, session: ManagedSession, sinceSeq?: number, epoch?: string) {
@@ -991,6 +1050,44 @@ export class PierHost implements RequestHandler {
 					? await this.applySettingsChange(params.scope, params.workspaceId, true)
 					: { reloaded: 0, pending: 0, failed: 0 };
 				return { file, changed, reload };
+			},
+
+			"agentConfig.get": async (_ctx, params) => {
+				const workspace = params.workspaceId ? this.requireWorkspace(params.workspaceId) : undefined;
+				const scopes = this.agentConfig.scopes(params.runtime);
+				const files = scopes
+					.filter((scope) => scope === "user" || workspace)
+					.map((scope) => this.agentConfig.read(params.runtime, scope, workspace?.path));
+				const runtime = this.pool.runtimes.find((r) => r.id === params.runtime);
+				const available = runtime ? (await runtime.info()).available : false;
+				return {
+					runtime: params.runtime,
+					format: this.agentConfig.format(params.runtime),
+					configDir: this.agentConfig.configDir(params.runtime),
+					scopes,
+					files,
+					...(workspace ? { workspaceId: workspace.id } : {}),
+					available,
+				};
+			},
+			"agentConfig.update": (_ctx, params) => {
+				const path = this.agentConfigWorkspace(params.scope, params.workspaceId);
+				const changes = params.changes.map((c) => (c.value === undefined ? { path: c.path } : c));
+				const result = this.agentConfig.update(params.runtime, params.scope, path, changes);
+				if (result.changed) this.applyAgentConfigChange(params.runtime, params.scope, params.workspaceId);
+				return result;
+			},
+			"agentConfig.write": (_ctx, params) => {
+				const path = this.agentConfigWorkspace(params.scope, params.workspaceId);
+				const result = this.agentConfig.write(
+					params.runtime,
+					params.scope,
+					path,
+					params.text,
+					params.expectedModifiedAt,
+				);
+				if (result.changed) this.applyAgentConfigChange(params.runtime, params.scope, params.workspaceId);
+				return result;
 			},
 
 			"ui.respond": (ctx, params) => ({

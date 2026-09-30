@@ -1,4 +1,6 @@
 import { readFileSync, statSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import {
 	type AgentRuntimeInfo,
 	type ModelInfo,
@@ -25,6 +27,11 @@ export interface CodexRuntimeOptions {
 }
 
 type Json = Record<string, unknown>;
+
+/** Codex's home directory (`config.toml`, `auth.json`, sessions): `CODEX_HOME` or `~/.codex`. */
+export function codexHome(env: NodeJS.ProcessEnv = process.env): string {
+	return env.CODEX_HOME || join(homedir(), ".codex");
+}
 
 const MODELS_TTL_MS = 10 * 60 * 1000;
 const LIST_LIMIT = 200;
@@ -330,6 +337,23 @@ export class CodexRuntime implements AgentRuntime {
 		const levels = model?.thinkingLevels ?? ["off"];
 		const thinkingLevel: ThinkingLevel = levels.includes("medium") ? "medium" : (levels.at(-1) ?? "off");
 		return model ? { model, thinkingLevel } : { thinkingLevel };
+	}
+
+	/** Where Codex reads `config.toml`. */
+	configDir(): string {
+		return codexHome(this.options.env ?? process.env);
+	}
+
+	/**
+	 * `config.toml` changed: forget the model list, and restart the shared app server once no
+	 * Codex session uses it so providers and profiles are read again.
+	 */
+	configChanged(): void {
+		this.models = undefined;
+		if (this.sessions.size > 0 || !this.appServer) return;
+		const server = this.appServer;
+		this.appServer = undefined;
+		void server.close();
 	}
 
 	async dispose(): Promise<void> {

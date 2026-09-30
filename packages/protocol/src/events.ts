@@ -1,4 +1,6 @@
 import type {
+	AgentConfigRuntime,
+	AgentConfigScope,
 	AppUpdateStatus,
 	AuthNotice,
 	AuthPromptInfo,
@@ -115,6 +117,11 @@ export type PierHostEvent =
 	 * `workspaceId` is set for a workspace's project settings. Sent to every connection.
 	 */
 	| { type: "settings.changed"; scope: "user" | "project"; workspaceId?: string }
+	/**
+	 * A Claude Code or Codex configuration file was changed through `agentConfig.update` /
+	 * `agentConfig.write` (1.23). `workspaceId` is set for a workspace's files. Sent to every connection.
+	 */
+	| { type: "agentConfig.changed"; runtime: AgentConfigRuntime; scope: AgentConfigScope; workspaceId?: string }
 	// Terminals (1.18), sent only to the connection that opened the terminal.
 	/** Output of a terminal: raw bytes, base64-encoded (UTF-8 sequences may be split across events). */
 	| { type: "terminal.output"; terminalId: string; data: string }

@@ -991,3 +991,62 @@ export interface PiSettingsChangeResult {
 	changed: boolean;
 	reload: ExtensionReloadSummary;
 }
+
+// ---- Claude Code and Codex configuration files (1.23) -------------------------------------
+
+/** Agent runtimes whose own configuration files Pier edits (1.23). */
+export const AgentConfigRuntimeSchema = z.enum(["claude-code", "codex"]);
+export type AgentConfigRuntime = z.infer<typeof AgentConfigRuntimeSchema>;
+
+/**
+ * A configuration file of an agent runtime. `user`: in the runtime's configuration directory
+ * (`~/.claude/settings.json`, `~/.codex/config.toml`). `project`: shared settings of a workspace
+ * (`.claude/settings.json`, `.codex/config.toml`). `local`: Claude Code's personal settings of a
+ * workspace (`.claude/settings.local.json`, usually not committed).
+ */
+export const AgentConfigScopeSchema = z.enum(["user", "project", "local"]);
+export type AgentConfigScope = z.infer<typeof AgentConfigScopeSchema>;
+
+/** `json` (Claude Code) or `toml` (Codex). */
+export type AgentConfigFormat = "json" | "toml";
+
+export interface AgentConfigFile {
+	scope: AgentConfigScope;
+	/** Absolute path of the file. */
+	path: string;
+	/** The file exists (a missing file means every setting is at its default). */
+	exists: boolean;
+	/** The file's text as stored (without a byte-order mark); `""` when it does not exist. */
+	text: string;
+	/**
+	 * The parsed settings, as JSON (TOML dates become ISO strings, integers beyond the safe
+	 * range become strings); undefined when the text cannot be parsed (see `error`).
+	 */
+	settings?: Record<string, unknown>;
+	/** Why the text could not be parsed. */
+	error?: string;
+	/** Last modification time (ISO 8601), for `agentConfig.write`'s `expectedModifiedAt`. */
+	modifiedAt?: string;
+}
+
+export interface AgentConfigResult {
+	runtime: AgentConfigRuntime;
+	format: AgentConfigFormat;
+	/** The runtime's configuration directory (`CLAUDE_CONFIG_DIR` / `CODEX_HOME`, or the default). */
+	configDir: string;
+	/** Scopes the runtime reads, lowest precedence first. */
+	scopes: AgentConfigScope[];
+	/** The user file, then (with `workspaceId`) the workspace's files; lowest precedence first. */
+	files: AgentConfigFile[];
+	/** The workspace whose files were included. */
+	workspaceId?: string;
+	/** The runtime's CLI is installed on the host (the files can be edited either way). */
+	available: boolean;
+}
+
+/** Result of changing an agent configuration file. */
+export interface AgentConfigChangeResult {
+	file: AgentConfigFile;
+	/** False when the change left the file as it was (nothing was written). */
+	changed: boolean;
+}

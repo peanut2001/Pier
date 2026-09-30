@@ -218,3 +218,59 @@ code.pi-pm-path {
 	padding: 3px 10px;
 	font-size: 12px;
 }
+
+/* Settings → Claude Code / Codex: credentials, environment variables, providers. */
+
+.config-secret {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	min-width: 0;
+	max-width: 100%;
+}
+
+.config-secret input.pi-setting-input {
+	width: 232px;
+}
+
+.config-map {
+	display: flex;
+	flex: 1;
+	flex-direction: column;
+	gap: 6px;
+	min-width: 0;
+}
+
+.config-map-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+}
+
+code.config-map-key,
+input.pi-setting-input.config-map-key {
+	flex: none;
+	width: 240px;
+	overflow: hidden;
+	font-size: 12px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.config-map-row input.pi-setting-input.config-map-value,
+.config-map-row .config-secret {
+	flex: 1;
+	width: auto;
+	min-width: 0;
+}
+
+.config-map-row .config-secret input.pi-setting-input {
+	flex: 1;
+	width: auto;
+}
+
+.config-provider + .config-provider,
+.config-provider + .settings-card {
+	margin-top: 10px;
+}

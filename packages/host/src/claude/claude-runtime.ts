@@ -68,6 +68,11 @@ const TERMINAL_COMMANDS = new Set([
 	"upgrade",
 ]);
 
+/** Claude Code's configuration directory: `configDir`, `CLAUDE_CONFIG_DIR` or `~/.claude`. */
+export function claudeConfigDir(configDir?: string): string {
+	return configDir ?? (process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude"));
+}
+
 /** Claude Code's project directory name for a cwd. */
 export function claudeProjectKey(cwd: string): string {
 	return cwd.replace(/[^a-zA-Z0-9]/g, "-");
@@ -117,7 +122,17 @@ export class ClaudeCodeRuntime implements AgentRuntime {
 	}
 
 	private get configDir(): string {
-		return this.options.configDir ?? process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");
+		return claudeConfigDir(this.options.configDir);
+	}
+
+	/** Where Claude Code reads its user settings. */
+	userConfigDir(): string {
+		return this.configDir;
+	}
+
+	/** A settings file changed (model, environment): read the models and commands again. */
+	configChanged(): void {
+		if (!this.options.catalog) this.catalog = undefined;
 	}
 
 	sdk(): Promise<ClaudeSdk> {

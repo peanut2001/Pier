@@ -1,6 +1,10 @@
 import { ChatController, type ChatView } from "@pier/chat-state";
 import { CLOSE_DEVICE_REVOKED, type ClientState, PierClient } from "@pier/client";
 import type {
+	AgentConfigChangeResult,
+	AgentConfigResult,
+	AgentConfigRuntime,
+	AgentConfigScope,
 	AgentRuntimeId,
 	AgentRuntimeInfo,
 	ApprovalPolicy,
@@ -221,6 +225,8 @@ export type SettingsSection =
 	| "workspaces"
 	| "extensions"
 	| "pi"
+	| "claude"
+	| "codex"
 	| "remote"
 	| "logs"
 	| "about";
@@ -330,6 +336,8 @@ export interface AppState {
 	extensionsVersion: number;
 	/** Bumped when a pi settings file may have changed, so the pi settings page reloads. */
 	piSettingsVersion: number;
+	/** Bumped when a Claude Code or Codex configuration file changed, so their pages reload. */
+	agentConfigVersion: number;
 	extensionProgress?: ExtensionProgressState | undefined;
 	/** The directory picker for a paired computer is open. */
 	directoryPicker?: { title: string; node: string } | undefined;
@@ -549,6 +557,7 @@ export class PierStore {
 			filesVersion: {},
 			extensionsVersion: 0,
 			piSettingsVersion: 0,
+			agentConfigVersion: 0,
 			hostStats: {},
 			peerUpdates: {},
 			newChatModel: {},
@@ -1049,6 +1058,8 @@ export class PierStore {
 			}));
 		} else if (event.type === "settings.changed") {
 			this.set((s) => ({ piSettingsVersion: s.piSettingsVersion + 1 }));
+		} else if (event.type === "agentConfig.changed") {
+			this.set((s) => ({ agentConfigVersion: s.agentConfigVersion + 1 }));
 		} else if (event.type === "extension.progress") {
 			const { type: _type, ...progress } = event as unknown as ExtensionProgressState & { type: string };
 			this.set({ extensionProgress: progress });
@@ -1721,6 +1732,51 @@ export class PierStore {
 		});
 		this.reportSettingsReload(result.reload);
 		return result;
+	}
+
+	// ---- Claude Code and Codex configuration files ----------------------------------------
+
+	/** Read a runtime's user file, plus a workspace's files; rejects with the host's error. */
+	async getAgentConfig(runtime: AgentConfigRuntime, workspaceId?: string): Promise<AgentConfigResult> {
+		const client = this.settingsClient;
+		if (!client) throw this.settingsOffline();
+		return client.request("agentConfig.get", { runtime, ...(workspaceId ? { workspaceId } : {}) });
+	}
+
+	/** Set (or, without `value`, remove) settings in one file. Failures are reported as a toast. */
+	async updateAgentConfig(
+		runtime: AgentConfigRuntime,
+		scope: AgentConfigScope,
+		workspaceId: string | undefined,
+		changes: Array<{ path: string[]; value?: unknown }>,
+	): Promise<AgentConfigChangeResult | undefined> {
+		return this.callSettings("保存设置", (c) =>
+			c.request("agentConfig.update", {
+				runtime,
+				scope,
+				...(scope !== "user" && workspaceId ? { workspaceId } : {}),
+				changes,
+			}),
+		);
+	}
+
+	/** Replace one file with `text`; rejects with the host's error (e.g. `CONFLICT`). */
+	async writeAgentConfig(
+		runtime: AgentConfigRuntime,
+		scope: AgentConfigScope,
+		workspaceId: string | undefined,
+		text: string,
+		expectedModifiedAt?: string,
+	): Promise<AgentConfigChangeResult> {
+		const client = this.settingsClient;
+		if (!client) throw this.settingsOffline();
+		return client.request("agentConfig.write", {
+			runtime,
+			scope,
+			...(scope !== "user" && workspaceId ? { workspaceId } : {}),
+			text,
+			...(expectedModifiedAt ? { expectedModifiedAt } : {}),
+		});
 	}
 
 	/** Mention sessions that did not pick up a settings change (reloaded ones need no toast). */
