@@ -146,7 +146,12 @@ describe("downloadFile", () => {
 		await downloadFile(store, workspace, "dir/f.txt");
 		expect(Buffer.concat(sink.writes.map((w) => Buffer.from(w, "base64"))).toString()).toBe("hello world");
 		expect(sink.finished).toBe(true);
-		expect(transfers.snapshot()[0]).toMatchObject({ name: "f.txt", state: "done", done: 11, savedTo: "/local/out.bin" });
+		expect(transfers.snapshot()[0]).toMatchObject({
+			name: "f.txt",
+			state: "done",
+			done: 11,
+			savedTo: "/local/out.bin",
+		});
 
 		const changed = { writes: [] as string[], finished: false, aborted: false };
 		const second = fakeStore(({ params }) => {
