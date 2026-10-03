@@ -1,5 +1,12 @@
-import { type ChatController, isRole, userText } from "@pier/chat-state";
-import type { ModelInfo, SessionSummary, ThinkingLevel } from "@pier/protocol";
+import {
+	type ChatController,
+	clampThinking,
+	isRole,
+	supportedThinkingLevels,
+	thinkingLabel,
+	userText,
+} from "@pier/chat-state";
+import type { ModelInfo, SessionSummary } from "@pier/protocol";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -16,6 +23,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Composer } from "../../../../src/components/Composer.tsx";
 import { PendingRequests } from "../../../../src/components/PendingRequests.tsx";
+import { ThinkingSlider } from "../../../../src/components/ThinkingSlider.tsx";
 import { Transcript } from "../../../../src/components/Transcript.tsx";
 import {
 	Button,
@@ -28,8 +36,6 @@ import {
 import { isBusy, RUN_STATE_LABEL, sessionTitle } from "../../../../src/format.ts";
 import { useChatView, useMobileState, useStore } from "../../../../src/store.ts";
 import { RADIUS, usePalette } from "../../../../src/theme.ts";
-
-const THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
 
 function placeholderSummary(sessionId: string, workspaceId: string): SessionSummary {
 	const now = new Date().toISOString();
@@ -53,7 +59,19 @@ function SessionMenu({ chat, onClose }: { chat: ChatController; onClose: () => v
 	const insets = useSafeAreaInsets();
 	const [models, setModels] = useState<ModelInfo[] | undefined>();
 	const [busy, setBusy] = useState(false);
-	const current = chat.chat.model;
+	const [sliding, setSliding] = useState(false);
+	const [switching, setSwitching] = useState<string | undefined>();
+	// Follow the session itself, so changes made on the computer show up here too.
+	const view = useChatView(chat);
+	const state = view?.chat ?? chat.chat;
+	const current = state.model;
+	const levels = supportedThinkingLevels(current);
+	const level = clampThinking(state.thinkingLevel, levels);
+	const groups = new Map<string, ModelInfo[]>();
+	for (const model of models ?? []) groups.set(model.provider, [...(groups.get(model.provider) ?? []), model]);
+	// Reload when the session's model changes (for example after models were edited on the computer).
+	const modelKey = current ? JSON.stringify(current) : "";
+	// biome-ignore lint/correctness/useExhaustiveDependencies: modelKey only triggers a reload.
 	useEffect(() => {
 		let alive = true;
 		chat
@@ -67,72 +85,82 @@ function SessionMenu({ chat, onClose }: { chat: ChatController; onClose: () => v
 		return () => {
 			alive = false;
 		};
-	}, [chat]);
+	}, [chat, modelKey]);
 	return (
 		<Modal transparent animationType="slide" onRequestClose={onClose}>
 			<Pressable style={styles.backdrop} onPress={onClose} />
 			<View style={[styles.sheet, { backgroundColor: p.card, paddingBottom: insets.bottom + 16 }]}>
 				<View style={[styles.grabber, { backgroundColor: p.border }]} />
-				<ScrollView contentContainerStyle={styles.sheetContent}>
-					<SectionLabel>模型</SectionLabel>
-					{!models ? <ActivityIndicator color={p.accent} /> : null}
-					{models?.length ? (
-						<View style={[styles.group, { backgroundColor: p.bg }]}>
-							{models.map((model, index) => {
-								const selected = current?.provider === model.provider && current.id === model.id;
-								return (
-									<Pressable
-										key={`${model.provider}/${model.id}`}
-										style={({ pressed }) => [
-											styles.option,
-											index > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderColor: p.border },
-											selected && { backgroundColor: p.accentSoft },
-											pressed && { backgroundColor: p.elevated },
-										]}
-										onPress={async () => {
-											await chat.setModel(model.provider, model.id);
-											onClose();
-										}}
-									>
-										<View style={styles.flex}>
-											<Text style={[styles.optionName, { color: selected ? p.accent : p.text }]} numberOfLines={1}>
-												{model.name}
-											</Text>
-											<Muted>{model.provider}</Muted>
-										</View>
-										{selected ? <Text style={[styles.check, { color: p.accent }]}>✓</Text> : null}
-									</Pressable>
-								);
-							})}
-						</View>
-					) : null}
-					{current?.reasoning ? (
+				<ScrollView contentContainerStyle={styles.sheetContent} scrollEnabled={!sliding}>
+					{current ? (
 						<>
-							<SectionLabel style={styles.sectionTitle}>思考等级</SectionLabel>
-							<View style={[styles.levels, { backgroundColor: p.elevated }]}>
-								{THINKING_LEVELS.map((level) => {
-									const selected = chat.chat.thinkingLevel === level;
+							<SectionLabel>思考程度</SectionLabel>
+							<View style={[styles.thinking, { backgroundColor: p.bg }]}>
+								{levels.length > 1 ? (
+									<ThinkingSlider
+										levels={levels}
+										value={level}
+										onChange={(next) => chat.setThinking(next)}
+										onDragging={setSliding}
+									/>
+								) : (
+									<Muted>这个模型不支持调节思考程度</Muted>
+								)}
+							</View>
+						</>
+					) : null}
+					<SectionLabel style={current ? styles.sectionTitle : undefined}>模型</SectionLabel>
+					{!models ? <ActivityIndicator color={p.accent} /> : null}
+					{models && !models.length ? <Muted>没有可用的模型，请在电脑上的 Pier 里配置模型。</Muted> : null}
+					{[...groups].map(([provider, list]) => (
+						<View key={provider} style={styles.providerGroup}>
+							<Text style={[styles.providerTitle, { color: p.faint }]}>{provider}</Text>
+							<View style={[styles.group, { backgroundColor: p.bg }]}>
+								{list.map((model, index) => {
+									const key = `${model.provider}/${model.id}`;
+									const selected = current?.provider === model.provider && current.id === model.id;
 									return (
 										<Pressable
-											key={level}
-											accessibilityRole="button"
-											accessibilityLabel={level}
-											onPress={() => void chat.setThinking(level)}
-											style={[styles.level, selected && { backgroundColor: p.card }]}
+											key={key}
+											disabled={switching !== undefined}
+											style={({ pressed }) => [
+												styles.option,
+												index > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderColor: p.border },
+												selected && { backgroundColor: p.accentSoft },
+												pressed && { backgroundColor: p.elevated },
+											]}
+											onPress={async () => {
+												if (selected) return;
+												setSwitching(key);
+												try {
+													await chat.setModel(model.provider, model.id);
+												} finally {
+													setSwitching(undefined);
+												}
+											}}
 										>
-											<Text
-												style={[styles.levelText, { color: selected ? p.accent : p.muted }]}
-												numberOfLines={1}
-												adjustsFontSizeToFit
-											>
-												{level}
-											</Text>
+											<View style={styles.flex}>
+												<View style={styles.optionHead}>
+													<Text style={[styles.optionName, { color: selected ? p.accent : p.text }]} numberOfLines={1}>
+														{model.name || model.id}
+													</Text>
+													{model.reasoning ? (
+														<Text style={[styles.tag, { color: p.muted, borderColor: p.border }]}>推理</Text>
+													) : null}
+												</View>
+												<Muted>{model.id}</Muted>
+											</View>
+											{switching === key ? (
+												<ActivityIndicator size="small" color={p.accent} />
+											) : selected ? (
+												<Text style={[styles.check, { color: p.accent }]}>✓</Text>
+											) : null}
 										</Pressable>
 									);
 								})}
 							</View>
-						</>
-					) : null}
+						</View>
+					))}
 					{chat.chat.capabilities?.compact === false ? null : (
 						<>
 							<SectionLabel style={styles.sectionTitle}>上下文</SectionLabel>
@@ -250,7 +278,12 @@ export default function SessionScreen() {
 					>
 						<Text style={[styles.statusText, { color: p.text }]} numberOfLines={1}>
 							{state.model.name}
-							{state.model.reasoning ? <Text style={{ color: p.muted }}> · {state.thinkingLevel}</Text> : null}
+							{supportedThinkingLevels(state.model).length > 1 ? (
+								<Text style={{ color: p.muted }}>
+									{" · "}
+									{thinkingLabel(clampThinking(state.thinkingLevel, supportedThinkingLevels(state.model)))}
+								</Text>
+							) : null}
 						</Text>
 						<Text style={[styles.statusText, { color: p.faint }]}>▾</Text>
 					</Pressable>
@@ -325,10 +358,19 @@ const styles = StyleSheet.create({
 	sheetContent: { padding: 18, paddingTop: 12, gap: 10 },
 	group: { borderRadius: RADIUS.md, overflow: "hidden" },
 	option: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 14, paddingVertical: 11 },
-	optionName: { fontSize: 15, fontWeight: "600" },
+	optionName: { fontSize: 15, fontWeight: "600", flexShrink: 1 },
 	check: { fontSize: 17, fontWeight: "700" },
 	sectionTitle: { marginTop: 12 },
-	levels: { flexDirection: "row", padding: 3, borderRadius: RADIUS.md, gap: 2 },
-	level: { flex: 1, paddingVertical: 8, borderRadius: RADIUS.sm + 1, alignItems: "center" },
-	levelText: { fontSize: 13, fontWeight: "600" },
+	thinking: { borderRadius: RADIUS.md, paddingHorizontal: 14, paddingVertical: 12 },
+	providerGroup: { gap: 6 },
+	providerTitle: { fontSize: 12, fontWeight: "600", paddingHorizontal: 4 },
+	optionHead: { flexDirection: "row", alignItems: "center", gap: 6 },
+	tag: {
+		fontSize: 10.5,
+		fontWeight: "600",
+		borderWidth: StyleSheet.hairlineWidth,
+		borderRadius: RADIUS.sm,
+		paddingHorizontal: 5,
+		paddingVertical: 1,
+	},
 });
