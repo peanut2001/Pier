@@ -1,5 +1,5 @@
 import type { ApprovalPolicy, WorkspaceInfo } from "@pier/protocol";
-import { type ComponentType, type ReactNode, useEffect, useRef, useState } from "react";
+import { type ComponentType, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { POLICY_DESCRIPTION, POLICY_LABEL } from "../lib/format.ts";
 import { pageFollowsHost, pageIsLocalOnly } from "../lib/settings-target.ts";
 import {
@@ -17,6 +17,8 @@ import { HostBanner, LogsSettings, useHostStatus } from "./HostPanels.tsx";
 import {
 	IconArrowLeft,
 	IconBot,
+	IconCheck,
+	IconChevronDown,
 	IconFolder,
 	IconFolderPlus,
 	IconInfo,
@@ -40,6 +42,7 @@ import { CopyButton } from "./Markdown.tsx";
 import { ModelsSettings } from "./ModelsPanel.tsx";
 import { PiSettings } from "./PiSettingsPanel.tsx";
 import { RemoteSettings } from "./RemotePanel.tsx";
+import { useOutsideClick } from "./SessionControls.tsx";
 import { SettingRow, SettingsCard, SettingsGroup } from "./SettingsUi.tsx";
 import { addWorkspaceBlocker } from "./Sidebar.tsx";
 import { UpdateSettings, updatePending } from "./UpdatePanel.tsx";
@@ -490,40 +493,116 @@ function HostSwitcher() {
 	const computers = useComputers();
 	const target = useSettingsTarget();
 	const syncing = useAppState((s) => s.settingsSyncing);
+	const [open, setOpen] = useState(false);
+	const close = useCallback(() => setOpen(false), []);
+	const ref = useOutsideClick(open, close);
 	if (computers.length < 2) return null;
+	const status = hostStatus(target.local, target.online, target.connectError, target.revoked);
 	return (
-		<div className="settings-host">
-			<div className="settings-host-label">
-				<IconMonitor size={13} />
-				设置哪台电脑上的 Pier
-			</div>
-			<div className="settings-host-row">
-				<span className={`status-dot ${target.online ? "ok" : target.connectError ? "bad" : "wait"}`} />
-				<select
-					className="setting-select settings-host-select"
-					aria-label="要设置的电脑"
-					value={target.node}
-					onChange={(e) => store.setSettingsNode(e.target.value)}
-				>
-					{computers.map((computer) => (
-						<option key={computer.id} value={computer.id}>
-							{computer.name}
-							{computer.local ? "（本机）" : computer.online ? "" : "（离线）"}
-						</option>
-					))}
-				</select>
-				<button
-					type="button"
-					className="ghost icon"
-					title={`从${target.local ? "本机" : ` ${target.name} `}重新同步设置`}
-					disabled={syncing}
-					onClick={() => void store.syncSettings()}
-				>
-					{syncing ? <IconLoader size={14} className="spin" /> : <IconRefresh size={14} />}
-				</button>
-			</div>
+		<div className="dropdown settings-host" ref={ref}>
+			<button
+				type="button"
+				className={`settings-host-trigger${open ? " open" : ""}`}
+				aria-haspopup="menu"
+				aria-expanded={open}
+				aria-label={`正在设置 ${target.name} 上的 Pier，点击切换电脑`}
+				title={`正在设置 ${target.name} 上的 Pier`}
+				onClick={() => setOpen(!open)}
+			>
+				<span className="settings-host-avatar">
+					<IconMonitor size={16} />
+					<span className={`status-dot ${status.tone}`} />
+				</span>
+				<span className="settings-host-text">
+					<span className="settings-host-name">{target.name}</span>
+					<span className="settings-host-detail">{status.text}</span>
+				</span>
+				{syncing ? (
+					<IconLoader size={14} className="spin settings-host-chevron" />
+				) : (
+					<IconChevronDown size={14} className="settings-host-chevron" />
+				)}
+			</button>
+			{open ? (
+				<div className="dropdown-menu settings-host-menu" role="menu">
+					<div className="dropdown-group-title no-caps">设置哪台电脑上的 Pier</div>
+					{computers.map((computer) => {
+						const item = hostStatus(
+							computer.local,
+							computer.online,
+							computer.state.connectError,
+							computer.state.revoked === true,
+						);
+						const selected = computer.id === target.node;
+						return (
+							<button
+								type="button"
+								role="menuitemradio"
+								aria-checked={selected}
+								key={computer.id}
+								className={`dropdown-item settings-host-item${selected ? " selected" : ""}`}
+								title={computer.name}
+								onClick={() => {
+									close();
+									if (!selected) store.setSettingsNode(computer.id);
+								}}
+							>
+								<span className={`status-dot ${item.tone}`} />
+								<span className="settings-host-text">
+									<span className="settings-host-name">{computer.name}</span>
+									<span className="settings-host-detail">{item.text}</span>
+								</span>
+								{selected ? <IconCheck size={14} className="settings-host-check" /> : null}
+							</button>
+						);
+					})}
+					<div className="dropdown-separator" />
+					<button
+						type="button"
+						role="menuitem"
+						className="dropdown-item"
+						disabled={syncing || !target.online}
+						onClick={() => {
+							close();
+							void store.syncSettings();
+						}}
+					>
+						<span className="menu-label">
+							<IconRefresh size={14} />从{target.local ? "本机" : ` ${target.name} `}重新同步设置
+						</span>
+					</button>
+					<button
+						type="button"
+						role="menuitem"
+						className="dropdown-item"
+						onClick={() => {
+							close();
+							store.openAddPeer();
+						}}
+					>
+						<span className="menu-label">
+							<IconPlus size={14} />
+							添加电脑…
+						</span>
+					</button>
+				</div>
+			) : null}
 		</div>
 	);
+}
+
+/** The status dot tone and one-line description of a computer in the host switcher. */
+function hostStatus(
+	local: boolean,
+	online: boolean,
+	connectError: string | undefined,
+	revoked: boolean,
+): { tone: "ok" | "bad" | "wait"; text: string } {
+	const where = local ? "本机" : "远程";
+	if (online) return { tone: "ok", text: `${where} · 已连接` };
+	if (revoked) return { tone: "bad", text: `${where} · 需要重新配对` };
+	if (connectError) return { tone: "bad", text: `${where} · 无法连接` };
+	return { tone: "wait", text: `${where} · 正在连接…` };
 }
 
 /** Above the pages that manage a paired computer: which computer the changes go to. */
