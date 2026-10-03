@@ -2,6 +2,7 @@ import type { DeviceInfo, PairingRequest, PeerInfo } from "@pier/protocol";
 import { useEffect, useMemo, useState } from "react";
 import { encode } from "uqr";
 import { relativeTime } from "../lib/format.ts";
+import { addressPort, DEFAULT_PIER_PORT, parsePeerAddresses } from "../lib/peer-addresses.ts";
 import { useAppState, useStore } from "../lib/store.tsx";
 import { IconLoader, IconMonitor, IconPencil, IconPlus, IconSmartphone } from "./Icons.tsx";
 import { CopyButton } from "./Markdown.tsx";
@@ -207,6 +208,7 @@ function PeerRow({ peer }: { peer: PeerInfo }) {
 	const store = useStore();
 	const workspaces = useAppState((s) => s.nodes[peer.id]?.workspaces.length ?? 0);
 	const [confirm, setConfirm] = useState(false);
+	const [editing, setEditing] = useState(false);
 	const details = [
 		peer.platform ? `${platformName(peer.platform)} 电脑` : "",
 		peer.version ? `Pier ${peer.version}` : "",
@@ -226,6 +228,14 @@ function PeerRow({ peer }: { peer: PeerInfo }) {
 			</div>
 			<button
 				type="button"
+				className="ghost"
+				title="修改连接地址（那台电脑的 IP 变了时）"
+				onClick={() => setEditing(true)}
+			>
+				编辑
+			</button>
+			<button
+				type="button"
 				className={confirm ? "danger" : "ghost"}
 				onClick={() => {
 					if (!confirm) {
@@ -239,10 +249,85 @@ function PeerRow({ peer }: { peer: PeerInfo }) {
 			>
 				{confirm ? "确认移除" : "移除"}
 			</button>
+			{editing ? <PeerAddressDialog peer={peer} onClose={() => setEditing(false)} /> : null}
 		</div>
 	);
 }
 
+/** Edit the addresses used to reach a paired computer, e.g. after its IP changed. */
+function PeerAddressDialog({ peer, onClose }: { peer: PeerInfo; onClose: () => void }) {
+	const store = useStore();
+	const [text, setText] = useState(() => peer.addresses.join("\n"));
+	const [busy, setBusy] = useState(false);
+	const [error, setError] = useState<string | undefined>();
+	const defaultPort = addressPort(peer.addresses[0]) ?? DEFAULT_PIER_PORT;
+	const { addresses, invalid } = parsePeerAddresses(text, defaultPort);
+	const unchanged = addresses.join(",") === peer.addresses.join(",");
+	const submit = async () => {
+		if (busy || invalid.length || !addresses.length) return;
+		if (unchanged) {
+			onClose();
+			return;
+		}
+		setBusy(true);
+		setError(undefined);
+		try {
+			await store.updatePeerAddresses(peer.id, addresses);
+			onClose();
+		} catch (e) {
+			setError(e instanceof Error ? e.message : String(e));
+			setBusy(false);
+		}
+	};
+	return (
+		<Modal title={`编辑「${peer.name}」的连接地址`} onClose={onClose}>
+			<div className="add-peer">
+				<p className="muted">
+					那台电脑的 IP 变了时在这里修改，无需重新配对。每行一个地址，格式为 <span className="mono">IP:端口</span>
+					（省略端口时使用 {defaultPort}），连接时按顺序尝试。也可以填域名或 Tailscale 地址。
+				</p>
+				<textarea
+					className="add-peer-link mono"
+					rows={4}
+					placeholder={`192.168.1.20:${defaultPort}`}
+					value={text}
+					disabled={busy}
+					onChange={(e) => {
+						setText(e.target.value);
+						setError(undefined);
+					}}
+				/>
+				{invalid.length ? (
+					<div className="banner error inline">无法识别的地址：{invalid.join("、")}</div>
+				) : !addresses.length ? (
+					<p className="muted small">至少需要一个地址。</p>
+				) : (
+					<p className="muted small">
+						将依次尝试：<span className="mono">{addresses.join("、")}</span>
+					</p>
+				)}
+				<p className="muted small">
+					只会连接密钥指纹为 <span className="mono">{peer.fingerprint}</span>{" "}
+					的电脑；地址上如果是另一台电脑，连接会被拒绝。
+				</p>
+				{error ? <div className="banner error inline">{error}</div> : null}
+			</div>
+			<div className="modal-actions">
+				<button type="button" onClick={onClose}>
+					取消
+				</button>
+				<button
+					type="button"
+					className="primary"
+					disabled={busy || invalid.length > 0 || !addresses.length}
+					onClick={() => void submit()}
+				>
+					{busy ? "保存中…" : "保存并重新连接"}
+				</button>
+			</div>
+		</Modal>
+	);
+}
 function PeersSection() {
 	const store = useStore();
 	const peers = useAppState((s) => s.peers);

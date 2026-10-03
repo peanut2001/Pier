@@ -65,6 +65,8 @@ import {
 } from "./domain.ts";
 
 const Id = z.string().min(1).max(256);
+/** A `host:port` address of a computer; IPv6 hosts are bracketed (`[fd00::1]:7433`). */
+export const PEER_ADDRESS = /^(?:\[[0-9a-fA-F:.%\w-]+\]|[\w.-]+):\d{1,5}$/;
 /** Agent runtime id (1.22), e.g. `pi`, `claude-code`, `codex`. */
 const RuntimeId = z.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
 const SessionRef = { sessionId: Id };
@@ -521,6 +523,15 @@ export const MethodParamsSchemas = {
 	 * device key. Resolves after the other computer's user allowed (or declined) it.
 	 */
 	"peer.pair": z.object({ uri: z.string().min(1).max(4096) }),
+	/**
+	 * Replace the `host:port` addresses used to reach a paired computer (e.g. after its IP
+	 * changed). The pinned host key is unchanged, so a different computer at a new address is
+	 * still refused.
+	 */
+	"peer.update": z.object({
+		peerId: Id,
+		addresses: z.array(z.string().trim().max(300).regex(PEER_ADDRESS, "Expected host:port")).min(1).max(16),
+	}),
 	/** Forget a paired computer here (its device list is not changed). */
 	"peer.remove": z.object({ peerId: Id }),
 } as const;
@@ -550,6 +561,7 @@ export const LOCAL_ONLY_METHODS: ReadonlySet<MethodName> = new Set([
 	"remote.configure",
 	"peer.list",
 	"peer.pair",
+	"peer.update",
 	"peer.remove",
 ]);
 
@@ -693,6 +705,7 @@ export interface MethodResults {
 	"remote.configure": RemoteAccessStatus;
 	"peer.list": { peers: PeerInfo[] };
 	"peer.pair": { peer: PeerInfo };
+	"peer.update": { peer: PeerInfo };
 	"peer.remove": { removed: boolean };
 }
 

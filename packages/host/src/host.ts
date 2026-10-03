@@ -1121,6 +1121,7 @@ export class PierHost implements RequestHandler {
 
 			"peer.list": () => ({ peers: this.peers.list() }),
 			"peer.pair": async (_ctx, params) => ({ peer: await this.peers.pair(params.uri) }),
+			"peer.update": (_ctx, params) => ({ peer: this.peers.update(params.peerId, params.addresses) }),
 			"peer.remove": (_ctx, params) => ({ removed: this.peers.remove(params.peerId) }),
 		};
 	}
