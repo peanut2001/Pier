@@ -120,13 +120,33 @@ export function newApiBaseUrl(siteUrl: string, api: CustomProviderApi): string {
 	}
 }
 
+function sameUrl(a: string, b: string): boolean {
+	return a.trim().replace(/\/+$/, "").toLowerCase() === b.trim().replace(/\/+$/, "").toLowerCase();
+}
+
+/**
+ * The API most models use. Ties keep `current`, then prefer Chat Completions, then the API seen
+ * first.
+ */
+function mainApi(apis: ReadonlyArray<CustomProviderApi>, current: CustomProviderApi | undefined): CustomProviderApi {
+	const counts = new Map<CustomProviderApi, number>();
+	for (const api of apis) counts.set(api, (counts.get(api) ?? 0) + 1);
+	const most = Math.max(0, ...counts.values());
+	const top = [...counts].filter(([, n]) => n === most).map(([api]) => api);
+	if (current && (top.includes(current) || !top.length)) return current;
+	if (top.includes("openai-completions") || !top.length) return "openai-completions";
+	return top[0] as CustomProviderApi;
+}
+
 /**
  * The custom provider to save for a token's models. Saving again keeps the existing entry's
- * name, API type, Base URL and per-model settings, and adds the token's new models.
+ * name and per-model settings, and adds the token's new models.
  *
  * Each model is called with the wire API the site detected for it (e.g. Anthropic Messages for
- * Claude models), stored per model when it differs from the provider's; models the site gave no
- * preference for keep their previous API.
+ * Claude models); models the site gave no preference for keep their previous API, and new ones
+ * use Chat Completions. The provider takes the API most of its models use (a Claude group is an
+ * Anthropic Messages provider), with its Base URL derived for it, and only the other models store
+ * their own API. A Base URL the user changed by hand keeps the provider's API and Base URL.
  */
 export function relayProvider(
 	target: { id: string; name: string; siteUrl: string },
@@ -134,7 +154,6 @@ export function relayProvider(
 	existing?: CustomProvider,
 	modelsError?: string,
 ): CustomProvider {
-	const api = existing?.api ?? "openai-completions";
 	const previous = new Map((existing?.models ?? []).map((m) => [m.id, m]));
 	const seen = new Set<string>();
 	const list: CustomModel[] = [];
@@ -142,26 +161,38 @@ export function relayProvider(
 		const id = model.id.trim();
 		if (!id || seen.has(id)) continue;
 		seen.add(id);
-		const { api: previousApi, ...kept } = previous.get(id) ?? {
+		const old = previous.get(id);
+		const { api: previousApi, ...kept } = old ?? {
 			id,
 			...(model.name && model.name !== id ? { name: model.name } : {}),
 		};
-		const modelApi = model.api ?? previousApi;
-		list.push({ ...kept, ...(modelApi && modelApi !== api ? { api: modelApi } : {}) });
+		const api = model.api ?? (old ? (previousApi ?? existing?.api) : undefined) ?? "openai-completions";
+		list.push({ ...kept, api });
 	}
 	// The site could not list models this time: keep what was configured before.
-	const kept = list.length ? list : (existing?.models ?? []);
-	if (!kept.length) {
+	const resolved = list.length
+		? list
+		: (existing?.models ?? []).map((m) => ({ ...m, api: m.api ?? existing?.api ?? "openai-completions" }));
+	if (!resolved.length) {
 		throw new Error(
 			modelsError ? `无法获取${target.name}的模型列表：${modelsError}` : `${target.name} 没有返回可用的模型`,
 		);
 	}
+	const limited = resolved.slice(0, MAX_MODELS);
+	// A Base URL other than the one derived for the provider's API was set by hand.
+	const custom = existing !== undefined && !sameUrl(existing.baseUrl, newApiBaseUrl(target.siteUrl, existing.api));
+	const api = custom
+		? existing.api
+		: mainApi(
+				limited.map((m) => m.api as CustomProviderApi),
+				existing?.api,
+			);
 	return {
 		id: existing?.id ?? target.id,
 		...(existing ? (existing.name ? { name: existing.name } : {}) : { name: target.name }),
 		api,
-		baseUrl: existing?.baseUrl ?? newApiBaseUrl(target.siteUrl, api),
-		models: kept.slice(0, MAX_MODELS),
+		baseUrl: custom ? existing.baseUrl : newApiBaseUrl(target.siteUrl, api),
+		models: limited.map(({ api: modelApi, ...model }) => (modelApi === api ? model : { ...model, api: modelApi })),
 	};
 }
 
