@@ -1256,6 +1256,28 @@ export class PierStore {
 		if (this.state.addPeerOpen) this.set({ addPeerOpen: false });
 	}
 
+	/**
+	 * Change the addresses used to reach a paired computer (e.g. its IP changed) and reconnect
+	 * to it right away. Rejects with a user-facing message.
+	 */
+	async updatePeerAddresses(peerId: string, addresses: string[]): Promise<PeerInfo> {
+		const client = this.localClient;
+		if (!client) throw new Error("尚未连接到本机的 Pier Host");
+		let peer: PeerInfo;
+		try {
+			peer = (await client.request("peer.update", { peerId, addresses })).peer;
+		} catch (error) {
+			throw new Error(`保存失败：${errorText(error)}`);
+		}
+		this.set((s) => ({ peers: s.peers.map((p) => (p.id === peer.id ? peer : p)) }));
+		if (!this.state.nodes[peer.id]?.revoked) {
+			this.closeNode(peer.id);
+			this.patchNode(peer.id, { connectError: undefined });
+			void this.connectPeer(peer.id);
+		}
+		return peer;
+	}
+
 	/** Forget a paired computer here (it keeps this computer in its device list until removed there). */
 	async removePeer(peerId: string): Promise<void> {
 		const result = await this.callLocal("移除电脑", (c) => c.request("peer.remove", { peerId }));

@@ -181,6 +181,33 @@ export class PeerManager {
 		return this.info(record);
 	}
 
+	/**
+	 * Replace the addresses used to reach a paired computer (its IP changed, or it moved to
+	 * another network). Open connections to it reconnect with the new addresses; the pinned
+	 * host key still authenticates whoever answers there.
+	 */
+	update(id: string, addresses: string[]): PeerInfo {
+		const unique = [...new Set(addresses.map((a) => a.trim()).filter(Boolean))];
+		if (!unique.length) throw new PierProtocolError("BAD_REQUEST", "At least one address is required");
+		for (const address of unique) {
+			const port = Number(address.slice(address.lastIndexOf(":") + 1));
+			if (!Number.isInteger(port) || port < 1 || port > 65535) {
+				throw new PierProtocolError("BAD_REQUEST", `Invalid port in address ${address}`);
+			}
+		}
+		const before = this.store.get(id);
+		if (!before) throw new PierProtocolError("NOT_FOUND", "This computer is not paired here");
+		const record = this.store.update(id, { addresses: unique });
+		if (!record) throw new PierProtocolError("NOT_FOUND", "This computer is not paired here");
+		if (before.addresses.join(",") !== unique.join(",")) {
+			this.hooks.log(`addresses of computer ${record.name} changed to ${unique.join(", ")}`);
+			// Reconnect through the new addresses (the desktop client reconnects on 1012).
+			this.closeProxies(id, 1012, "Addresses changed");
+			this.changed();
+		}
+		return this.info(record);
+	}
+
 	remove(id: string): boolean {
 		if (!this.store.remove(id)) return false;
 		this.closeProxies(id, CLOSE_PEER_UNKNOWN, "Computer removed");

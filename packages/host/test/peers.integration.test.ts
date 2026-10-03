@@ -211,6 +211,36 @@ describe("computer-to-computer (peers)", () => {
 		expect(CLOSE_PEER_UNREACHABLE).toBe(4502);
 	});
 
+	it("updates the addresses of a computer whose IP changed and reconnects through them", async () => {
+		const peer = await pair();
+		const port = Number(peer.addresses[0]?.split(":").pop());
+		const remote = viaA(peer.id);
+		await remote.connect();
+
+		// Simulate a stale address: the computer is no longer reachable there.
+		await aDesktop.request("peer.update", { peerId: peer.id, addresses: ["127.0.0.1:1"] });
+		const stale = viaA(peer.id);
+		await expect(stale.connect()).rejects.toThrow();
+		stale.close();
+
+		const reopened = new Promise<void>((resolve) => remote.onState((s) => s === "open" && resolve()));
+		const { peer: updated } = await aDesktop.request("peer.update", {
+			peerId: peer.id,
+			addresses: [" 127.0.0.1:1 ", `127.0.0.1:${port}`, `127.0.0.1:${port}`],
+		});
+		expect(updated.addresses).toEqual(["127.0.0.1:1", `127.0.0.1:${port}`]);
+		await reopened;
+		expect((await remote.request("workspace.list")).workspaces).toHaveLength(1);
+		// The address that worked moves to the front.
+		const [listed] = (await aDesktop.request("peer.list")).peers;
+		expect(listed?.addresses[0]).toBe(`127.0.0.1:${port}`);
+
+		await expectCode(aDesktop.request("peer.update", { peerId: peer.id, addresses: ["no-port"] }), "BAD_REQUEST");
+		await expectCode(aDesktop.request("peer.update", { peerId: peer.id, addresses: ["h:70000"] }), "BAD_REQUEST");
+		await expectCode(aDesktop.request("peer.update", { peerId: "nope", addresses: ["h:1"] }), "NOT_FOUND");
+		remote.close();
+	});
+
 	it("closes proxied connections when the computer is removed here", async () => {
 		const peer = await pair();
 		const remote = viaA(peer.id);

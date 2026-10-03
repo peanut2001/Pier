@@ -1,4 +1,4 @@
-# Pier 协议 v1.23
+# Pier 协议 v1.24
 
 > 实现：`packages/protocol`（zod schema + TS 类型，Host 与所有客户端共享）。
 > 本文档描述线上格式与语义；字段的权威定义以 `packages/protocol/src` 为准。
@@ -59,7 +59,7 @@
 
 ```jsonc
 { "type": "req", "id": "h", "method": "host.hello", "params": {
-  "protocolVersion": "1.23",
+  "protocolVersion": "1.24",
   "client": { "name": "pier-desktop", "version": "0.1.0", "platform": "darwin" },
   "token": "<本地 token>",       // 本地连接必填；远程连接由加密通道认证，不需要
   "coalesceMs": 50               // 可选：合并流式增量的窗口（0–1000ms，默认 0）
@@ -350,6 +350,7 @@ Host 由桌面端启动时（`--watch-stdin`，macOS / Linux），启动过程�
 |---|---|---|
 | `peer.list` 🔒 | – | `{ peers: PeerInfo[] }`：`{ id（那台电脑的 hostId）, name, fingerprint, addresses, deviceId, pairedAt, lastConnectedAt?, platform?, version?, connected }`；`connected` 表示当前有桌面窗口经本机连着它 |
 | `peer.pair` 🔒 | `{ uri }`（那台电脑显示的 `pier://pair?...` 链接） | `{ peer }`；在那台电脑的用户确认后返回。失败时 `data.reason` 为 `INVALID_LINK`（`BAD_REQUEST`）、`SELF`（本机自己的链接）、`UNREACHABLE`、`PAIRING_INVALID`、`PAIRING_REJECTED`、`PAIRING_TIMEOUT`、`BAD_HANDSHAKE` 等（`CONFLICT`）。可能耗时数分钟，客户端请放宽超时 |
+| `peer.update` 🔒 | `{ peerId, addresses }`（`host:port` 列表，1–16 个，IPv6 加方括号） | `{ peer }`；修改连接那台电脑使用的地址（例如它的 IP 变了），去重后按顺序尝试；地址有变化时以 1012 断开经本机到它的连接以便用新地址重连。固定的公钥不变，新地址上若是另一台电脑会握手失败。未配对时 `NOT_FOUND`，地址无效时 `BAD_REQUEST`（1.24） |
 | `peer.remove` 🔒 | `{ peerId }` | `{ removed }`；只在本机忘记那台电脑，并断开经本机到它的连接（4404）；那台电脑的设备列表不变 |
 
 Host 保存已配对的电脑于 `~/.pier/peers.json`（0600），每次经代理连接成功后更新名称、系统、版本、最近连接时间，并把成功的地址排到最前。
