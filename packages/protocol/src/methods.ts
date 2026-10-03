@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PEER_ADDRESS } from "./addresses.ts";
 import {
 	type AccountAuthorizeStart,
 	type AccountLoginResult,
@@ -65,8 +66,6 @@ import {
 } from "./domain.ts";
 
 const Id = z.string().min(1).max(256);
-/** A `host:port` address of a computer; IPv6 hosts are bracketed (`[fd00::1]:7433`). */
-export const PEER_ADDRESS = /^(?:\[[0-9a-fA-F:.%\w-]+\]|[\w.-]+):\d{1,5}$/;
 /** Agent runtime id (1.22), e.g. `pi`, `claude-code`, `codex`. */
 const RuntimeId = z.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
 const SessionRef = { sessionId: Id };

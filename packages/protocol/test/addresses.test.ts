@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addressPort, parsePeerAddresses } from "../src/lib/peer-addresses.ts";
+import { addressPort, parsePeerAddresses } from "../src/addresses.ts";
 
 describe("parsePeerAddresses", () => {
 	it("keeps host:port addresses in order without duplicates", () => {

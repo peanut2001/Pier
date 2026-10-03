@@ -200,6 +200,25 @@ export class MobileStore {
 		this.set({ hosts });
 	}
 
+	/**
+	 * Replace the addresses used to reach a paired computer (its IP changed) and, if it is the
+	 * one on screen, reconnect through them right away. The pinned host key is unchanged, so a
+	 * different computer at the new address fails the handshake.
+	 */
+	async setHostAddresses(hostId: string, addresses: string[]): Promise<void> {
+		const current = this.state.hosts.find((h) => h.hostId === hostId);
+		if (!current) throw new Error("这台电脑已不在列表中");
+		if (!addresses.length) throw new Error("至少需要一个地址");
+		const updated = { ...current, addresses: [...addresses] };
+		const hosts = this.state.hosts.map((h) => (h.hostId === hostId ? updated : h));
+		await saveHost(updated, hosts);
+		this.set({ hosts });
+		if (this.state.host.hostId === hostId) {
+			this.teardown();
+			this.openHost(hostId);
+		}
+	}
+
 	private async updateHost(hostId: string, patch: Partial<PairedHost>): Promise<void> {
 		const current = this.state.hosts.find((h) => h.hostId === hostId);
 		if (!current) return;

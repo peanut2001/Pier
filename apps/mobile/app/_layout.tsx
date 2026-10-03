@@ -45,6 +45,10 @@ export default function RootLayout() {
 					/>
 					<Stack.Screen name="settings" options={{ title: "设置" }} />
 					<Stack.Screen name="host/[hostId]/index" options={{ title: "" }} />
+					<Stack.Screen
+						name="host/[hostId]/addresses"
+						options={{ title: "连接地址", presentation: "modal", animation: "slide_from_bottom" }}
+					/>
 					<Stack.Screen name="host/[hostId]/session/[sessionId]" options={{ title: "" }} />
 				</Stack>
 				<ToastHost />

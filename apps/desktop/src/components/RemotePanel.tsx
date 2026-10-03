@@ -1,8 +1,15 @@
-import type { DeviceInfo, PairingRequest, PeerInfo } from "@pier/protocol";
+import {
+	addressPort,
+	DEFAULT_PIER_PORT,
+	type DeviceInfo,
+	type PairingRequest,
+	type PeerInfo,
+	parsePeerAddresses,
+} from "@pier/protocol";
 import { useEffect, useMemo, useState } from "react";
 import { encode } from "uqr";
 import { relativeTime } from "../lib/format.ts";
-import { addressPort, DEFAULT_PIER_PORT, parsePeerAddresses } from "../lib/peer-addresses.ts";
+
 import { useAppState, useStore } from "../lib/store.tsx";
 import { IconLoader, IconMonitor, IconPencil, IconPlus, IconSmartphone } from "./Icons.tsx";
 import { CopyButton } from "./Markdown.tsx";

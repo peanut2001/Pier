@@ -13,7 +13,17 @@ import {
 	Text,
 	View,
 } from "react-native";
-import { Avatar, Button, Card, confirmDestructive, Muted, Pill, Screen, Title } from "../../../src/components/ui.tsx";
+import {
+	Avatar,
+	Button,
+	Card,
+	confirmDestructive,
+	HeaderAction,
+	Muted,
+	Pill,
+	Screen,
+	Title,
+} from "../../../src/components/ui.tsx";
 import { isBusy, RUN_STATE_LABEL, relativeTime, sessionTitle } from "../../../src/format.ts";
 import { useMobileState, useStore } from "../../../src/store.ts";
 import { MONO, RADIUS, usePalette } from "../../../src/theme.ts";
@@ -57,6 +67,17 @@ function ConnectionBanner({ hostId }: { hostId: string }) {
 				<Button title="立即重试" small onPress={() => store.retryNow()} />
 			</View>
 			{view.error ? <Muted>{view.error}</Muted> : null}
+			{view.connection === "reconnecting" ? (
+				<View style={styles.bannerRow}>
+					<Muted style={styles.flex}>电脑的 IP 变了？修改地址即可，不用重新配对。</Muted>
+					<Button
+						title="修改地址"
+						small
+						variant="tonal"
+						onPress={() => router.push({ pathname: "/host/[hostId]/addresses", params: { hostId } })}
+					/>
+				</View>
+			) : null}
 		</Card>
 	);
 }
@@ -183,7 +204,17 @@ export default function HostScreen() {
 
 	return (
 		<Screen>
-			<Stack.Screen options={{ title: host?.hostName ?? "电脑" }} />
+			<Stack.Screen
+				options={{
+					title: host?.hostName ?? "电脑",
+					headerRight: () => (
+						<HeaderAction
+							label="地址"
+							onPress={() => router.push({ pathname: "/host/[hostId]/addresses", params: { hostId } })}
+						/>
+					),
+				}}
+			/>
 			<SectionList
 				sections={sections}
 				keyExtractor={(item) => item.id}

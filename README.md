@@ -101,7 +101,7 @@ bun run --cwd apps/desktop dev:web            # http://localhost:1420/?url=<url>
 
 ### 手机端
 
-手机 App 通过加密通道连接电脑上的 Host，需要先在桌面端“手机”面板中开启远程访问并扫码配对（原理见 [docs/security.md](docs/security.md)）。
+手机 App 通过加密通道连接电脑上的 Host，需要先在桌面端“手机”面板中开启远程访问并扫码配对（原理见 [docs/security.md](docs/security.md)）。电脑的 IP 变了时不用重新配对：在首页长按那台电脑选「修改连接地址」，或在它的页面右上角点「地址」（连不上时连接提示中也有「修改地址」），填入新地址即可；配对时固定的密钥不变，新地址上如果是另一台电脑，连接会被拒绝。
 
 ```bash
 bun run --cwd apps/mobile start               # Metro 开发服务器
