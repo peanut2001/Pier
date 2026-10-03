@@ -6,6 +6,7 @@ import type {
 	SessionCommandInfo,
 	ThinkingLevel,
 } from "@pier/protocol";
+import { clampThinking, supportedThinkingLevels } from "./thinking.ts";
 
 /**
  * Slash commands typed into the composer.
@@ -210,13 +211,18 @@ export async function loadArgumentOptions(target: SlashTarget, command: string):
 				selected: current?.provider === model.provider && current.id === model.id,
 			}));
 		}
-		case "thinking":
-			return (Object.keys(THINKING_LEVEL_LABELS) as ThinkingLevel[]).map((level) => ({
+		case "thinking": {
+			// Offer only what the current model supports (every level while it is unknown).
+			const model = target.chat.model;
+			const levels = model ? supportedThinkingLevels(model) : (Object.keys(THINKING_LEVEL_LABELS) as ThinkingLevel[]);
+			const current = clampThinking(target.chat.thinkingLevel, levels);
+			return levels.map((level) => ({
 				value: level,
 				label: THINKING_LEVEL_LABELS[level],
 				detail: level,
-				selected: target.chat.thinkingLevel === level,
+				selected: current === level,
 			}));
+		}
 		case "fork": {
 			const { points } = await target.forkPoints();
 			return [...points].reverse().map((point) => ({
