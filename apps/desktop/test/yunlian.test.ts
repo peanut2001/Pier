@@ -51,7 +51,10 @@ describe("云链API provider", () => {
 			id: "api.yunnet.top",
 			api: "anthropic-messages",
 			baseUrl: "https://api.yunnet.top",
-			models: [{ id: "claude-opus-5", reasoning: true, contextWindow: 200_000 }, { id: "new-model" }],
+			models: [
+				{ id: "claude-opus-5", reasoning: true, contextWindow: 200_000 },
+				{ id: "new-model", api: "openai-completions" },
+			],
 		});
 		// No model list this time: keep the configured models.
 		expect(yunlianProvider([], existing, "timeout").models).toEqual(existing.models);
@@ -77,13 +80,16 @@ describe("云链API provider", () => {
 			baseUrl: "https://api.yunnet.top/v1",
 			models: [
 				{ id: "claude-opus-5", reasoning: true },
+				{ id: "gpt-5" },
 				{ id: "manual", api: "openai-responses" as const },
 			],
 		};
 		expect(
-			yunlianProvider([{ id: "claude-opus-5", api: "anthropic-messages" }, { id: "manual" }], existing).models,
+			yunlianProvider([{ id: "claude-opus-5", api: "anthropic-messages" }, { id: "gpt-5" }, { id: "manual" }], existing)
+				.models,
 		).toEqual([
 			{ id: "claude-opus-5", reasoning: true, api: "anthropic-messages" },
+			{ id: "gpt-5" },
 			{ id: "manual", api: "openai-responses" },
 		]);
 		// On an Anthropic provider, Claude models need no override.
@@ -103,6 +109,53 @@ describe("云链API provider", () => {
 			{ id: "claude-opus-5", reasoning: true },
 			{ id: "gpt-5", api: "openai-completions" },
 		]);
+	});
+
+	it("makes a group of Claude models an Anthropic Messages provider", () => {
+		const claude = [
+			{ id: "claude-opus-5", api: "anthropic-messages" as const },
+			{ id: "claude-sonnet-5", api: "anthropic-messages" as const },
+		];
+		const target = { id: "yunlian-claude", name: "云链API · Claude", siteUrl: "https://api.yunnet.top" };
+		expect(relayProvider(target, claude)).toEqual({
+			id: "yunlian-claude",
+			name: "云链API · Claude",
+			api: "anthropic-messages",
+			baseUrl: "https://api.yunnet.top",
+			models: [{ id: "claude-opus-5" }, { id: "claude-sonnet-5" }],
+		});
+
+		// Saved by an earlier release as Chat Completions with per-model overrides: switched over.
+		const saved = {
+			id: "yunlian-claude",
+			name: "云链API · Claude",
+			api: "openai-completions" as const,
+			baseUrl: "https://api.yunnet.top/v1/",
+			models: [
+				{ id: "claude-opus-5", api: "anthropic-messages" as const, reasoning: true },
+				{ id: "claude-sonnet-5", api: "anthropic-messages" as const },
+			],
+		};
+		expect(relayProvider(target, claude, saved)).toEqual({
+			id: "yunlian-claude",
+			name: "云链API · Claude",
+			api: "anthropic-messages",
+			baseUrl: "https://api.yunnet.top",
+			models: [{ id: "claude-opus-5", reasoning: true }, { id: "claude-sonnet-5" }],
+		});
+		// Even when the site cannot list models this time.
+		expect(relayProvider(target, [], saved, "timeout").api).toBe("anthropic-messages");
+
+		// A Base URL changed by hand keeps the provider's API.
+		const proxied = { ...saved, baseUrl: "https://proxy.example.com/v1" };
+		expect(relayProvider(target, claude, proxied)).toMatchObject({
+			api: "openai-completions",
+			baseUrl: "https://proxy.example.com/v1",
+			models: [
+				{ id: "claude-opus-5", api: "anthropic-messages" },
+				{ id: "claude-sonnet-5", api: "anthropic-messages" },
+			],
+		});
 	});
 
 	it("fails when no models are available for a new provider", () => {
