@@ -1,5 +1,5 @@
 import { Stack, useRouter } from "expo-router";
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, FlatList, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { UpdateBanner } from "../src/components/Update.tsx";
 import {
 	Avatar,
@@ -30,14 +30,28 @@ function HostRow({ host }: { host: PairedHost }) {
 		<Pressable
 			testID={`host-${host.hostId}`}
 			onPress={() => router.push({ pathname: "/host/[hostId]", params: { hostId: host.hostId } })}
-			onLongPress={() =>
-				confirmDestructive(
-					`移除“${host.hostName}”？`,
-					"只会删除这台手机上的配对信息。要彻底撤销访问，请在电脑的“手机与远程访问”中移除这台设备。",
-					"移除",
-					() => void store.forgetHost(host.hostId),
-				)
-			}
+			onLongPress={() => {
+				const editAddresses = () =>
+					router.push({ pathname: "/host/[hostId]/addresses", params: { hostId: host.hostId } });
+				const forget = () =>
+					confirmDestructive(
+						`移除“${host.hostName}”？`,
+						"只会删除这台手机上的配对信息。要彻底撤销访问，请在电脑的“手机与远程访问”中移除这台设备。",
+						"移除",
+						() => void store.forgetHost(host.hostId),
+					);
+				if (Platform.OS === "web") {
+					// Browsers have no action sheet: ask about the addresses first, then removal.
+					if (globalThis.confirm?.(`修改“${host.hostName}”的连接地址？`)) editAddresses();
+					else forget();
+					return;
+				}
+				Alert.alert(host.hostName, host.addresses.join("\n"), [
+					{ text: "修改连接地址", onPress: editAddresses },
+					{ text: "移除", style: "destructive", onPress: forget },
+					{ text: "取消", style: "cancel" },
+				]);
+			}}
 			style={({ pressed }) => pressed && styles.pressed}
 		>
 			<Card style={styles.hostCard}>
