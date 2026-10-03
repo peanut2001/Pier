@@ -164,57 +164,120 @@ button.settings-nav-item.selected:hover:not(:disabled) {
 
 .settings-host {
 	margin: 0 12px 10px;
-	padding: 8px 8px 8px 10px;
+}
+
+/* The managed computer: a quiet two-line button (its name, then where it is and its status). */
+button.settings-host-trigger {
+	justify-content: flex-start;
+	gap: 10px;
+	width: 100%;
+	height: auto;
+	padding: 7px 10px 7px 7px;
 	border: 1px solid var(--border);
-	border-radius: var(--radius);
+	border-radius: 12px;
 	background: var(--bg-input);
-	box-shadow: var(--shadow-sm);
+	box-shadow: none;
+	color: var(--text);
+	font-weight: 400;
+	text-align: left;
+	transition:
+		border-color 0.15s var(--ease),
+		box-shadow 0.15s var(--ease);
 }
 
-.settings-host-label {
-	display: flex;
-	align-items: center;
-	gap: 6px;
-	margin-bottom: 4px;
-	font-size: 11.5px;
-	color: var(--text-faint);
+button.settings-host-trigger:hover:not(:disabled) {
+	border-color: var(--border-strong);
+	background: var(--bg-input);
 }
 
-.settings-host-row {
-	display: flex;
-	align-items: center;
-	gap: 4px;
-	min-width: 0;
+button.settings-host-trigger.open,
+button.settings-host-trigger.open:hover:not(:disabled) {
+	border-color: var(--accent);
+	box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
-.settings-host-row .status-dot {
+.settings-host-avatar {
+	position: relative;
+	display: grid;
 	flex: none;
-	margin: 0 2px 0 3px;
+	place-items: center;
+	width: 32px;
+	height: 32px;
+	border-radius: 9px;
+	background: var(--bg-active);
+	color: var(--text-muted);
 }
 
-/* A borderless drop-down that reads as the card's title; the card is the visible frame. */
-select.setting-select.settings-host-select {
+/* The status dot sits on the avatar's corner, cut out from it by a ring of the card colour. */
+.settings-host-avatar .status-dot {
+	position: absolute;
+	right: -3px;
+	bottom: -3px;
+	width: 8px;
+	height: 8px;
+	border: 2px solid var(--bg-input);
+	box-shadow: none;
+	box-sizing: content-box;
+}
+
+.settings-host-text {
+	display: flex;
 	flex: 1;
-	width: auto;
+	flex-direction: column;
+	gap: 1px;
 	min-width: 0;
-	height: 28px;
-	padding: 0 26px 0 6px;
-	border-color: transparent;
-	background-color: transparent;
-	background-position: right 6px center;
+}
+
+.settings-host-name {
+	overflow: hidden;
 	font-size: 13px;
 	font-weight: 600;
+	line-height: 18px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
-select.setting-select.settings-host-select:hover:not(:disabled):not(:focus) {
-	border-color: transparent;
-	background-color: var(--bg-hover);
+.settings-host-detail {
+	overflow: hidden;
+	color: var(--text-faint);
+	font-size: 11.5px;
+	line-height: 16px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
-.settings-host-row .ghost.icon {
+.settings-host-chevron {
 	flex: none;
-	width: 28px;
-	height: 28px;
+	color: var(--text-faint);
+	transition: transform 0.15s var(--ease);
+}
+
+.settings-host-trigger.open .settings-host-chevron:not(.spin) {
+	transform: rotate(180deg);
+}
+
+.dropdown-menu.settings-host-menu {
+	right: 0;
+	min-width: 0;
+	font-size: 13px;
+}
+
+.dropdown-item.settings-host-item {
+	justify-content: flex-start;
+	gap: 10px;
+}
+
+.settings-host-item .status-dot {
+	margin: 0 1px 0 3px;
+}
+
+.settings-host-item .settings-host-name {
+	font-weight: 500;
+}
+
+.settings-host-check {
+	flex: none;
+	color: var(--accent-text);
 }
 
 .settings-target-banner.banner.inline {
