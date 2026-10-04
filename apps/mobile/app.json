@@ -42,7 +42,7 @@
 			[
 				"expo-image-picker",
 				{
-					"photosPermission": "Pier 需要访问相册，以便把图片发送给 Agent。",
+					"photosPermission": "Pier 需要访问相册，以便把图片发送给 Agent，或把照片和视频上传到电脑上的工作区。",
 					"cameraPermission": "Pier 需要使用相机拍照发送给 Agent。",
 					"microphonePermission": false
 				}

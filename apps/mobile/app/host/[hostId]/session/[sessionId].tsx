@@ -1,15 +1,17 @@
 import {
 	type ChatController,
+	type ChatState,
 	clampThinking,
 	isRole,
+	sessionUsage,
 	supportedThinkingLevels,
 	thinkingLabel,
 	userText,
 } from "@pier/chat-state";
-import type { ApprovalPolicy, ModelInfo, SessionSummary } from "@pier/protocol";
+import type { ApprovalPolicy, ForkPoint, ModelInfo, SessionSummary } from "@pier/protocol";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Composer } from "../../../../src/components/Composer.tsx";
 import { KeyboardAvoider } from "../../../../src/components/KeyboardAvoider.tsx";
@@ -17,19 +19,28 @@ import { PendingRequests } from "../../../../src/components/PendingRequests.tsx"
 import { ThinkingSlider } from "../../../../src/components/ThinkingSlider.tsx";
 import { Transcript } from "../../../../src/components/Transcript.tsx";
 import {
-	Button,
 	confirmDestructive,
 	HeaderAction,
 	Icon,
 	type IconName,
 	Muted,
+	PromptSheet,
 	PulseDot,
 	Sheet,
 	StatusDot,
 } from "../../../../src/components/ui.tsx";
-import { isBusy, POLICY_LABEL, POLICY_SUMMARY, RUN_STATE_LABEL, sessionTitle } from "../../../../src/format.ts";
+import {
+	formatCost,
+	formatPercent,
+	formatTokens,
+	isBusy,
+	POLICY_LABEL,
+	POLICY_SUMMARY,
+	RUN_STATE_LABEL,
+	sessionTitle,
+} from "../../../../src/format.ts";
 import { useChatView, useMobileState, useStore } from "../../../../src/store.ts";
-import { RADIUS, usePalette } from "../../../../src/theme.ts";
+import { type Palette, RADIUS, usePalette } from "../../../../src/theme.ts";
 
 function placeholderSummary(sessionId: string, workspaceId: string): SessionSummary {
 	const now = new Date().toISOString();
@@ -260,53 +271,296 @@ function ModelSheet({ chat, onClose }: { chat: ChatController; onClose: () => vo
 	);
 }
 
-/** The header's "…" sheet: actions on the session itself. */
-function ActionsSheet({ chat, onClose }: { chat: ChatController; onClose: () => void }) {
-	const store = useStore();
-	const router = useRouter();
-	const [busy, setBusy] = useState(false);
+/** Share of the model's context window the last request used, when both are known. */
+function contextShare(chat: ChatState): { used: number; window?: number; ratio?: number } {
+	const usage = sessionUsage(chat);
+	const window = chat.model?.contextWindow;
+	return {
+		used: usage.lastContext,
+		...(window ? { window } : {}),
+		...(window && usage.lastContext ? { ratio: Math.min(1, usage.lastContext / window) } : {}),
+	};
+}
+
+function contextColor(p: Palette, ratio: number): string {
+	return ratio >= 0.8 ? p.danger : ratio >= 0.5 ? p.warning : p.accent;
+}
+
+/** Context size, token totals, cost and cache hits of the session, as on the desktop's status bar. */
+function UsageCard({ chat }: { chat: ChatState }) {
+	const p = usePalette();
+	const usage = sessionUsage(chat);
+	const context = contextShare(chat);
+	if (!usage.lastContext && !usage.input && !usage.output) return null;
+	const stats: [string, string][] = [];
+	if (usage.input || usage.output) {
+		stats.push(["输入", formatTokens(usage.input)], ["输出", formatTokens(usage.output)]);
+	}
+	if (usage.cost) stats.push(["费用", formatCost(usage.cost)]);
+	if (usage.cacheHitRate !== undefined) stats.push(["缓存命中", formatPercent(usage.cacheHitRate)]);
+	return (
+		<View style={[styles.usage, { backgroundColor: p.bg }]}>
+			{usage.lastContext ? (
+				<View style={styles.usageContext}>
+					<View style={styles.usageHead}>
+						<Text style={[styles.usageLabel, { color: p.muted }]}>上下文</Text>
+						<Text style={[styles.usageValue, { color: p.text }]}>
+							{formatTokens(context.used)}
+							{context.window ? ` / ${formatTokens(context.window)}` : ""}
+							{context.ratio !== undefined ? `（${formatPercent(context.ratio)}）` : ""}
+						</Text>
+					</View>
+					{context.ratio !== undefined ? (
+						<View style={[styles.usageTrack, { backgroundColor: p.elevated }]}>
+							<View
+								style={[
+									styles.usageFill,
+									{
+										backgroundColor: contextColor(p, context.ratio),
+										width: `${Math.max(2, Math.round(context.ratio * 100))}%`,
+									},
+								]}
+							/>
+						</View>
+					) : null}
+				</View>
+			) : null}
+			{stats.length ? (
+				<View style={styles.usageStats}>
+					{stats.map(([label, value]) => (
+						<View key={label} style={styles.usageStat}>
+							<Text style={[styles.usageStatValue, { color: p.text }]}>{value}</Text>
+							<Text style={[styles.usageStatLabel, { color: p.faint }]}>{label}</Text>
+						</View>
+					))}
+				</View>
+			) : null}
+			<Muted style={styles.usageNote}>上下文为最近一次请求的大小，其余为本会话累计</Muted>
+		</View>
+	);
+}
+
+/** Pick one of your earlier messages to fork the session from, as on the desktop. */
+function ForkSheet({
+	chat,
+	onFork,
+	onClose,
+}: {
+	chat: ChatController;
+	onFork: (entryId: string) => void;
+	onClose: () => void;
+}) {
+	const p = usePalette();
+	const [points, setPoints] = useState<ForkPoint[]>();
+	const [error, setError] = useState<string>();
+	useEffect(() => {
+		let alive = true;
+		chat
+			.forkPoints()
+			.then((r) => {
+				if (alive) setPoints(r.points);
+			})
+			.catch((e: unknown) => {
+				if (alive) setError(e instanceof Error ? e.message : String(e));
+			});
+		return () => {
+			alive = false;
+		};
+	}, [chat]);
 	return (
 		<Sheet onClose={onClose}>
-			<View style={styles.sheetContent}>
-				<View style={styles.menuActions}>
-					{chat.chat.capabilities?.compact === false ? null : (
-						<Button
-							title="压缩上下文"
-							icon="contract-outline"
-							loading={busy}
-							style={styles.flex}
-							onPress={async () => {
-								setBusy(true);
-								await chat.compact();
-								setBusy(false);
-								onClose();
-							}}
-						/>
-					)}
-					<Button
-						title="删除会话"
-						icon="trash-outline"
-						variant="danger"
-						style={styles.flex}
-						disabled={!chat.chat.session}
-						onPress={() => {
-							const session = chat.chat.session;
-							if (!session) return;
-							const running = isBusy(chat.chat.runState);
-							confirmDestructive(
-								`删除“${sessionTitle(session)}”？`,
-								`${running ? "Agent 正在运行，会先中止。" : ""}会话文件会移到电脑上的 Pier 回收站（~/.pier/trash/sessions）。`,
-								"删除",
-								async () => {
-									if (!(await store.deleteSession(session, running))) return;
-									onClose();
-									if (router.canGoBack()) router.back();
-								},
-							);
-						}}
-					/>
+			<ScrollView contentContainerStyle={styles.sheetContent}>
+				<MenuSection icon="git-branch-outline" title="从历史消息分叉">
+					<Muted style={styles.policyNote}>
+						选择一条你发送过的消息：新会话保留它之前的全部上下文，并把这条消息放进输入框供你修改后重新发送。原会话保持不变。
+					</Muted>
+					{error ? <Text style={{ color: p.danger }}>{error}</Text> : null}
+					{!points && !error ? <ActivityIndicator color={p.accent} /> : null}
+					{points && !points.length ? <Muted>还没有可以分叉的消息。</Muted> : null}
+					{points?.length ? (
+						<View style={[styles.group, { backgroundColor: p.bg }]}>
+							{[...points].reverse().map((point, index) => (
+								<Pressable
+									key={point.entryId}
+									onPress={() => {
+										onClose();
+										onFork(point.entryId);
+									}}
+									style={({ pressed }) => [
+										styles.option,
+										index > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderColor: p.border },
+										pressed && { backgroundColor: p.elevated },
+									]}
+								>
+									<Icon name="chatbubble-outline" size={15} color={p.muted} />
+									<Text style={[styles.forkText, { color: p.text }]} numberOfLines={3}>
+										{point.text.slice(0, 300) || "（空消息）"}
+									</Text>
+								</Pressable>
+							))}
+						</View>
+					) : null}
+				</MenuSection>
+			</ScrollView>
+		</Sheet>
+	);
+}
+
+type SubSheet = "rename" | "compact" | "fork";
+
+interface ActionItem {
+	key: string;
+	label: string;
+	icon: IconName;
+	danger?: boolean;
+	disabled?: boolean;
+	onPress: () => void;
+}
+
+/** The header's "…" sheet: usage of the session and actions on it. */
+function ActionsSheet({
+	chat,
+	hostId,
+	onOpen,
+	onClose,
+}: {
+	chat: ChatController;
+	hostId: string;
+	onOpen: (sheet: SubSheet) => void;
+	onClose: () => void;
+}) {
+	const store = useStore();
+	const router = useRouter();
+	const p = usePalette();
+	const view = useChatView(chat);
+	const state = view?.chat ?? chat.chat;
+	const session = state.session;
+	const caps = state.capabilities;
+	const workspace = useMobileState((s) => s.host.workspaces?.find((w) => w.id === chat.workspaceId));
+	const archived = useMobileState((s) =>
+		session
+			? (s.host.sessions[session.workspaceId]?.find((x) => x.id === session.id)?.archived ?? session.archived)
+			: false,
+	);
+	const running = isBusy(state.runState);
+	const items: ActionItem[] = [];
+	if (caps?.rename !== false) {
+		items.push({ key: "rename", label: "重命名", icon: "pencil-outline", onPress: () => onOpen("rename") });
+	}
+	if (caps?.compact !== false) {
+		items.push({
+			key: "compact",
+			label: "压缩上下文",
+			icon: "contract-outline",
+			disabled: state.runState !== "idle",
+			onPress: () => onOpen("compact"),
+		});
+	}
+	if (caps?.fork !== false) {
+		items.push({ key: "fork", label: "从历史消息分叉", icon: "git-branch-outline", onPress: () => onOpen("fork") });
+	}
+	if (workspace && store.canBrowseFiles()) {
+		items.push({
+			key: "files",
+			label: "工作区文件",
+			icon: "folder-outline",
+			onPress: () => {
+				onClose();
+				router.push({ pathname: "/host/[hostId]/files", params: { hostId, workspaceId: workspace.id } });
+			},
+		});
+	}
+	if (workspace && store.canOpenTerminal()) {
+		items.push({
+			key: "terminal",
+			label: "在工作区打开终端",
+			icon: "terminal-outline",
+			onPress: () => {
+				onClose();
+				router.push({ pathname: "/host/[hostId]/terminal", params: { hostId, cwd: session?.cwd || workspace.path } });
+			},
+		});
+	}
+	if (session && store.canArchive()) {
+		items.push({
+			key: "archive",
+			label: archived ? "取消归档" : "归档会话",
+			icon: archived ? "arrow-undo-outline" : "archive-outline",
+			onPress: async () => {
+				if (!(await store.archiveSession(session, !archived))) return;
+				onClose();
+				store.toast("info", archived ? "已取消归档" : "已归档");
+			},
+		});
+	}
+	if (session) {
+		items.push({
+			key: "close",
+			label: "关闭会话",
+			icon: "close-circle-outline",
+			onPress: () => {
+				const close = async () => {
+					if (!(await store.closeSession(session, running))) return;
+					onClose();
+					if (router.canGoBack()) router.back();
+				};
+				if (running) {
+					confirmDestructive(
+						"关闭会话？",
+						"Agent 正在运行，会先中止。会话记录会保留。",
+						"中止并关闭",
+						() => void close(),
+					);
+				} else void close();
+			},
+		});
+		items.push({
+			key: "delete",
+			label: "删除会话",
+			icon: "trash-outline",
+			danger: true,
+			onPress: () =>
+				confirmDestructive(
+					`删除“${sessionTitle(session)}”？`,
+					`${running ? "Agent 正在运行，会先中止。" : ""}会话文件会移到电脑上的 Pier 回收站（~/.pier/trash/sessions）。`,
+					"删除",
+					async () => {
+						if (!(await store.deleteSession(session, running))) return;
+						onClose();
+						if (router.canGoBack()) router.back();
+					},
+				),
+		});
+	}
+	return (
+		<Sheet onClose={onClose}>
+			<ScrollView contentContainerStyle={styles.sheetContent}>
+				<UsageCard chat={state} />
+				<View style={[styles.group, { backgroundColor: p.bg }]}>
+					{items.map((item, index) => {
+						const color = item.danger ? p.danger : p.text;
+						return (
+							<Pressable
+								key={item.key}
+								testID={`session-action-${item.key}`}
+								accessibilityRole="button"
+								disabled={item.disabled}
+								onPress={item.onPress}
+								style={({ pressed }) => [
+									styles.option,
+									index > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderColor: p.border },
+									pressed && { backgroundColor: p.elevated },
+									item.disabled && styles.disabled,
+								]}
+							>
+								<Icon name={item.icon} size={19} color={item.danger ? p.danger : p.muted} />
+								<Text style={[styles.actionLabel, { color }]}>{item.label}</Text>
+								<Icon name="chevron-forward" size={16} color={p.faint} />
+							</Pressable>
+						);
+					})}
 				</View>
-			</View>
+			</ScrollView>
 		</Sheet>
 	);
 }
@@ -323,7 +577,7 @@ export default function SessionScreen() {
 	const connection = useMobileState((s) => (s.host.hostId === hostId ? s.host.connection : "none"));
 	const revoked = useMobileState((s) => s.host.hostId === hostId && s.host.revoked);
 	useMobileState((s) => s.chatsVersion);
-	const [sheet, setSheet] = useState<"policy" | "model" | "actions">();
+	const [sheet, setSheet] = useState<"policy" | "model" | "actions" | SubSheet>();
 	const scroller = useRef<ScrollView>(null);
 	const nearBottom = useRef(true);
 
@@ -360,6 +614,8 @@ export default function SessionScreen() {
 					: ""
 			}`
 		: undefined;
+	const context = state ? contextShare(state) : undefined;
+	const router = useRouter();
 
 	return (
 		<KeyboardAvoider style={[styles.flex, { backgroundColor: p.bg }]} topOffset={insets.top + 44} contentInsetsBottom>
@@ -389,6 +645,23 @@ export default function SessionScreen() {
 								: "未连接，正在重连…"}
 					</Text>
 				</View>
+				{context?.used ? (
+					<Pressable
+						testID="session-context-chip"
+						onPress={() => chat && setSheet("actions")}
+						style={({ pressed }) => [styles.chip, { backgroundColor: p.elevated }, pressed && styles.pressed]}
+						accessibilityLabel="上下文用量，点按查看详情"
+					>
+						<Icon
+							name="layers-outline"
+							size={13}
+							color={context.ratio !== undefined ? contextColor(p, context.ratio) : p.muted}
+						/>
+						<Text style={[styles.statusText, { color: p.text }]} numberOfLines={1}>
+							{context.ratio !== undefined ? formatPercent(context.ratio) : formatTokens(context.used)}
+						</Text>
+					</Pressable>
+				) : null}
 				{policy ? (
 					<Pressable
 						testID="session-policy-chip"
@@ -462,7 +735,62 @@ export default function SessionScreen() {
 				<PolicySheet workspaceId={chat.workspaceId} onClose={() => setSheet(undefined)} />
 			) : null}
 			{chat && sheet === "model" ? <ModelSheet chat={chat} onClose={() => setSheet(undefined)} /> : null}
-			{chat && sheet === "actions" ? <ActionsSheet chat={chat} onClose={() => setSheet(undefined)} /> : null}
+			{chat && sheet === "actions" ? (
+				<ActionsSheet
+					chat={chat}
+					hostId={hostId}
+					onOpen={(next) => {
+						// Let iOS finish dismissing one modal before presenting the next.
+						setSheet(undefined);
+						setTimeout(() => setSheet(next), Platform.OS === "ios" ? 350 : 0);
+					}}
+					onClose={() => setSheet(undefined)}
+				/>
+			) : null}
+			{chat && sheet === "rename" ? (
+				<PromptSheet
+					title="重命名会话"
+					initialValue={state?.session?.name ?? ""}
+					placeholder={title}
+					confirm="保存"
+					onClose={() => setSheet(undefined)}
+					onSubmit={async (name) => {
+						const ok = (await chat.rename(name.slice(0, 200))) !== undefined;
+						if (ok) store.scheduleSessionsRefresh(chat.workspaceId);
+						return ok;
+					}}
+				/>
+			) : null}
+			{chat && sheet === "compact" ? (
+				<PromptSheet
+					title="压缩上下文"
+					message="让模型把此前的对话总结成摘要，释放上下文窗口。可以补充希望摘要重点保留的内容（可选）。"
+					placeholder="例如：保留所有未完成的 TODO 和已修改的文件列表"
+					confirm="开始压缩"
+					multiline
+					allowEmpty
+					onClose={() => setSheet(undefined)}
+					onSubmit={(instructions) => {
+						void chat.compact(instructions || undefined);
+						return true;
+					}}
+				/>
+			) : null}
+			{chat && sheet === "fork" ? (
+				<ForkSheet
+					chat={chat}
+					onClose={() => setSheet(undefined)}
+					onFork={async (entryId) => {
+						const session = await store.forkSession(chat.sessionId, entryId);
+						if (session) {
+							router.push({
+								pathname: "/host/[hostId]/session/[sessionId]",
+								params: { hostId, sessionId: session.id, workspaceId: session.workspaceId },
+							});
+						}
+					}}
+				/>
+			) : null}
 		</KeyboardAvoider>
 	);
 }
@@ -517,6 +845,21 @@ const styles = StyleSheet.create({
 	thinking: { borderRadius: RADIUS.lg, paddingHorizontal: 14, paddingVertical: 12 },
 	providerGroup: { gap: 6 },
 	providerTitle: { fontSize: 12, fontWeight: "600", paddingHorizontal: 4 },
+	disabled: { opacity: 0.4 },
+	actionLabel: { flex: 1, fontSize: 15.5, fontWeight: "500" },
+	forkText: { flex: 1, fontSize: 14, lineHeight: 20 },
+	usage: { borderRadius: RADIUS.lg, paddingHorizontal: 14, paddingVertical: 12, gap: 12 },
+	usageContext: { gap: 7 },
+	usageHead: { flexDirection: "row", alignItems: "baseline", justifyContent: "space-between" },
+	usageLabel: { fontSize: 13, fontWeight: "600" },
+	usageValue: { fontSize: 13.5, fontWeight: "600", fontVariant: ["tabular-nums"] },
+	usageTrack: { height: 6, borderRadius: RADIUS.pill, overflow: "hidden" },
+	usageFill: { height: 6, borderRadius: RADIUS.pill },
+	usageStats: { flexDirection: "row", justifyContent: "space-between" },
+	usageStat: { alignItems: "center", flex: 1 },
+	usageStatValue: { fontSize: 15, fontWeight: "700", fontVariant: ["tabular-nums"] },
+	usageStatLabel: { fontSize: 11.5, marginTop: 2 },
+	usageNote: { fontSize: 11.5, lineHeight: 16 },
 	optionHead: { flexDirection: "row", alignItems: "center", gap: 6 },
 	tag: {
 		fontSize: 10.5,

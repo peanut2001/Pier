@@ -62,6 +62,19 @@ export default function RootLayout() {
 						options={{ title: "工作区设置", presentation: "modal", animation: "slide_from_bottom" }}
 					/>
 					<Stack.Screen name="host/[hostId]/session/[sessionId]" options={{ title: "" }} />
+					<Stack.Screen name="host/[hostId]/files" options={{ title: "文件" }} />
+					<Stack.Screen name="host/[hostId]/file" options={{ title: "" }} />
+					<Stack.Screen
+						name="host/[hostId]/terminal"
+						options={{
+							title: "终端",
+							headerStyle: { backgroundColor: "#0d1014" },
+							headerTintColor: "#eef0f3",
+							headerTitleStyle: { color: "#eef0f3", fontWeight: "700", fontSize: 17 },
+							contentStyle: { backgroundColor: "#0d1014" },
+						}}
+					/>
+					<Stack.Screen name="host/[hostId]/extensions" options={{ title: "pi 扩展" }} />
 				</Stack>
 				<ToastHost />
 			</StoreContext.Provider>

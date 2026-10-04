@@ -112,6 +112,74 @@ export default function WorkspaceSettings() {
 					</Pressable>
 				</Card>
 
+				{online && (store.canBrowseFiles() || store.canOpenTerminal() || store.canManageExtensions()) ? (
+					<>
+						<SectionLabel style={styles.label}>工具</SectionLabel>
+						<Card flat style={styles.options}>
+							{[
+								store.canBrowseFiles()
+									? {
+											key: "files",
+											icon: "folder-outline" as IconName,
+											title: "浏览文件",
+											text: "查看、编辑、上传和下载工作区中的文件",
+											onPress: () =>
+												router.push({
+													pathname: "/host/[hostId]/files",
+													params: { hostId, workspaceId: workspace.id },
+												}),
+										}
+									: undefined,
+								store.canOpenTerminal()
+									? {
+											key: "terminal",
+											icon: "terminal-outline" as IconName,
+											title: "在这里打开终端",
+											text: `在 ${hostName} 上以这个目录启动 shell`,
+											onPress: () =>
+												router.push({ pathname: "/host/[hostId]/terminal", params: { hostId, cwd: workspace.path } }),
+										}
+									: undefined,
+								store.canManageExtensions()
+									? {
+											key: "extensions",
+											icon: "extension-puzzle-outline" as IconName,
+											title: "pi 扩展",
+											text: "全局与这个工作区的扩展包、技能和提示词模板",
+											onPress: () =>
+												router.push({
+													pathname: "/host/[hostId]/extensions",
+													params: { hostId, workspaceId: workspace.id },
+												}),
+										}
+									: undefined,
+							]
+								.filter((tool) => tool !== undefined)
+								.map((tool, index) => (
+									<Pressable
+										key={tool.key}
+										testID={`workspace-${tool.key}`}
+										onPress={tool.onPress}
+										style={({ pressed }) => [
+											styles.option,
+											index > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderColor: p.border },
+											pressed && { backgroundColor: p.elevated },
+										]}
+									>
+										<View style={[styles.policyIcon, { backgroundColor: p.accentSoft }]}>
+											<Icon name={tool.icon} size={18} color={p.accent} />
+										</View>
+										<View style={styles.flex}>
+											<Text style={[styles.optionTitle, { color: p.text }]}>{tool.title}</Text>
+											<Text style={[styles.optionText, { color: p.muted }]}>{tool.text}</Text>
+										</View>
+										<Icon name="chevron-forward" size={17} color={p.faint} />
+									</Pressable>
+								))}
+						</Card>
+					</>
+				) : null}
+
 				<SectionLabel style={styles.label}>工具审批策略</SectionLabel>
 				<Card flat style={styles.options}>
 					{POLICIES.map((policy, index) => {

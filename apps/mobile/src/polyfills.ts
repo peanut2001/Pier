@@ -16,3 +16,17 @@ if (typeof g.crypto?.getRandomValues !== "function") {
 	};
 	g.crypto = Object.assign(g.crypto ?? {}, source);
 }
+
+/**
+ * React Native's `navigator` has no `userAgent` / `platform`; `@xterm/headless` (the phone's
+ * terminal) reads both as strings when it loads.
+ */
+const nav = (globalThis as { navigator?: { userAgent?: unknown; platform?: unknown } }).navigator;
+if (nav) {
+	try {
+		if (typeof nav.userAgent !== "string") nav.userAgent = "";
+		if (typeof nav.platform !== "string") nav.platform = "";
+	} catch {
+		// Read-only on browsers, where both are already strings.
+	}
+}

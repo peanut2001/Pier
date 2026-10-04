@@ -5,19 +5,21 @@ import {
 	Alert,
 	Animated,
 	Easing,
+	Keyboard,
 	Modal,
 	Platform,
 	Pressable,
 	type StyleProp,
 	StyleSheet,
 	Text,
+	TextInput,
 	type TextStyle,
 	View,
 	type ViewStyle,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useMobileState, useStore } from "../store.ts";
-import { FLOAT_SHADOW, type Palette, RADIUS, SHADOW, tileColors, usePalette } from "../theme.ts";
+import { FLOAT_SHADOW, MONO, type Palette, RADIUS, SHADOW, tileColors, usePalette } from "../theme.ts";
 
 export type IconName = ComponentProps<typeof Ionicons>["name"];
 
@@ -385,7 +387,25 @@ export function Pill({
 	);
 }
 
-/** Modal panel that slides up from the bottom of the screen over a fading scrim. */
+/** Height of the soft keyboard while it is shown (0 when hidden), on iOS and Android. */
+export function useKeyboardHeight(): number {
+	const [height, setHeight] = useState(0);
+	useEffect(() => {
+		if (Platform.OS === "web") return;
+		const ios = Platform.OS === "ios";
+		const show = Keyboard.addListener(ios ? "keyboardWillShow" : "keyboardDidShow", (e) =>
+			setHeight(Math.max(0, e.endCoordinates.height)),
+		);
+		const hide = Keyboard.addListener(ios ? "keyboardWillHide" : "keyboardDidHide", () => setHeight(0));
+		return () => {
+			show.remove();
+			hide.remove();
+		};
+	}, []);
+	return height;
+}
+
+/** Modal panel that slides up from the bottom of the screen over a fading scrim; stays above the keyboard. */
 export function Sheet({
 	children,
 	onClose,
@@ -397,6 +417,7 @@ export function Sheet({
 }) {
 	const p = usePalette();
 	const insets = useSafeAreaInsets();
+	const keyboard = useKeyboardHeight();
 	const enter = useRef(new Animated.Value(0)).current;
 	useEffect(() => {
 		Animated.timing(enter, {
@@ -406,6 +427,8 @@ export function Sheet({
 			useNativeDriver: Platform.OS !== "web",
 		}).start();
 	}, [enter]);
+	// Android reports the keyboard above the navigation bar, which the sheet still has to clear.
+	const paddingBottom = keyboard ? 12 + (Platform.OS === "android" ? insets.bottom : 0) : insets.bottom + 12;
 	return (
 		<Modal transparent animationType="fade" statusBarTranslucent navigationBarTranslucent onRequestClose={onClose}>
 			<Pressable style={[styles.backdrop, { backgroundColor: p.scrim }]} onPress={onClose} accessibilityLabel="关闭" />
@@ -414,7 +437,9 @@ export function Sheet({
 					styles.sheet,
 					{
 						backgroundColor: p.card,
-						paddingBottom: insets.bottom + 12,
+						bottom: keyboard,
+						maxHeight: keyboard ? "70%" : "86%",
+						paddingBottom,
 						transform: [{ translateY: enter.interpolate({ inputRange: [0, 1], outputRange: [360, 0] }) }],
 					},
 					style,
@@ -424,6 +449,94 @@ export function Sheet({
 				{children}
 			</Animated.View>
 		</Modal>
+	);
+}
+
+/**
+ * A sheet asking for one line (or a few lines) of text, e.g. a new name. `onSubmit` resolves to
+ * whether the sheet may close; on failure it stays open with the text kept.
+ */
+export function PromptSheet({
+	title,
+	message,
+	initialValue = "",
+	placeholder,
+	confirm = "确定",
+	multiline,
+	allowEmpty,
+	mono,
+	onSubmit,
+	onClose,
+}: {
+	title: string;
+	message?: string;
+	initialValue?: string;
+	placeholder?: string;
+	confirm?: string;
+	multiline?: boolean;
+	/** Allow submitting an empty value (for optional input). */
+	allowEmpty?: boolean;
+	/** Monospace input, for paths and package sources. */
+	mono?: boolean;
+	onSubmit: (value: string) => Promise<boolean> | boolean;
+	onClose: () => void;
+}) {
+	const p = usePalette();
+	const [value, setValue] = useState(initialValue);
+	const [busy, setBusy] = useState(false);
+	const trimmed = value.trim();
+	const submit = async () => {
+		if (busy || (!trimmed && !allowEmpty)) return;
+		setBusy(true);
+		let done = false;
+		try {
+			done = await onSubmit(trimmed);
+		} finally {
+			setBusy(false);
+		}
+		if (done) onClose();
+	};
+	return (
+		<Sheet onClose={onClose}>
+			<View style={styles.sheetContent}>
+				<View style={styles.sheetHead}>
+					<Text style={[styles.sheetTitle, { color: p.text }]}>{title}</Text>
+					{message ? <Muted>{message}</Muted> : null}
+				</View>
+				<TextInput
+					testID="prompt-input"
+					autoFocus
+					value={value}
+					onChangeText={setValue}
+					placeholder={placeholder}
+					placeholderTextColor={p.faint}
+					multiline={multiline}
+					autoCapitalize="none"
+					autoCorrect={!mono}
+					spellCheck={!mono}
+					returnKeyType={multiline ? "default" : "done"}
+					onSubmitEditing={multiline ? undefined : () => void submit()}
+					style={[
+						styles.promptInput,
+						multiline && styles.promptMultiline,
+						mono && { fontFamily: MONO, fontSize: 14 },
+						{ color: p.text, borderColor: p.border, backgroundColor: p.bg },
+					]}
+				/>
+				<View style={styles.sheetButtons}>
+					<Button title="取消" onPress={onClose} style={styles.flex} />
+					<Button
+						title={confirm}
+						variant="primary"
+						loading={busy}
+						disabled={!trimmed && !allowEmpty}
+						onPress={() => void submit()}
+						style={styles.flex}
+						testID="prompt-confirm"
+					/>
+				</View>
+			</View>
+		</Sheet>
 	);
 }
 
@@ -701,4 +814,12 @@ const styles = StyleSheet.create({
 	sheetActionLabel: { fontSize: 15.5, fontWeight: "600" },
 	sheetActionText: { fontSize: 12.5, lineHeight: 18, marginTop: 2 },
 	sheetButtons: { flexDirection: "row", gap: 10 },
+	promptInput: {
+		borderWidth: 1,
+		borderRadius: RADIUS.md,
+		paddingHorizontal: 14,
+		paddingVertical: 11,
+		fontSize: 15.5,
+	},
+	promptMultiline: { minHeight: 96, maxHeight: 200, textAlignVertical: "top" },
 });

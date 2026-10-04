@@ -4,6 +4,7 @@ import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, RefreshControl, SectionList, StyleSheet, Text, View } from "react-native";
 import { AgentPicker } from "../../../src/components/AgentPicker.tsx";
+import { HostStatsCard } from "../../../src/components/HostStatsCard.tsx";
 import {
 	ActionSheet,
 	Avatar,
@@ -94,6 +95,70 @@ function ConnectionCard({ hostId }: { hostId: string }) {
 					<Icon name="chevron-forward" size={16} color={p.faint} />
 				</Pressable>
 			) : null}
+		</Card>
+	);
+}
+
+/** Shortcuts to the computer itself: a terminal, pi extensions, and the terminals already open. */
+function ToolsCard({ hostId }: { hostId: string }) {
+	const store = useStore();
+	const router = useRouter();
+	const p = usePalette();
+	const online = useMobileState((s) => s.host.connection === "open");
+	const terminals = useMobileState((s) => s.host.terminals);
+	useMobileState((s) => s.host.info);
+	if (!online && !terminals.length) return null;
+	const canTerminal = store.canOpenTerminal();
+	const canExtensions = store.canManageExtensions();
+	if (!canTerminal && !canExtensions && !terminals.length) return null;
+	const openTerminal = (id?: number) =>
+		router.push({ pathname: "/host/[hostId]/terminal", params: { hostId, ...(id ? { id: String(id) } : {}) } });
+	return (
+		<Card flat style={styles.tools}>
+			<View style={styles.toolRow}>
+				{canTerminal ? (
+					<Pressable
+						testID="open-terminal"
+						disabled={!online}
+						onPress={() => openTerminal()}
+						style={({ pressed }) => [styles.tool, { backgroundColor: p.elevated }, pressed && styles.pressed]}
+					>
+						<Icon name="terminal-outline" size={18} color={p.accent} />
+						<Text style={[styles.toolText, { color: p.text }]}>终端</Text>
+					</Pressable>
+				) : null}
+				{canExtensions ? (
+					<Pressable
+						testID="open-extensions"
+						disabled={!online}
+						onPress={() => router.push({ pathname: "/host/[hostId]/extensions", params: { hostId } })}
+						style={({ pressed }) => [styles.tool, { backgroundColor: p.elevated }, pressed && styles.pressed]}
+					>
+						<Icon name="extension-puzzle-outline" size={18} color={p.accent} />
+						<Text style={[styles.toolText, { color: p.text }]}>pi 扩展</Text>
+					</Pressable>
+				) : null}
+			</View>
+			{terminals.map((terminal) => (
+				<Pressable
+					key={terminal.id}
+					onPress={() => openTerminal(terminal.id)}
+					style={({ pressed }) => [styles.terminalRow, { borderColor: p.border }, pressed && styles.pressed]}
+				>
+					{terminal.status === "running" ? (
+						<PulseDot color={p.ok} size={7} />
+					) : (
+						<StatusDot color={terminal.status === "exited" ? p.faint : p.warning} size={7} />
+					)}
+					<Text style={[styles.terminalTitle, { color: p.text }]} numberOfLines={1}>
+						{terminal.title}
+					</Text>
+					<Text style={[styles.terminalCwd, { color: p.faint }]} numberOfLines={1} ellipsizeMode="head">
+						{terminal.status === "exited" ? "已结束" : shortPath(terminal.cwd)}
+					</Text>
+					<IconButton icon="close" label="关闭终端" size={28} onPress={() => void store.removeTerminal(terminal.id)} />
+				</Pressable>
+			))}
 		</Card>
 	);
 }
@@ -290,6 +355,9 @@ export default function HostScreen() {
 	};
 	const openWorkspace = (workspaceId: string) =>
 		router.push({ pathname: "/host/[hostId]/workspace/[workspaceId]", params: { hostId, workspaceId } });
+	const openFiles = (workspaceId: string) =>
+		router.push({ pathname: "/host/[hostId]/files", params: { hostId, workspaceId } });
+	const canBrowseFiles = online && store.canBrowseFiles();
 
 	return (
 		<Screen>
@@ -320,6 +388,8 @@ export default function HostScreen() {
 				ListHeaderComponent={
 					<View style={styles.header}>
 						{hostId ? <ConnectionCard hostId={hostId} /> : null}
+						{view.hostId === hostId ? <HostStatsCard /> : null}
+						{hostId && view.hostId === hostId ? <ToolsCard hostId={hostId} /> : null}
 						{pendingTotal ? (
 							<Card flat style={[styles.pending, { borderColor: p.warningSoft, backgroundColor: p.warningSoft }]}>
 								<Icon name="hand-left" size={18} color={p.warning} />
@@ -373,6 +443,15 @@ export default function HostScreen() {
 								</Text>
 							</View>
 						</Pressable>
+						{canBrowseFiles ? (
+							<IconButton
+								icon="folder-outline"
+								label={`浏览文件：${section.workspace.name}`}
+								size={36}
+								testID={`files-${section.workspace.id}`}
+								onPress={() => openFiles(section.workspace.id)}
+							/>
+						) : null}
 						<IconButton
 							icon="options-outline"
 							label={`工作区设置：${section.workspace.name}`}
@@ -462,6 +541,28 @@ const styles = StyleSheet.create({
 	},
 	hintText: { flex: 1, fontSize: 12.5 },
 	pending: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 12 },
+	tools: { gap: 8, paddingVertical: 10, paddingHorizontal: 10 },
+	toolRow: { flexDirection: "row", gap: 8 },
+	tool: {
+		flex: 1,
+		flexDirection: "row",
+		alignItems: "center",
+		justifyContent: "center",
+		gap: 7,
+		height: 42,
+		borderRadius: RADIUS.md,
+	},
+	toolText: { fontSize: 14.5, fontWeight: "600" },
+	terminalRow: {
+		flexDirection: "row",
+		alignItems: "center",
+		gap: 8,
+		paddingLeft: 6,
+		paddingTop: 6,
+		borderTopWidth: StyleSheet.hairlineWidth,
+	},
+	terminalTitle: { fontSize: 14, fontWeight: "600", maxWidth: "40%" },
+	terminalCwd: { flex: 1, fontSize: 11.5, fontFamily: MONO },
 	pendingText: { fontSize: 14, fontWeight: "600", flex: 1 },
 	emptyWorkspaces: { alignItems: "center", gap: 8, paddingVertical: 28 },
 	emptyIcon: {

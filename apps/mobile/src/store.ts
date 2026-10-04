@@ -13,15 +13,24 @@ import {
 	type AgentRuntimeInfo,
 	type ApprovalPolicy,
 	type EventFrame,
+	type ExtensionListResult,
+	type ExtensionResourceInfo,
+	type ExtensionScope,
+	type ExtensionUpdateInfo,
 	type HostDirectoryListing,
 	type HostInfo,
+	type HostStats,
 	parseProtocolVersion,
 	type SessionRunState,
 	type SessionSummary,
+	type WorkspaceFileContent,
+	type WorkspaceFilesResult,
+	type WorkspaceFileWriteResult,
 	type WorkspaceInfo,
 } from "@pier/protocol";
 import { createContext, useContext, useSyncExternalStore } from "react";
 import { Platform } from "react-native";
+import { base64ToBytes, bytesToBase64 } from "./bytes.ts";
 import { loadHosts, type PairedHost, removeHost, saveHost } from "./hosts.ts";
 import {
 	defaultDeviceName,
@@ -32,11 +41,33 @@ import {
 	loadDeviceName,
 	saveDeviceName,
 } from "./identity.ts";
+import { RemoteTerminal } from "./terminal.ts";
 
 export const APP_VERSION = "0.2.19";
 
 /** Live session subscriptions kept for quick back-and-forth navigation. */
 const MAX_LIVE_CHATS = 4;
+/** Largest piece of a file sent or fetched per request. */
+const TRANSFER_CHUNK = 512 * 1024;
+
+/** Reads `length` bytes of a local file, in order (an upload source). */
+export interface UploadSource {
+	size: number;
+	read: (length: number) => Uint8Array;
+}
+
+/** Receives a downloaded file's bytes in order. */
+export interface DownloadSink {
+	write: (bytes: Uint8Array) => void;
+}
+
+/** A short summary of an open terminal, for lists. */
+export interface TerminalSummary {
+	id: number;
+	title: string;
+	cwd: string;
+	status: RemoteTerminal["status"];
+}
 
 export interface HostView {
 	hostId?: string;
@@ -50,6 +81,8 @@ export interface HostView {
 	sessions: Record<string, SessionSummary[] | undefined>;
 	/** Which address the secure channel is using. */
 	address?: string;
+	/** Terminals opened on this computer from the phone, newest first. */
+	terminals: TerminalSummary[];
 }
 
 export interface Toast {
@@ -68,7 +101,7 @@ export interface MobileState {
 	toast?: Toast;
 }
 
-const EMPTY_HOST: HostView = { connection: "none", revoked: false, sessions: {} };
+const EMPTY_HOST: HostView = { connection: "none", revoked: false, sessions: {}, terminals: [] };
 
 function errorText(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
@@ -113,6 +146,8 @@ export class MobileStore {
 	private readonly refreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
 	private nextToastId = 1;
 	private readonly drafts = new Map<string, string>();
+	private readonly terminals = new Map<number, RemoteTerminal>();
+	private nextTerminalId = 1;
 
 	getState = (): MobileState => this.state;
 
@@ -276,6 +311,7 @@ export class MobileStore {
 		client.onState((state) => {
 			if (this.client !== client) return;
 			this.setHost(state === "open" ? { connection: state, error: undefined } : { connection: state });
+			if (state !== "open") this.loseTerminals(`与 ${host.hostName} 的连接已断开，终端已关闭`);
 			if (state === "open") {
 				this.retryAttempt = 0;
 				void this.updateHost(host.hostId, { lastConnectedAt: new Date().toISOString() });
@@ -342,6 +378,8 @@ export class MobileStore {
 		for (const chat of this.chats.values()) chat.dispose();
 		this.chats.clear();
 		this.recent = [];
+		for (const terminal of this.terminals.values()) terminal.dispose();
+		this.terminals.clear();
 		this.client?.close();
 		this.client = undefined;
 		this.set((s) => ({ host: EMPTY_HOST, chatsVersion: s.chatsVersion + 1 }));
@@ -369,6 +407,8 @@ export class MobileStore {
 			}));
 		} else if (event.type === "host.notice") {
 			this.toast(event.level === "error" ? "error" : "info", String(event.message ?? ""));
+		} else if (event.type === "terminal.output" || event.type === "terminal.exit") {
+			this.onTerminalEvent(event);
 		}
 	}
 
@@ -383,6 +423,11 @@ export class MobileStore {
 		} catch (error) {
 			if (this.client === client) this.toast("error", `加载工作区失败：${errorText(error)}`);
 		}
+	}
+
+	/** Reload a workspace's session list shortly (coalesces bursts of changes). */
+	scheduleSessionsRefresh(workspaceId: string): void {
+		this.scheduleRefresh(workspaceId);
 	}
 
 	private scheduleRefresh(workspaceId: string): void {
@@ -649,6 +694,285 @@ export class MobileStore {
 	saveDraft(sessionId: string, text: string): void {
 		if (text) this.drafts.set(sessionId, text);
 		else this.drafts.delete(sessionId);
+	}
+
+	private requireClient(): PierClient {
+		const client = this.client;
+		if (client?.state !== "open") throw new Error("尚未连接到电脑");
+		return client;
+	}
+
+	/** Close a session on the computer (it stays in the list). `force` aborts a running agent first. */
+	async closeSession(session: SessionSummary, force = false): Promise<boolean> {
+		const client = this.client;
+		if (!client) return false;
+		try {
+			await client.request("session.close", { sessionId: session.id, force });
+		} catch (error) {
+			this.toast("error", `关闭会话失败：${errorText(error)}`);
+			return false;
+		}
+		this.chats.get(session.id)?.dispose();
+		this.chats.delete(session.id);
+		this.recent = this.recent.filter((id) => id !== session.id);
+		this.scheduleRefresh(session.workspaceId);
+		return true;
+	}
+
+	// ---- host status -------------------------------------------------------------------
+
+	/** Whether the connected computer reports its resource usage (`host.stats`, protocol 1.12). */
+	canReadHostStats(): boolean {
+		return this.hostSpeaks(12);
+	}
+
+	async hostStats(): Promise<HostStats> {
+		return this.requireClient().request("host.stats", {});
+	}
+
+	// ---- workspace files ---------------------------------------------------------------
+
+	/** Whether the connected computer lets this phone browse workspace files (open to paired devices since 1.10). */
+	canBrowseFiles(): boolean {
+		return this.hostSpeaks(10);
+	}
+
+	/** Whether the connected computer can upload and download workspace files in pieces (1.21). */
+	canTransferFiles(): boolean {
+		return this.hostSpeaks(21);
+	}
+
+	/** Whether the connected computer can save edited files (1.8) and delete paths (1.11). */
+	canEditFiles(): boolean {
+		return this.hostSpeaks(11);
+	}
+
+	async listFiles(workspaceId: string, path: string): Promise<WorkspaceFilesResult> {
+		return this.requireClient().request("workspace.files", { workspaceId, ...(path ? { path } : {}) });
+	}
+
+	async readFile(workspaceId: string, path: string): Promise<WorkspaceFileContent> {
+		return this.requireClient().request("workspace.readFile", { workspaceId, path });
+	}
+
+	async writeFile(
+		workspaceId: string,
+		path: string,
+		text: string,
+		expectedModifiedAt?: string,
+	): Promise<WorkspaceFileWriteResult> {
+		return this.requireClient().request("workspace.writeFile", {
+			workspaceId,
+			path,
+			text,
+			...(expectedModifiedAt ? { expectedModifiedAt } : {}),
+		});
+	}
+
+	/** Permanently delete a workspace file or directory. Resolves to whether it worked. */
+	async deletePath(workspaceId: string, path: string): Promise<boolean> {
+		try {
+			await this.requireClient().request("workspace.deletePath", { workspaceId, path });
+			return true;
+		} catch (error) {
+			this.toast("error", `删除失败：${errorText(error)}`);
+			return false;
+		}
+	}
+
+	/**
+	 * Upload a local file into a workspace in pieces. `onProgress` gets the bytes sent so far.
+	 * A failed upload is cancelled so no partial file is left behind.
+	 */
+	async uploadFile(
+		workspaceId: string,
+		path: string,
+		source: UploadSource,
+		options: { overwrite?: boolean; onProgress?: (sent: number) => void } = {},
+	): Promise<WorkspaceFileWriteResult> {
+		const client = this.requireClient();
+		const start = await client.request("workspace.uploadStart", {
+			workspaceId,
+			path,
+			size: source.size,
+			...(options.overwrite ? { overwrite: true } : {}),
+		});
+		const chunk = Math.max(1, Math.min(TRANSFER_CHUNK, start.chunkBytes));
+		try {
+			let offset = 0;
+			while (offset < source.size) {
+				const bytes = source.read(Math.min(chunk, source.size - offset));
+				if (!bytes.length) throw new Error("文件在上传时变短了");
+				await client.request("workspace.uploadChunk", { uploadId: start.uploadId, offset, data: bytesToBase64(bytes) });
+				offset += bytes.length;
+				options.onProgress?.(offset);
+			}
+			return await client.request("workspace.uploadFinish", { uploadId: start.uploadId });
+		} catch (error) {
+			void client.request("workspace.uploadCancel", { uploadId: start.uploadId }).catch(() => undefined);
+			throw error;
+		}
+	}
+
+	/** Upload text (or an empty file) to a new workspace path. */
+	async createFile(workspaceId: string, path: string, text = ""): Promise<WorkspaceFileWriteResult> {
+		const bytes = new TextEncoder().encode(text);
+		let read = 0;
+		return this.uploadFile(workspaceId, path, {
+			size: bytes.length,
+			read: (length) => {
+				const part = bytes.subarray(read, read + length);
+				read += part.length;
+				return part;
+			},
+		});
+	}
+
+	/** Download a workspace file in pieces into `sink`. Resolves to its size. */
+	async downloadFile(
+		workspaceId: string,
+		path: string,
+		sink: DownloadSink,
+		onProgress?: (received: number, size: number) => void,
+	): Promise<number> {
+		const client = this.requireClient();
+		let offset = 0;
+		for (;;) {
+			const part = await client.request("workspace.readBytes", { workspaceId, path, offset, length: TRANSFER_CHUNK });
+			const bytes = base64ToBytes(part.data);
+			if (bytes.length) sink.write(bytes);
+			offset += bytes.length;
+			onProgress?.(offset, part.size);
+			if (part.eof || !bytes.length) return offset;
+		}
+	}
+
+	// ---- terminals ---------------------------------------------------------------------
+
+	/** Whether the connected computer can run a shell for this phone (`terminal.*`, protocol 1.18). */
+	canOpenTerminal(): boolean {
+		return this.state.host.info?.terminals === true && this.hostSpeaks(18);
+	}
+
+	/** Open a shell on the connected computer, in `cwd` (its home directory by default). */
+	openTerminal(options: { cwd?: string; cols: number; rows: number; title?: string }): RemoteTerminal {
+		const client = this.requireClient();
+		const id = this.nextTerminalId++;
+		const terminal = new RemoteTerminal(id, client, {
+			...(options.cwd ? { cwd: options.cwd } : {}),
+			cols: options.cols,
+			rows: options.rows,
+			title: options.title ?? "终端",
+		});
+		this.terminals.set(id, terminal);
+		terminal.subscribe(() => this.publishTerminals());
+		this.publishTerminals();
+		void terminal.open();
+		return terminal;
+	}
+
+	terminal(id: number): RemoteTerminal | undefined {
+		return this.terminals.get(id);
+	}
+
+	/** Hang up a terminal (if it still runs) and forget it. */
+	async removeTerminal(id: number): Promise<void> {
+		const terminal = this.terminals.get(id);
+		if (!terminal) return;
+		await terminal.close();
+		this.terminals.delete(id);
+		terminal.dispose();
+		this.publishTerminals();
+	}
+
+	private publishTerminals(): void {
+		const list: TerminalSummary[] = [...this.terminals.values()]
+			.reverse()
+			.map((t) => ({ id: t.id, title: t.title, cwd: t.cwd, status: t.status }));
+		const previous = this.state.host.terminals;
+		const same =
+			previous.length === list.length &&
+			previous.every((t, i) => {
+				const next = list[i];
+				return next && t.id === next.id && t.title === next.title && t.cwd === next.cwd && t.status === next.status;
+			});
+		if (!same) this.setHost({ terminals: list });
+	}
+
+	private onTerminalEvent(event: EventFrame["event"]): void {
+		const terminalId = String((event as { terminalId?: unknown }).terminalId ?? "");
+		const terminal = [...this.terminals.values()].find((t) => t.terminalId === terminalId);
+		if (!terminal) return;
+		if (event.type === "terminal.output") terminal.output(String(event.data ?? ""));
+		else {
+			const code = typeof event.code === "number" ? event.code : null;
+			const error = typeof event.error === "string" ? `终端已丢失：${event.error}` : undefined;
+			terminal.exited(code, error);
+		}
+	}
+
+	private loseTerminals(reason: string): void {
+		for (const terminal of this.terminals.values()) {
+			if (terminal.status !== "exited") terminal.exited(null, reason);
+		}
+	}
+
+	// ---- pi extensions -----------------------------------------------------------------
+
+	/** Whether this phone may manage pi extensions on the connected computer (protocol 1.10). */
+	canManageExtensions(): boolean {
+		return this.hostSpeaks(10);
+	}
+
+	async listExtensions(workspaceId?: string): Promise<ExtensionListResult> {
+		return this.requireClient().request("extension.list", workspaceId ? { workspaceId } : {});
+	}
+
+	async setExtensionEnabled(resource: ExtensionResourceInfo, enabled: boolean, workspaceId?: string): Promise<void> {
+		await this.requireClient().request("extension.setEnabled", {
+			type: resource.type,
+			path: resource.path,
+			enabled,
+			...(workspaceId && resource.scope === "project" ? { workspaceId } : {}),
+		});
+	}
+
+	async installExtension(source: string, scope: ExtensionScope, workspaceId?: string): Promise<void> {
+		await this.requireClient().request(
+			"extension.install",
+			{ source, scope, ...(scope === "project" && workspaceId ? { workspaceId } : {}) },
+			{ timeoutMs: 10 * 60_000 },
+		);
+	}
+
+	async removeExtension(source: string, scope: ExtensionScope, workspaceId?: string): Promise<void> {
+		await this.requireClient().request(
+			"extension.remove",
+			{ source, scope, ...(scope === "project" && workspaceId ? { workspaceId } : {}) },
+			{ timeoutMs: 5 * 60_000 },
+		);
+	}
+
+	async checkExtensionUpdates(workspaceId?: string): Promise<ExtensionUpdateInfo[]> {
+		const { updates } = await this.requireClient().request(
+			"extension.checkUpdates",
+			workspaceId ? { workspaceId } : {},
+			{ timeoutMs: 5 * 60_000 },
+		);
+		return updates;
+	}
+
+	/** Update one package, or every unpinned one without `source`. */
+	async updateExtensions(source?: string, workspaceId?: string): Promise<void> {
+		await this.requireClient().request(
+			"extension.update",
+			{ ...(source ? { source } : {}), ...(workspaceId ? { workspaceId } : {}) },
+			{ timeoutMs: 10 * 60_000 },
+		);
+	}
+
+	async deleteExtension(path: string, workspaceId?: string): Promise<void> {
+		await this.requireClient().request("extension.delete", { path, ...(workspaceId ? { workspaceId } : {}) });
 	}
 }
 
