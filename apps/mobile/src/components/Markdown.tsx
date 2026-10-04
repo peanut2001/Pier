@@ -142,7 +142,7 @@ export const Markdown = memo(function Markdown({ text }: { text: string }) {
 						);
 					case "quote":
 						return (
-							<Text key={key} selectable style={[styles.text, styles.quote, { color: p.muted, borderColor: p.border }]}>
+							<Text key={key} selectable style={[styles.text, styles.quote, { color: p.muted, borderColor: p.accent }]}>
 								{inline(block.text, p, key)}
 							</Text>
 						);
@@ -162,12 +162,12 @@ const styles = StyleSheet.create({
 	root: { gap: 8 },
 	text: { fontSize: 15, lineHeight: 22 },
 	bold: { fontWeight: "700" },
-	inlineCode: { fontFamily: MONO, fontSize: 13, borderRadius: 4 },
+	inlineCode: { fontFamily: MONO, fontSize: 13, borderRadius: 5 },
 	heading: { fontWeight: "700", marginTop: 4 },
-	codeBlock: { borderRadius: 12, borderWidth: StyleSheet.hairlineWidth, padding: 10, maxHeight: 360 },
+	codeBlock: { borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, padding: 12, maxHeight: 360 },
 	code: { fontFamily: MONO, fontSize: 12.5, lineHeight: 18 },
 	listRow: { flexDirection: "row", gap: 6 },
 	bullet: { minWidth: 14 },
 	listText: { flex: 1 },
-	quote: { borderLeftWidth: 3, paddingLeft: 10 },
+	quote: { borderLeftWidth: 3, paddingLeft: 12, borderRadius: 2 },
 });

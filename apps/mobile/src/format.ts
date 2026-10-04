@@ -54,3 +54,8 @@ export const POLICY_DESCRIPTION: Record<ApprovalPolicy, string> = {
 export function truncate(text: string, max: number): string {
 	return text.length > max ? `${text.slice(0, max)}…` : text;
 }
+
+/** Shorten a home-directory prefix (`/home/me`, `/Users/me`, `C:\Users\me`) to `~`. */
+export function shortPath(path: string): string {
+	return path.replace(/^(\/home\/[^/]+|\/Users\/[^/]+|\/root|[A-Za-z]:\\Users\\[^\\]+)(?=$|[\\/])/, "~");
+}

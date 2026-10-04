@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { KeyboardAvoider } from "../../../src/components/KeyboardAvoider.tsx";
-import { Button, Muted, Pill, Screen } from "../../../src/components/ui.tsx";
+import { Button, Icon, IconButton, Muted, Pill, Screen } from "../../../src/components/ui.tsx";
 import { useMobileState, useStore } from "../../../src/store.ts";
 import { MONO, RADIUS, usePalette } from "../../../src/theme.ts";
 
@@ -84,12 +84,14 @@ export default function AddWorkspace() {
 			onPress={() => void load(item.path)}
 			style={({ pressed }) => [styles.item, { borderColor: p.border, backgroundColor: pressed ? p.elevated : p.card }]}
 		>
-			<Text style={[styles.folder, { color: p.accent }]}>▸</Text>
+			<View style={[styles.folder, { backgroundColor: p.accentSoft }]}>
+				<Icon name={item.symlink ? "link" : "folder"} size={17} color={p.accent} />
+			</View>
 			<Text style={[styles.itemName, { color: p.text }]} numberOfLines={1}>
 				{item.name}
 			</Text>
 			{item.symlink ? <Pill text="链接" /> : null}
-			<Text style={[styles.chevron, { color: p.faint }]}>›</Text>
+			<Icon name="chevron-forward" size={17} color={p.faint} />
 		</Pressable>
 	);
 
@@ -100,16 +102,18 @@ export default function AddWorkspace() {
 				<View style={styles.top}>
 					<Muted>浏览 {hostName} 上的目录，选择一个作为工作区。Agent 会在这个目录中读写文件、运行命令。</Muted>
 					<View style={styles.bar}>
-						<Button
-							title="↑"
-							small
+						<IconButton
+							icon="arrow-up"
+							label="上一级目录"
+							tone="elevated"
 							disabled={!listing?.parent || loading}
 							onPress={() => listing?.parent && void load(listing.parent)}
 							testID="directory-up"
 						/>
-						<Button
-							title="⌂"
-							small
+						<IconButton
+							icon="home-outline"
+							label="主目录"
+							tone="elevated"
 							disabled={loading || !online}
 							onPress={() => void load(listing?.home)}
 							testID="directory-home"
@@ -142,7 +146,10 @@ export default function AddWorkspace() {
 					ListEmptyComponent={
 						<View style={styles.empty}>
 							{error ? (
-								<Text style={{ color: p.danger }}>{error}</Text>
+								<View style={styles.errorBox}>
+									<Icon name="alert-circle-outline" size={26} color={p.danger} />
+									<Text style={[styles.errorText, { color: p.danger }]}>{error}</Text>
+								</View>
 							) : !online && !listing ? (
 								<Muted>等待连接到电脑…</Muted>
 							) : !listing || loading ? (
@@ -177,6 +184,7 @@ export default function AddWorkspace() {
 					) : null}
 					<Button
 						title={`添加「${name}」为工作区`}
+						icon="add"
 						variant="primary"
 						loading={adding}
 						disabled={!listing || loading || !online || !!error}
@@ -196,8 +204,8 @@ const styles = StyleSheet.create({
 	input: {
 		flex: 1,
 		borderWidth: 1,
-		borderRadius: RADIUS.md,
-		paddingHorizontal: 12,
+		borderRadius: RADIUS.pill,
+		paddingHorizontal: 14,
 		paddingVertical: 9,
 		fontSize: 13.5,
 		fontFamily: MONO,
@@ -206,16 +214,17 @@ const styles = StyleSheet.create({
 	item: {
 		flexDirection: "row",
 		alignItems: "center",
-		gap: 10,
-		paddingVertical: 13,
-		paddingHorizontal: 14,
+		gap: 12,
+		paddingVertical: 10,
+		paddingHorizontal: 12,
 		borderWidth: StyleSheet.hairlineWidth,
-		borderRadius: RADIUS.md,
+		borderRadius: RADIUS.md + 2,
 		marginTop: 6,
 	},
-	folder: { fontSize: 14 },
-	itemName: { flex: 1, fontSize: 15 },
-	chevron: { fontSize: 20, marginTop: -2 },
+	folder: { width: 32, height: 32, borderRadius: 10, alignItems: "center", justifyContent: "center" },
+	itemName: { flex: 1, fontSize: 15, fontWeight: "500" },
+	errorBox: { alignItems: "center", gap: 8, paddingHorizontal: 16 },
+	errorText: { fontSize: 13.5, textAlign: "center" },
 	empty: { paddingVertical: 32, alignItems: "center" },
 	note: { textAlign: "center", paddingVertical: 12 },
 	footer: { gap: 10, paddingHorizontal: 16, paddingTop: 12, borderTopWidth: StyleSheet.hairlineWidth },

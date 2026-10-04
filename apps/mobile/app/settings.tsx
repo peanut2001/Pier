@@ -4,9 +4,9 @@ import * as Device from "expo-device";
 import { useEffect, useState } from "react";
 import { Platform, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { UpdateSettingsCard } from "../src/components/Update.tsx";
-import { Button, Card, Muted, Screen, Title } from "../src/components/ui.tsx";
+import { Button, Card, CardHeader, Muted, Screen } from "../src/components/ui.tsx";
 import { APP_VERSION, useMobileState, useStore } from "../src/store.ts";
-import { MONO, usePalette } from "../src/theme.ts";
+import { MONO, RADIUS, usePalette } from "../src/theme.ts";
 
 function engine(): string {
 	const hermes = (globalThis as { HermesInternal?: { getRuntimeProperties?: () => Record<string, string> } })
@@ -47,8 +47,11 @@ export default function Settings() {
 		<Screen>
 			<ScrollView contentContainerStyle={styles.content}>
 				<Card style={styles.card}>
-					<Title>这台设备</Title>
-					<Muted>配对时电脑上显示的名称（之后再配对的电脑生效）。</Muted>
+					<CardHeader
+						icon="phone-portrait-outline"
+						title="这台设备"
+						subtitle="配对时电脑上显示的名称（之后再配对的电脑生效）"
+					/>
 					<TextInput
 						value={name}
 						onChangeText={setName}
@@ -61,18 +64,21 @@ export default function Settings() {
 						disabled={!name.trim() || name.trim() === deviceName}
 						onPress={() => void store.setDeviceName(name)}
 					/>
-					<Muted>设备密钥指纹（配对时与电脑上显示的核对）：</Muted>
-					<Text selectable style={[styles.mono, { color: p.text }]}>
-						{fingerprint}
-					</Text>
+					<View style={[styles.fingerprintBox, { backgroundColor: p.elevated }]}>
+						<Muted style={styles.fingerprintLabel}>设备密钥指纹 · 配对时与电脑上显示的核对</Muted>
+						<Text selectable style={[styles.mono, { color: p.text }]}>
+							{fingerprint}
+						</Text>
+					</View>
 				</Card>
 
 				<Card style={styles.card}>
-					<Title>加密性能测试</Title>
-					<Muted>
-						测量本机的 Noise 握手与帧加解密速度（Spike 3）。{engine()} · {Device.modelName ?? Platform.OS}
-					</Muted>
-					<Button title="运行测试" loading={running} onPress={() => void runBench()} />
+					<CardHeader
+						icon="speedometer-outline"
+						title="加密性能测试"
+						subtitle={`测量本机的 Noise 握手与帧加解密速度 · ${engine()} · ${Device.modelName ?? Platform.OS}`}
+					/>
+					<Button title="运行测试" icon="play" loading={running} onPress={() => void runBench()} />
 					{bench?.length ? (
 						<View style={[styles.bench, { backgroundColor: p.code }]}>
 							{bench.map((r) => (
@@ -88,7 +94,7 @@ export default function Settings() {
 				<UpdateSettingsCard />
 
 				<Card style={styles.card}>
-					<Title>关于</Title>
+					<CardHeader icon="information-circle-outline" title="关于" />
 					<Muted>
 						Pier Mobile {APP_VERSION}（{Constants.expoConfig?.version ?? "?"}）。手机只是遥控器：Agent
 						始终运行在你的电脑上， 模型与凭据保存在电脑的 pi 配置中。连接使用 Noise
@@ -101,10 +107,12 @@ export default function Settings() {
 }
 
 const styles = StyleSheet.create({
-	content: { padding: 16, gap: 14 },
-	card: { gap: 10 },
-	input: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 11, fontSize: 15 },
+	content: { padding: 16, paddingBottom: 40, gap: 14 },
+	card: { gap: 12 },
+	input: { borderWidth: 1, borderRadius: RADIUS.md, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15 },
 	mono: { fontFamily: MONO, fontSize: 16, letterSpacing: 1 },
-	bench: { borderRadius: 12, padding: 10, gap: 4 },
+	fingerprintBox: { borderRadius: RADIUS.md, padding: 12, gap: 4 },
+	fingerprintLabel: { fontSize: 12 },
+	bench: { borderRadius: RADIUS.md, padding: 12, gap: 4 },
 	benchLine: { fontFamily: MONO, fontSize: 12 },
 });

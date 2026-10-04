@@ -10,7 +10,7 @@ import {
 } from "@pier/chat-state";
 import { useEffect, useState } from "react";
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { usePalette } from "../theme.ts";
+import { FLOAT_SHADOW, usePalette } from "../theme.ts";
 
 const SOURCE_LABEL: Record<SlashCommand["source"], string> = {
 	builtin: "内置",
@@ -112,7 +112,7 @@ export function SlashMenu({ menu, onPick }: { menu: SlashMenuModel; onPick: (ent
 	const p = usePalette();
 	if (!menu.open) return null;
 	return (
-		<View style={[styles.root, { borderColor: p.border, backgroundColor: p.card }]}>
+		<View style={[styles.root, FLOAT_SHADOW, { borderColor: p.border, backgroundColor: p.card }]}>
 			<ScrollView keyboardShouldPersistTaps="always" style={styles.list}>
 				{menu.entries.map((entry) => (
 					<Pressable
@@ -127,8 +127,12 @@ export function SlashMenu({ menu, onPick }: { menu: SlashMenuModel; onPick: (ent
 								{entry.name}
 								{entry.hint ? <Text style={{ color: p.faint }}> {entry.hint}</Text> : null}
 							</Text>
-							{entry.selected ? <Text style={[styles.badge, { color: p.accent }]}>当前</Text> : null}
-							{entry.badge ? <Text style={[styles.badge, { color: p.muted }]}>{entry.badge}</Text> : null}
+							{entry.selected ? (
+								<Text style={[styles.badge, { color: p.accent, backgroundColor: p.accentSoft }]}>当前</Text>
+							) : null}
+							{entry.badge ? (
+								<Text style={[styles.badge, { color: p.muted, backgroundColor: p.elevated }]}>{entry.badge}</Text>
+							) : null}
 						</View>
 						{entry.description ? (
 							<Text style={[styles.description, { color: p.muted }]} numberOfLines={1}>
@@ -144,12 +148,19 @@ export function SlashMenu({ menu, onPick }: { menu: SlashMenuModel; onPick: (ent
 }
 
 const styles = StyleSheet.create({
-	root: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 16, overflow: "hidden" },
-	list: { maxHeight: 240 },
-	item: { paddingHorizontal: 14, paddingVertical: 10, gap: 2 },
+	root: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 18, overflow: "hidden" },
+	list: { maxHeight: 260 },
+	item: { paddingHorizontal: 14, paddingVertical: 10, gap: 3 },
 	itemHead: { flexDirection: "row", alignItems: "center", gap: 8 },
 	name: { flex: 1, fontSize: 14, fontFamily: Platform.select({ ios: "Menlo", default: "monospace" }) },
-	badge: { fontSize: 11 },
+	badge: {
+		fontSize: 10.5,
+		fontWeight: "600",
+		paddingHorizontal: 6,
+		paddingVertical: 1,
+		borderRadius: 6,
+		overflow: "hidden",
+	},
 	description: { fontSize: 12 },
 	status: { padding: 12, fontSize: 13 },
 });

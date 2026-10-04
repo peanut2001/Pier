@@ -13,8 +13,9 @@ import {
 import { memo, useMemo, useState } from "react";
 import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { isBusy, truncate } from "../format.ts";
-import { MONO, type Palette, usePalette } from "../theme.ts";
+import { MONO, type Palette, RADIUS, usePalette } from "../theme.ts";
 import { Markdown } from "./Markdown.tsx";
+import { Icon, type IconName } from "./ui.tsx";
 
 const STATUS_LABEL: Record<ToolBlock["status"], string> = {
 	generating: "生成中",
@@ -34,6 +35,24 @@ const TOOL_LABEL: Record<string, string> = {
 	grep: "搜索",
 	find: "查找",
 	ls: "列目录",
+};
+
+const TOOL_ICON: Record<string, IconName> = {
+	bash: "terminal-outline",
+	powershell: "terminal-outline",
+	read: "document-text-outline",
+	write: "create-outline",
+	edit: "pencil-outline",
+	grep: "search-outline",
+	find: "search-outline",
+	ls: "folder-outline",
+};
+
+const STATUS_ICON: Partial<Record<ToolBlock["status"], IconName>> = {
+	done: "checkmark-circle",
+	error: "close-circle",
+	pending: "time-outline",
+	interrupted: "remove-circle-outline",
 };
 
 /** Keep very long outputs cheap to render on a phone. */
@@ -83,16 +102,29 @@ export const ToolCard = memo(function ToolCard({ block }: { block: ToolBlock }) 
 
 	return (
 		<View style={[styles.tool, { borderColor: p.border, backgroundColor: p.card }]}>
-			<Pressable style={styles.toolHeader} onPress={() => setOpen(!open)} accessibilityRole="button">
-				<Text style={[styles.toolName, { color: p.accent }]}>{TOOL_LABEL[call.name] ?? call.name}</Text>
-				<Text style={[styles.toolSummary, { color: p.text }]} numberOfLines={open ? 6 : 1}>
-					{summary}
-				</Text>
-				{status === "running" ? (
+			<Pressable
+				style={({ pressed }) => [styles.toolHeader, pressed && { backgroundColor: p.elevated }]}
+				onPress={() => setOpen(!open)}
+				accessibilityRole="button"
+				accessibilityLabel={`${TOOL_LABEL[call.name] ?? call.name}：${STATUS_LABEL[status]}`}
+			>
+				<View style={[styles.toolIcon, { backgroundColor: p.accentSoft }]}>
+					<Icon name={TOOL_ICON[call.name] ?? "construct-outline"} size={14} color={p.accent} />
+				</View>
+				<View style={styles.toolMain}>
+					<Text style={[styles.toolName, { color: p.muted }]}>{TOOL_LABEL[call.name] ?? call.name}</Text>
+					<Text style={[styles.toolSummary, { color: p.text }]} numberOfLines={open ? 6 : 1}>
+						{summary}
+					</Text>
+				</View>
+				{status === "running" || status === "generating" ? (
 					<ActivityIndicator size="small" color={p.accent} />
+				) : STATUS_ICON[status] ? (
+					<Icon name={STATUS_ICON[status] ?? "ellipse-outline"} size={18} color={statusColor(p, status)} />
 				) : (
 					<Text style={[styles.toolStatus, { color: statusColor(p, status) }]}>{STATUS_LABEL[status]}</Text>
 				)}
+				<Icon name={open ? "chevron-up" : "chevron-down"} size={14} color={p.faint} />
 			</Pressable>
 			{open ? (
 				<View style={styles.toolBody}>
@@ -129,10 +161,13 @@ function Thinking({ text, redacted, live }: { text: string; redacted: boolean; l
 	const [open, setOpen] = useState(false);
 	return (
 		<Pressable onPress={() => setOpen(!open)} style={[styles.thinking, { backgroundColor: p.elevated }]}>
-			<Text style={[styles.thinkingLabel, { color: p.muted }]}>
-				{redacted ? "思考内容已隐藏" : live ? "思考中…" : "思考过程"}
-				{redacted ? "" : open ? "  ▾" : "  ▸"}
-			</Text>
+			<View style={styles.thinkingHead}>
+				<Icon name={redacted ? "eye-off-outline" : "bulb-outline"} size={14} color={p.muted} />
+				<Text style={[styles.thinkingLabel, { color: p.muted }]}>
+					{redacted ? "思考内容已隐藏" : live ? "思考中…" : "思考过程"}
+				</Text>
+				{redacted ? null : <Icon name={open ? "chevron-up" : "chevron-down"} size={13} color={p.faint} />}
+			</View>
 			{open && !redacted ? <Text style={[styles.thinkingText, { color: p.muted }]}>{text}</Text> : null}
 		</Pressable>
 	);
@@ -156,6 +191,18 @@ function AssistantItem({ blocks, streaming }: { blocks: AssistantBlock[]; stream
 				}
 				return <ToolCard key={block.call.id} block={block} />;
 			})}
+		</View>
+	);
+}
+
+function Divider({ icon, text }: { icon: IconName; text: string }) {
+	const p = usePalette();
+	return (
+		<View style={styles.divider}>
+			<View style={[styles.dividerLine, { backgroundColor: p.border }]} />
+			<Icon name={icon} size={13} color={p.faint} />
+			<Text style={[styles.notice, { color: p.muted }]}>{text}</Text>
+			<View style={[styles.dividerLine, { backgroundColor: p.border }]} />
 		</View>
 	);
 }
@@ -187,8 +234,13 @@ const TranscriptRow = memo(function TranscriptRow({ item }: { item: TranscriptIt
 		case "bash":
 			return (
 				<View style={[styles.tool, { borderColor: p.border, backgroundColor: p.card }]}>
-					<Text style={[styles.toolSummary, styles.pad, { color: p.text }]}>$ {item.message.command}</Text>
-					<ScrollView horizontal style={[styles.output, { backgroundColor: p.code }]}>
+					<View style={styles.toolHeader}>
+						<View style={[styles.toolIcon, { backgroundColor: p.accentSoft }]}>
+							<Icon name="terminal-outline" size={14} color={p.accent} />
+						</View>
+						<Text style={[styles.toolSummary, styles.flex, { color: p.text }]}>$ {item.message.command}</Text>
+					</View>
+					<ScrollView horizontal style={[styles.output, styles.bashOutput, { backgroundColor: p.code }]}>
 						<Text style={[styles.mono, { color: p.codeText }]}>
 							{truncate(item.message.output ?? "", MAX_OUTPUT_CHARS)}
 						</Text>
@@ -196,9 +248,9 @@ const TranscriptRow = memo(function TranscriptRow({ item }: { item: TranscriptIt
 				</View>
 			);
 		case "compaction":
-			return <Text style={[styles.notice, { color: p.muted }]}>—— 上下文已压缩 ——</Text>;
+			return <Divider icon="contract-outline" text="上下文已压缩" />;
 		case "branchSummary":
-			return <Text style={[styles.notice, { color: p.muted }]}>—— 分支摘要 ——</Text>;
+			return <Divider icon="git-branch-outline" text="分支摘要" />;
 		case "custom":
 			return item.text ? <Markdown text={item.text} /> : null;
 		case "toolResult":
@@ -234,7 +286,12 @@ export function Transcript({ chat }: { chat: ChatState }) {
 				</View>
 			) : null}
 			{chat.errorMessage && !isBusy(chat.runState) ? (
-				<Text style={[styles.error, { color: p.danger, backgroundColor: p.dangerSoft }]}>{chat.errorMessage}</Text>
+				<View style={[styles.error, { backgroundColor: p.dangerSoft }]}>
+					<Icon name="alert-circle-outline" size={17} color={p.danger} />
+					<Text selectable style={[styles.errorText, { color: p.danger }]}>
+						{chat.errorMessage}
+					</Text>
+				</View>
 			) : null}
 		</View>
 	);
@@ -242,31 +299,37 @@ export function Transcript({ chat }: { chat: ChatState }) {
 
 const styles = StyleSheet.create({
 	transcript: { gap: 16, paddingHorizontal: 16, paddingTop: 14, paddingBottom: 24 },
+	flex: { flex: 1 },
 	user: {
 		alignSelf: "flex-end",
 		maxWidth: "86%",
-		borderRadius: 20,
+		borderRadius: 22,
 		borderBottomRightRadius: 6,
-		paddingHorizontal: 14,
+		paddingHorizontal: 15,
 		paddingVertical: 10,
 		gap: 6,
 	},
 	userText: { fontSize: 15.5, lineHeight: 22 },
 	userImage: { width: 160, height: 120, borderRadius: 12 },
 	assistant: { gap: 10 },
-	tool: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, overflow: "hidden" },
-	toolHeader: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, paddingVertical: 10 },
-	toolName: { fontSize: 12, fontWeight: "700" },
-	toolSummary: { flex: 1, fontFamily: MONO, fontSize: 12.5 },
+	tool: { borderWidth: StyleSheet.hairlineWidth, borderRadius: RADIUS.md + 2, overflow: "hidden" },
+	toolHeader: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 10, paddingVertical: 9 },
+	toolIcon: { width: 28, height: 28, borderRadius: 9, alignItems: "center", justifyContent: "center" },
+	toolMain: { flex: 1, gap: 1 },
+	toolName: { fontSize: 11, fontWeight: "700", letterSpacing: 0.3 },
+	toolSummary: { fontFamily: MONO, fontSize: 12.5 },
 	toolStatus: { fontSize: 12, fontWeight: "500" },
 	toolBody: { gap: 6, paddingHorizontal: 8, paddingBottom: 8 },
-	output: { borderRadius: 8, padding: 10, maxHeight: 280 },
+	output: { borderRadius: 10, padding: 10, maxHeight: 280 },
+	bashOutput: { marginHorizontal: 8, marginBottom: 8 },
 	mono: { fontFamily: MONO, fontSize: 12, lineHeight: 17 },
-	pad: { padding: 12 },
-	thinking: { alignSelf: "flex-start", maxWidth: "100%", borderRadius: 12, paddingHorizontal: 12, paddingVertical: 7 },
-	thinkingLabel: { fontSize: 13, fontWeight: "500" },
+	thinking: { alignSelf: "flex-start", maxWidth: "100%", borderRadius: 14, paddingHorizontal: 12, paddingVertical: 8 },
+	thinkingHead: { flexDirection: "row", alignItems: "center", gap: 6 },
+	thinkingLabel: { fontSize: 13, fontWeight: "600" },
 	thinkingText: { fontSize: 13, lineHeight: 19, marginTop: 6 },
 	notice: { textAlign: "center", fontSize: 12 },
+	divider: { flexDirection: "row", alignItems: "center", gap: 6 },
+	dividerLine: { flex: 1, height: StyleSheet.hairlineWidth },
 	waiting: {
 		alignSelf: "flex-start",
 		flexDirection: "row",
@@ -277,5 +340,6 @@ const styles = StyleSheet.create({
 		borderRadius: 999,
 	},
 	waitingText: { fontSize: 13, fontWeight: "600" },
-	error: { padding: 12, borderRadius: 12, fontSize: 13, overflow: "hidden" },
+	error: { flexDirection: "row", gap: 8, padding: 12, borderRadius: RADIUS.md },
+	errorText: { flex: 1, fontSize: 13, lineHeight: 19 },
 });
