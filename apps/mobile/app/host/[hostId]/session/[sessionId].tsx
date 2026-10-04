@@ -67,8 +67,11 @@ function MenuSection({ icon, title, children }: { icon: IconName; title: string;
 	);
 }
 
-/** Approval-policy picker of the session's workspace. The policy applies to every session in it. */
-function PolicySection({ workspaceId }: { workspaceId: string }) {
+/**
+ * The status bar's approval-mode sheet for the session's workspace. The policy applies to every
+ * session in it; the sheet closes once the pick is saved.
+ */
+function PolicySheet({ workspaceId, onClose }: { workspaceId: string; onClose: () => void }) {
 	const store = useStore();
 	const p = usePalette();
 	const workspace = useMobileState((s) => s.host.workspaces?.find((w) => w.id === workspaceId));
@@ -77,75 +80,82 @@ function PolicySection({ workspaceId }: { workspaceId: string }) {
 	if (!workspace) return null;
 	const canManage = online && store.canManageWorkspaces();
 	return (
-		<MenuSection icon="shield-outline" title="审批模式">
-			<View style={[styles.group, { backgroundColor: p.bg }]}>
-				{POLICIES.map((policy, index) => {
-					const selected = workspace.policy === policy;
-					const tint = policy === "auto" ? p.warning : p.accent;
-					return (
-						<Pressable
-							key={policy}
-							testID={`session-policy-${policy}`}
-							accessibilityRole="radio"
-							accessibilityState={{ selected, disabled: !canManage }}
-							disabled={!canManage || saving !== undefined}
-							style={({ pressed }) => [
-								styles.option,
-								index > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderColor: p.border },
-								pressed && { backgroundColor: p.elevated },
-							]}
-							onPress={async () => {
-								if (selected) return;
-								setSaving(policy);
-								try {
-									await store.setWorkspacePolicy(workspace.id, policy);
-								} finally {
-									setSaving(undefined);
-								}
-							}}
-						>
-							<View
-								style={[
-									styles.optionIcon,
-									{ backgroundColor: selected ? (policy === "auto" ? p.warningSoft : p.accentSoft) : p.elevated },
-								]}
-							>
-								<Icon name={POLICY_ICON[policy]} size={17} color={selected ? tint : p.muted} />
-							</View>
-							<View style={styles.flex}>
-								<Text style={[styles.optionName, { color: selected ? tint : canManage ? p.text : p.muted }]}>
-									{POLICY_LABEL[policy]}
-								</Text>
-								<Muted style={[styles.optionText, policy === "auto" ? { color: p.warning } : undefined]}>
-									{POLICY_SUMMARY[policy]}
-								</Muted>
-							</View>
-							{saving === policy ? (
-								<ActivityIndicator size="small" color={p.accent} />
-							) : selected ? (
-								<Icon name="checkmark-circle" size={22} color={tint} />
-							) : null}
-						</Pressable>
-					);
-				})}
-			</View>
-			<Muted style={styles.policyNote}>
-				{!online
-					? "连接到电脑后才能修改。"
-					: !canManage
-						? "这台电脑上的 Pier 版本较旧，请先升级，或在电脑上修改审批模式。"
-						: `对工作区「${workspace.name}」的所有会话立即生效。`}
-			</Muted>
-		</MenuSection>
+		<Sheet onClose={onClose}>
+			<ScrollView contentContainerStyle={styles.sheetContent}>
+				<MenuSection icon="shield-outline" title="审批模式">
+					<View style={[styles.group, { backgroundColor: p.bg }]}>
+						{POLICIES.map((policy, index) => {
+							const selected = workspace.policy === policy;
+							const tint = policy === "auto" ? p.warning : p.accent;
+							return (
+								<Pressable
+									key={policy}
+									testID={`session-policy-${policy}`}
+									accessibilityRole="radio"
+									accessibilityState={{ selected, disabled: !canManage }}
+									disabled={!canManage || saving !== undefined}
+									style={({ pressed }) => [
+										styles.option,
+										index > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderColor: p.border },
+										pressed && { backgroundColor: p.elevated },
+									]}
+									onPress={async () => {
+										if (selected) {
+											onClose();
+											return;
+										}
+										setSaving(policy);
+										const saved = await store.setWorkspacePolicy(workspace.id, policy);
+										setSaving(undefined);
+										// On failure the store shows why; stay open to try again.
+										if (saved) onClose();
+									}}
+								>
+									<View
+										style={[
+											styles.optionIcon,
+											{ backgroundColor: selected ? (policy === "auto" ? p.warningSoft : p.accentSoft) : p.elevated },
+										]}
+									>
+										<Icon name={POLICY_ICON[policy]} size={17} color={selected ? tint : p.muted} />
+									</View>
+									<View style={styles.flex}>
+										<Text style={[styles.optionName, { color: selected ? tint : canManage ? p.text : p.muted }]}>
+											{POLICY_LABEL[policy]}
+										</Text>
+										<Muted style={[styles.optionText, policy === "auto" ? { color: p.warning } : undefined]}>
+											{POLICY_SUMMARY[policy]}
+										</Muted>
+									</View>
+									{saving === policy ? (
+										<ActivityIndicator size="small" color={p.accent} />
+									) : selected ? (
+										<Icon name="checkmark-circle" size={22} color={tint} />
+									) : null}
+								</Pressable>
+							);
+						})}
+					</View>
+					<Muted style={styles.policyNote}>
+						{!online
+							? "连接到电脑后才能修改。"
+							: !canManage
+								? "这台电脑上的 Pier 版本较旧，请先升级，或在电脑上修改审批模式。"
+								: `对工作区「${workspace.name}」的所有会话立即生效。`}
+					</Muted>
+				</MenuSection>
+			</ScrollView>
+		</Sheet>
 	);
 }
 
-function SessionMenu({ chat, onClose }: { chat: ChatController; onClose: () => void }) {
-	const store = useStore();
-	const router = useRouter();
+/**
+ * The composer's model sheet, as on the desktop: the thinking-level slider on top, then the
+ * models to switch to.
+ */
+function ModelSheet({ chat, onClose }: { chat: ChatController; onClose: () => void }) {
 	const p = usePalette();
 	const [models, setModels] = useState<ModelInfo[] | undefined>();
-	const [busy, setBusy] = useState(false);
 	const [sliding, setSliding] = useState(false);
 	const [switching, setSwitching] = useState<string | undefined>();
 	// Follow the session itself, so changes made on the computer show up here too.
@@ -176,7 +186,6 @@ function SessionMenu({ chat, onClose }: { chat: ChatController; onClose: () => v
 	return (
 		<Sheet onClose={onClose}>
 			<ScrollView contentContainerStyle={styles.sheetContent} scrollEnabled={!sliding}>
-				<PolicySection workspaceId={chat.workspaceId} />
 				{current ? (
 					<View style={[styles.thinking, { backgroundColor: p.bg }]}>
 						{levels.length > 1 ? (
@@ -246,6 +255,19 @@ function SessionMenu({ chat, onClose }: { chat: ChatController; onClose: () => v
 						</View>
 					))}
 				</MenuSection>
+			</ScrollView>
+		</Sheet>
+	);
+}
+
+/** The header's "…" sheet: actions on the session itself. */
+function ActionsSheet({ chat, onClose }: { chat: ChatController; onClose: () => void }) {
+	const store = useStore();
+	const router = useRouter();
+	const [busy, setBusy] = useState(false);
+	return (
+		<Sheet onClose={onClose}>
+			<View style={styles.sheetContent}>
 				<View style={styles.menuActions}>
 					{chat.chat.capabilities?.compact === false ? null : (
 						<Button
@@ -284,7 +306,7 @@ function SessionMenu({ chat, onClose }: { chat: ChatController; onClose: () => v
 						}}
 					/>
 				</View>
-			</ScrollView>
+			</View>
 		</Sheet>
 	);
 }
@@ -301,7 +323,7 @@ export default function SessionScreen() {
 	const connection = useMobileState((s) => (s.host.hostId === hostId ? s.host.connection : "none"));
 	const revoked = useMobileState((s) => s.host.hostId === hostId && s.host.revoked);
 	useMobileState((s) => s.chatsVersion);
-	const [menu, setMenu] = useState(false);
+	const [sheet, setSheet] = useState<"policy" | "model" | "actions">();
 	const scroller = useRef<ScrollView>(null);
 	const nearBottom = useRef(true);
 
@@ -345,7 +367,9 @@ export default function SessionScreen() {
 				options={{
 					title,
 					headerRight: () =>
-						chat ? <HeaderAction label="会话选项" icon="ellipsis-horizontal" onPress={() => setMenu(true)} /> : null,
+						chat ? (
+							<HeaderAction label="会话选项" icon="ellipsis-horizontal" onPress={() => setSheet("actions")} />
+						) : null,
 				}}
 			/>
 			<View style={[styles.statusBar, { borderColor: p.border }]}>
@@ -368,7 +392,7 @@ export default function SessionScreen() {
 				{policy ? (
 					<Pressable
 						testID="session-policy-chip"
-						onPress={() => chat && setMenu(true)}
+						onPress={() => chat && setSheet("policy")}
 						style={({ pressed }) => [
 							styles.chip,
 							{ backgroundColor: policy === "auto" ? p.warningSoft : p.elevated },
@@ -429,12 +453,16 @@ export default function SessionScreen() {
 							chat={chat}
 							runState={state.runState}
 							{...(modelLabel ? { model: modelLabel } : {})}
-							onModelPress={() => setMenu(true)}
+							onModelPress={() => setSheet("model")}
 						/>
 					</View>
 				</>
 			) : null}
-			{menu && chat ? <SessionMenu chat={chat} onClose={() => setMenu(false)} /> : null}
+			{chat && sheet === "policy" ? (
+				<PolicySheet workspaceId={chat.workspaceId} onClose={() => setSheet(undefined)} />
+			) : null}
+			{chat && sheet === "model" ? <ModelSheet chat={chat} onClose={() => setSheet(undefined)} /> : null}
+			{chat && sheet === "actions" ? <ActionsSheet chat={chat} onClose={() => setSheet(undefined)} /> : null}
 		</KeyboardAvoider>
 	);
 }
