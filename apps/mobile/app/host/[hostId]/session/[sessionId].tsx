@@ -6,7 +6,7 @@ import {
 	thinkingLabel,
 	userText,
 } from "@pier/chat-state";
-import type { ModelInfo, SessionSummary } from "@pier/protocol";
+import type { ApprovalPolicy, ModelInfo, SessionSummary } from "@pier/protocol";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -33,7 +33,7 @@ import {
 	SectionLabel,
 	StatusDot,
 } from "../../../../src/components/ui.tsx";
-import { isBusy, RUN_STATE_LABEL, sessionTitle } from "../../../../src/format.ts";
+import { isBusy, POLICY_LABEL, POLICY_SUMMARY, RUN_STATE_LABEL, sessionTitle } from "../../../../src/format.ts";
 import { useChatView, useMobileState, useStore } from "../../../../src/store.ts";
 import { RADIUS, usePalette } from "../../../../src/theme.ts";
 
@@ -52,6 +52,77 @@ function placeholderSummary(sessionId: string, workspaceId: string): SessionSumm
 	};
 }
 
+const POLICIES: ApprovalPolicy[] = ["ask", "smart", "auto"];
+
+/** Approval-policy picker of the session's workspace. The policy applies to every session in it. */
+function PolicySection({ workspaceId }: { workspaceId: string }) {
+	const store = useStore();
+	const p = usePalette();
+	const workspace = useMobileState((s) => s.host.workspaces?.find((w) => w.id === workspaceId));
+	const online = useMobileState((s) => s.host.connection === "open");
+	const [saving, setSaving] = useState<ApprovalPolicy>();
+	if (!workspace) return null;
+	const canManage = online && store.canManageWorkspaces();
+	return (
+		<>
+			<SectionLabel>审批模式</SectionLabel>
+			<View style={[styles.group, { backgroundColor: p.bg }]}>
+				{POLICIES.map((policy, index) => {
+					const selected = workspace.policy === policy;
+					return (
+						<Pressable
+							key={policy}
+							testID={`session-policy-${policy}`}
+							accessibilityRole="radio"
+							accessibilityState={{ selected, disabled: !canManage }}
+							disabled={!canManage || saving !== undefined}
+							style={({ pressed }) => [
+								styles.option,
+								index > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderColor: p.border },
+								selected && { backgroundColor: p.accentSoft },
+								pressed && { backgroundColor: p.elevated },
+							]}
+							onPress={async () => {
+								if (selected) return;
+								setSaving(policy);
+								try {
+									await store.setWorkspacePolicy(workspace.id, policy);
+								} finally {
+									setSaving(undefined);
+								}
+							}}
+						>
+							<View style={styles.flex}>
+								<Text
+									style={[
+										styles.optionName,
+										{ color: selected ? (policy === "auto" ? p.warning : p.accent) : canManage ? p.text : p.muted },
+									]}
+								>
+									{POLICY_LABEL[policy]}
+								</Text>
+								<Muted style={policy === "auto" ? { color: p.warning } : undefined}>{POLICY_SUMMARY[policy]}</Muted>
+							</View>
+							{saving === policy ? (
+								<ActivityIndicator size="small" color={p.accent} />
+							) : selected ? (
+								<Text style={[styles.check, { color: policy === "auto" ? p.warning : p.accent }]}>✓</Text>
+							) : null}
+						</Pressable>
+					);
+				})}
+			</View>
+			<Muted style={styles.policyNote}>
+				{!online
+					? "连接到电脑后才能修改。"
+					: !canManage
+						? "这台电脑上的 Pier 版本较旧，请先升级，或在电脑上修改审批模式。"
+						: `对工作区「${workspace.name}」的所有会话立即生效。`}
+			</Muted>
+		</>
+	);
+}
+
 function SessionMenu({ chat, onClose }: { chat: ChatController; onClose: () => void }) {
 	const store = useStore();
 	const router = useRouter();
@@ -61,6 +132,7 @@ function SessionMenu({ chat, onClose }: { chat: ChatController; onClose: () => v
 	const [busy, setBusy] = useState(false);
 	const [sliding, setSliding] = useState(false);
 	const [switching, setSwitching] = useState<string | undefined>();
+	const hasWorkspace = useMobileState((s) => s.host.workspaces?.some((w) => w.id === chat.workspaceId) ?? false);
 	// Follow the session itself, so changes made on the computer show up here too.
 	const view = useChatView(chat);
 	const state = view?.chat ?? chat.chat;
@@ -92,9 +164,10 @@ function SessionMenu({ chat, onClose }: { chat: ChatController; onClose: () => v
 			<View style={[styles.sheet, { backgroundColor: p.card, paddingBottom: insets.bottom + 16 }]}>
 				<View style={[styles.grabber, { backgroundColor: p.border }]} />
 				<ScrollView contentContainerStyle={styles.sheetContent} scrollEnabled={!sliding}>
+					<PolicySection workspaceId={chat.workspaceId} />
 					{current ? (
 						<>
-							<SectionLabel>思考程度</SectionLabel>
+							<SectionLabel style={hasWorkspace ? styles.sectionTitle : undefined}>思考程度</SectionLabel>
 							<View style={[styles.thinking, { backgroundColor: p.bg }]}>
 								{levels.length > 1 ? (
 									<ThinkingSlider
@@ -109,7 +182,7 @@ function SessionMenu({ chat, onClose }: { chat: ChatController; onClose: () => v
 							</View>
 						</>
 					) : null}
-					<SectionLabel style={current ? styles.sectionTitle : undefined}>模型</SectionLabel>
+					<SectionLabel style={current || hasWorkspace ? styles.sectionTitle : undefined}>模型</SectionLabel>
 					{!models ? <ActivityIndicator color={p.accent} /> : null}
 					{models && !models.length ? <Muted>没有可用的模型，请在电脑上的 Pier 里配置模型。</Muted> : null}
 					{[...groups].map(([provider, list]) => (
@@ -230,6 +303,10 @@ export default function SessionScreen() {
 		return store.chat(store.findSession(sessionId) ?? placeholderSummary(sessionId, workspaceId ?? ""));
 	}, [ready, sessionId, workspaceId, store, store.activeClient]);
 	const view = useChatView(chat);
+	const sessionWorkspaceId = chat?.workspaceId || workspaceId;
+	const policy = useMobileState((s) =>
+		s.host.hostId === hostId ? s.host.workspaces?.find((w) => w.id === sessionWorkspaceId)?.policy : undefined,
+	);
 	const state = view?.chat;
 	const firstUser = state?.messages.find((m) => isRole(m, "user"));
 	const title = state?.session
@@ -284,6 +361,19 @@ export default function SessionScreen() {
 									{thinkingLabel(clampThinking(state.thinkingLevel, supportedThinkingLevels(state.model)))}
 								</Text>
 							) : null}
+						</Text>
+						<Text style={[styles.statusText, { color: p.faint }]}>▾</Text>
+					</Pressable>
+				) : null}
+				{policy ? (
+					<Pressable
+						testID="session-policy-chip"
+						onPress={() => chat && setMenu(true)}
+						style={[styles.chip, { backgroundColor: policy === "auto" ? p.warningSoft : p.elevated }]}
+						accessibilityLabel={`审批模式：${POLICY_LABEL[policy]}，点按切换`}
+					>
+						<Text style={[styles.statusText, { color: policy === "auto" ? p.warning : p.text }]} numberOfLines={1}>
+							{POLICY_LABEL[policy]}
 						</Text>
 						<Text style={[styles.statusText, { color: p.faint }]}>▾</Text>
 					</Pressable>
@@ -361,6 +451,7 @@ const styles = StyleSheet.create({
 	optionName: { fontSize: 15, fontWeight: "600", flexShrink: 1 },
 	check: { fontSize: 17, fontWeight: "700" },
 	sectionTitle: { marginTop: 12 },
+	policyNote: { fontSize: 12, marginHorizontal: 4 },
 	thinking: { borderRadius: RADIUS.md, paddingHorizontal: 14, paddingVertical: 12 },
 	providerGroup: { gap: 6 },
 	providerTitle: { fontSize: 12, fontWeight: "600", paddingHorizontal: 4 },
