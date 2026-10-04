@@ -11,6 +11,7 @@ import { ChannelError, fromBase64Url, type KeyPair, PairingUriError, parsePairin
 import {
 	type AgentRuntimeId,
 	type AgentRuntimeInfo,
+	type ApprovalPolicy,
 	type EventFrame,
 	type HostDirectoryListing,
 	type HostInfo,
@@ -444,6 +445,62 @@ export class MobileStore {
 			if (this.client === client) this.toast("error", `添加工作区失败：${errorText(error)}`);
 			return undefined;
 		}
+	}
+
+	/**
+	 * Whether the connected computer lets this phone change or remove workspaces
+	 * (`workspace.setPolicy` and `workspace.remove` are open to paired devices since protocol 1.10).
+	 */
+	canManageWorkspaces(): boolean {
+		return this.hostSpeaks(10);
+	}
+
+	/** Change a workspace's tool approval policy. Resolves to whether it worked. */
+	async setWorkspacePolicy(workspaceId: string, policy: ApprovalPolicy): Promise<boolean> {
+		const client = this.client;
+		if (!client) return false;
+		try {
+			const { workspace } = await client.request("workspace.setPolicy", { workspaceId, policy });
+			if (this.client === client) {
+				this.setHost((h) => ({
+					workspaces: (h.workspaces ?? []).map((w) => (w.id === workspace.id ? workspace : w)),
+				}));
+			}
+			return true;
+		} catch (error) {
+			if (this.client === client) this.toast("error", `修改审批策略失败：${errorText(error)}`);
+			return false;
+		}
+	}
+
+	/**
+	 * Remove a workspace from the computer's Pier. Its running sessions are closed; no files or
+	 * session histories are deleted. Resolves to whether it worked.
+	 */
+	async removeWorkspace(workspaceId: string): Promise<boolean> {
+		const client = this.client;
+		if (!client) return false;
+		try {
+			await client.request("workspace.remove", { workspaceId });
+		} catch (error) {
+			if (this.client === client) this.toast("error", `移除工作区失败：${errorText(error)}`);
+			return false;
+		}
+		if (this.client !== client) return true;
+		for (const [id, chat] of this.chats) {
+			if (chat.workspaceId !== workspaceId) continue;
+			chat.dispose();
+			this.chats.delete(id);
+			this.recent = this.recent.filter((r) => r !== id);
+			this.drafts.delete(id);
+		}
+		clearTimeout(this.refreshTimers.get(workspaceId));
+		this.refreshTimers.delete(workspaceId);
+		this.setHost((h) => {
+			const { [workspaceId]: _removed, ...sessions } = h.sessions;
+			return { workspaces: (h.workspaces ?? []).filter((w) => w.id !== workspaceId), sessions };
+		});
+		return true;
 	}
 
 	/** Agent runtimes of the connected computer that can run sessions (none before protocol 1.22). */

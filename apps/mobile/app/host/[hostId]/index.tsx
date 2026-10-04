@@ -222,6 +222,8 @@ export default function HostScreen() {
 		}
 		router.push({ pathname: "/host/[hostId]/add-workspace", params: { hostId } });
 	};
+	const openWorkspace = (workspaceId: string) =>
+		router.push({ pathname: "/host/[hostId]/workspace/[workspaceId]", params: { hostId, workspaceId } });
 
 	return (
 		<Screen>
@@ -285,13 +287,26 @@ export default function HostScreen() {
 				}
 				renderSectionHeader={({ section }) => (
 					<View style={styles.sectionHeader}>
-						<Avatar name={section.workspace.name} size={38} />
-						<View style={styles.flex}>
-							<Title numberOfLines={1}>{section.workspace.name}</Title>
-							<Text style={[styles.path, { color: p.faint }]} numberOfLines={1} ellipsizeMode="head">
-								{section.workspace.path}
-							</Text>
-						</View>
+						<Pressable
+							testID={`workspace-${section.workspace.id}`}
+							accessibilityRole="button"
+							accessibilityLabel={`工作区设置：${section.workspace.name}`}
+							onPress={() => openWorkspace(section.workspace.id)}
+							style={({ pressed }) => [styles.sectionInfo, pressed && styles.pressed]}
+						>
+							<Avatar name={section.workspace.name} size={38} />
+							<View style={styles.flex}>
+								<View style={styles.nameRow}>
+									<Title numberOfLines={1} style={styles.shrink}>
+										{section.workspace.name}
+									</Title>
+									<Text style={[styles.moreGlyph, { color: p.faint }]}>⋯</Text>
+								</View>
+								<Text style={[styles.path, { color: p.faint }]} numberOfLines={1} ellipsizeMode="head">
+									{section.workspace.path}
+								</Text>
+							</View>
+						</Pressable>
 						<Button
 							title="新建"
 							icon="+"
@@ -369,6 +384,11 @@ const styles = StyleSheet.create({
 		paddingHorizontal: 2,
 	},
 	path: { fontSize: 11.5, fontFamily: MONO, marginTop: 2 },
+	sectionInfo: { flex: 1, flexDirection: "row", alignItems: "center", gap: 12 },
+	nameRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+	shrink: { flexShrink: 1 },
+	moreGlyph: { fontSize: 18, fontWeight: "700", marginTop: -2 },
+	pressed: { opacity: 0.6 },
 	session: {
 		flexDirection: "row",
 		alignItems: "center",
