@@ -49,6 +49,10 @@ export default function RootLayout() {
 						name="host/[hostId]/addresses"
 						options={{ title: "连接地址", presentation: "modal", animation: "slide_from_bottom" }}
 					/>
+					<Stack.Screen
+						name="host/[hostId]/add-workspace"
+						options={{ title: "添加工作区", presentation: "modal", animation: "slide_from_bottom" }}
+					/>
 					<Stack.Screen name="host/[hostId]/session/[sessionId]" options={{ title: "" }} />
 				</Stack>
 				<ToastHost />

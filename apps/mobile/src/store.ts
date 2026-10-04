@@ -12,6 +12,7 @@ import {
 	type AgentRuntimeId,
 	type AgentRuntimeInfo,
 	type EventFrame,
+	type HostDirectoryListing,
 	type HostInfo,
 	parseProtocolVersion,
 	type SessionRunState,
@@ -406,11 +407,49 @@ export class MobileStore {
 		}
 	}
 
+	/** Whether the connected computer speaks protocol `1.<minor>` or later. */
+	private hostSpeaks(minor: number): boolean {
+		const version = this.state.host.info ? parseProtocolVersion(this.state.host.info.protocolVersion) : undefined;
+		return version !== undefined && (version.major > 1 || (version.major === 1 && version.minor >= minor));
+	}
+
+	/**
+	 * Whether the connected computer lets this phone add workspaces (`workspace.add` and
+	 * `host.listDirectories` are open to paired devices since protocol 1.10).
+	 */
+	canAddWorkspace(): boolean {
+		return this.hostSpeaks(10);
+	}
+
+	/** Subdirectories of a directory on the connected computer (its home directory by default). */
+	async listDirectories(path?: string): Promise<HostDirectoryListing> {
+		const client = this.client;
+		if (!client) throw new Error("尚未连接到电脑");
+		return client.request("host.listDirectories", path ? { path } : {});
+	}
+
+	/** Add a directory of the connected computer as a workspace. Resolves to it, or `undefined` on failure. */
+	async addWorkspace(path: string): Promise<WorkspaceInfo | undefined> {
+		const client = this.client;
+		if (!client) return undefined;
+		try {
+			const { workspace } = await client.request("workspace.add", { path });
+			if (this.client !== client) return workspace;
+			this.setHost((h) => ({
+				workspaces: [...(h.workspaces ?? []).filter((w) => w.id !== workspace.id), workspace],
+			}));
+			void this.refreshSessions(workspace.id);
+			return workspace;
+		} catch (error) {
+			if (this.client === client) this.toast("error", `添加工作区失败：${errorText(error)}`);
+			return undefined;
+		}
+	}
+
 	/** Agent runtimes of the connected computer that can run sessions (none before protocol 1.22). */
 	async availableRuntimes(): Promise<AgentRuntimeInfo[]> {
 		const client = this.client;
-		const version = this.state.host.info ? parseProtocolVersion(this.state.host.info.protocolVersion) : undefined;
-		if (!client || !version || (version.major === 1 && version.minor < 22)) return [];
+		if (!client || !this.hostSpeaks(22)) return [];
 		try {
 			return (await client.request("runtime.list", {})).runtimes.filter((r) => r.available);
 		} catch {
@@ -496,8 +535,7 @@ export class MobileStore {
 
 	/** Whether the connected computer can archive sessions (`session.archive`, protocol 1.14). */
 	canArchive(): boolean {
-		const version = this.state.host.info ? parseProtocolVersion(this.state.host.info.protocolVersion) : undefined;
-		return version !== undefined && (version.major > 1 || (version.major === 1 && version.minor >= 14));
+		return this.hostSpeaks(14);
 	}
 
 	/** Archive or unarchive a session. Resolves to whether it worked. */
