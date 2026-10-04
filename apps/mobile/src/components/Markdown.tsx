@@ -1,173 +1,292 @@
-import { memo, type ReactNode } from "react";
-import { ScrollView, StyleSheet, Text, View } from "react-native";
+import type { BlockContent, DefinitionContent, List, PhrasingContent, Root, RootContent, Table } from "mdast";
+import { memo, type ReactNode, useMemo } from "react";
+import { Linking, ScrollView, StyleSheet, Text, type TextStyle, View } from "react-native";
+import { parseMarkdown, safeUrl, tableColumnWidths } from "../markdown.ts";
 import { MONO, type Palette, usePalette } from "../theme.ts";
 
 /**
- * Deliberately small Markdown renderer for chat text: fenced code blocks, headings,
- * list bullets, blockquotes, and inline `code` / **bold**. Everything else stays plain
- * (selectable) text, which is robust while streaming.
+ * Native Markdown renderer for chat text. Parsing is remark-parse + remark-gfm (the same
+ * parser as the desktop app); this file only maps the resulting mdast nodes onto
+ * React Native views, so tables, task lists, links, emphasis, strikethrough, rules and
+ * footnotes render instead of leaking their syntax.
  */
 
-type Block =
-	| { kind: "code"; lang: string; text: string }
-	| { kind: "heading"; level: number; text: string }
-	| { kind: "quote"; text: string }
-	| { kind: "list"; bullet: string; text: string; indent: number }
-	| { kind: "para"; text: string };
+type Ctx = { p: Palette; color: string; depth: number };
 
-function parseBlocks(source: string): Block[] {
-	const blocks: Block[] = [];
-	const lines = source.split("\n");
-	let para: string[] = [];
-	const flush = () => {
-		if (para.length) blocks.push({ kind: "para", text: para.join("\n") });
-		para = [];
-	};
-	for (let i = 0; i < lines.length; i++) {
-		const line = lines[i] ?? "";
-		const fence = /^\s*(```|~~~)(.*)$/.exec(line);
-		if (fence) {
-			flush();
-			const marker = fence[1] ?? "```";
-			const body: string[] = [];
-			i++;
-			while (i < lines.length && !(lines[i] ?? "").trim().startsWith(marker)) {
-				body.push(lines[i] ?? "");
-				i++;
+function parse(text: string): Root {
+	try {
+		return parseMarkdown(text);
+	} catch {
+		return { type: "root", children: [{ type: "paragraph", children: [{ type: "text", value: text }] }] };
+	}
+}
+
+function open(url: string | undefined) {
+	if (url) void Linking.openURL(url).catch(() => undefined);
+}
+
+function renderInline(nodes: PhrasingContent[], ctx: Ctx, key: string): ReactNode[] {
+	return nodes.map((node, index) => {
+		const k = `${key}.${index}`;
+		switch (node.type) {
+			case "text":
+				return node.value;
+			case "break":
+				return "\n";
+			case "strong":
+				return (
+					<Text key={k} style={styles.bold}>
+						{renderInline(node.children, ctx, k)}
+					</Text>
+				);
+			case "emphasis":
+				return (
+					<Text key={k} style={styles.italic}>
+						{renderInline(node.children, ctx, k)}
+					</Text>
+				);
+			case "delete":
+				return (
+					<Text key={k} style={styles.strike}>
+						{renderInline(node.children, ctx, k)}
+					</Text>
+				);
+			case "inlineCode":
+				return (
+					<Text key={k} style={[styles.inlineCode, { backgroundColor: ctx.p.elevated, color: ctx.p.text }]}>
+						{node.value}
+					</Text>
+				);
+			case "link": {
+				const url = safeUrl(node.url);
+				return (
+					<Text
+						key={k}
+						style={url ? [styles.link, { color: ctx.p.accent }] : undefined}
+						onPress={url ? () => open(url) : undefined}
+						accessibilityRole={url ? "link" : undefined}
+					>
+						{renderInline(node.children, ctx, k)}
+					</Text>
+				);
 			}
-			blocks.push({ kind: "code", lang: (fence[2] ?? "").trim(), text: body.join("\n") });
-			continue;
+			case "image": {
+				const url = safeUrl(node.url);
+				const label = `[图片${node.alt ? `: ${node.alt}` : ""}]`;
+				return (
+					<Text
+						key={k}
+						style={url ? [styles.link, { color: ctx.p.accent }] : { color: ctx.p.muted }}
+						onPress={url ? () => open(url) : undefined}
+						accessibilityRole={url ? "link" : undefined}
+					>
+						{label}
+					</Text>
+				);
+			}
+			case "linkReference":
+				return (
+					<Text key={k} style={[styles.link, { color: ctx.p.accent }]}>
+						{renderInline(node.children, ctx, k)}
+					</Text>
+				);
+			case "imageReference":
+				return `[图片${node.alt ? `: ${node.alt}` : ""}]`;
+			case "footnoteReference":
+				return (
+					<Text key={k} style={[styles.footnoteRef, { color: ctx.p.accent }]}>
+						[{node.label ?? node.identifier}]
+					</Text>
+				);
+			case "html":
+				return node.value;
+			default:
+				return null;
 		}
-		const heading = /^(#{1,6})\s+(.*)$/.exec(line);
-		if (heading) {
-			flush();
-			blocks.push({ kind: "heading", level: heading[1]?.length ?? 1, text: heading[2] ?? "" });
-			continue;
-		}
-		const list = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/.exec(line);
-		if (list) {
-			flush();
-			const bullet = /\d/.test(list[2] ?? "") ? (list[2] ?? "") : "•";
-			blocks.push({
-				kind: "list",
-				bullet,
-				text: list[3] ?? "",
-				indent: Math.min(3, Math.floor((list[1]?.length ?? 0) / 2)),
-			});
-			continue;
-		}
-		const quote = /^>\s?(.*)$/.exec(line);
-		if (quote) {
-			flush();
-			blocks.push({ kind: "quote", text: quote[1] ?? "" });
-			continue;
-		}
-		if (!line.trim()) {
-			flush();
-			continue;
-		}
-		para.push(line);
-	}
-	flush();
-	return blocks;
+	});
 }
 
-function inline(text: string, p: Palette, key: string): ReactNode[] {
-	const parts: ReactNode[] = [];
-	const pattern = /(`[^`\n]+`|\*\*[^*\n]+\*\*)/g;
-	let last = 0;
-	let match: RegExpExecArray | null = pattern.exec(text);
-	let n = 0;
-	while (match) {
-		if (match.index > last) parts.push(text.slice(last, match.index));
-		const token = match[0];
-		if (token.startsWith("`")) {
-			parts.push(
-				<Text key={`${key}-${n++}`} style={[styles.inlineCode, { backgroundColor: p.elevated, color: p.text }]}>
-					{token.slice(1, -1)}
-				</Text>,
-			);
-		} else {
-			parts.push(
-				<Text key={`${key}-${n++}`} style={styles.bold}>
-					{token.slice(2, -2)}
-				</Text>,
-			);
-		}
-		last = match.index + token.length;
-		match = pattern.exec(text);
-	}
-	if (last < text.length) parts.push(text.slice(last));
-	return parts;
-}
-
-export const Markdown = memo(function Markdown({ text }: { text: string }) {
-	const p = usePalette();
-	const blocks = parseBlocks(text);
+function renderList(list: List, ctx: Ctx, key: string): ReactNode {
+	const start = list.start ?? 1;
+	const nested = { ...ctx, depth: ctx.depth + 1 };
 	return (
-		<View style={styles.root}>
-			{blocks.map((block, index) => {
-				const key = `b${index}`;
-				switch (block.kind) {
-					case "code":
-						return (
-							<ScrollView
-								key={key}
-								horizontal
-								style={[styles.codeBlock, { backgroundColor: p.code, borderColor: p.border }]}
-							>
-								<Text selectable style={[styles.code, { color: p.codeText }]}>
-									{block.text}
-								</Text>
-							</ScrollView>
-						);
-					case "heading":
-						return (
-							<Text
-								key={key}
-								selectable
-								style={[styles.heading, { color: p.text, fontSize: block.level <= 2 ? 18 : 16 }]}
-							>
-								{inline(block.text, p, key)}
-							</Text>
-						);
-					case "list":
-						return (
-							<View key={key} style={[styles.listRow, { paddingLeft: block.indent * 14 }]}>
-								<Text style={[styles.text, styles.bullet, { color: p.muted }]}>{block.bullet}</Text>
-								<Text selectable style={[styles.text, styles.listText, { color: p.text }]}>
-									{inline(block.text, p, key)}
-								</Text>
-							</View>
-						);
-					case "quote":
-						return (
-							<Text key={key} selectable style={[styles.text, styles.quote, { color: p.muted, borderColor: p.accent }]}>
-								{inline(block.text, p, key)}
-							</Text>
-						);
-					default:
-						return (
-							<Text key={key} selectable style={[styles.text, { color: p.text }]}>
-								{inline(block.text, p, key)}
-							</Text>
-						);
-				}
+		<View key={key} style={[styles.list, { gap: list.spread ? 8 : 4 }]}>
+			{list.children.map((item, index) => {
+				const k = `${key}.${index}`;
+				const task = typeof item.checked === "boolean";
+				const bullet = task
+					? item.checked
+						? "☑"
+						: "☐"
+					: list.ordered
+						? `${start + index}.`
+						: ctx.depth > 0
+							? "◦"
+							: "•";
+				return (
+					<View key={k} style={styles.listRow}>
+						<Text
+							style={[
+								styles.text,
+								styles.bullet,
+								{ color: task && item.checked ? ctx.p.accent : ctx.p.muted },
+								list.ordered && !task ? styles.ordinal : null,
+							]}
+						>
+							{bullet}
+						</Text>
+						<View style={[styles.listBody, { gap: item.spread ? 8 : 4 }]}>
+							{renderBlocks(item.children, nested, k)}
+						</View>
+					</View>
+				);
 			})}
 		</View>
 	);
+}
+
+const ALIGN: Record<string, TextStyle["textAlign"]> = { left: "left", center: "center", right: "right" };
+
+function renderTable(table: Table, ctx: Ctx, key: string): ReactNode {
+	const widths = tableColumnWidths(table);
+	const { p } = ctx;
+	return (
+		<ScrollView key={key} horizontal showsHorizontalScrollIndicator={false} style={styles.tableScroll}>
+			<View style={[styles.table, { borderColor: p.border }]}>
+				{table.children.map((row, rowIndex) => {
+					const rk = `${key}.${rowIndex}`;
+					const header = rowIndex === 0;
+					return (
+						<View
+							key={rk}
+							style={[
+								styles.tableRow,
+								header ? { backgroundColor: p.elevated } : null,
+								rowIndex > 0 ? { borderTopWidth: StyleSheet.hairlineWidth, borderColor: p.border } : null,
+							]}
+						>
+							{widths.map((width, column) => {
+								const cell = row.children[column];
+								const ck = `${rk}.${column}`;
+								const align = ALIGN[table.align?.[column] ?? ""] ?? "left";
+								return (
+									<View
+										key={ck}
+										style={[
+											styles.tableCell,
+											{ width },
+											column > 0 ? { borderLeftWidth: StyleSheet.hairlineWidth, borderColor: p.border } : null,
+										]}
+									>
+										<Text
+											selectable
+											style={[styles.tableText, { color: p.text, textAlign: align }, header ? styles.bold : null]}
+										>
+											{cell ? renderInline(cell.children, ctx, ck) : null}
+										</Text>
+									</View>
+								);
+							})}
+						</View>
+					);
+				})}
+			</View>
+		</ScrollView>
+	);
+}
+
+function renderBlocks(nodes: (RootContent | BlockContent | DefinitionContent)[], ctx: Ctx, key: string): ReactNode[] {
+	const { p } = ctx;
+	return nodes.map((node, index) => {
+		const k = `${key}.${index}`;
+		switch (node.type) {
+			case "paragraph":
+				return (
+					<Text key={k} selectable style={[styles.text, { color: ctx.color }]}>
+						{renderInline(node.children, ctx, k)}
+					</Text>
+				);
+			case "heading":
+				return (
+					<Text
+						key={k}
+						selectable
+						style={[styles.heading, { color: ctx.color, fontSize: HEADING_SIZE[node.depth] ?? 15 }]}
+					>
+						{renderInline(node.children, ctx, k)}
+					</Text>
+				);
+			case "code":
+				return (
+					<ScrollView key={k} horizontal style={[styles.codeBlock, { backgroundColor: p.code, borderColor: p.border }]}>
+						<Text selectable style={[styles.code, { color: p.codeText }]}>
+							{node.value}
+						</Text>
+					</ScrollView>
+				);
+			case "list":
+				return renderList(node, ctx, k);
+			case "blockquote":
+				return (
+					<View key={k} style={[styles.quote, { borderColor: p.accent }]}>
+						{renderBlocks(node.children, { ...ctx, color: p.muted }, k)}
+					</View>
+				);
+			case "table":
+				return renderTable(node, ctx, k);
+			case "thematicBreak":
+				return <View key={k} style={[styles.rule, { backgroundColor: p.border }]} />;
+			case "html":
+				return (
+					<Text key={k} selectable style={[styles.text, { color: p.muted }]}>
+						{node.value}
+					</Text>
+				);
+			case "footnoteDefinition":
+				return (
+					<View key={k} style={styles.footnote}>
+						<Text style={[styles.small, { color: p.accent }]}>[{node.label ?? node.identifier}]</Text>
+						<View style={styles.listBody}>{renderBlocks(node.children, { ...ctx, color: p.muted }, k)}</View>
+					</View>
+				);
+			default:
+				return null;
+		}
+	});
+}
+
+const HEADING_SIZE: Record<number, number> = { 1: 20, 2: 18, 3: 16 };
+
+export const Markdown = memo(function Markdown({ text }: { text: string }) {
+	const p = usePalette();
+	const tree = useMemo(() => parse(text), [text]);
+	return <View style={styles.root}>{renderBlocks(tree.children, { p, color: p.text, depth: 0 }, "b")}</View>;
 });
 
 const styles = StyleSheet.create({
 	root: { gap: 8 },
 	text: { fontSize: 15, lineHeight: 22 },
+	small: { fontSize: 13, lineHeight: 20 },
 	bold: { fontWeight: "700" },
+	italic: { fontStyle: "italic" },
+	strike: { textDecorationLine: "line-through" },
+	link: { textDecorationLine: "underline" },
+	footnoteRef: { fontSize: 12 },
 	inlineCode: { fontFamily: MONO, fontSize: 13, borderRadius: 5 },
 	heading: { fontWeight: "700", marginTop: 4 },
 	codeBlock: { borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, padding: 12, maxHeight: 360 },
 	code: { fontFamily: MONO, fontSize: 12.5, lineHeight: 18 },
+	list: {},
 	listRow: { flexDirection: "row", gap: 6 },
 	bullet: { minWidth: 14 },
-	listText: { flex: 1 },
-	quote: { borderLeftWidth: 3, paddingLeft: 12, borderRadius: 2 },
+	ordinal: { minWidth: 20, textAlign: "right" },
+	listBody: { flex: 1, gap: 4 },
+	quote: { borderLeftWidth: 3, paddingLeft: 12, borderRadius: 2, gap: 6 },
+	rule: { height: StyleSheet.hairlineWidth, marginVertical: 6 },
+	tableScroll: { flexGrow: 0 },
+	table: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 10, overflow: "hidden" },
+	tableRow: { flexDirection: "row" },
+	tableCell: { paddingHorizontal: 10, paddingVertical: 7 },
+	tableText: { fontSize: 13.5, lineHeight: 19 },
+	footnote: { flexDirection: "row", gap: 6 },
 });
