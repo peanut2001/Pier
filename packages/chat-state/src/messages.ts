@@ -149,6 +149,24 @@ export function stripImageHints(text: string): string {
 	return lines.slice(0, end - 1).join("\n");
 }
 
+/** An image note at the end of a one-line summary, where pi joined the text parts with spaces. */
+const TRAILING_IMAGE_HINT =
+	/\s*\[Image(?:: original \d+[x×]\d+, displayed at \d+[x×]\d+\. Multiply coordinates by [\d.]+ to map to original image\.| omitted: [^\]\n]+| converted from \S+ to \S+\.)\]\s*$/;
+/** The start of an image note cut off by a length limit. */
+const CUT_IMAGE_HINT = /\s*\[Image(?:: original \d|: original$| omitted:| converted from )[^\]]*$/;
+
+/**
+ * Remove pi's image notes from the end of a session summary such as `firstMessage`, which pi
+ * builds by joining text parts with spaces and which may be cut off in the middle of a note.
+ */
+export function stripTrailingImageHints(text: string): string {
+	let out = stripImageHints(text).replace(CUT_IMAGE_HINT, "");
+	for (let next = out.replace(TRAILING_IMAGE_HINT, ""); next !== out; next = out.replace(TRAILING_IMAGE_HINT, "")) {
+		out = next;
+	}
+	return out;
+}
+
 /** Display text of a user message: its text parts without pi's image notes. */
 export function userText(content: unknown): string {
 	return stripImageHints(contentText(content));

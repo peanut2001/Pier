@@ -2,27 +2,18 @@ import { agentRuntimeLabel } from "@pier/chat-state";
 import type { AgentRuntimeId, AgentRuntimeInfo, SessionSummary, WorkspaceInfo } from "@pier/protocol";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
-import {
-	ActivityIndicator,
-	Alert,
-	Platform,
-	Pressable,
-	RefreshControl,
-	SectionList,
-	StyleSheet,
-	Text,
-	View,
-} from "react-native";
+import { ActivityIndicator, Pressable, RefreshControl, SectionList, StyleSheet, Text, View } from "react-native";
 import { AgentPicker } from "../../../src/components/AgentPicker.tsx";
 import {
+	ActionSheet,
 	Avatar,
 	Button,
 	Card,
-	confirmDestructive,
 	HeaderAction,
 	Muted,
 	Pill,
 	Screen,
+	type SheetAction,
 	Title,
 } from "../../../src/components/ui.tsx";
 import { isBusy, RUN_STATE_LABEL, relativeTime, sessionTitle } from "../../../src/format.ts";
@@ -83,18 +74,70 @@ function ConnectionBanner({ hostId }: { hostId: string }) {
 	);
 }
 
+function SessionMenu({ session, onClose }: { session: SessionSummary; onClose: () => void }) {
+	const store = useStore();
+	const running = isBusy(session.state);
+	const title = sessionTitle(session);
+	const actions: SheetAction[] = [];
+	// Older computers cannot archive.
+	if (store.canArchive()) {
+		actions.push(
+			session.archived
+				? {
+						label: "取消归档",
+						description: "放回会话列表",
+						testID: "session-unarchive",
+						onPress: () => void store.archiveSession(session, false),
+					}
+				: {
+						label: "归档",
+						description: "从列表中收起，可随时在“已归档”中找回",
+						testID: "session-archive",
+						onPress: () => void store.archiveSession(session, true),
+					},
+		);
+	}
+	actions.push({
+		label: "删除",
+		description: running ? "Agent 正在运行，会先中止" : "移到电脑上的 Pier 回收站",
+		danger: true,
+		testID: "session-delete",
+		confirm: {
+			title: `删除“${title.length > 40 ? `${title.slice(0, 40)}…` : title}”？`,
+			message: `${running ? "Agent 正在运行，会先中止。" : ""}会话文件会移到电脑上的 Pier 回收站（~/.pier/trash/sessions）。`,
+			action: "删除",
+		},
+		onPress: () => void store.deleteSession(session, running),
+	});
+	return (
+		<ActionSheet
+			title={title}
+			subtitle={[
+				session.archived ? "已归档" : running ? RUN_STATE_LABEL[session.state] : "",
+				relativeTime(session.modifiedAt),
+				`${session.messageCount} 条消息`,
+			]
+				.filter(Boolean)
+				.join(" · ")}
+			actions={actions}
+			onClose={onClose}
+		/>
+	);
+}
+
 function SessionRow({
 	session,
 	hostId,
 	first,
 	last,
+	onMenu,
 }: {
 	session: SessionSummary;
 	hostId: string;
 	first: boolean;
 	last: boolean;
+	onMenu: (session: SessionSummary) => void;
 }) {
-	const store = useStore();
 	const router = useRouter();
 	const p = usePalette();
 	const pending = session.pendingUi ?? 0;
@@ -114,29 +157,7 @@ function SessionRow({
 					params: { hostId, sessionId: session.id, workspaceId: session.workspaceId },
 				})
 			}
-			onLongPress={() => {
-				const running = isBusy(session.state);
-				const remove = () =>
-					confirmDestructive(
-						`删除“${sessionTitle(session)}”？`,
-						`${running ? "Agent 正在运行，会先中止。" : ""}会话文件会移到电脑上的 Pier 回收站（~/.pier/trash/sessions）。`,
-						"删除",
-						() => void store.deleteSession(session, running),
-					);
-				// Older computers cannot archive; web has no action sheet.
-				if (!store.canArchive() || Platform.OS === "web") {
-					remove();
-					return;
-				}
-				Alert.alert(sessionTitle(session), undefined, [
-					{
-						text: session.archived ? "取消归档" : "归档",
-						onPress: () => void store.archiveSession(session, !session.archived),
-					},
-					{ text: "删除…", style: "destructive", onPress: remove },
-					{ text: "取消", style: "cancel" },
-				]);
-			}}
+			onLongPress={() => onMenu(session)}
 		>
 			{!first ? <View style={[styles.separator, { backgroundColor: p.border }]} /> : null}
 			<View style={styles.sessionMain}>
@@ -171,6 +192,7 @@ export default function HostScreen() {
 	const [showArchived, setShowArchived] = useState<Record<string, boolean>>({});
 	const [refreshing, setRefreshing] = useState(false);
 	const [picker, setPicker] = useState<{ workspace: WorkspaceInfo; runtimes: AgentRuntimeInfo[] }>();
+	const [menu, setMenu] = useState<SessionSummary>();
 
 	const createSession = async (workspaceId: string, runtime?: AgentRuntimeId) => {
 		const session = await store.createSession(workspaceId, runtime);
@@ -327,35 +349,50 @@ export default function HostScreen() {
 					</View>
 				)}
 				renderItem={({ item, index, section }) => (
-					<SessionRow session={item} hostId={hostId} first={index === 0} last={index === section.data.length - 1} />
+					<SessionRow
+						session={item}
+						hostId={hostId}
+						first={index === 0}
+						last={index === section.data.length - 1}
+						onMenu={setMenu}
+					/>
 				)}
 				renderSectionFooter={({ section }) => (
-					<>
+					<View style={[styles.footer, section.total > 0 && styles.footerAfterList]}>
 						{section.total > section.limit ? (
 							<Pressable
-								style={styles.more}
+								style={({ pressed }) => [styles.more, pressed && styles.pressed]}
 								onPress={() => setLimits({ ...limits, [section.workspace.id]: section.limit + SESSIONS_PER_WORKSPACE })}
 							>
-								<Text style={{ color: p.accent }}>显示更多（还有 {section.total - section.limit} 个）</Text>
+								<Text style={[styles.moreText, { color: p.accent }]}>
+									显示更多（还有 {section.total - section.limit} 个）
+								</Text>
 							</Pressable>
 						) : section.total === 0 ? (
 							<View style={[styles.none, { backgroundColor: p.card, borderColor: p.border }]}>
-								<Muted>{section.archived ? "没有未归档的会话" : "还没有会话，点“新建”开始"}</Muted>
+								<Muted>{section.archived ? "会话都已归档" : "还没有会话，点“新建”开始"}</Muted>
 							</View>
 						) : null}
 						{section.archived ? (
 							<Pressable
-								style={styles.more}
+								accessibilityRole="button"
+								style={({ pressed }) => [
+									styles.archivedToggle,
+									{ backgroundColor: p.elevated },
+									pressed && styles.pressed,
+								]}
 								onPress={() => setShowArchived({ ...showArchived, [section.workspace.id]: !section.withArchived })}
 							>
-								<Text style={{ color: p.muted }}>
-									{section.withArchived ? "隐藏已归档的会话" : `显示已归档的会话（${section.archived} 个）`}
+								<Text style={[styles.archivedText, { color: p.muted }]}>
+									{section.withArchived ? "收起已归档" : `已归档 ${section.archived} 个`}
 								</Text>
+								<Text style={[styles.archivedGlyph, { color: p.faint }]}>{section.withArchived ? "▴" : "▾"}</Text>
 							</Pressable>
 						) : null}
-					</>
+					</View>
 				)}
 			/>
+			{menu ? <SessionMenu session={menu} onClose={() => setMenu(undefined)} /> : null}
 			{picker ? (
 				<AgentPicker
 					runtimes={picker.runtimes}
@@ -413,7 +450,21 @@ const styles = StyleSheet.create({
 	sessionTitle: { fontSize: 15.5, lineHeight: 22, fontWeight: "500" },
 	sessionMeta: { fontSize: 12.5 },
 	chevron: { fontSize: 22, marginTop: -2 },
-	more: { paddingVertical: 12, alignItems: "center" },
+	footer: { gap: 10 },
+	footerAfterList: { marginTop: 10 },
+	more: { paddingVertical: 4, alignItems: "center" },
+	moreText: { fontSize: 14, fontWeight: "500" },
+	archivedToggle: {
+		alignSelf: "center",
+		flexDirection: "row",
+		alignItems: "center",
+		gap: 6,
+		height: 30,
+		paddingHorizontal: 14,
+		borderRadius: RADIUS.pill,
+	},
+	archivedText: { fontSize: 13, fontWeight: "500" },
+	archivedGlyph: { fontSize: 13, fontWeight: "700" },
 	none: {
 		paddingVertical: 18,
 		paddingHorizontal: 16,
