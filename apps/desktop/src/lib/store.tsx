@@ -1783,6 +1783,19 @@ export class PierStore {
 		);
 	}
 
+	/**
+	 * Change a runtime's user file with edits that may carry token key references (protocol
+	 * 1.25), e.g. to point it at a personal-center group. Throws with the host's message.
+	 */
+	async updateAgentUserConfig(
+		runtime: AgentConfigRuntime,
+		changes: Array<{ path: string[]; value?: unknown; apiKeyRef?: string }>,
+	): Promise<AgentConfigChangeResult> {
+		const client = this.settingsClient;
+		if (!client) throw this.settingsOffline();
+		return client.request("agentConfig.update", { runtime, scope: "user", changes });
+	}
+
 	/** Replace one file with `text`; rejects with the host's error (e.g. `CONFLICT`). */
 	async writeAgentConfig(
 		runtime: AgentConfigRuntime,

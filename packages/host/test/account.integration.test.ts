@@ -64,6 +64,7 @@ async function startHarness(site: string): Promise<Harness> {
 				localToken: TOKEN,
 				remote: { enabled: false },
 				accountSite: site,
+				agentConfigDirs: { "claude-code": join(root, "claude"), codex: join(root, "codex") },
 			});
 			const gateway = await startLocalGateway(host);
 			const connect = async () => {
@@ -350,6 +351,56 @@ describe("personal center", () => {
 			message: expect.stringContaining("请先登录"),
 		});
 		expect(await t.client.request("account.logout", {})).toEqual({ loggedOut: false });
+	});
+
+	it("writes a group's key into Claude Code and Codex from a key reference", async () => {
+		await start({ variant: "modern" });
+		await t.client.request("account.login", { username: "alice", password: PASSWORD });
+		const used = await t.client.request("account.useToken", { tokenId: 2 });
+
+		// The key reference belongs to the connection that asked for it.
+		await expect(
+			t.second.request("agentConfig.update", {
+				runtime: "claude-code",
+				scope: "user",
+				changes: [{ path: ["env", "ANTHROPIC_AUTH_TOKEN"], apiKeyRef: used.keyRef }],
+			}),
+		).rejects.toMatchObject({ code: "NOT_FOUND" });
+		await expect(
+			t.client.request("agentConfig.update", {
+				runtime: "claude-code",
+				scope: "user",
+				changes: [{ path: ["env", "ANTHROPIC_AUTH_TOKEN"], value: "x", apiKeyRef: used.keyRef }],
+			}),
+		).rejects.toMatchObject({ code: "BAD_REQUEST" });
+
+		const claude = await t.client.request("agentConfig.update", {
+			runtime: "claude-code",
+			scope: "user",
+			changes: [
+				{ path: ["env", "ANTHROPIC_BASE_URL"], value: site.url },
+				{ path: ["env", "ANTHROPIC_AUTH_TOKEN"], apiKeyRef: used.keyRef },
+				{ path: ["env", "ANTHROPIC_API_KEY"] },
+			],
+		});
+		expect(claude.changed).toBe(true);
+		const settings = JSON.parse(readFileSync(join(t.root, "claude", "settings.json"), "utf8"));
+		expect(settings.env).toEqual({ ANTHROPIC_BASE_URL: site.url, ANTHROPIC_AUTH_TOKEN: `sk-${TOKEN_KEY_B}` });
+
+		const codex = await t.client.request("agentConfig.update", {
+			runtime: "codex",
+			scope: "user",
+			changes: [
+				{ path: ["model_providers", "yunlian-vip", "base_url"], value: `${site.url}/v1` },
+				{ path: ["model_providers", "yunlian-vip", "wire_api"], value: "responses" },
+				{ path: ["model_providers", "yunlian-vip", "experimental_bearer_token"], apiKeyRef: used.keyRef },
+				{ path: ["model_provider"], value: "yunlian-vip" },
+			],
+		});
+		expect(codex.changed).toBe(true);
+		expect(readFileSync(join(t.root, "codex", "config.toml"), "utf8")).toContain(
+			`experimental_bearer_token = "sk-${TOKEN_KEY_B}"`,
+		);
 	});
 
 	it("registers with an email code and signs in", async () => {

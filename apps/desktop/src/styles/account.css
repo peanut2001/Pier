@@ -179,3 +179,38 @@ select.account-token-select {
 .account-group-error {
 	padding: 0 14px 10px;
 }
+
+/* ---- Claude Code / Codex for a group ------------------------------------------------- */
+
+.account-agents-chevron {
+	transition: transform 0.15s var(--ease);
+}
+
+.account-agents-toggle.open .account-agents-chevron {
+	transform: rotate(180deg);
+}
+
+.account-agents {
+	margin: 0 14px 12px;
+	border: 1px solid var(--border);
+	border-radius: 10px;
+	background: var(--bg-hover);
+}
+
+.account-agents .provider-main .small {
+	white-space: normal;
+	overflow-wrap: anywhere;
+}
+
+.account-agents .provider-name {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px;
+}
+
+.account-agents > p {
+	margin: 0;
+	padding: 8px 14px 10px;
+	border-top: 1px solid var(--border);
+}

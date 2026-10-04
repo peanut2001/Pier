@@ -455,13 +455,21 @@ export const MethodParamsSchemas = {
 	/**
 	 * Set or remove individual settings of one file, keeping everything else (TOML comments and
 	 * formatting included). Like `settings.update`; `project` and `local` scopes need `workspaceId`.
+	 * A change with `apiKeyRef` (1.25) sets the key behind a reference from `account.useToken` /
+	 * `newapi.useToken` instead of `value`, so the key never reaches the client.
 	 */
 	"agentConfig.update": z.object({
 		runtime: AgentConfigRuntimeSchema,
 		scope: AgentConfigScopeSchema,
 		workspaceId: Id.optional(),
 		changes: z
-			.array(z.object({ path: SettingsKeyPath, value: z.unknown().optional() }))
+			.array(
+				z
+					.object({ path: SettingsKeyPath, value: z.unknown().optional(), apiKeyRef: Id.optional() })
+					.refine((c) => c.apiKeyRef === undefined || c.value === undefined, {
+						message: "A change sets either value or apiKeyRef",
+					}),
+			)
 			.min(1)
 			.max(200),
 	}),
