@@ -1,7 +1,8 @@
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 import {
 	ActivityIndicator,
 	Alert,
+	Modal,
 	Platform,
 	Pressable,
 	type StyleProp,
@@ -27,7 +28,7 @@ export function confirmDestructive(title: string, message: string, action: strin
 	]);
 }
 
-type Variant = "primary" | "secondary" | "tonal" | "danger" | "ghost";
+type Variant = "primary" | "secondary" | "tonal" | "danger" | "destructive" | "ghost";
 
 function variantStyle(p: Palette, variant: Variant): { box: ViewStyle; text: TextStyle } {
 	switch (variant) {
@@ -37,6 +38,8 @@ function variantStyle(p: Palette, variant: Variant): { box: ViewStyle; text: Tex
 			return { box: { backgroundColor: p.accentSoft }, text: { color: p.accent } };
 		case "danger":
 			return { box: { backgroundColor: p.dangerSoft }, text: { color: p.danger } };
+		case "destructive":
+			return { box: { backgroundColor: p.danger }, text: { color: "#fff" } };
 		case "ghost":
 			return { box: { backgroundColor: "transparent" }, text: { color: p.accent } };
 		default:
@@ -202,9 +205,136 @@ export function Pill({
 	);
 }
 
-export function Muted({ children, style }: { children: ReactNode; style?: StyleProp<TextStyle> }) {
+/** Modal panel that slides up from the bottom of the screen. */
+export function Sheet({
+	children,
+	onClose,
+	style,
+}: {
+	children: ReactNode;
+	onClose: () => void;
+	style?: StyleProp<ViewStyle>;
+}) {
 	const p = usePalette();
-	return <Text style={[styles.muted, { color: p.muted }, style]}>{children}</Text>;
+	const insets = useSafeAreaInsets();
+	return (
+		<Modal transparent animationType="slide" onRequestClose={onClose}>
+			<Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="关闭" />
+			<View style={[styles.sheet, { backgroundColor: p.card, paddingBottom: insets.bottom + 16 }, style]}>
+				<View style={[styles.grabber, { backgroundColor: p.border }]} />
+				{children}
+			</View>
+		</Modal>
+	);
+}
+
+export interface SheetAction {
+	label: string;
+	/** One line under the label explaining the effect. */
+	description?: string;
+	danger?: boolean;
+	testID?: string;
+	onPress: () => void;
+	/** Ask inside the sheet before running the action. */
+	confirm?: { title: string; message: string; action: string };
+}
+
+/** Bottom sheet with a short header and a list of actions, replacing the native alert menu. */
+export function ActionSheet({
+	title,
+	subtitle,
+	actions,
+	onClose,
+}: {
+	title: string;
+	subtitle?: string;
+	actions: SheetAction[];
+	onClose: () => void;
+}) {
+	const p = usePalette();
+	const [confirming, setConfirming] = useState<SheetAction>();
+	const run = (action: SheetAction) => {
+		onClose();
+		action.onPress();
+	};
+	if (confirming?.confirm) {
+		const { confirm } = confirming;
+		return (
+			<Sheet onClose={onClose}>
+				<View style={styles.sheetContent}>
+					<View style={styles.sheetHead}>
+						<Text style={[styles.sheetTitle, { color: p.text }]}>{confirm.title}</Text>
+						<Muted style={styles.sheetMessage}>{confirm.message}</Muted>
+					</View>
+					<View style={styles.sheetButtons}>
+						<Button title="取消" onPress={onClose} style={styles.flex} />
+						<Button
+							title={confirm.action}
+							variant="destructive"
+							onPress={() => run(confirming)}
+							style={styles.flex}
+							testID={confirming.testID ? `${confirming.testID}-confirm` : undefined}
+						/>
+					</View>
+				</View>
+			</Sheet>
+		);
+	}
+	return (
+		<Sheet onClose={onClose}>
+			<View style={styles.sheetContent}>
+				<View style={styles.sheetHead}>
+					<Text style={[styles.sheetTitle, { color: p.text }]} numberOfLines={2}>
+						{title}
+					</Text>
+					{subtitle ? <Muted numberOfLines={3}>{subtitle}</Muted> : null}
+				</View>
+				<View style={[styles.sheetGroup, { backgroundColor: p.bg, borderColor: p.border }]}>
+					{actions.map((action, index) => (
+						<Pressable
+							key={action.label}
+							testID={action.testID}
+							accessibilityRole="button"
+							accessibilityLabel={action.label}
+							onPress={() => (action.confirm ? setConfirming(action) : run(action))}
+							style={({ pressed }) => [
+								styles.sheetAction,
+								index > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderColor: p.border },
+								pressed && { backgroundColor: p.elevated },
+							]}
+						>
+							<View style={styles.flex}>
+								<Text style={[styles.sheetActionLabel, { color: action.danger ? p.danger : p.text }]}>
+									{action.label}
+								</Text>
+								{action.description ? (
+									<Text style={[styles.sheetActionText, { color: p.muted }]}>{action.description}</Text>
+								) : null}
+							</View>
+						</Pressable>
+					))}
+				</View>
+				<Button title="取消" onPress={onClose} />
+			</View>
+		</Sheet>
+	);
+}
+
+export function Muted({
+	children,
+	style,
+	numberOfLines,
+}: {
+	children: ReactNode;
+	style?: StyleProp<TextStyle>;
+	numberOfLines?: number;
+}) {
+	const p = usePalette();
+	return (
+		<Text numberOfLines={numberOfLines} style={[styles.muted, { color: p.muted }, style]}>
+			{children}
+		</Text>
+	);
 }
 
 export function Title({
@@ -254,6 +384,7 @@ export function ToastHost() {
 }
 
 const styles = StyleSheet.create({
+	flex: { flex: 1 },
 	screen: { flex: 1 },
 	button: {
 		minHeight: 46,
@@ -309,4 +440,16 @@ const styles = StyleSheet.create({
 		}),
 	},
 	toastText: { fontSize: 14, fontWeight: "500", textAlign: "center" },
+	backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)" },
+	sheet: { maxHeight: "85%", borderTopLeftRadius: RADIUS.xl, borderTopRightRadius: RADIUS.xl },
+	grabber: { alignSelf: "center", width: 38, height: 5, borderRadius: 3, marginTop: 8 },
+	sheetContent: { padding: 18, paddingTop: 14, gap: 16 },
+	sheetHead: { gap: 6, paddingHorizontal: 2 },
+	sheetTitle: { fontSize: 17, lineHeight: 24, fontWeight: "700" },
+	sheetMessage: { fontSize: 14, lineHeight: 21 },
+	sheetGroup: { borderRadius: RADIUS.lg, borderWidth: StyleSheet.hairlineWidth, overflow: "hidden" },
+	sheetAction: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, paddingVertical: 14 },
+	sheetActionLabel: { fontSize: 16, fontWeight: "600" },
+	sheetActionText: { fontSize: 12.5, lineHeight: 18, marginTop: 2 },
+	sheetButtons: { flexDirection: "row", gap: 10 },
 });

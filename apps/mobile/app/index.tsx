@@ -1,11 +1,12 @@
 import { Stack, useRouter } from "expo-router";
-import { ActivityIndicator, Alert, FlatList, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { useState } from "react";
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 import { UpdateBanner } from "../src/components/Update.tsx";
 import {
+	ActionSheet,
 	Avatar,
 	Button,
 	Card,
-	confirmDestructive,
 	HeaderAction,
 	Muted,
 	Pill,
@@ -19,65 +20,79 @@ import type { PairedHost } from "../src/hosts.ts";
 import { useMobileState, useStore } from "../src/store.ts";
 import { usePalette } from "../src/theme.ts";
 
-function HostRow({ host }: { host: PairedHost }) {
+function HostMenu({ host, onClose }: { host: PairedHost; onClose: () => void }) {
 	const store = useStore();
 	const router = useRouter();
+	return (
+		<ActionSheet
+			title={host.hostName}
+			subtitle={host.addresses.join("\n")}
+			onClose={onClose}
+			actions={[
+				{
+					label: "修改连接地址",
+					description: "电脑的 IP 变了时使用，不用重新配对",
+					testID: "host-edit-addresses",
+					onPress: () => router.push({ pathname: "/host/[hostId]/addresses", params: { hostId: host.hostId } }),
+				},
+				{
+					label: "移除",
+					description: "只删除这台手机上的配对信息",
+					danger: true,
+					testID: "host-forget",
+					confirm: {
+						title: `移除“${host.hostName}”？`,
+						message: "只会删除这台手机上的配对信息。要彻底撤销访问，请在电脑的“手机与远程访问”中移除这台设备。",
+						action: "移除",
+					},
+					onPress: () => void store.forgetHost(host.hostId),
+				},
+			]}
+		/>
+	);
+}
+
+function HostRow({ host }: { host: PairedHost }) {
+	const router = useRouter();
 	const p = usePalette();
+	const [menu, setMenu] = useState(false);
 	const active = useMobileState((s) => (s.host.hostId === host.hostId ? s.host.connection : undefined));
 	const revoked = useMobileState((s) => s.host.hostId === host.hostId && s.host.revoked);
 	const dot = revoked ? p.danger : active === "open" ? p.ok : active ? p.warning : p.faint;
 	return (
-		<Pressable
-			testID={`host-${host.hostId}`}
-			onPress={() => router.push({ pathname: "/host/[hostId]", params: { hostId: host.hostId } })}
-			onLongPress={() => {
-				const editAddresses = () =>
-					router.push({ pathname: "/host/[hostId]/addresses", params: { hostId: host.hostId } });
-				const forget = () =>
-					confirmDestructive(
-						`移除“${host.hostName}”？`,
-						"只会删除这台手机上的配对信息。要彻底撤销访问，请在电脑的“手机与远程访问”中移除这台设备。",
-						"移除",
-						() => void store.forgetHost(host.hostId),
-					);
-				if (Platform.OS === "web") {
-					// Browsers have no action sheet: ask about the addresses first, then removal.
-					if (globalThis.confirm?.(`修改“${host.hostName}”的连接地址？`)) editAddresses();
-					else forget();
-					return;
-				}
-				Alert.alert(host.hostName, host.addresses.join("\n"), [
-					{ text: "修改连接地址", onPress: editAddresses },
-					{ text: "移除", style: "destructive", onPress: forget },
-					{ text: "取消", style: "cancel" },
-				]);
-			}}
-			style={({ pressed }) => pressed && styles.pressed}
-		>
-			<Card style={styles.hostCard}>
-				<Avatar name={host.hostName} size={46}>
-					<View style={styles.avatarDot}>
-						<StatusDot color={dot} size={12} ring={p.card} />
+		<>
+			<Pressable
+				testID={`host-${host.hostId}`}
+				onPress={() => router.push({ pathname: "/host/[hostId]", params: { hostId: host.hostId } })}
+				onLongPress={() => setMenu(true)}
+				style={({ pressed }) => pressed && styles.pressed}
+			>
+				<Card style={styles.hostCard}>
+					<Avatar name={host.hostName} size={46}>
+						<View style={styles.avatarDot}>
+							<StatusDot color={dot} size={12} ring={p.card} />
+						</View>
+					</Avatar>
+					<View style={styles.hostMain}>
+						<Text style={[styles.hostName, { color: p.text }]} numberOfLines={1}>
+							{host.hostName}
+						</Text>
+						<Muted>
+							{revoked
+								? "已被电脑移除，需要重新配对"
+								: active === "open"
+									? "已连接"
+									: host.lastConnectedAt
+										? `上次连接 ${relativeTime(host.lastConnectedAt)}`
+										: `配对于 ${relativeTime(host.pairedAt)}`}
+						</Muted>
 					</View>
-				</Avatar>
-				<View style={styles.hostMain}>
-					<Text style={[styles.hostName, { color: p.text }]} numberOfLines={1}>
-						{host.hostName}
-					</Text>
-					<Muted>
-						{revoked
-							? "已被电脑移除，需要重新配对"
-							: active === "open"
-								? "已连接"
-								: host.lastConnectedAt
-									? `上次连接 ${relativeTime(host.lastConnectedAt)}`
-									: `配对于 ${relativeTime(host.pairedAt)}`}
-					</Muted>
-				</View>
-				{revoked ? <Pill text="需重新配对" tone="danger" /> : null}
-				<Text style={[styles.chevron, { color: p.faint }]}>›</Text>
-			</Card>
-		</Pressable>
+					{revoked ? <Pill text="需重新配对" tone="danger" /> : null}
+					<Text style={[styles.chevron, { color: p.faint }]}>›</Text>
+				</Card>
+			</Pressable>
+			{menu ? <HostMenu host={host} onClose={() => setMenu(false)} /> : null}
+		</>
 	);
 }
 

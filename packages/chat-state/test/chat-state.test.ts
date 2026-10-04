@@ -10,6 +10,7 @@ import {
 	reduceChat,
 	sessionUsage,
 	stripImageHints,
+	stripTrailingImageHints,
 	summarizeToolCall,
 	userText,
 } from "../src/index.ts";
@@ -368,6 +369,28 @@ describe("helpers", () => {
 		]);
 		expect(editReplacements({ path: "a", oldText: "x", newText: "y" })).toEqual([{ oldText: "x", newText: "y" }]);
 		expect(editReplacements(null)).toEqual([]);
+	});
+});
+
+describe("stripTrailingImageHints", () => {
+	const note =
+		"[Image: original 1080x2400, displayed at 900x2000. Multiply coordinates by 1.20 to map to original image.]";
+
+	it("removes notes joined with spaces or cut off", () => {
+		expect(stripTrailingImageHints(`手机不能切换审批模式吗 ${note}`)).toBe("手机不能切换审批模式吗");
+		expect(stripTrailingImageHints(`a ${note} ${note}`)).toBe("a");
+		expect(stripTrailingImageHints(`a\n\n${note}`)).toBe("a");
+		expect(stripTrailingImageHints("a [Image converted from image/bmp to image/png.]")).toBe("a");
+		expect(stripTrailingImageHints("a [Image: original 1080x2400, displayed at 9")).toBe("a");
+		expect(stripTrailingImageHints("a [Image omitted: could not")).toBe("a");
+		expect(stripTrailingImageHints(note)).toBe("");
+	});
+
+	it("leaves other text unchanged", () => {
+		expect(stripTrailingImageHints("hello")).toBe("hello");
+		expect(stripTrailingImageHints(`${note} after`)).toBe(`${note} after`);
+		expect(stripTrailingImageHints("x [Image: something else]")).toBe("x [Image: something else]");
+		expect(stripTrailingImageHints("x [Image")).toBe("x [Image");
 	});
 });
 

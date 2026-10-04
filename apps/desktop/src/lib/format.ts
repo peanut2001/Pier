@@ -1,8 +1,11 @@
+import { stripTrailingImageHints } from "@pier/chat-state";
 import type { ApprovalPolicy, SessionRunState, SessionSummary } from "@pier/protocol";
 
 export function sessionTitle(session: Pick<SessionSummary, "name" | "firstMessage">): string {
-	const text = session.name || session.firstMessage.replace(/\s+/g, " ").trim();
-	return text || "新会话";
+	if (session.name) return session.name;
+	// Older computers send the first prompt with pi's image notes still attached.
+	const raw = session.firstMessage.replace(/\s+/g, " ").trim();
+	return stripTrailingImageHints(raw) || (raw ? "图片" : "新会话");
 }
 
 export function relativeTime(iso: string | number): string {
