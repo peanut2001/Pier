@@ -8,16 +8,24 @@ import {
 	Button,
 	Card,
 	confirmDestructive,
+	Icon,
+	type IconName,
 	Muted,
 	Screen,
 	SectionLabel,
 	Title,
 } from "../../../../src/components/ui.tsx";
-import { isBusy, POLICY_DESCRIPTION, POLICY_LABEL } from "../../../../src/format.ts";
+import { isBusy, POLICY_DESCRIPTION, POLICY_LABEL, shortPath } from "../../../../src/format.ts";
 import { useMobileState, useStore } from "../../../../src/store.ts";
 import { MONO, RADIUS, usePalette } from "../../../../src/theme.ts";
 
 const POLICIES: ApprovalPolicy[] = ["ask", "smart", "auto"];
+
+const POLICY_ICON: Record<ApprovalPolicy, IconName> = {
+	ask: "hand-left-outline",
+	smart: "shield-checkmark-outline",
+	auto: "flash-outline",
+};
 
 /** Settings of one workspace on the connected computer: approval policy and removal. */
 export default function WorkspaceSettings() {
@@ -80,7 +88,7 @@ export default function WorkspaceSettings() {
 			<ScrollView contentContainerStyle={styles.content}>
 				<Card flat style={styles.summary}>
 					<View style={styles.row}>
-						<Avatar name={workspace.name} size={44} />
+						<Avatar name={workspace.name} size={48} icon="folder-open" />
 						<View style={styles.flex}>
 							<Title numberOfLines={1}>{workspace.name}</Title>
 							<Muted>
@@ -96,9 +104,11 @@ export default function WorkspaceSettings() {
 						}}
 						style={[styles.pathBox, { backgroundColor: p.elevated }]}
 					>
+						<Icon name="folder-outline" size={15} color={p.muted} />
 						<Text selectable style={[styles.path, { color: p.text }]}>
-							{workspace.path}
+							{shortPath(workspace.path)}
 						</Text>
+						<Icon name="copy-outline" size={14} color={p.faint} />
 					</Pressable>
 				</Card>
 
@@ -120,8 +130,19 @@ export default function WorkspaceSettings() {
 									pressed && { backgroundColor: p.elevated },
 								]}
 							>
-								<View style={[styles.radio, { borderColor: selected ? p.accent : p.faint }]}>
-									{selected ? <View style={[styles.radioDot, { backgroundColor: p.accent }]} /> : null}
+								<View
+									style={[
+										styles.policyIcon,
+										{
+											backgroundColor: selected ? (policy === "auto" ? p.warningSoft : p.accentSoft) : p.elevated,
+										},
+									]}
+								>
+									<Icon
+										name={POLICY_ICON[policy]}
+										size={18}
+										color={selected ? (policy === "auto" ? p.warning : p.accent) : p.muted}
+									/>
 								</View>
 								<View style={styles.flex}>
 									<Text style={[styles.optionTitle, { color: p.text }]}>
@@ -132,7 +153,13 @@ export default function WorkspaceSettings() {
 										{POLICY_DESCRIPTION[policy]}
 									</Text>
 								</View>
-								{saving === policy ? <ActivityIndicator size="small" color={p.accent} /> : null}
+								{saving === policy ? (
+									<ActivityIndicator size="small" color={p.accent} />
+								) : selected ? (
+									<Icon name="checkmark-circle" size={22} color={policy === "auto" ? p.warning : p.accent} />
+								) : (
+									<View style={[styles.radio, { borderColor: p.border }]} />
+								)}
 							</Pressable>
 						);
 					})}
@@ -143,6 +170,7 @@ export default function WorkspaceSettings() {
 
 				<Button
 					title="从 Pier 移除工作区"
+					icon="trash-outline"
 					variant="danger"
 					loading={removing}
 					disabled={!canManage}
@@ -168,21 +196,20 @@ const styles = StyleSheet.create({
 	content: { padding: 16, paddingBottom: 48 },
 	summary: { gap: 14 },
 	row: { flexDirection: "row", alignItems: "center", gap: 12 },
-	pathBox: { borderRadius: RADIUS.md, paddingHorizontal: 12, paddingVertical: 10 },
-	path: { fontSize: 12.5, fontFamily: MONO, lineHeight: 18 },
+	pathBox: {
+		flexDirection: "row",
+		alignItems: "center",
+		gap: 8,
+		borderRadius: RADIUS.md,
+		paddingHorizontal: 12,
+		paddingVertical: 10,
+	},
+	path: { flex: 1, fontSize: 12.5, fontFamily: MONO, lineHeight: 18 },
+	policyIcon: { width: 36, height: 36, borderRadius: 11, alignItems: "center", justifyContent: "center" },
 	label: { marginTop: 22, marginBottom: 8, marginLeft: 4 },
 	options: { padding: 0, overflow: "hidden" },
-	option: { flexDirection: "row", alignItems: "flex-start", gap: 12, paddingVertical: 14, paddingHorizontal: 16 },
-	radio: {
-		width: 20,
-		height: 20,
-		borderRadius: 10,
-		borderWidth: 2,
-		alignItems: "center",
-		justifyContent: "center",
-		marginTop: 1,
-	},
-	radioDot: { width: 10, height: 10, borderRadius: 5 },
+	option: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 14, paddingHorizontal: 14 },
+	radio: { width: 22, height: 22, borderRadius: 11, borderWidth: 2 },
 	optionTitle: { fontSize: 15.5, fontWeight: "600" },
 	optionText: { fontSize: 13, lineHeight: 19, marginTop: 3 },
 	note: { marginTop: 10, marginHorizontal: 4, fontSize: 12.5, lineHeight: 18 },

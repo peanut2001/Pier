@@ -1,3 +1,5 @@
+import Ionicons from "@expo/vector-icons/Ionicons";
+import * as Font from "expo-font";
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useEffect } from "react";
@@ -15,6 +17,8 @@ export default function RootLayout() {
 	useEffect(() => {
 		void store.init();
 		void updater.init();
+		// Icons render once their font is in; load it right away instead of on first use.
+		void Font.loadAsync(Ionicons.font).catch(() => {});
 		// iOS suspends sockets in the background; resume (with seq replay) right away on return.
 		const subscription = AppState.addEventListener("change", (state) => {
 			if (state !== "active") return;
@@ -32,13 +36,13 @@ export default function RootLayout() {
 						headerStyle: { backgroundColor: p.bg },
 						headerShadowVisible: false,
 						headerTintColor: p.text,
-						headerTitleStyle: { color: p.text, fontWeight: "700", fontSize: 18 },
+						headerTitleStyle: { color: p.text, fontWeight: "700", fontSize: 17 },
 						headerBackButtonDisplayMode: "minimal",
 						contentStyle: { backgroundColor: p.bg },
 						animation: "slide_from_right",
 					}}
 				>
-					<Stack.Screen name="index" options={{ title: "Pier" }} />
+					<Stack.Screen name="index" options={{ title: "" }} />
 					<Stack.Screen
 						name="pair"
 						options={{ title: "添加电脑", presentation: "modal", animation: "slide_from_bottom" }}

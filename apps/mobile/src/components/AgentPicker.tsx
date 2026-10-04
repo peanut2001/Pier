@@ -2,7 +2,20 @@ import type { AgentRuntimeId, AgentRuntimeInfo } from "@pier/protocol";
 import { useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { RADIUS, usePalette } from "../theme.ts";
-import { Avatar, Button, Muted, Sheet } from "./ui.tsx";
+import { Avatar, Button, Icon, type IconName, Muted, Sheet } from "./ui.tsx";
+
+function agentIcon(id: AgentRuntimeId): IconName {
+	switch (id) {
+		case "pi":
+			return "sparkles";
+		case "claude-code":
+			return "code-slash";
+		case "codex":
+			return "terminal";
+		default:
+			return "hardware-chip-outline";
+	}
+}
 
 function agentDescription(id: AgentRuntimeId): string {
 	switch (id) {
@@ -54,7 +67,10 @@ export function AgentPicker({
 								disabled={creating !== undefined}
 								style={({ pressed }) => [
 									styles.option,
-									{ backgroundColor: pressed || busy ? p.accentSoft : p.bg, borderColor: busy ? p.accent : p.border },
+									{
+										backgroundColor: pressed || busy ? p.accentSoft : p.bg,
+										borderColor: busy ? p.accent : "transparent",
+									},
 									creating !== undefined && !busy && styles.dimmed,
 								]}
 								onPress={async () => {
@@ -66,14 +82,14 @@ export function AgentPicker({
 									}
 								}}
 							>
-								<Avatar name={r.name} size={40} />
+								<Avatar name={r.name} size={44} icon={agentIcon(r.id)} />
 								<View style={styles.flex}>
 									<View style={styles.nameRow}>
 										<Text style={[styles.name, { color: p.text }]} numberOfLines={1}>
 											{r.name}
 										</Text>
 										{r.version ? (
-											<Text style={[styles.tag, { color: p.muted, borderColor: p.border }]} numberOfLines={1}>
+											<Text style={[styles.tag, { color: p.muted, backgroundColor: p.elevated }]} numberOfLines={1}>
 												{r.version}
 											</Text>
 										) : null}
@@ -83,7 +99,7 @@ export function AgentPicker({
 								{busy ? (
 									<ActivityIndicator size="small" color={p.accent} />
 								) : (
-									<Text style={[styles.chevron, { color: p.faint }]}>›</Text>
+									<Icon name="chevron-forward" size={18} color={p.faint} />
 								)}
 							</Pressable>
 						);
@@ -99,16 +115,16 @@ const styles = StyleSheet.create({
 	flex: { flex: 1, gap: 3 },
 	content: { padding: 18, paddingTop: 14, gap: 16 },
 	head: { gap: 4, paddingHorizontal: 2 },
-	title: { fontSize: 19, fontWeight: "700" },
+	title: { fontSize: 20, fontWeight: "800" },
 	options: { gap: 10 },
 	option: {
 		flexDirection: "row",
 		alignItems: "center",
 		gap: 12,
 		paddingHorizontal: 14,
-		paddingVertical: 13,
+		paddingVertical: 14,
 		borderRadius: RADIUS.lg,
-		borderWidth: StyleSheet.hairlineWidth,
+		borderWidth: 1.5,
 	},
 	dimmed: { opacity: 0.5 },
 	nameRow: { flexDirection: "row", alignItems: "center", gap: 6 },
@@ -116,11 +132,10 @@ const styles = StyleSheet.create({
 	tag: {
 		fontSize: 10.5,
 		fontWeight: "600",
-		borderWidth: StyleSheet.hairlineWidth,
-		borderRadius: RADIUS.sm,
-		paddingHorizontal: 5,
+		borderRadius: 6,
+		paddingHorizontal: 6,
 		paddingVertical: 1,
 		maxWidth: 120,
+		overflow: "hidden",
 	},
-	chevron: { fontSize: 22, marginTop: -2 },
 });

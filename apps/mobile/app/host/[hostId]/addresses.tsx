@@ -2,11 +2,11 @@ import { fromBase64Url, keyFingerprint } from "@pier/crypto";
 import { addressPort, DEFAULT_PIER_PORT, parsePeerAddresses } from "@pier/protocol";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useMemo, useState } from "react";
-import { ScrollView, StyleSheet, Text, TextInput } from "react-native";
+import { ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { KeyboardAvoider } from "../../../src/components/KeyboardAvoider.tsx";
-import { Button, Card, Muted, Screen, Title } from "../../../src/components/ui.tsx";
+import { Button, Card, CardHeader, Icon, Muted, Screen } from "../../../src/components/ui.tsx";
 import { useMobileState, useStore } from "../../../src/store.ts";
-import { MONO, usePalette } from "../../../src/theme.ts";
+import { MONO, RADIUS, usePalette } from "../../../src/theme.ts";
 
 function fingerprintOf(publicKey: string | undefined): string {
 	if (!publicKey) return "";
@@ -65,9 +65,9 @@ export default function HostAddresses() {
 			<KeyboardAvoider style={styles.flex}>
 				<ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
 					<Card style={styles.card}>
-						<Title>连接地址</Title>
+						<CardHeader icon="swap-horizontal" title="连接地址" subtitle="电脑的 IP 变了时在这里修改，不用重新配对" />
 						<Muted>
-							电脑的 IP 变了时在这里修改，不用重新配对。每行一个地址，格式为 IP:端口（省略端口时使用 {defaultPort}
+							每行一个地址，格式为 IP:端口（省略端口时使用 {defaultPort}
 							），连接时按顺序尝试；也可以填域名或 Tailscale 地址。电脑上的地址可以在 Pier 的「设置 →
 							设备与远程」中看到。
 						</Muted>
@@ -97,14 +97,18 @@ export default function HostAddresses() {
 							</Muted>
 						)}
 						{fingerprint ? (
-							<Muted>
-								只会连接密钥指纹为 <Text style={styles.mono}>{fingerprint}</Text>{" "}
-								的电脑；地址上如果是另一台电脑，连接会被拒绝。
-							</Muted>
+							<View style={[styles.secure, { backgroundColor: p.okSoft }]}>
+								<Icon name="shield-checkmark-outline" size={18} color={p.ok} />
+								<Muted style={styles.flex}>
+									只会连接密钥指纹为 <Text style={[styles.mono, { color: p.text }]}>{fingerprint}</Text>{" "}
+									的电脑；地址上如果是另一台电脑，连接会被拒绝。
+								</Muted>
+							</View>
 						) : null}
 						{error ? <Text style={[styles.small, { color: p.danger }]}>{error}</Text> : null}
 						<Button
 							title="保存并重新连接"
+							icon="refresh"
 							variant="primary"
 							loading={busy}
 							disabled={invalid.length > 0 || !addresses.length}
@@ -121,12 +125,13 @@ export default function HostAddresses() {
 const styles = StyleSheet.create({
 	flex: { flex: 1 },
 	content: { padding: 16, gap: 14 },
-	card: { gap: 10 },
+	card: { gap: 12 },
+	secure: { flexDirection: "row", gap: 10, padding: 12, borderRadius: RADIUS.md },
 	missing: { padding: 24, textAlign: "center" },
 	input: {
 		borderWidth: 1,
-		borderRadius: 12,
-		paddingHorizontal: 12,
+		borderRadius: RADIUS.md,
+		paddingHorizontal: 14,
 		paddingVertical: 11,
 		fontSize: 14,
 		fontFamily: MONO,

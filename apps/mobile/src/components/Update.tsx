@@ -5,7 +5,7 @@ import { RADIUS, usePalette } from "../theme.ts";
 import { formatBytes } from "../update-manifest.ts";
 import { pendingUpdate, type UpdateStatus, updater, useUpdateStatus } from "../updater.ts";
 import { Markdown } from "./Markdown.tsx";
-import { Button, Card, Muted, Title } from "./ui.tsx";
+import { Button, Card, CardHeader, Icon, Muted } from "./ui.tsx";
 
 function ProgressBar({ status }: { status: UpdateStatus }) {
 	const p = usePalette();
@@ -57,6 +57,9 @@ export function UpdateBanner() {
 	return (
 		<Pressable onPress={() => router.push("/settings")} style={({ pressed }) => pressed && styles.pressed}>
 			<Card flat style={[styles.banner, { backgroundColor: p.accentSoft, borderColor: p.accentSoft }]}>
+				<View style={[styles.bannerIcon, { backgroundColor: p.accent }]}>
+					<Icon name="rocket-outline" size={18} color={p.onAccent} />
+				</View>
 				<View style={styles.bannerText}>
 					<Text style={[styles.bannerTitle, { color: p.text }]}>发现新版本 v{update.version}</Text>
 					<Muted>
@@ -112,11 +115,11 @@ export function UpdateSettingsCard() {
 	const skipped = update !== undefined && status.skippedVersion === update.version;
 	return (
 		<Card style={styles.card}>
-			<Title>软件更新</Title>
-			<Muted>
-				当前版本 v{status.currentVersion}
-				{status.lastChecked ? ` · 上次检查 ${relativeTime(status.lastChecked)}` : ""}
-			</Muted>
+			<CardHeader
+				icon="cloud-download-outline"
+				title="软件更新"
+				subtitle={`当前版本 v${status.currentVersion}${status.lastChecked ? ` · 上次检查 ${relativeTime(status.lastChecked)}` : ""}`}
+			/>
 			<Text style={[styles.status, { color: status.state === "error" ? p.danger : p.text }]}>{statusLine(status)}</Text>
 			{status.state === "downloading" ? <ProgressBar status={status} /> : null}
 
@@ -173,15 +176,17 @@ export function UpdateSettingsCard() {
 
 const styles = StyleSheet.create({
 	pressed: { opacity: 0.8 },
-	banner: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 12 },
+	banner: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 12, paddingHorizontal: 14 },
+	bannerIcon: { width: 36, height: 36, borderRadius: 11, alignItems: "center", justifyContent: "center" },
 	bannerText: { flex: 1, gap: 4 },
 	bannerTitle: { fontSize: 15, fontWeight: "700" },
 	bannerActions: { alignItems: "flex-end", gap: 4 },
-	card: { gap: 10 },
+	card: { gap: 12 },
 	status: { fontSize: 14, lineHeight: 20 },
 	track: { height: 6, borderRadius: RADIUS.pill, overflow: "hidden" },
 	fill: { height: 6, borderRadius: RADIUS.pill },
 	notes: { borderWidth: StyleSheet.hairlineWidth, borderRadius: RADIUS.md, padding: 12, gap: 6 },
+
 	notesTitle: { fontSize: 14, fontWeight: "700" },
 	actions: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
 	switchRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },

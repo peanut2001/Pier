@@ -1,7 +1,10 @@
-import { type ReactNode, useState } from "react";
+import Ionicons from "@expo/vector-icons/Ionicons";
+import { type ComponentProps, type ReactNode, useEffect, useRef, useState } from "react";
 import {
 	ActivityIndicator,
 	Alert,
+	Animated,
+	Easing,
 	Modal,
 	Platform,
 	Pressable,
@@ -14,7 +17,23 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useMobileState, useStore } from "../store.ts";
-import { type Palette, RADIUS, SHADOW, usePalette } from "../theme.ts";
+import { FLOAT_SHADOW, type Palette, RADIUS, SHADOW, tileColors, usePalette } from "../theme.ts";
+
+export type IconName = ComponentProps<typeof Ionicons>["name"];
+
+export function Icon({
+	name,
+	size = 20,
+	color,
+	style,
+}: {
+	name: IconName;
+	size?: number;
+	color: string;
+	style?: StyleProp<TextStyle>;
+}) {
+	return <Ionicons name={name} size={size} color={color} style={style} />;
+}
 
 /** Ask before a destructive action (`window.confirm` on web). */
 export function confirmDestructive(title: string, message: string, action: string, onConfirm: () => void): void {
@@ -28,22 +47,27 @@ export function confirmDestructive(title: string, message: string, action: strin
 	]);
 }
 
-type Variant = "primary" | "secondary" | "tonal" | "danger" | "destructive" | "ghost";
+type Variant = "primary" | "secondary" | "tonal" | "danger" | "destructive" | "ghost" | "outline";
 
-function variantStyle(p: Palette, variant: Variant): { box: ViewStyle; text: TextStyle } {
+function variantStyle(p: Palette, variant: Variant): { box: ViewStyle; color: string } {
 	switch (variant) {
 		case "primary":
-			return { box: { backgroundColor: p.accent }, text: { color: p.onAccent } };
+			return { box: { backgroundColor: p.accent }, color: p.onAccent };
 		case "tonal":
-			return { box: { backgroundColor: p.accentSoft }, text: { color: p.accent } };
+			return { box: { backgroundColor: p.accentSoft }, color: p.accent };
 		case "danger":
-			return { box: { backgroundColor: p.dangerSoft }, text: { color: p.danger } };
+			return { box: { backgroundColor: p.dangerSoft }, color: p.danger };
 		case "destructive":
-			return { box: { backgroundColor: p.danger }, text: { color: "#fff" } };
+			return { box: { backgroundColor: p.danger }, color: "#fff" };
 		case "ghost":
-			return { box: { backgroundColor: "transparent" }, text: { color: p.accent } };
+			return { box: { backgroundColor: "transparent" }, color: p.accent };
+		case "outline":
+			return {
+				box: { backgroundColor: p.card, borderWidth: StyleSheet.hairlineWidth, borderColor: p.border },
+				color: p.text,
+			};
 		default:
-			return { box: { backgroundColor: p.elevated }, text: { color: p.text } };
+			return { box: { backgroundColor: p.elevated }, color: p.text };
 	}
 }
 
@@ -65,8 +89,8 @@ export function Button({
 	loading?: boolean;
 	style?: StyleProp<ViewStyle>;
 	small?: boolean;
-	/** Short glyph shown before the title, e.g. "+". */
-	icon?: string;
+	/** Icon shown before the title. */
+	icon?: IconName;
 	testID?: string;
 }) {
 	const p = usePalette();
@@ -87,31 +111,93 @@ export function Button({
 				style,
 			]}
 		>
-			{loading ? <ActivityIndicator size="small" color={v.text.color as string} style={styles.spinner} /> : null}
-			{icon && !loading ? (
-				<Text style={[styles.buttonIcon, small && styles.buttonIconSmall, v.text]}>{icon}</Text>
-			) : null}
-			<Text style={[styles.buttonText, small && styles.buttonTextSmall, v.text]}>{title}</Text>
+			{loading ? <ActivityIndicator size="small" color={v.color} /> : null}
+			{icon && !loading ? <Icon name={icon} size={small ? 16 : 19} color={v.color} /> : null}
+			<Text style={[styles.buttonText, small && styles.buttonTextSmall, { color: v.color }]} numberOfLines={1}>
+				{title}
+			</Text>
 		</Pressable>
 	);
 }
 
-/** Compact text/glyph action for navigation headers. */
-export function HeaderAction({ label, glyph, onPress }: { label: string; glyph?: string; onPress?: () => void }) {
+/** Round icon-only button. */
+export function IconButton({
+	icon,
+	label,
+	onPress,
+	size = 38,
+	tone = "plain",
+	disabled,
+	testID,
+	style,
+}: {
+	icon: IconName;
+	/** Accessibility label. */
+	label: string;
+	onPress?: () => void;
+	size?: number;
+	tone?: "plain" | "elevated" | "accent" | "tonal" | "danger";
+	disabled?: boolean;
+	testID?: string;
+	style?: StyleProp<ViewStyle>;
+}) {
 	const p = usePalette();
+	const [bg, fg] = {
+		plain: ["transparent", p.text],
+		elevated: [p.elevated, p.text],
+		accent: [p.accent, p.onAccent],
+		tonal: [p.accentSoft, p.accent],
+		danger: [p.dangerSoft, p.danger],
+	}[tone] as [string, string];
+	return (
+		<Pressable
+			testID={testID}
+			hitSlop={6}
+			onPress={onPress}
+			disabled={disabled}
+			accessibilityRole="button"
+			accessibilityLabel={label}
+			style={({ pressed }) => [
+				{ width: size, height: size, borderRadius: size / 2, backgroundColor: bg },
+				styles.iconButton,
+				pressed && { backgroundColor: tone === "plain" ? p.elevated : bg, opacity: tone === "plain" ? 1 : 0.7 },
+				disabled && styles.disabled,
+				style,
+			]}
+		>
+			<Icon name={icon} size={Math.round(size * 0.52)} color={fg} />
+		</Pressable>
+	);
+}
+
+/**
+ * Navigation-header action: an icon button, or a compact pill with `text` (and the icon, if any)
+ * when the action needs words.
+ */
+export function HeaderAction({
+	label,
+	icon,
+	text,
+	onPress,
+}: {
+	label: string;
+	icon?: IconName;
+	/** Visible text; without it an icon-only button is shown. */
+	text?: string;
+	onPress?: () => void;
+}) {
+	const p = usePalette();
+	if (icon && !text) return <IconButton icon={icon} label={label} onPress={onPress} size={38} tone="elevated" />;
 	return (
 		<Pressable
 			hitSlop={8}
 			onPress={onPress}
 			accessibilityRole="button"
 			accessibilityLabel={label}
-			style={({ pressed }) => [
-				glyph ? styles.headerIcon : styles.headerAction,
-				{ backgroundColor: p.elevated },
-				pressed && styles.pressed,
-			]}
+			style={({ pressed }) => [styles.headerAction, { backgroundColor: p.elevated }, pressed && styles.pressed]}
 		>
-			<Text style={[glyph ? styles.headerGlyph : styles.headerActionText, { color: p.text }]}>{glyph ?? label}</Text>
+			{icon ? <Icon name={icon} size={17} color={p.text} /> : null}
+			<Text style={[styles.headerActionText, { color: p.text }]}>{text ?? label}</Text>
 		</Pressable>
 	);
 }
@@ -134,6 +220,47 @@ export function Card({
 	);
 }
 
+/** Icon tile, title and optional subtitle at the top of a card. */
+export function CardHeader({
+	icon,
+	title,
+	subtitle,
+	tone = "accent",
+	right,
+}: {
+	icon: IconName;
+	title: string;
+	subtitle?: string;
+	tone?: "accent" | "warning" | "danger" | "muted";
+	right?: ReactNode;
+}) {
+	const p = usePalette();
+	const [bg, fg] = {
+		accent: [p.accentSoft, p.accent],
+		warning: [p.warningSoft, p.warning],
+		danger: [p.dangerSoft, p.danger],
+		muted: [p.elevated, p.muted],
+	}[tone] as [string, string];
+	return (
+		<View style={styles.cardHeader}>
+			<View style={[styles.cardHeaderIcon, { backgroundColor: bg }]}>
+				<Icon name={icon} size={19} color={fg} />
+			</View>
+			<View style={styles.flex}>
+				<Text style={[styles.cardHeaderTitle, { color: p.text }]} numberOfLines={1}>
+					{title}
+				</Text>
+				{subtitle ? (
+					<Text style={[styles.cardHeaderSubtitle, { color: p.muted }]} numberOfLines={2}>
+						{subtitle}
+					</Text>
+				) : null}
+			</View>
+			{right}
+		</View>
+	);
+}
+
 export function StatusDot({ color, size = 8, ring }: { color: string; size?: number; ring?: string }) {
 	return (
 		<View
@@ -148,34 +275,78 @@ export function StatusDot({ color, size = 8, ring }: { color: string; size?: num
 	);
 }
 
-/** Rounded letter tile used as an icon for hosts and workspaces. */
+/** A dot with a soft, pulsing halo, for things that are running right now. */
+export function PulseDot({ color, size = 8 }: { color: string; size?: number }) {
+	const pulse = useRef(new Animated.Value(0)).current;
+	useEffect(() => {
+		const loop = Animated.loop(
+			Animated.timing(pulse, {
+				toValue: 1,
+				duration: 1400,
+				easing: Easing.out(Easing.quad),
+				useNativeDriver: Platform.OS !== "web",
+			}),
+		);
+		loop.start();
+		return () => loop.stop();
+	}, [pulse]);
+	return (
+		<View style={{ width: size, height: size, alignItems: "center", justifyContent: "center" }}>
+			<Animated.View
+				style={{
+					position: "absolute",
+					width: size,
+					height: size,
+					borderRadius: size / 2,
+					backgroundColor: color,
+					opacity: pulse.interpolate({ inputRange: [0, 1], outputRange: [0.55, 0] }),
+					transform: [{ scale: pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 2.6] }) }],
+				}}
+			/>
+			<StatusDot color={color} size={size} />
+		</View>
+	);
+}
+
+/** Rounded tile used as an icon for hosts, workspaces and agents; colored from the name. */
 export function Avatar({
 	name,
 	size = 40,
-	tone = "accent",
+	icon,
+	tone = "auto",
 	children,
 }: {
 	name: string;
 	size?: number;
-	tone?: "accent" | "muted";
+	/** Show this icon instead of the name's first letter. */
+	icon?: IconName;
+	tone?: "auto" | "accent" | "muted";
 	children?: ReactNode;
 }) {
 	const p = usePalette();
 	const letter = Array.from(name.trim())[0]?.toUpperCase() ?? "?";
+	const colors =
+		tone === "accent"
+			? { bg: p.accentSoft, fg: p.accent }
+			: tone === "muted"
+				? { bg: p.elevated, fg: p.muted }
+				: tileColors(p, name);
 	return (
 		<View
 			style={{
 				width: size,
 				height: size,
-				borderRadius: size * 0.32,
+				borderRadius: size * 0.3,
 				alignItems: "center",
 				justifyContent: "center",
-				backgroundColor: tone === "accent" ? p.accentSoft : p.elevated,
+				backgroundColor: colors.bg,
 			}}
 		>
-			<Text style={{ color: tone === "accent" ? p.accent : p.muted, fontSize: size * 0.42, fontWeight: "700" }}>
-				{letter}
-			</Text>
+			{icon ? (
+				<Icon name={icon} size={Math.round(size * 0.5)} color={colors.fg} />
+			) : (
+				<Text style={{ color: colors.fg, fontSize: size * 0.42, fontWeight: "700" }}>{letter}</Text>
+			)}
 			{children}
 		</View>
 	);
@@ -185,10 +356,15 @@ export function Pill({
 	text,
 	tone = "muted",
 	dot,
+	pulse,
+	icon,
 }: {
 	text: string;
-	tone?: "muted" | "accent" | "warning" | "danger";
+	tone?: "muted" | "accent" | "warning" | "danger" | "ok";
 	dot?: boolean;
+	/** Animated dot for live states. */
+	pulse?: boolean;
+	icon?: IconName;
 }) {
 	const p = usePalette();
 	const colors = {
@@ -196,16 +372,20 @@ export function Pill({
 		accent: [p.accentSoft, p.accent],
 		warning: [p.warningSoft, p.warning],
 		danger: [p.dangerSoft, p.danger],
+		ok: [p.okSoft, p.ok],
 	}[tone] as [string, string];
 	return (
 		<View style={[styles.pill, { backgroundColor: colors[0] }]}>
-			{dot ? <StatusDot color={colors[1]} size={6} /> : null}
-			<Text style={[styles.pillText, { color: colors[1] }]}>{text}</Text>
+			{pulse ? <PulseDot color={colors[1]} size={6} /> : dot ? <StatusDot color={colors[1]} size={6} /> : null}
+			{icon ? <Icon name={icon} size={12} color={colors[1]} /> : null}
+			<Text style={[styles.pillText, { color: colors[1] }]} numberOfLines={1}>
+				{text}
+			</Text>
 		</View>
 	);
 }
 
-/** Modal panel that slides up from the bottom of the screen. */
+/** Modal panel that slides up from the bottom of the screen over a fading scrim. */
 export function Sheet({
 	children,
 	onClose,
@@ -217,13 +397,32 @@ export function Sheet({
 }) {
 	const p = usePalette();
 	const insets = useSafeAreaInsets();
+	const enter = useRef(new Animated.Value(0)).current;
+	useEffect(() => {
+		Animated.timing(enter, {
+			toValue: 1,
+			duration: 260,
+			easing: Easing.out(Easing.cubic),
+			useNativeDriver: Platform.OS !== "web",
+		}).start();
+	}, [enter]);
 	return (
-		<Modal transparent animationType="slide" onRequestClose={onClose}>
-			<Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="关闭" />
-			<View style={[styles.sheet, { backgroundColor: p.card, paddingBottom: insets.bottom + 16 }, style]}>
+		<Modal transparent animationType="fade" statusBarTranslucent navigationBarTranslucent onRequestClose={onClose}>
+			<Pressable style={[styles.backdrop, { backgroundColor: p.scrim }]} onPress={onClose} accessibilityLabel="关闭" />
+			<Animated.View
+				style={[
+					styles.sheet,
+					{
+						backgroundColor: p.card,
+						paddingBottom: insets.bottom + 12,
+						transform: [{ translateY: enter.interpolate({ inputRange: [0, 1], outputRange: [360, 0] }) }],
+					},
+					style,
+				]}
+			>
 				<View style={[styles.grabber, { backgroundColor: p.border }]} />
 				{children}
-			</View>
+			</Animated.View>
 		</Modal>
 	);
 }
@@ -232,6 +431,7 @@ export interface SheetAction {
 	label: string;
 	/** One line under the label explaining the effect. */
 	description?: string;
+	icon?: IconName;
 	danger?: boolean;
 	testID?: string;
 	onPress: () => void;
@@ -262,9 +462,12 @@ export function ActionSheet({
 		return (
 			<Sheet onClose={onClose}>
 				<View style={styles.sheetContent}>
-					<View style={styles.sheetHead}>
-						<Text style={[styles.sheetTitle, { color: p.text }]}>{confirm.title}</Text>
-						<Muted style={styles.sheetMessage}>{confirm.message}</Muted>
+					<View style={[styles.confirmIcon, { backgroundColor: p.dangerSoft }]}>
+						<Icon name={confirming.icon ?? "warning-outline"} size={24} color={p.danger} />
+					</View>
+					<View style={[styles.sheetHead, styles.center]}>
+						<Text style={[styles.sheetTitle, styles.centerText, { color: p.text }]}>{confirm.title}</Text>
+						<Muted style={[styles.sheetMessage, styles.centerText]}>{confirm.message}</Muted>
 					</View>
 					<View style={styles.sheetButtons}>
 						<Button title="取消" onPress={onClose} style={styles.flex} />
@@ -289,30 +492,39 @@ export function ActionSheet({
 					</Text>
 					{subtitle ? <Muted numberOfLines={3}>{subtitle}</Muted> : null}
 				</View>
-				<View style={[styles.sheetGroup, { backgroundColor: p.bg, borderColor: p.border }]}>
-					{actions.map((action, index) => (
-						<Pressable
-							key={action.label}
-							testID={action.testID}
-							accessibilityRole="button"
-							accessibilityLabel={action.label}
-							onPress={() => (action.confirm ? setConfirming(action) : run(action))}
-							style={({ pressed }) => [
-								styles.sheetAction,
-								index > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderColor: p.border },
-								pressed && { backgroundColor: p.elevated },
-							]}
-						>
-							<View style={styles.flex}>
-								<Text style={[styles.sheetActionLabel, { color: action.danger ? p.danger : p.text }]}>
-									{action.label}
-								</Text>
-								{action.description ? (
-									<Text style={[styles.sheetActionText, { color: p.muted }]}>{action.description}</Text>
+				<View style={[styles.sheetGroup, { backgroundColor: p.bg }]}>
+					{actions.map((action, index) => {
+						const color = action.danger ? p.danger : p.text;
+						return (
+							<Pressable
+								key={action.label}
+								testID={action.testID}
+								accessibilityRole="button"
+								accessibilityLabel={action.label}
+								onPress={() => (action.confirm ? setConfirming(action) : run(action))}
+								style={({ pressed }) => [
+									styles.sheetAction,
+									index > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderColor: p.border },
+									pressed && { backgroundColor: p.elevated },
+								]}
+							>
+								{action.icon ? (
+									<View
+										style={[styles.sheetActionIcon, { backgroundColor: action.danger ? p.dangerSoft : p.accentSoft }]}
+									>
+										<Icon name={action.icon} size={18} color={action.danger ? p.danger : p.accent} />
+									</View>
 								) : null}
-							</View>
-						</Pressable>
-					))}
+								<View style={styles.flex}>
+									<Text style={[styles.sheetActionLabel, { color }]}>{action.label}</Text>
+									{action.description ? (
+										<Text style={[styles.sheetActionText, { color: p.muted }]}>{action.description}</Text>
+									) : null}
+								</View>
+								<Icon name="chevron-forward" size={16} color={p.faint} />
+							</Pressable>
+						);
+					})}
 				</View>
 				<Button title="取消" onPress={onClose} />
 			</View>
@@ -354,7 +566,19 @@ export function Title({
 	);
 }
 
-/** Small uppercase-style label above a group of cards. */
+/** Large in-page title with an optional eyebrow and subtitle, for top-level screens. */
+export function LargeTitle({ title, eyebrow, subtitle }: { title: string; eyebrow?: string; subtitle?: string }) {
+	const p = usePalette();
+	return (
+		<View style={styles.largeTitle}>
+			{eyebrow ? <Text style={[styles.eyebrow, { color: p.accent }]}>{eyebrow}</Text> : null}
+			<Text style={[styles.largeTitleText, { color: p.text }]}>{title}</Text>
+			{subtitle ? <Text style={[styles.largeTitleSubtitle, { color: p.muted }]}>{subtitle}</Text> : null}
+		</View>
+	);
+}
+
+/** Small label above a group of cards. */
 export function SectionLabel({ children, style }: { children: ReactNode; style?: StyleProp<TextStyle> }) {
 	const p = usePalette();
 	return <Text style={[styles.sectionLabel, { color: p.muted }, style]}>{children}</Text>;
@@ -373,83 +597,108 @@ export function ToastHost() {
 	const insets = useSafeAreaInsets();
 	if (!toast) return null;
 	const error = toast.level === "error";
+	const bg = error ? p.danger : p.dark ? p.elevated : "#1b2027";
 	return (
 		<Pressable
 			onPress={() => store.dismissToast()}
-			style={[styles.toast, { top: insets.top + 60, backgroundColor: error ? p.danger : p.text }]}
+			style={[styles.toast, FLOAT_SHADOW, { top: insets.top + 60, backgroundColor: bg }]}
 		>
-			<Text style={[styles.toastText, { color: error ? "#fff" : p.bg }]}>{toast.message}</Text>
+			<Icon name={error ? "alert-circle" : "checkmark-circle"} size={18} color={error ? "#fff" : p.accent} />
+			<Text style={[styles.toastText, { color: "#fff" }]}>{toast.message}</Text>
 		</Pressable>
 	);
 }
 
 const styles = StyleSheet.create({
 	flex: { flex: 1 },
+	center: { alignItems: "center" },
+	centerText: { textAlign: "center" },
 	screen: { flex: 1 },
 	button: {
-		minHeight: 46,
-		paddingHorizontal: 18,
-		borderRadius: RADIUS.md,
+		minHeight: 48,
+		paddingHorizontal: 20,
+		borderRadius: 14,
 		alignItems: "center",
 		justifyContent: "center",
 		flexDirection: "row",
-		gap: 6,
+		gap: 7,
 	},
-	buttonSmall: { minHeight: 34, paddingHorizontal: 14, borderRadius: RADIUS.pill },
-	buttonText: { fontSize: 16, fontWeight: "600" },
+	buttonSmall: { minHeight: 36, paddingHorizontal: 14, borderRadius: RADIUS.pill, gap: 5 },
+	buttonText: { fontSize: 15.5, fontWeight: "600", flexShrink: 1 },
 	buttonTextSmall: { fontSize: 14 },
-	buttonIcon: { fontSize: 18, fontWeight: "600", marginTop: -1 },
-	buttonIconSmall: { fontSize: 16 },
-	spinner: { marginRight: 2 },
 	disabled: { opacity: 0.4 },
-	pressed: { opacity: 0.65 },
-	headerAction: { paddingHorizontal: 12, height: 32, borderRadius: RADIUS.pill, justifyContent: "center" },
+	pressed: { opacity: 0.7, transform: [{ scale: 0.98 }] },
+	iconButton: { alignItems: "center", justifyContent: "center" },
+	headerAction: {
+		flexDirection: "row",
+		alignItems: "center",
+		gap: 4,
+		paddingHorizontal: 13,
+		height: 36,
+		borderRadius: RADIUS.pill,
+	},
 	headerActionText: { fontSize: 14, fontWeight: "600" },
-	headerIcon: { width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center" },
-	headerGlyph: { fontSize: 18, fontWeight: "700", marginTop: -2 },
 	card: { borderRadius: RADIUS.lg, borderWidth: StyleSheet.hairlineWidth, padding: 16 },
+	cardHeader: { flexDirection: "row", alignItems: "center", gap: 12 },
+	cardHeaderIcon: { width: 38, height: 38, borderRadius: 12, alignItems: "center", justifyContent: "center" },
+	cardHeaderTitle: { fontSize: 16.5, fontWeight: "700" },
+	cardHeaderSubtitle: { fontSize: 13, lineHeight: 18, marginTop: 1 },
 	pill: {
 		flexDirection: "row",
 		alignItems: "center",
 		gap: 5,
 		paddingHorizontal: 9,
-		paddingVertical: 3,
+		paddingVertical: 4,
 		borderRadius: RADIUS.pill,
 		alignSelf: "flex-start",
 	},
 	pillText: { fontSize: 12, fontWeight: "600" },
-	muted: { fontSize: 13, lineHeight: 19 },
+	muted: { fontSize: 13.5, lineHeight: 20 },
 	title: { fontSize: 17, fontWeight: "700" },
+	largeTitle: { gap: 4, paddingHorizontal: 4, paddingTop: 4, paddingBottom: 6 },
+	eyebrow: { fontSize: 12.5, fontWeight: "700", letterSpacing: 1.6 },
+	largeTitleText: { fontSize: 30, lineHeight: 38, fontWeight: "800", letterSpacing: -0.4 },
+	largeTitleSubtitle: { fontSize: 14, lineHeight: 20 },
 	sectionLabel: { fontSize: 13, fontWeight: "600", letterSpacing: 0.3, marginLeft: 4 },
 	toast: {
 		position: "absolute",
 		alignSelf: "center",
 		maxWidth: "90%",
-		paddingHorizontal: 18,
+		flexDirection: "row",
+		alignItems: "center",
+		gap: 8,
+		paddingHorizontal: 16,
 		paddingVertical: 12,
 		borderRadius: RADIUS.pill,
-		...Platform.select({
-			web: { boxShadow: "0 4px 14px rgba(0,0,0,0.2)" },
-			default: {
-				shadowColor: "#000",
-				shadowOpacity: 0.2,
-				shadowRadius: 14,
-				shadowOffset: { width: 0, height: 4 },
-				elevation: 8,
-			},
-		}),
 	},
-	toastText: { fontSize: 14, fontWeight: "500", textAlign: "center" },
-	backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)" },
-	sheet: { maxHeight: "85%", borderTopLeftRadius: RADIUS.xl, borderTopRightRadius: RADIUS.xl },
-	grabber: { alignSelf: "center", width: 38, height: 5, borderRadius: 3, marginTop: 8 },
-	sheetContent: { padding: 18, paddingTop: 14, gap: 16 },
+	toastText: { fontSize: 14, fontWeight: "500", flexShrink: 1 },
+	backdrop: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
+	sheet: {
+		position: "absolute",
+		left: 0,
+		right: 0,
+		bottom: 0,
+		maxHeight: "86%",
+		borderTopLeftRadius: RADIUS.xl,
+		borderTopRightRadius: RADIUS.xl,
+	},
+	grabber: { alignSelf: "center", width: 40, height: 5, borderRadius: 3, marginTop: 10 },
+	sheetContent: { padding: 20, paddingTop: 16, gap: 16 },
 	sheetHead: { gap: 6, paddingHorizontal: 2 },
-	sheetTitle: { fontSize: 17, lineHeight: 24, fontWeight: "700" },
+	sheetTitle: { fontSize: 18, lineHeight: 25, fontWeight: "700" },
 	sheetMessage: { fontSize: 14, lineHeight: 21 },
-	sheetGroup: { borderRadius: RADIUS.lg, borderWidth: StyleSheet.hairlineWidth, overflow: "hidden" },
-	sheetAction: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, paddingVertical: 14 },
-	sheetActionLabel: { fontSize: 16, fontWeight: "600" },
+	confirmIcon: {
+		alignSelf: "center",
+		width: 52,
+		height: 52,
+		borderRadius: 26,
+		alignItems: "center",
+		justifyContent: "center",
+	},
+	sheetGroup: { borderRadius: RADIUS.lg, overflow: "hidden" },
+	sheetAction: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 14, paddingVertical: 13 },
+	sheetActionIcon: { width: 36, height: 36, borderRadius: 11, alignItems: "center", justifyContent: "center" },
+	sheetActionLabel: { fontSize: 15.5, fontWeight: "600" },
 	sheetActionText: { fontSize: 12.5, lineHeight: 18, marginTop: 2 },
 	sheetButtons: { flexDirection: "row", gap: 10 },
 });

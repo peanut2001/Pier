@@ -6,18 +6,31 @@ import { useState } from "react";
 import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { isBusy } from "../format.ts";
 import { useStore } from "../store.ts";
-import { SHADOW, usePalette } from "../theme.ts";
+import { FLOAT_SHADOW, RADIUS, usePalette } from "../theme.ts";
 import { type SlashEntry, SlashMenu, useSlashMenu } from "./SlashMenu.tsx";
+import { Icon, IconButton } from "./ui.tsx";
 
 const MAX_IMAGES = 8;
 
-export function Composer({ chat, runState }: { chat: ChatController; runState: string }) {
+export function Composer({
+	chat,
+	runState,
+	model,
+	onModelPress,
+}: {
+	chat: ChatController;
+	runState: string;
+	/** Current model (and thinking level), shown as a chip in the toolbar. */
+	model?: string;
+	onModelPress?: () => void;
+}) {
 	const store = useStore();
 	const router = useRouter();
 	const p = usePalette();
 	const [text, setText] = useState(() => store.draft(chat.sessionId));
 	const [images, setImages] = useState<ImageInput[]>([]);
 	const [sending, setSending] = useState(false);
+	const [focused, setFocused] = useState(false);
 	const busy = isBusy(runState as never);
 	const canSend = (text.trim().length > 0 || images.length > 0) && !sending;
 
@@ -99,68 +112,95 @@ export function Composer({ chat, runState }: { chat: ChatController; runState: s
 	};
 
 	return (
-		<View style={[styles.root, { backgroundColor: p.bg }]}>
+		<View style={styles.root}>
 			<SlashMenu menu={menu} onPick={pick} />
-			{images.length ? (
-				<ScrollView horizontal style={styles.images} contentContainerStyle={styles.imagesContent}>
-					{images.map((image, index) => (
-						<Pressable
-							// biome-ignore lint/suspicious/noArrayIndexKey: attachments have no id.
-							key={index}
-							onPress={() => setImages(images.filter((_, i) => i !== index))}
-							accessibilityLabel="移除图片"
-						>
-							<Image source={{ uri: `data:${image.mimeType};base64,${image.data}` }} style={styles.thumb} />
-							<Text style={styles.remove}>×</Text>
-						</Pressable>
-					))}
-				</ScrollView>
-			) : null}
-			<View style={[styles.row, SHADOW, { backgroundColor: p.card, borderColor: p.border }]}>
-				<Pressable
-					onPress={() => void pickImages()}
-					style={({ pressed }) => [styles.iconButton, { backgroundColor: pressed ? p.border : p.elevated }]}
-					accessibilityLabel="添加图片"
-				>
-					<Text style={[styles.icon, { color: p.muted }]}>+</Text>
-				</Pressable>
+			<View style={[styles.box, FLOAT_SHADOW, { backgroundColor: p.card, borderColor: focused ? p.accent : p.border }]}>
+				{images.length ? (
+					<ScrollView horizontal style={styles.images} contentContainerStyle={styles.imagesContent}>
+						{images.map((image, index) => (
+							<Pressable
+								// biome-ignore lint/suspicious/noArrayIndexKey: attachments have no id.
+								key={index}
+								onPress={() => setImages(images.filter((_, i) => i !== index))}
+								accessibilityLabel="移除图片"
+							>
+								<Image source={{ uri: `data:${image.mimeType};base64,${image.data}` }} style={styles.thumb} />
+								<View style={styles.remove}>
+									<Icon name="close" size={13} color="#fff" />
+								</View>
+							</Pressable>
+						))}
+					</ScrollView>
+				) : null}
 				<TextInput
 					testID="composer-input"
 					value={text}
 					onChangeText={update}
+					onFocus={() => setFocused(true)}
+					onBlur={() => setFocused(false)}
 					multiline
-					placeholder={busy ? "引导 Agent，或排队下一条…" : "给 Agent 发消息，/ 使用命令"}
+					placeholder={busy ? "引导 Agent，或排队下一条…" : "给 Agent 发消息，输入 / 使用命令"}
 					placeholderTextColor={p.faint}
 					style={[styles.input, { color: p.text }]}
 				/>
-				{busy && !canSend ? (
-					<Pressable
-						onPress={() => void chat.abort()}
-						style={[styles.send, { backgroundColor: p.dangerSoft }]}
-						accessibilityLabel="中止"
-						testID="abort-button"
-					>
-						<Text style={[styles.sendText, { color: p.danger }]}>■</Text>
-					</Pressable>
-				) : (
-					<Pressable
-						onPress={() => void send("auto")}
-						disabled={!canSend}
-						style={[styles.send, { backgroundColor: canSend ? p.accent : p.elevated }]}
-						accessibilityLabel={busy ? "引导" : "发送"}
-						testID="send-button"
-					>
-						<Text style={[styles.sendText, { color: canSend ? p.onAccent : p.faint }]}>↑</Text>
-					</Pressable>
-				)}
+				<View style={styles.toolbar}>
+					<IconButton
+						icon="image-outline"
+						label="添加图片"
+						size={34}
+						tone="elevated"
+						onPress={() => void pickImages()}
+					/>
+					{model ? (
+						<Pressable
+							onPress={onModelPress}
+							accessibilityRole="button"
+							accessibilityLabel="切换模型"
+							style={({ pressed }) => [styles.modelChip, { backgroundColor: pressed ? p.border : p.elevated }]}
+						>
+							<Icon name="sparkles-outline" size={13} color={p.accent} />
+							<Text style={[styles.modelText, { color: p.text }]} numberOfLines={1}>
+								{model}
+							</Text>
+							<Icon name="chevron-down" size={13} color={p.faint} />
+						</Pressable>
+					) : (
+						<View style={styles.flex} />
+					)}
+					{busy && !canSend ? (
+						<Pressable
+							onPress={() => void chat.abort()}
+							style={({ pressed }) => [styles.send, { backgroundColor: p.danger }, pressed && styles.pressed]}
+							accessibilityLabel="中止"
+							testID="abort-button"
+						>
+							<Icon name="stop" size={15} color="#fff" />
+						</Pressable>
+					) : (
+						<Pressable
+							onPress={() => void send("auto")}
+							disabled={!canSend}
+							style={({ pressed }) => [
+								styles.send,
+								{ backgroundColor: canSend ? p.accent : p.elevated },
+								pressed && styles.pressed,
+							]}
+							accessibilityLabel={busy ? "引导" : "发送"}
+							testID="send-button"
+						>
+							<Icon name="arrow-up" size={20} color={canSend ? p.onAccent : p.faint} />
+						</Pressable>
+					)}
+				</View>
 			</View>
 			{busy && canSend ? (
 				<View style={styles.modes}>
-					<Text style={[styles.hint, { color: p.muted }]}>Agent 正在运行：↑ 立即引导</Text>
-					<Pressable onPress={() => void send("followUp")}>
-						<Text style={[styles.link, { color: p.accent }]}>改为排队到结束后</Text>
+					<Icon name="flash-outline" size={13} color={p.muted} />
+					<Text style={[styles.hint, { color: p.muted }]}>运行中：发送即引导</Text>
+					<Pressable hitSlop={6} onPress={() => void send("followUp")}>
+						<Text style={[styles.link, { color: p.accent }]}>排队到结束后</Text>
 					</Pressable>
-					<Pressable onPress={() => void chat.abort()}>
+					<Pressable hitSlop={6} onPress={() => void chat.abort()}>
 						<Text style={[styles.link, { color: p.danger }]}>中止</Text>
 					</Pressable>
 				</View>
@@ -170,34 +210,39 @@ export function Composer({ chat, runState }: { chat: ChatController; runState: s
 }
 
 const styles = StyleSheet.create({
+	flex: { flex: 1 },
 	root: { paddingHorizontal: 10, paddingTop: 6, paddingBottom: 8, gap: 6 },
-	row: {
-		flexDirection: "row",
-		alignItems: "flex-end",
-		gap: 6,
-		padding: 5,
-		borderRadius: 25,
-		borderWidth: StyleSheet.hairlineWidth,
-	},
-	iconButton: { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center" },
-	icon: { fontSize: 22, fontWeight: "500", marginTop: -2 },
+	box: { borderRadius: 24, borderWidth: 1, paddingTop: 4, paddingBottom: 8, paddingHorizontal: 8 },
 	input: {
-		flex: 1,
-		minHeight: 38,
-		maxHeight: 140,
-		paddingHorizontal: 6,
-		paddingTop: 9,
-		paddingBottom: 9,
+		minHeight: 40,
+		maxHeight: 150,
+		paddingHorizontal: 8,
+		paddingTop: 10,
+		paddingBottom: 8,
 		fontSize: 15.5,
+		lineHeight: 21,
 	},
-	send: { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center" },
-	sendText: { fontSize: 18, fontWeight: "800" },
-	modes: { flexDirection: "row", alignItems: "center", gap: 14, paddingHorizontal: 12 },
+	toolbar: { flexDirection: "row", alignItems: "center", gap: 8 },
+	modelChip: {
+		flexShrink: 1,
+		flexDirection: "row",
+		alignItems: "center",
+		alignSelf: "center",
+		gap: 5,
+		height: 34,
+		paddingHorizontal: 11,
+		borderRadius: RADIUS.pill,
+		maxWidth: 240,
+	},
+	modelText: { fontSize: 13, fontWeight: "600", flexShrink: 1 },
+	send: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center", marginLeft: "auto" },
+	pressed: { opacity: 0.75 },
+	modes: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12 },
 	hint: { fontSize: 12, flex: 1 },
-	link: { fontSize: 13, fontWeight: "600" },
-	images: { maxHeight: 72 },
-	imagesContent: { gap: 8, paddingHorizontal: 4 },
-	thumb: { width: 64, height: 64, borderRadius: 12 },
+	link: { fontSize: 13, fontWeight: "600", marginLeft: 8 },
+	images: { maxHeight: 80, marginTop: 4 },
+	imagesContent: { gap: 8, paddingHorizontal: 4, paddingTop: 4 },
+	thumb: { width: 64, height: 64, borderRadius: 14 },
 	remove: {
 		position: "absolute",
 		top: 4,
@@ -205,12 +250,8 @@ const styles = StyleSheet.create({
 		width: 20,
 		height: 20,
 		borderRadius: 10,
-		overflow: "hidden",
+		alignItems: "center",
+		justifyContent: "center",
 		backgroundColor: "rgba(0,0,0,0.6)",
-		color: "#fff",
-		fontSize: 14,
-		lineHeight: 20,
-		textAlign: "center",
-		fontWeight: "700",
 	},
 });

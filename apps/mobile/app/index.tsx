@@ -6,19 +6,20 @@ import {
 	ActionSheet,
 	Avatar,
 	Button,
-	Card,
 	HeaderAction,
+	Icon,
+	LargeTitle,
 	Muted,
 	Pill,
+	PulseDot,
 	Screen,
-	SectionLabel,
 	StatusDot,
 	Title,
 } from "../src/components/ui.tsx";
 import { relativeTime } from "../src/format.ts";
 import type { PairedHost } from "../src/hosts.ts";
 import { useMobileState, useStore } from "../src/store.ts";
-import { usePalette } from "../src/theme.ts";
+import { MONO, RADIUS, SHADOW, usePalette } from "../src/theme.ts";
 
 function HostMenu({ host, onClose }: { host: PairedHost; onClose: () => void }) {
 	const store = useStore();
@@ -32,12 +33,14 @@ function HostMenu({ host, onClose }: { host: PairedHost; onClose: () => void }) 
 				{
 					label: "修改连接地址",
 					description: "电脑的 IP 变了时使用，不用重新配对",
+					icon: "swap-horizontal",
 					testID: "host-edit-addresses",
 					onPress: () => router.push({ pathname: "/host/[hostId]/addresses", params: { hostId: host.hostId } }),
 				},
 				{
 					label: "移除",
 					description: "只删除这台手机上的配对信息",
+					icon: "trash-outline",
 					danger: true,
 					testID: "host-forget",
 					confirm: {
@@ -58,41 +61,98 @@ function HostRow({ host }: { host: PairedHost }) {
 	const [menu, setMenu] = useState(false);
 	const active = useMobileState((s) => (s.host.hostId === host.hostId ? s.host.connection : undefined));
 	const revoked = useMobileState((s) => s.host.hostId === host.hostId && s.host.revoked);
-	const dot = revoked ? p.danger : active === "open" ? p.ok : active ? p.warning : p.faint;
+	const online = active === "open" && !revoked;
+	const dot = revoked ? p.danger : online ? p.ok : active ? p.warning : p.faint;
+	const status = revoked
+		? "已被电脑移除，需要重新配对"
+		: online
+			? "已连接"
+			: active
+				? "正在连接…"
+				: host.lastConnectedAt
+					? `上次连接 ${relativeTime(host.lastConnectedAt)}`
+					: `配对于 ${relativeTime(host.pairedAt)}`;
 	return (
 		<>
 			<Pressable
 				testID={`host-${host.hostId}`}
 				onPress={() => router.push({ pathname: "/host/[hostId]", params: { hostId: host.hostId } })}
 				onLongPress={() => setMenu(true)}
-				style={({ pressed }) => pressed && styles.pressed}
+				style={({ pressed }) => [
+					styles.hostCard,
+					SHADOW,
+					{ backgroundColor: p.card, borderColor: p.border },
+					pressed && styles.pressed,
+				]}
 			>
-				<Card style={styles.hostCard}>
-					<Avatar name={host.hostName} size={46}>
-						<View style={styles.avatarDot}>
-							<StatusDot color={dot} size={12} ring={p.card} />
-						</View>
-					</Avatar>
-					<View style={styles.hostMain}>
-						<Text style={[styles.hostName, { color: p.text }]} numberOfLines={1}>
-							{host.hostName}
-						</Text>
-						<Muted>
-							{revoked
-								? "已被电脑移除，需要重新配对"
-								: active === "open"
-									? "已连接"
-									: host.lastConnectedAt
-										? `上次连接 ${relativeTime(host.lastConnectedAt)}`
-										: `配对于 ${relativeTime(host.pairedAt)}`}
-						</Muted>
+				<Avatar name={host.hostName} size={50} icon="desktop-outline">
+					<View style={styles.avatarDot}>
+						<StatusDot color={dot} size={14} ring={p.card} />
 					</View>
-					{revoked ? <Pill text="需重新配对" tone="danger" /> : null}
-					<Text style={[styles.chevron, { color: p.faint }]}>›</Text>
-				</Card>
+				</Avatar>
+				<View style={styles.hostMain}>
+					<Text style={[styles.hostName, { color: p.text }]} numberOfLines={1}>
+						{host.hostName}
+					</Text>
+					<View style={styles.statusRow}>
+						{online ? <PulseDot color={p.ok} size={6} /> : null}
+						<Text style={[styles.status, { color: revoked ? p.danger : online ? p.ok : p.muted }]} numberOfLines={1}>
+							{status}
+						</Text>
+					</View>
+					{host.addresses[0] ? (
+						<Text style={[styles.address, { color: p.faint }]} numberOfLines={1}>
+							{host.addresses[0]}
+							{host.addresses.length > 1 ? `  +${host.addresses.length - 1}` : ""}
+						</Text>
+					) : null}
+				</View>
+				{revoked ? <Pill text="需重新配对" tone="danger" /> : null}
+				<Pressable
+					hitSlop={10}
+					onPress={() => setMenu(true)}
+					accessibilityRole="button"
+					accessibilityLabel={`${host.hostName} 的更多操作`}
+					style={({ pressed }) => [styles.more, pressed && { backgroundColor: p.elevated }]}
+				>
+					<Icon name="ellipsis-vertical" size={18} color={p.faint} />
+				</Pressable>
 			</Pressable>
 			{menu ? <HostMenu host={host} onClose={() => setMenu(false)} /> : null}
 		</>
+	);
+}
+
+const STEPS = [
+	{ icon: "desktop-outline", text: "在电脑上打开 Pier，进入“手机与远程访问”" },
+	{ icon: "radio-outline", text: "开启远程访问，显示配对二维码" },
+	{ icon: "scan-outline", text: "点下方“添加电脑”，用手机扫码" },
+] as const;
+
+function EmptyHosts() {
+	const p = usePalette();
+	return (
+		<View style={styles.empty}>
+			<View style={[styles.hero, { backgroundColor: p.accentSoft }]}>
+				<View style={[styles.heroInner, { backgroundColor: p.accent }]}>
+					<Icon name="laptop-outline" size={34} color={p.onAccent} />
+				</View>
+			</View>
+			<Title style={[styles.center, styles.emptyTitle]}>连接你的电脑</Title>
+			<Muted style={styles.center}>手机是遥控器，Agent 始终运行在你的电脑上。</Muted>
+			<View style={[styles.steps, { backgroundColor: p.card, borderColor: p.border }]}>
+				{STEPS.map((step, index) => (
+					<View key={step.text} style={styles.step}>
+						<View style={[styles.stepIndex, { backgroundColor: p.accentSoft }]}>
+							<Text style={[styles.stepIndexText, { color: p.accent }]}>{index + 1}</Text>
+						</View>
+						<Text style={[styles.stepText, { color: p.text }]}>{step.text}</Text>
+						<Icon name={step.icon} size={18} color={p.faint} />
+					</View>
+				))}
+			</View>
+			<Muted style={[styles.center, styles.hint]}>手机需要和电脑在同一局域网，或同一 Tailscale 网络。</Muted>
+		</View>
 	);
 }
 
@@ -105,7 +165,9 @@ export default function Home() {
 		<Screen>
 			<Stack.Screen
 				options={{
-					headerRight: () => <HeaderAction label="设置" onPress={() => router.push("/settings")} />,
+					headerRight: () => (
+						<HeaderAction label="设置" icon="settings-outline" onPress={() => router.push("/settings")} />
+					),
 				}}
 			/>
 			{!ready ? (
@@ -117,32 +179,48 @@ export default function Home() {
 					contentContainerStyle={styles.list}
 					renderItem={({ item }) => <HostRow host={item} />}
 					ListHeaderComponent={
-						<>
+						<View style={styles.header}>
+							<LargeTitle
+								eyebrow="PIER"
+								title="我的电脑"
+								subtitle={hosts.length ? `${hosts.length} 台已配对 · 长按管理` : "随时随地驱动电脑上的编码 Agent"}
+							/>
 							<UpdateBanner />
-							{hosts.length ? <SectionLabel>我的电脑</SectionLabel> : null}
-						</>
-					}
-					ListEmptyComponent={
-						<View style={styles.empty}>
-							<View style={[styles.hero, { backgroundColor: p.accentSoft }]}>
-								<Text style={[styles.heroGlyph, { color: p.accent }]}>💻</Text>
-							</View>
-							<Title style={[styles.center, styles.emptyTitle]}>连接你的电脑</Title>
-							<Muted style={styles.center}>
-								在电脑上的 Pier 中打开“手机”→ 开启远程访问 →
-								显示配对二维码，然后在这里扫码。手机需要和电脑在同一局域网（或同一 Tailscale 网络）。
-							</Muted>
 						</View>
 					}
+					ListEmptyComponent={<EmptyHosts />}
 					ListFooterComponent={
-						<Button
-							title="添加电脑"
-							icon="+"
-							variant={hosts.length ? "tonal" : "primary"}
-							onPress={() => router.push("/pair")}
-							testID="add-host"
-							style={styles.add}
-						/>
+						hosts.length ? (
+							<Pressable
+								testID="add-host"
+								accessibilityRole="button"
+								accessibilityLabel="添加电脑"
+								onPress={() => router.push("/pair")}
+								style={({ pressed }) => [
+									styles.addCard,
+									{ borderColor: p.border },
+									pressed && { backgroundColor: p.elevated },
+								]}
+							>
+								<View style={[styles.addIcon, { backgroundColor: p.accentSoft }]}>
+									<Icon name="add" size={20} color={p.accent} />
+								</View>
+								<View style={styles.flex}>
+									<Text style={[styles.addTitle, { color: p.text }]}>添加电脑</Text>
+									<Muted>扫描电脑上的配对二维码</Muted>
+								</View>
+								<Icon name="qr-code-outline" size={20} color={p.faint} />
+							</Pressable>
+						) : (
+							<Button
+								title="添加电脑"
+								icon="scan-outline"
+								variant="primary"
+								onPress={() => router.push("/pair")}
+								testID="add-host"
+								style={styles.add}
+							/>
+						)
 					}
 				/>
 			)}
@@ -151,18 +229,54 @@ export default function Home() {
 }
 
 const styles = StyleSheet.create({
+	flex: { flex: 1 },
 	loading: { marginTop: 48 },
-	list: { padding: 16, gap: 12, flexGrow: 1 },
-	pressed: { opacity: 0.75, transform: [{ scale: 0.99 }] },
-	hostCard: { flexDirection: "row", alignItems: "center", gap: 14, paddingVertical: 14 },
+	list: { paddingHorizontal: 16, paddingBottom: 40, gap: 12, flexGrow: 1 },
+	header: { gap: 14, marginBottom: 2 },
+	pressed: { opacity: 0.85, transform: [{ scale: 0.985 }] },
+	hostCard: {
+		flexDirection: "row",
+		alignItems: "center",
+		gap: 14,
+		padding: 14,
+		paddingRight: 8,
+		borderRadius: RADIUS.lg,
+		borderWidth: StyleSheet.hairlineWidth,
+	},
 	avatarDot: { position: "absolute", right: -3, bottom: -3 },
 	hostMain: { flex: 1, gap: 3 },
 	hostName: { fontSize: 17, fontWeight: "700" },
-	chevron: { fontSize: 26, marginTop: -3 },
-	empty: { gap: 12, paddingTop: 56, paddingBottom: 24, paddingHorizontal: 12, alignItems: "center" },
-	hero: { width: 84, height: 84, borderRadius: 28, alignItems: "center", justifyContent: "center", marginBottom: 8 },
-	heroGlyph: { fontSize: 38, fontWeight: "600" },
+	statusRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+	status: { fontSize: 13, fontWeight: "500", flexShrink: 1 },
+	address: { fontSize: 11.5, fontFamily: MONO },
+	more: { width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center" },
+	empty: { gap: 10, paddingTop: 28, paddingBottom: 20, alignItems: "center" },
+	hero: { width: 104, height: 104, borderRadius: 36, alignItems: "center", justifyContent: "center", marginBottom: 10 },
+	heroInner: { width: 68, height: 68, borderRadius: 24, alignItems: "center", justifyContent: "center" },
 	emptyTitle: { fontSize: 22 },
 	center: { textAlign: "center" },
-	add: { marginTop: 8 },
+	steps: {
+		alignSelf: "stretch",
+		marginTop: 14,
+		borderRadius: RADIUS.lg,
+		borderWidth: StyleSheet.hairlineWidth,
+		paddingVertical: 6,
+	},
+	step: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 14, paddingVertical: 11 },
+	stepIndex: { width: 26, height: 26, borderRadius: 13, alignItems: "center", justifyContent: "center" },
+	stepIndexText: { fontSize: 13, fontWeight: "800" },
+	stepText: { flex: 1, fontSize: 14.5, lineHeight: 20 },
+	hint: { fontSize: 12.5, marginTop: 4 },
+	add: { marginTop: 4 },
+	addCard: {
+		flexDirection: "row",
+		alignItems: "center",
+		gap: 14,
+		padding: 14,
+		borderRadius: RADIUS.lg,
+		borderWidth: 1.5,
+		borderStyle: "dashed",
+	},
+	addIcon: { width: 50, height: 50, borderRadius: 15, alignItems: "center", justifyContent: "center" },
+	addTitle: { fontSize: 16, fontWeight: "700" },
 });
