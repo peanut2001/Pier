@@ -1,4 +1,4 @@
-import type { SessionRunState, SessionSummary } from "@pier/protocol";
+import type { ApprovalPolicy, SessionRunState, SessionSummary } from "@pier/protocol";
 
 export function sessionTitle(session: Pick<SessionSummary, "name" | "firstMessage">): string {
 	const text = session.name || session.firstMessage.replace(/\s+/g, " ").trim();
@@ -28,6 +28,18 @@ export const RUN_STATE_LABEL: Record<SessionRunState, string> = {
 export function isBusy(state: SessionRunState): boolean {
 	return state === "streaming" || state === "compacting" || state === "retrying";
 }
+
+export const POLICY_LABEL: Record<ApprovalPolicy, string> = {
+	ask: "逐项审批",
+	smart: "智能",
+	auto: "自动放行",
+};
+
+export const POLICY_DESCRIPTION: Record<ApprovalPolicy, string> = {
+	ask: "bash、write、edit 每次都需要你批准。",
+	smart: "只读命令与工作区内的文件修改直接放行；其他命令、工作区外写入与危险操作需要批准。",
+	auto: "所有工具调用直接执行，不再询问。仅在你完全信任当前任务时使用。",
+};
 
 export function truncate(text: string, max: number): string {
 	return text.length > max ? `${text.slice(0, max)}…` : text;
