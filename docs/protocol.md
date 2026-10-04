@@ -1,4 +1,4 @@
-# Pier 协议 v1.24
+# Pier 协议 v1.25
 
 > 实现：`packages/protocol`（zod schema + TS 类型，Host 与所有客户端共享）。
 > 本文档描述线上格式与语义；字段的权威定义以 `packages/protocol/src` 为准。
@@ -59,7 +59,7 @@
 
 ```jsonc
 { "type": "req", "id": "h", "method": "host.hello", "params": {
-  "protocolVersion": "1.24",
+  "protocolVersion": "1.25",
   "client": { "name": "pier-desktop", "version": "0.1.0", "platform": "darwin" },
   "token": "<本地 token>",       // 本地连接必填；远程连接由加密通道认证，不需要
   "coalesceMs": 50               // 可选：合并流式增量的窗口（0–1000ms，默认 0）
@@ -333,7 +333,7 @@ Host 由桌面端启动时（`--watch-stdin`，macOS / Linux），启动过程�
 | 方法 | 参数 | 结果 |
 |---|---|---|
 | `agentConfig.get` | `{ runtime, workspaceId? }` | `AgentConfigResult = { runtime, format: "json"\|"toml", configDir, scopes, files, workspaceId?, available }`。`scopes` 是该运行时的全部范围（优先级从低到高），`files` 为 `user` 文件，带 `workspaceId` 时还有该工作区的文件，顺序同 `scopes`；每项 `AgentConfigFile = { scope, path, exists, text, settings?, error?, modifiedAt? }`，语义同 `PiSettingsFile`。TOML 的 `settings` 转换为 JSON：日期时间为 ISO 字符串，超出安全范围的整数为字符串。`available` 表示这台电脑上装了该 CLI（没装也可以编辑文件） |
-| `agentConfig.update` | `{ runtime, scope, workspaceId?, changes: { path: string[], value? }[] }` | `AgentConfigChangeResult = { file, changed }`；与 `settings.update` 相同地逐项设置或删除键，其他内容保持不变。JSON 以两个空格缩进写回；TOML 在原文上修改，保留注释、顺序与格式，在已有表中新增的子表（如另一个 `[model_providers.x]`）写成紧跟在同级表后的节，内联表保持内联；写入前重新解析校验，结果与预期不符时 `INTERNAL` 且不写入。TOML 不能存 `null`（`BAD_REQUEST`）。文件无法解析时 `CONFLICT`（改用 `agentConfig.write` 修复） |
+| `agentConfig.update` | `{ runtime, scope, workspaceId?, changes: { path: string[], value?, apiKeyRef? }[] }` | `AgentConfigChangeResult = { file, changed }`；与 `settings.update` 相同地逐项设置或删除键，其他内容保持不变。JSON 以两个空格缩进写回；TOML 在原文上修改，保留注释、顺序与格式，在已有表中新增的子表（如另一个 `[model_providers.x]`）写成紧跟在同级表后的节，内联表保持内联；写入前重新解析校验，结果与预期不符时 `INTERNAL` 且不写入。TOML 不能存 `null`（`BAD_REQUEST`）。文件无法解析时 `CONFLICT`（改用 `agentConfig.write` 修复）。某项带 `apiKeyRef`（`account.useToken` / `newapi.useToken` 返回的密钥引用，只对取得它的连接有效）时写入该引用背后的令牌密钥，客户端不需要知道密钥（文件内容随结果返回，之后读取文件时也能看到它）；引用不存在或已过期时 `NOT_FOUND`，同一项同时带 `value` 与 `apiKeyRef` 时 `BAD_REQUEST`（1.25） |
 | `agentConfig.write` | `{ runtime, scope, workspaceId?, text, expectedModifiedAt? }` | `AgentConfigChangeResult`；用 `text`（最多 1 MiB）整体替换文件，原样写入。Claude Code 的必须是 JSON 对象，Codex 的必须是有效的 TOML（可以为空），否则 `BAD_REQUEST`；`expectedModifiedAt` 同 `settings.write` |
 
 ### UI

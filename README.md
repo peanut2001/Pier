@@ -51,6 +51,13 @@ CLI 不在 `PATH` 中时，可以用 `PIER_CLAUDE_PATH` / `PIER_CODEX_PATH` 指�
 
 修改对之后新建（或重新打开）的会话生效。Pier 按工作区审批策略设置的项（Claude Code 的默认权限模式，Codex 的审批策略与沙箱）只影响终端中的 CLI。设置其他电脑时这两页修改那台电脑上的文件，那台电脑需要协议 1.23 或更高。
 
+**一键接入云链API**：在「设置 → 个人中心」中把一个分组配置到本地后，点该分组的「Claude Code / Codex」，可以用同一个令牌把它们接入这个分组（写入全局配置，密钥由 Host 直接写入，需要协议 1.25）：
+
+- **Claude Code**：`ANTHROPIC_BASE_URL` 设为站点地址、`ANTHROPIC_AUTH_TOKEN` 设为令牌，opus / sonnet / haiku 别名各自对应分组中该系列最新的模型，可选指定默认模型；同时移除会改用其他凭据或模型的 `ANTHROPIC_API_KEY`、`apiKeyHelper`、`ANTHROPIC_MODEL`、`ANTHROPIC_SMALL_FAST_MODEL`。
+- **Codex**：添加服务商 `[model_providers.<分组 ID>]`（站点的 `/v1`、Responses API、`experimental_bearer_token`），设为当前服务商并设置默认模型。Codex 只用 Responses API，模型所在的渠道需要支持它（OpenAI 类模型排在前面）。
+
+正在使用的分组会标出「Claude Code」「Codex」，之后可以在「Agent 配置」中查看和修改。
+
 调试时 `bun run faux-host --agents` 会同时提供电脑上的 Claude Code 与 Codex（真实会话，会消耗额度）；`npx tsx packages/host/scripts/live-agent-check.ts claude-code [模型]` 用真实 CLI 走一遍创建、流式输出、审批、重命名、重新打开与分叉。
 
 ### pi 的配置

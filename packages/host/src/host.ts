@@ -1070,9 +1070,15 @@ export class PierHost implements RequestHandler {
 					available,
 				};
 			},
-			"agentConfig.update": (_ctx, params) => {
+			"agentConfig.update": (ctx, params) => {
 				const path = this.agentConfigWorkspace(params.scope, params.workspaceId);
-				const changes = params.changes.map((c) => (c.value === undefined ? { path: c.path } : c));
+				const changes = params.changes.map(({ path, value, apiKeyRef }) =>
+					apiKeyRef !== undefined
+						? { path, value: this.newapi.resolveKey(ctx.connection.connectionId, apiKeyRef) }
+						: value === undefined
+							? { path }
+							: { path, value },
+				);
 				const result = this.agentConfig.update(params.runtime, params.scope, path, changes);
 				if (result.changed) this.applyAgentConfigChange(params.runtime, params.scope, params.workspaceId);
 				return result;
