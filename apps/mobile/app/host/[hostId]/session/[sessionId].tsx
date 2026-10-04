@@ -9,19 +9,10 @@ import {
 import type { ApprovalPolicy, ModelInfo, SessionSummary } from "@pier/protocol";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-	ActivityIndicator,
-	KeyboardAvoidingView,
-	Modal,
-	Platform,
-	Pressable,
-	ScrollView,
-	StyleSheet,
-	Text,
-	View,
-} from "react-native";
+import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Composer } from "../../../../src/components/Composer.tsx";
+import { KeyboardAvoider } from "../../../../src/components/KeyboardAvoider.tsx";
 import { PendingRequests } from "../../../../src/components/PendingRequests.tsx";
 import { ThinkingSlider } from "../../../../src/components/ThinkingSlider.tsx";
 import { Transcript } from "../../../../src/components/Transcript.tsx";
@@ -318,11 +309,7 @@ export default function SessionScreen() {
 		: "会话";
 
 	return (
-		<KeyboardAvoidingView
-			style={[styles.flex, { backgroundColor: p.bg }]}
-			behavior={Platform.OS === "ios" ? "padding" : undefined}
-			keyboardVerticalOffset={Platform.OS === "ios" ? insets.top + 44 : 0}
-		>
+		<KeyboardAvoider style={[styles.flex, { backgroundColor: p.bg }]} topOffset={insets.top + 44} contentInsetsBottom>
 			<Stack.Screen
 				options={{
 					title,
@@ -388,6 +375,10 @@ export default function SessionScreen() {
 					nearBottom.current = contentOffset.y + layoutMeasurement.height >= contentSize.height - 80;
 				}}
 				scrollEventThrottle={100}
+				onLayout={() => {
+					// Keep the latest messages in view when the keyboard shrinks the transcript.
+					if (nearBottom.current) scroller.current?.scrollToEnd({ animated: false });
+				}}
 				onContentSizeChange={() => {
 					if (nearBottom.current) scroller.current?.scrollToEnd({ animated: false });
 				}}
@@ -414,7 +405,7 @@ export default function SessionScreen() {
 				</>
 			) : null}
 			{menu && chat ? <SessionMenu chat={chat} onClose={() => setMenu(false)} /> : null}
-		</KeyboardAvoidingView>
+		</KeyboardAvoider>
 	);
 }
 

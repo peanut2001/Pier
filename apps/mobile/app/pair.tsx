@@ -3,16 +3,8 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Clipboard from "expo-clipboard";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-	ActivityIndicator,
-	KeyboardAvoidingView,
-	Platform,
-	ScrollView,
-	StyleSheet,
-	Text,
-	TextInput,
-	View,
-} from "react-native";
+import { ActivityIndicator, Platform, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { KeyboardAvoider } from "../src/components/KeyboardAvoider.tsx";
 import { Button, Card, Muted, Screen, Title } from "../src/components/ui.tsx";
 import { pairingErrorText, useMobileState, useStore } from "../src/store.ts";
 import { MONO, usePalette } from "../src/theme.ts";
@@ -75,7 +67,7 @@ export default function Pair() {
 	const scanning = phase.kind === "scan";
 	return (
 		<Screen>
-			<KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+			<KeyboardAvoider style={styles.flex}>
 				<ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
 					{phase.kind === "busy" ? (
 						<Card style={styles.status}>
@@ -156,7 +148,7 @@ export default function Pair() {
 						</>
 					) : null}
 				</ScrollView>
-			</KeyboardAvoidingView>
+			</KeyboardAvoider>
 		</Screen>
 	);
 }
