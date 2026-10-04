@@ -1,5 +1,5 @@
 import { agentRuntimeLabel } from "@pier/chat-state";
-import type { AgentRuntimeId, SessionSummary, WorkspaceInfo } from "@pier/protocol";
+import type { AgentRuntimeId, AgentRuntimeInfo, SessionSummary, WorkspaceInfo } from "@pier/protocol";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -13,6 +13,7 @@ import {
 	Text,
 	View,
 } from "react-native";
+import { AgentPicker } from "../../../src/components/AgentPicker.tsx";
 import {
 	Avatar,
 	Button,
@@ -169,6 +170,18 @@ export default function HostScreen() {
 	const [limits, setLimits] = useState<Record<string, number>>({});
 	const [showArchived, setShowArchived] = useState<Record<string, boolean>>({});
 	const [refreshing, setRefreshing] = useState(false);
+	const [picker, setPicker] = useState<{ workspace: WorkspaceInfo; runtimes: AgentRuntimeInfo[] }>();
+
+	const createSession = async (workspaceId: string, runtime?: AgentRuntimeId) => {
+		const session = await store.createSession(workspaceId, runtime);
+		if (session) {
+			setPicker(undefined);
+			router.push({
+				pathname: "/host/[hostId]/session/[sessionId]",
+				params: { hostId, sessionId: session.id, workspaceId: session.workspaceId },
+			});
+		}
+	};
 
 	useEffect(() => {
 		if (hostId) store.openHost(hostId);
@@ -262,26 +275,14 @@ export default function HostScreen() {
 							small
 							disabled={view.connection !== "open"}
 							onPress={async () => {
-								const workspaceId = section.workspace.id;
-								const create = async (runtime?: AgentRuntimeId) => {
-									const session = await store.createSession(workspaceId, runtime);
-									if (session) {
-										router.push({
-											pathname: "/host/[hostId]/session/[sessionId]",
-											params: { hostId, sessionId: session.id, workspaceId: session.workspaceId },
-										});
-									}
-								};
+								const workspace = section.workspace;
 								// Let the user pick the agent when the computer can run more than pi.
 								const runtimes = await store.availableRuntimes();
-								if (runtimes.length < 2 || Platform.OS === "web") {
-									await create();
+								if (runtimes.length < 2) {
+									await createSession(workspace.id);
 									return;
 								}
-								Alert.alert("由哪个 Agent 来做？", undefined, [
-									...runtimes.map((r) => ({ text: r.name, onPress: () => void create(r.id) })),
-									{ text: "取消", style: "cancel" as const },
-								]);
+								setPicker({ workspace, runtimes });
 							}}
 						/>
 					</View>
@@ -316,6 +317,14 @@ export default function HostScreen() {
 					</>
 				)}
 			/>
+			{picker ? (
+				<AgentPicker
+					runtimes={picker.runtimes}
+					workspaceName={picker.workspace.name}
+					onPick={(runtime) => createSession(picker.workspace.id, runtime)}
+					onClose={() => setPicker(undefined)}
+				/>
+			) : null}
 		</Screen>
 	);
 }
