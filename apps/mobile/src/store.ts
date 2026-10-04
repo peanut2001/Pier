@@ -43,7 +43,7 @@ import {
 } from "./identity.ts";
 import { RemoteTerminal } from "./terminal.ts";
 
-export const APP_VERSION = "0.2.19";
+export const APP_VERSION = "0.2.20";
 
 /** Live session subscriptions kept for quick back-and-forth navigation. */
 const MAX_LIVE_CHATS = 4;
