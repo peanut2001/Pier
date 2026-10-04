@@ -1,19 +1,9 @@
 import type { HostDirectoryEntry, HostDirectoryListing } from "@pier/protocol";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-	ActivityIndicator,
-	FlatList,
-	KeyboardAvoidingView,
-	Platform,
-	Pressable,
-	StyleSheet,
-	Switch,
-	Text,
-	TextInput,
-	View,
-} from "react-native";
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { KeyboardAvoider } from "../../../src/components/KeyboardAvoider.tsx";
 import { Button, Muted, Pill, Screen } from "../../../src/components/ui.tsx";
 import { useMobileState, useStore } from "../../../src/store.ts";
 import { MONO, RADIUS, usePalette } from "../../../src/theme.ts";
@@ -106,7 +96,7 @@ export default function AddWorkspace() {
 	return (
 		<Screen>
 			<Stack.Screen options={{ title: "添加工作区" }} />
-			<KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+			<KeyboardAvoider style={styles.flex} contentInsetsBottom>
 				<View style={styles.top}>
 					<Muted>浏览 {hostName} 上的目录，选择一个作为工作区。Agent 会在这个目录中读写文件、运行命令。</Muted>
 					<View style={styles.bar}>
@@ -194,7 +184,7 @@ export default function AddWorkspace() {
 						testID="directory-add"
 					/>
 				</View>
-			</KeyboardAvoidingView>
+			</KeyboardAvoider>
 		</Screen>
 	);
 }

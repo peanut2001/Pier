@@ -2,7 +2,8 @@ import { fromBase64Url, keyFingerprint } from "@pier/crypto";
 import { addressPort, DEFAULT_PIER_PORT, parsePeerAddresses } from "@pier/protocol";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useMemo, useState } from "react";
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput } from "react-native";
+import { ScrollView, StyleSheet, Text, TextInput } from "react-native";
+import { KeyboardAvoider } from "../../../src/components/KeyboardAvoider.tsx";
 import { Button, Card, Muted, Screen, Title } from "../../../src/components/ui.tsx";
 import { useMobileState, useStore } from "../../../src/store.ts";
 import { MONO, usePalette } from "../../../src/theme.ts";
@@ -61,7 +62,7 @@ export default function HostAddresses() {
 	return (
 		<Screen>
 			<Stack.Screen options={{ title: `${host.hostName} 的地址` }} />
-			<KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+			<KeyboardAvoider style={styles.flex}>
 				<ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
 					<Card style={styles.card}>
 						<Title>连接地址</Title>
@@ -112,7 +113,7 @@ export default function HostAddresses() {
 						/>
 					</Card>
 				</ScrollView>
-			</KeyboardAvoidingView>
+			</KeyboardAvoider>
 		</Screen>
 	);
 }
