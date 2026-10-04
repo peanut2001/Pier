@@ -201,6 +201,14 @@ export default function HostScreen() {
 		(sum, s) => sum + (view.sessions[s.workspace.id] ?? []).reduce((n, x) => n + (x.pendingUi ?? 0), 0),
 		0,
 	);
+	const online = view.hostId === hostId && view.connection === "open";
+	const addWorkspace = () => {
+		if (!store.canAddWorkspace()) {
+			store.toast("error", "这台电脑上的 Pier 版本较旧，请先升级，或在电脑上添加工作区");
+			return;
+		}
+		router.push({ pathname: "/host/[hostId]/add-workspace", params: { hostId } });
+	};
 
 	return (
 		<Screen>
@@ -208,10 +216,13 @@ export default function HostScreen() {
 				options={{
 					title: host?.hostName ?? "电脑",
 					headerRight: () => (
-						<HeaderAction
-							label="地址"
-							onPress={() => router.push({ pathname: "/host/[hostId]/addresses", params: { hostId } })}
-						/>
+						<View style={styles.headerActions}>
+							{online ? <HeaderAction label="添加工作区" glyph="+" onPress={addWorkspace} /> : null}
+							<HeaderAction
+								label="地址"
+								onPress={() => router.push({ pathname: "/host/[hostId]/addresses", params: { hostId } })}
+							/>
+						</View>
 					),
 				}}
 			/>
@@ -240,8 +251,21 @@ export default function HostScreen() {
 							</Card>
 						) : null}
 						{view.connection === "open" && view.workspaces && !view.workspaces.length ? (
-							<Card flat>
-								<Muted>电脑上还没有工作区。请先在电脑的 Pier 中添加一个工作区目录。</Muted>
+							<Card flat style={styles.banner}>
+								<Muted>
+									{store.canAddWorkspace()
+										? "电脑上还没有工作区。选择电脑上的一个目录作为工作区，Agent 会在其中运行。"
+										: "电脑上还没有工作区。这台电脑上的 Pier 版本较旧，请先在电脑的 Pier 中添加一个工作区目录。"}
+								</Muted>
+								{store.canAddWorkspace() ? (
+									<Button
+										title="添加工作区"
+										icon="+"
+										variant="primary"
+										onPress={addWorkspace}
+										testID="add-workspace-empty"
+									/>
+								) : null}
 							</Card>
 						) : null}
 					</View>
@@ -326,6 +350,7 @@ const styles = StyleSheet.create({
 	header: { gap: 10 },
 	banner: { gap: 10 },
 	bannerRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+	headerActions: { flexDirection: "row", alignItems: "center", gap: 8 },
 	sectionHeader: {
 		flexDirection: "row",
 		alignItems: "center",
