@@ -124,17 +124,26 @@ function slugify(name: string): string {
 function DefaultModelField() {
 	const store = useStore();
 	const providers = useAppState((s) => s.providers);
+	const node = useAppState((s) => s.settingsNode);
 	const [models, setModels] = useState<ModelInfo[] | undefined>();
+	// Keyed by the computer too: the models come from the computer the settings screen
+	// manages, so they reload when it changes.
 	const version = providers
-		? `${providers.availableCount}|${providers.providers.map((p) => p.availableCount).join()}`
+		? `${node}|${providers.availableCount}|${providers.providers.map((p) => p.availableCount).join()}`
 		: "";
 
+	// Drop a reply from a computer that is no longer selected.
 	useEffect(() => {
 		if (!version) return;
+		let current = true;
+		setModels(undefined);
 		store
 			.availableModels()
-			.then(setModels)
-			.catch(() => setModels([]));
+			.then((list) => current && setModels(list))
+			.catch(() => current && setModels([]));
+		return () => {
+			current = false;
+		};
 	}, [store, version]);
 
 	if (!providers) return null;
