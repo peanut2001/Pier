@@ -3,6 +3,8 @@ import {
 	type AgentRuntimeId,
 	type EventFrame,
 	type ImageInput,
+	type KnownMessages,
+	knownPrefix,
 	type ModelInfo,
 	PierProtocolError,
 	type PierSessionEvent,
@@ -204,7 +206,16 @@ export abstract class ManagedSession {
 		else entry.buffer.push(frame);
 	}
 
-	subscribe(subscriber: SessionSubscriber, sinceSeq?: number, epoch?: string): PendingSubscription {
+	/**
+	 * Subscribe a connection: replay what it missed when `sinceSeq` / `epoch` allow it, otherwise
+	 * send a snapshot (without the transcript prefix it already has, when `known` matches).
+	 */
+	subscribe(
+		subscriber: SessionSubscriber,
+		sinceSeq?: number,
+		epoch?: string,
+		known?: KnownMessages,
+	): PendingSubscription {
 		this.lastActivity = Date.now();
 		const entry: SubscriberEntry = { subscriber, ready: false, buffer: [] };
 		this.subscribers.set(subscriber.connectionId, entry);
@@ -224,7 +235,7 @@ export abstract class ManagedSession {
 				}
 			} else {
 				// The snapshot already reflects every logged event up to its seq.
-				const snapshot = this.snapshot();
+				const snapshot = this.snapshot(known);
 				subscriber.send({ type: "evt", sessionId: this.id, event: { type: "session.snapshot", snapshot } });
 				buffered = buffered.filter((f) => f.seq === undefined || f.seq > snapshot.seq || f.sessionId !== this.id);
 			}
@@ -265,13 +276,16 @@ export abstract class ManagedSession {
 		};
 	}
 
-	snapshot(): SessionSnapshot {
+	/** Everything needed to render the session; without the first messages when `known` matches them. */
+	snapshot(known?: KnownMessages): SessionSnapshot {
 		const c = this.content();
+		const from = knownPrefix(c.messages, known);
 		return {
 			session: this.summary(),
 			seq: this.log.currentSeq,
 			epoch: this.log.epoch,
-			messages: c.messages,
+			messages: from ? c.messages.slice(from) : c.messages,
+			...(from ? { messagesFrom: from } : {}),
 			...(c.streamingMessage ? { streamingMessage: c.streamingMessage } : {}),
 			pendingToolCalls: c.pendingToolCalls,
 			pendingUi: this.bridge.pendingRequests,

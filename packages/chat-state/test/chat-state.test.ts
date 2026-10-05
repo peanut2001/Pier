@@ -4,6 +4,7 @@ import {
 	applySnapshot,
 	buildTranscript,
 	type ChatState,
+	cacheableChatState,
 	editReplacements,
 	initialChatState,
 	parsePartialJson,
@@ -327,6 +328,36 @@ describe("reduceChat", () => {
 		});
 		expect(closed.closed).toBe("idle");
 		expect(closed.runState).toBe("inactive");
+	});
+});
+
+describe("cached transcripts", () => {
+	const user = (text: string, timestamp: number) => ({ role: "user", content: text, timestamp });
+
+	it("keeps the known prefix when a snapshot starts after it", () => {
+		const state = loaded({ messages: [user("a", 1), user("b", 2)] });
+		const next = applySnapshot(state, snapshot({ seq: 20, epoch: "e2", messages: [user("c", 3)], messagesFrom: 2 }));
+		expect(next.messages).toEqual([user("a", 1), user("b", 2), user("c", 3)]);
+		expect(next.seq).toBe(20);
+		expect(next.epoch).toBe("e2");
+		expect(next.needsResync).toBe(false);
+	});
+
+	it("asks for a full snapshot when it lacks the prefix the snapshot assumes", () => {
+		const state = loaded({ messages: [user("a", 1)] });
+		const next = applySnapshot(state, snapshot({ seq: 20, messages: [user("c", 3)], messagesFrom: 2 }));
+		expect(next.needsResync).toBe(true);
+		expect(next.messages).toEqual([user("a", 1)]);
+	});
+
+	it("caches only loaded state, without client-local notices", () => {
+		expect(cacheableChatState(initialChatState("s1"))).toBeUndefined();
+		let state = loaded({ messages: [user("a", 1)] });
+		state = run(state, [{ type: "ui.notify", message: "hi" }]);
+		const cached = cacheableChatState(state);
+		expect(cached?.notices).toEqual([]);
+		expect(cached?.messages).toEqual([user("a", 1)]);
+		expect(cached?.seq).toBe(state.seq);
 	});
 });
 

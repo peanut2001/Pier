@@ -1,5 +1,6 @@
 import type { PierClient, Subscription } from "@pier/client";
 import type { EventFrame, ImageInput, SessionSummary, ThinkingLevel, UiResponse } from "@pier/protocol";
+import { knownMessages } from "@pier/protocol";
 import { applySnapshot, type ChatState, clearResync, dismissNotice, initialChatState, reduceChat } from "./reducer.ts";
 import { BUILTIN_COMMANDS, builtinCommands, mergeCommands, type SlashCommand } from "./slash.ts";
 
@@ -40,9 +41,13 @@ export class ChatController {
 		private readonly client: PierClient,
 		session: SessionSummary,
 		private readonly hooks: ChatHooks,
+		/** State kept from an earlier visit (`cacheableChatState`): shown at once and resumed from. */
+		cached?: ChatState,
 	) {
 		this.workspaceId = session.workspaceId;
-		this.view = { chat: initialChatState(session.id, session) };
+		this.view = {
+			chat: cached?.sessionId === session.id && cached.loaded ? cached : initialChatState(session.id, session),
+		};
 	}
 
 	get sessionId(): string {
@@ -71,8 +76,13 @@ export class ChatController {
 		try {
 			// Load the session into the host's active pool (no-op when it is already there).
 			await this.client.request("session.open", { workspaceId: this.workspaceId, sessionId: this.sessionId });
+			const chat = this.view.chat;
 			const sub = await this.client.subscribe(this.sessionId, (frame) => this.onFrame(frame), {
 				workspaceId: this.workspaceId,
+				// Only the events since the cached state when the host still has them, otherwise a
+				// snapshot without the transcript prefix this device already has.
+				...(chat.loaded && chat.epoch ? { resume: { seq: chat.seq, epoch: chat.epoch } } : {}),
+				known: () => (this.view.chat.loaded ? knownMessages(this.view.chat.messages) : undefined),
 			});
 			if (this.disposed) await sub.unsubscribe();
 			else this.sub = sub;
