@@ -1405,9 +1405,9 @@ export class PierStore {
 		this.openSettings("models", node);
 	}
 
-	/** Models with usable credentials. */
+	/** Models with usable credentials on the computer the settings screen manages. */
 	async availableModels(): Promise<ModelInfo[]> {
-		const client = this.client;
+		const client = this.settingsClient;
 		if (!client) return [];
 		return (await client.request("model.list")).models;
 	}
