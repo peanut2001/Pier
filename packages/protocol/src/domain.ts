@@ -501,7 +501,16 @@ export interface DeviceInfo {
 	lastSeenAt?: string;
 	/** Whether the device currently has an open connection. */
 	connected: boolean;
+	/** How the connected device reaches this computer (1.26). */
+	route?: ConnectionRouteKind;
 }
+
+/**
+ * How a remote connection reaches the host (1.26): `lan` straight to the listener (LAN,
+ * VPN, forwarded port), `relay` through a Pier Relay, `p2p` a peer-to-peer WebRTC path set
+ * up through the relay.
+ */
+export type ConnectionRouteKind = "lan" | "relay" | "p2p";
 
 /**
  * Another computer's Pier Host that this host paired with as a device (1.9). The desktop UI
@@ -517,6 +526,8 @@ export interface PeerInfo {
 	fingerprint: string;
 	/** Candidate `host:port` addresses, the last one that worked first. */
 	addresses: string[];
+	/** Pier Relays the peer is registered with, tried after the addresses (1.26). */
+	relays?: string[];
 	/** This computer's device id on the peer. */
 	deviceId: string;
 	pairedAt: string;
@@ -544,6 +555,27 @@ export interface RemoteAccessStatus {
 	error?: string;
 	/** Whether a pairing code is currently valid. */
 	pairingActive: boolean;
+	/** Connection through a Pier Relay (1.26). */
+	relay?: RelayStatus;
+	/** Whether connections through the relay may move to a peer-to-peer path (1.26). */
+	p2p?: boolean;
+}
+
+/**
+ * The host's registration with a Pier Relay (1.26): devices that cannot reach the host
+ * directly connect through the relay, which only forwards ciphertext.
+ */
+export interface RelayStatus {
+	enabled: boolean;
+	/** Relay URL (`ws://` / `wss://`). */
+	url?: string;
+	/** Whether an access token is saved (the token itself is never returned). */
+	hasToken: boolean;
+	state: "off" | "connecting" | "online" | "error";
+	/** Why the relay is not online although enabled. */
+	error?: string;
+	/** The relay's mode once connected: `private` (token required) or `open`. */
+	mode?: "private" | "open";
 }
 
 /** A device that presented a valid pairing code and waits for the desktop user's decision. */

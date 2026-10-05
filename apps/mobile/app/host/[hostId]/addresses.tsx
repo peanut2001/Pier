@@ -1,4 +1,4 @@
-import { fromBase64Url, keyFingerprint } from "@pier/crypto";
+import { fromBase64Url, keyFingerprint, normalizeRelayUrl } from "@pier/crypto";
 import { addressPort, DEFAULT_PIER_PORT, parsePeerAddresses } from "@pier/protocol";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useMemo, useState } from "react";
@@ -25,6 +25,7 @@ export default function HostAddresses() {
 	const { hostId } = useLocalSearchParams<{ hostId: string }>();
 	const host = useMobileState((s) => s.hosts.find((h) => h.hostId === hostId));
 	const [text, setText] = useState(() => host?.addresses.join("\n") ?? "");
+	const [relayText, setRelayText] = useState(() => (host?.relays ?? []).join("\n"));
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | undefined>();
 	const fingerprint = useMemo(() => fingerprintOf(host?.hostPublicKey), [host?.hostPublicKey]);
@@ -40,9 +41,23 @@ export default function HostAddresses() {
 
 	const defaultPort = addressPort(host.addresses[0]) ?? DEFAULT_PIER_PORT;
 	const { addresses, invalid } = parsePeerAddresses(text, defaultPort);
-	const unchanged = addresses.join(",") === host.addresses.join(",");
+	const relays: string[] = [];
+	const invalidRelays: string[] = [];
+	for (const item of relayText.split(/[\s,，、;；]+/)) {
+		if (!item.trim()) continue;
+		try {
+			const url = normalizeRelayUrl(item);
+			if (!relays.includes(url)) relays.push(url);
+		} catch {
+			invalidRelays.push(item.trim());
+		}
+	}
+	const unchanged =
+		addresses.join(",") === host.addresses.join(",") && relays.join(",") === (host.relays ?? []).join(",");
+	const empty = !addresses.length && !relays.length;
+	const blocked = invalid.length > 0 || invalidRelays.length > 0 || empty;
 	const save = async () => {
-		if (busy || invalid.length || !addresses.length) return;
+		if (busy || blocked) return;
 		if (unchanged) {
 			router.back();
 			return;
@@ -50,7 +65,7 @@ export default function HostAddresses() {
 		setBusy(true);
 		setError(undefined);
 		try {
-			await store.setHostAddresses(host.hostId, addresses);
+			await store.setHostAddresses(host.hostId, addresses, relays);
 			store.toast("info", "已保存，正在用新地址连接");
 			router.back();
 		} catch (e) {
@@ -87,13 +102,33 @@ export default function HostAddresses() {
 							textAlignVertical="top"
 							style={[styles.input, { color: p.text, borderColor: p.border, backgroundColor: p.bg }]}
 						/>
-						{invalid.length ? (
-							<Text style={[styles.small, { color: p.danger }]}>无法识别的地址：{invalid.join("、")}</Text>
-						) : !addresses.length ? (
-							<Muted>至少需要一个地址。</Muted>
+						<Muted>中继服务器（可选）：手机与电脑不在同一网络时，经电脑上配置的 Pier Relay 连接。</Muted>
+						<TextInput
+							testID="host-relays-input"
+							value={relayText}
+							onChangeText={(value) => {
+								setRelayText(value);
+								setError(undefined);
+							}}
+							multiline
+							editable={!busy}
+							placeholder="wss://relay.example.com"
+							placeholderTextColor={p.faint}
+							autoCapitalize="none"
+							autoCorrect={false}
+							textAlignVertical="top"
+							style={[styles.input, styles.relayInput, { color: p.text, borderColor: p.border, backgroundColor: p.bg }]}
+						/>
+						{invalid.length || invalidRelays.length ? (
+							<Text style={[styles.small, { color: p.danger }]}>
+								无法识别的地址：{[...invalid, ...invalidRelays].join("、")}
+							</Text>
+						) : empty ? (
+							<Muted>至少需要一个地址或中继服务器。</Muted>
 						) : (
 							<Muted>
-								将依次尝试：<Text style={styles.mono}>{addresses.join("、")}</Text>
+								将依次尝试：
+								<Text style={styles.mono}>{[...addresses, ...relays.map((r) => `中继 ${r}`)].join("、")}</Text>
 							</Muted>
 						)}
 						{fingerprint ? (
@@ -111,7 +146,7 @@ export default function HostAddresses() {
 							icon="refresh"
 							variant="primary"
 							loading={busy}
-							disabled={invalid.length > 0 || !addresses.length}
+							disabled={blocked}
 							onPress={() => void save()}
 							testID="host-addresses-save"
 						/>
@@ -137,6 +172,7 @@ const styles = StyleSheet.create({
 		fontFamily: MONO,
 		minHeight: 110,
 	},
+	relayInput: { minHeight: 60 },
 	small: { fontSize: 13 },
 	mono: { fontFamily: MONO },
 });

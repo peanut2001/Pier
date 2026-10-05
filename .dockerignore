@@ -1,0 +1,9 @@
+**/node_modules
+**/dist
+**/.tsbuild
+**/*.tsbuildinfo
+.git
+apps/desktop/src-tauri/target
+apps/mobile/android
+apps/mobile/ios
+packages/host/bin

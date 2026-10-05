@@ -149,3 +149,7 @@ button.small-icon {
 	font-size: 13px;
 	color: var(--text-muted);
 }
+
+.relay-input {
+	width: min(420px, 100%);
+}

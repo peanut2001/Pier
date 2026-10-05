@@ -9,7 +9,8 @@
 		{ "path": "../protocol" },
 		{ "path": "../crypto" },
 		{ "path": "../client" },
-		{ "path": "../chat-state" }
+		{ "path": "../chat-state" },
+		{ "path": "../../apps/relay" }
 	],
 	"include": ["src", "test", "spikes", "scripts/*.ts"]
 }

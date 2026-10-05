@@ -13,6 +13,8 @@
  * `--remote [--remote-port <n>]` also turns on remote access (default port 7433) so the
  * mobile app can pair with it; `--remote-address <host:port>` overrides the addresses
  * put into pairing codes (e.g. `10.0.2.2:7433` for the Android emulator).
+ * `--relay <url>` registers with a Pier Relay (token from $PIER_RELAY_TOKEN), e.g. one started
+ * with `bun run relay -- --mode open`; `--no-p2p` keeps relayed connections on the relay.
  * `--account-site <url>` points the personal center at another NewAPI site (e.g. a local one)
  * instead of 云链API. `--demo-updates` pretends the host runs in a desktop app whose updater
  * finds v9.9.9 and fakes installing it (`update.*`, for the remote update UI).
@@ -278,6 +280,7 @@ const demoUpdates = process.argv.includes("--demo-updates");
 const demoTerminals = process.argv.includes("--demo-terminals");
 const resources = sampleResources();
 const remoteAddress = flag("--remote-address");
+const relayUrl = flag("--relay");
 const accountSite = flag("--account-site");
 const t = await startTestHost({
 	...(accountSite ? { accountSite } : {}),
@@ -303,13 +306,22 @@ const t = await startTestHost({
 			},
 		],
 	},
-	...(remote
+	...(remote || relayUrl
 		? {
 				remote: {
-					enabled: true,
+					enabled: remote,
 					port: Number(flag("--remote-port") ?? 7433),
 					mdns: !process.argv.includes("--no-mdns"),
 					...(remoteAddress ? { advertiseAddresses: [remoteAddress] } : {}),
+					...(relayUrl
+						? {
+								relay: {
+									url: relayUrl,
+									...(process.env.PIER_RELAY_TOKEN ? { token: process.env.PIER_RELAY_TOKEN } : {}),
+								},
+							}
+						: {}),
+					...(process.argv.includes("--no-p2p") ? { p2p: false } : {}),
 				},
 			}
 		: {}),

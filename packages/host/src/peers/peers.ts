@@ -1,17 +1,25 @@
 import { platform } from "node:os";
-import { createSecureSocketFactory, pairWithHost, type WebSocketFactory, type WebSocketLike } from "@pier/client";
+import {
+	createSecureSocketFactory,
+	type P2POptions,
+	pairWithHost,
+	type WebSocketFactory,
+	type WebSocketLike,
+} from "@pier/client";
 import {
 	ChannelError,
 	CLOSE_CODES,
 	equalBytes,
 	fromBase64Url,
 	type KeyPair,
+	normalizeRelayUrl,
 	PairingUriError,
 	parsePairingUri,
 	toBase64Url,
 } from "@pier/crypto";
 import { type HostInfo, type PeerInfo, type PierHostEvent, PierProtocolError, parseClientFrame } from "@pier/protocol";
 import { WebSocket } from "ws";
+import { createHostPeerConnection } from "../remote/p2p.ts";
 import { type PeerRecord, PeerStore, toPeerInfo } from "./store.ts";
 
 /** Close code for the desktop's proxied socket when the peer cannot be reached or dropped. */
@@ -63,6 +71,8 @@ export interface PeerHooks {
 	verifyLocalToken(token: unknown): boolean;
 	broadcastLocal(event: PierHostEvent): void;
 	log(message: string): void;
+	/** Whether connections through a relay may move to a peer-to-peer path (default on). */
+	p2pEnabled?(): boolean;
 }
 
 export interface PeerManagerOptions {
@@ -142,7 +152,9 @@ export class PeerManager {
 		if (info.hostId === this.hooks.hostId() || equalBytes(info.hostPublicKey, identity.publicKey)) {
 			throw new PierProtocolError("CONFLICT", "This is this computer's own pairing link", { reason: "SELF" });
 		}
-		this.hooks.log(`pairing with computer ${info.hostName} (${info.addresses.join(", ")})`);
+		this.hooks.log(
+			`pairing with computer ${info.hostName} (${[...info.addresses, ...(info.relays ?? []).map((r) => `relay ${r}`)].join(", ")})`,
+		);
 		let outcome: Awaited<ReturnType<typeof pairWithHost>>;
 		try {
 			outcome = await pairWithHost({
@@ -169,6 +181,7 @@ export class PeerManager {
 			name: outcome.hostName,
 			publicKey: toBase64Url(outcome.hostPublicKey),
 			addresses: outcome.addresses,
+			...(outcome.relays.length ? { relays: outcome.relays } : {}),
 			deviceId: outcome.deviceId,
 			pairedAt: new Date().toISOString(),
 			...(existing?.platform ? { platform: existing.platform } : {}),
@@ -186,9 +199,23 @@ export class PeerManager {
 	 * another network). Open connections to it reconnect with the new addresses; the pinned
 	 * host key still authenticates whoever answers there.
 	 */
-	update(id: string, addresses: string[]): PeerInfo {
+	update(id: string, addresses: string[], relays?: string[]): PeerInfo {
 		const unique = [...new Set(addresses.map((a) => a.trim()).filter(Boolean))];
-		if (!unique.length) throw new PierProtocolError("BAD_REQUEST", "At least one address is required");
+		let relayUrls: string[] | undefined;
+		if (relays) {
+			try {
+				relayUrls = [
+					...new Set(
+						relays
+							.map((r) => r.trim())
+							.filter(Boolean)
+							.map((r) => normalizeRelayUrl(r)),
+					),
+				];
+			} catch (error) {
+				throw new PierProtocolError("BAD_REQUEST", error instanceof Error ? error.message : "Invalid relay address");
+			}
+		}
 		for (const address of unique) {
 			const port = Number(address.slice(address.lastIndexOf(":") + 1));
 			if (!Number.isInteger(port) || port < 1 || port > 65535) {
@@ -197,10 +224,16 @@ export class PeerManager {
 		}
 		const before = this.store.get(id);
 		if (!before) throw new PierProtocolError("NOT_FOUND", "This computer is not paired here");
-		const record = this.store.update(id, { addresses: unique });
+		const nextRelays = relayUrls ?? before.relays ?? [];
+		if (!unique.length && !nextRelays.length) {
+			throw new PierProtocolError("BAD_REQUEST", "At least one address or relay is required");
+		}
+		const record = this.store.update(id, { addresses: unique, relays: nextRelays });
 		if (!record) throw new PierProtocolError("NOT_FOUND", "This computer is not paired here");
-		if (before.addresses.join(",") !== unique.join(",")) {
-			this.hooks.log(`addresses of computer ${record.name} changed to ${unique.join(", ")}`);
+		if (before.addresses.join(",") !== unique.join(",") || (before.relays ?? []).join(",") !== nextRelays.join(",")) {
+			this.hooks.log(
+				`addresses of computer ${record.name} changed to ${[...unique, ...nextRelays.map((r) => `relay ${r}`)].join(", ")}`,
+			);
 			// Reconnect through the new addresses (the desktop client reconnects on 1012).
 			this.closeProxies(id, 1012, "Addresses changed");
 			this.changed();
@@ -229,7 +262,10 @@ export class PeerManager {
 	private connected(id: string, host: HostInfo | undefined, address: string | undefined): void {
 		const record = this.store.get(id);
 		if (!record) return;
-		const addresses = address ? [address, ...record.addresses.filter((a) => a !== address)] : record.addresses;
+		const addresses =
+			address && record.addresses.includes(address)
+				? [address, ...record.addresses.filter((a) => a !== address)]
+				: record.addresses;
 		this.store.update(id, {
 			addresses,
 			lastConnectedAt: new Date().toISOString(),
@@ -337,8 +373,17 @@ export class PeerManager {
 			this.proxies.set(peerId, set);
 			registered = true;
 			if (first) this.changed();
+			const p2p: P2POptions | undefined =
+				this.hooks.p2pEnabled?.() === false
+					? undefined
+					: {
+							createPeerConnection: (config) => createHostPeerConnection(config.iceServers),
+							log: (message) => this.hooks.log(`computer ${record.name}: ${message}`),
+						};
 			const open = createSecureSocketFactory({
 				addresses: record.addresses,
+				...(record.relays?.length ? { relays: record.relays } : {}),
+				...(p2p ? { p2p } : {}),
 				hostPublicKey: fromBase64Url(record.publicKey),
 				deviceKeyPair: this.hooks.identity(),
 				createWebSocket: this.factory,

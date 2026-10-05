@@ -16,6 +16,7 @@ import { PIER_HOST_VERSION, PierHost } from "./host.ts";
 import { applyLoginShellPath } from "./login-shell-path.ts";
 import { defaultPierDir, runtimeFilePath } from "./paths.ts";
 import { checkImageSupport, installPhotonWasmRedirect } from "./pi/photon-wasm.ts";
+import { checkP2PSupport } from "./remote/p2p.ts";
 import { StdioShell } from "./shell.ts";
 
 const HELP = `pier-host ${PIER_HOST_VERSION}
@@ -29,11 +30,16 @@ Options:
   --origin <origin>   Additional allowed WebSocket Origin (repeatable)
   --no-runtime-file   Do not write <pier-dir>/run/host.json for local tools
   --no-remote         Keep remote access (LAN) off for this run, whatever the saved setting
+                      (a configured relay still works; see --relay)
   --remote-port <n>   Use this port for remote access in this run (default: saved, 7433)
   --remote-address <host:port>
                       Address to put into pairing codes instead of the detected LAN
                       addresses (repeatable; e.g. a Tailscale name or a forwarded port)
   --no-mdns           Do not advertise _pier._tcp over mDNS
+  --relay <url>       Register with this Pier Relay in this run, whatever the saved setting
+                      (wss://relay.example.com); its access token comes from
+                      $PIER_RELAY_TOKEN for relays in private mode
+  --no-p2p            Keep relayed connections on the relay (no peer-to-peer paths)
   --watch-stdin       Exit when stdin closes (sidecar mode: exit with the parent). The
                       desktop app also talks to the host over stdin / stdout then (its
                       updater, see src/shell.ts). On macOS / Linux the host then also
@@ -45,10 +51,13 @@ Options:
   --no-login-shell-path
                       Do not ask the login shell for its PATH in sidecar mode
   --check-images      Resize a sample image through pi (Photon), print the result, and exit
+  --check-p2p         Open a local WebRTC data channel (peer-to-peer support), print the
+                      result, and exit
   -h, --help          Show this help
 
 Environment:
   PIER_LOCAL_TOKEN    Local token to require (default: random per start)
+  PIER_RELAY_TOKEN    Access token for --relay
 `;
 
 function log(message: string): void {
@@ -70,16 +79,26 @@ async function main(): Promise<void> {
 			"remote-port": { type: "string" },
 			"remote-address": { type: "string", multiple: true },
 			"no-mdns": { type: "boolean" },
+			relay: { type: "string" },
+			"no-p2p": { type: "boolean" },
 			"watch-stdin": { type: "boolean" },
 			"shell-terminals": { type: "boolean" },
 			"no-login-shell-path": { type: "boolean" },
 			"check-images": { type: "boolean" },
+			"check-p2p": { type: "boolean" },
 			help: { type: "boolean", short: "h" },
 		},
 		allowPositionals: false,
 	});
 	if (values.help) {
 		process.stdout.write(HELP);
+		return;
+	}
+	if (values["check-p2p"]) {
+		const result = await checkP2PSupport();
+		process.stdout.write(`${JSON.stringify(result)}\n`);
+		process.exitCode = result.ok ? 0 : 1;
+		setTimeout(() => process.exit(), 100).unref();
 		return;
 	}
 	if (values["check-images"]) {
@@ -120,6 +139,15 @@ async function main(): Promise<void> {
 			...(remotePort !== undefined ? { port: remotePort } : {}),
 			...(values["remote-address"]?.length ? { advertiseAddresses: values["remote-address"] } : {}),
 			...(values["no-mdns"] ? { mdns: false } : {}),
+			...(values.relay
+				? {
+						relay: {
+							url: values.relay,
+							...(process.env.PIER_RELAY_TOKEN ? { token: process.env.PIER_RELAY_TOKEN } : {}),
+						},
+					}
+				: {}),
+			...(values["no-p2p"] ? { p2p: false } : {}),
 		},
 	});
 	const gateway = await startLocalGateway(host, {

@@ -33,7 +33,16 @@ function ConnectionCard({ hostId }: { hostId: string }) {
 	const router = useRouter();
 	const p = usePalette();
 	const view = useMobileState((s) => s.host);
-	const address = useMobileState((s) => s.hosts.find((h) => h.hostId === hostId)?.addresses[0]);
+	const saved = useMobileState((s) => s.hosts.find((h) => h.hostId === hostId));
+	const route = view.route;
+	const address =
+		view.connection === "open" && route
+			? route.kind === "direct"
+				? `直连 · ${route.address}`
+				: route.kind === "p2p"
+					? "P2P 直连（经中继建立）"
+					: `经中继 · ${route.relay.replace(/^wss?:\/\//, "")}`
+			: (saved?.addresses[0] ?? (saved?.relays?.[0] ? `中继 ${saved.relays[0].replace(/^wss?:\/\//, "")}` : undefined));
 	const openAddresses = () => router.push({ pathname: "/host/[hostId]/addresses", params: { hostId } });
 	if (view.revoked) {
 		return (
