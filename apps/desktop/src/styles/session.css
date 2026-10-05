@@ -290,26 +290,6 @@
 	font-size: 12px;
 }
 
-.policy-chip {
-	gap: 6px;
-	height: 30px;
-	padding: 0 10px;
-	white-space: nowrap;
-	border-color: transparent;
-	background: var(--bg-active);
-	color: var(--text-muted);
-}
-
-.policy-chip:hover:not(:disabled) {
-	color: var(--text);
-}
-
-.policy-chip.auto,
-.policy-chip.auto:hover:not(:disabled) {
-	color: var(--warning);
-	background: var(--warning-soft);
-}
-
 .policy-item-text {
 	display: flex;
 	flex-direction: column;

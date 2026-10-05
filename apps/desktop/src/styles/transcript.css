@@ -49,11 +49,24 @@
 	margin: 2px 0 8px;
 }
 
-.message-images img {
+.message-image {
+	padding: 0;
+	border: 1px solid var(--border);
+	border-radius: 10px;
+	background: none;
+	overflow: hidden;
+	cursor: zoom-in;
+}
+
+.message-image:hover:not(:disabled) {
+	background: none;
+	border-color: var(--border-strong);
+}
+
+.message-image img {
+	display: block;
 	max-height: 160px;
 	max-width: 240px;
-	border-radius: 10px;
-	border: 1px solid var(--border);
 }
 
 .message-footer {

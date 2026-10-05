@@ -370,3 +370,43 @@
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
+
+/* ---- image lightbox -------------------------------------------------------------- */
+
+.lightbox {
+	position: fixed;
+	inset: 0;
+	z-index: 70;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 48px;
+	background: rgba(5, 6, 10, 0.78);
+	backdrop-filter: blur(8px);
+	-webkit-backdrop-filter: blur(8px);
+	cursor: zoom-out;
+	animation: fade-in 0.15s var(--ease);
+}
+
+.lightbox img {
+	max-width: 100%;
+	max-height: 100%;
+	object-fit: contain;
+	border-radius: 8px;
+	box-shadow: var(--shadow-lg);
+	cursor: default;
+}
+
+.lightbox-close.icon {
+	position: absolute;
+	top: 16px;
+	right: 16px;
+	width: 34px;
+	height: 34px;
+	color: rgba(255, 255, 255, 0.8);
+}
+
+.lightbox-close.icon:hover:not(:disabled) {
+	background: rgba(255, 255, 255, 0.12);
+	color: #fff;
+}
