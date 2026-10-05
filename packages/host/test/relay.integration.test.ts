@@ -197,6 +197,9 @@ describe("Pier Relay", () => {
 			await desktop.request("device.revoke", { deviceId: devices[0]?.id ?? "" });
 			await waitUntil(() => client.state === "closed", 10_000);
 			expect(client.terminalClose?.code).toBe(4403);
+			// The close code came over the data channel (no reconnect through the relay first).
+			expect(routes.map((r) => r.kind)).toEqual(["relay", "p2p"]);
+			expect(states.filter((s) => s === "reconnecting")).toEqual([]);
 		}, 40_000);
 	});
 
@@ -217,5 +220,19 @@ describe("Pier Relay", () => {
 			await phone(outcome, routes).connect();
 			expect(routes[0]?.kind).toBe("relay");
 		});
+
+		it("notices quickly when a device closes its peer-to-peer connection", async () => {
+			await startHost({ url: relay.url });
+			await waitUntil(async () => (await relayStatus())?.state === "online");
+			const outcome = await pair();
+			const routes: ConnectionRoute[] = [];
+			const client = phone(outcome, routes, true);
+			await client.connect();
+			await waitUntil(async () => (await desktop.request("device.list")).devices[0]?.route === "p2p", 20_000);
+			client.close();
+			const started = Date.now();
+			await waitUntil(async () => (await desktop.request("device.list")).devices[0]?.connected === false, 8000);
+			expect(Date.now() - started).toBeLessThan(8000);
+		}, 40_000);
 	});
 });

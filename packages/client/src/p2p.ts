@@ -63,6 +63,8 @@ export interface P2POptions {
  * accepts 64 KiB, libwebrtc 256 KiB) and large enough to keep the message count low.
  */
 export const DATA_CHANNEL_CHUNK = 60 * 1024;
+/** How long closing a data channel waits for queued frames to be sent. */
+export const CLOSE_LINGER_MS = 2000;
 /** Largest frame accepted from a data channel. */
 const MAX_DATA_CHANNEL_FRAME = 128 * 1024 * 1024;
 
@@ -79,6 +81,14 @@ const MAX_DATA_CHANNEL_FRAME = 128 * 1024 * 1024;
 export function dataChannelPath(
 	channel: RtcDataChannelLike,
 	handlers: { frame(text: string): void; close(reason: string): void },
+	options: {
+		/**
+		 * Called once a close we started finished: after what was queued went out (or
+		 * {@link CLOSE_LINGER_MS} passed) and the channel was closed. Close the peer connection
+		 * here; closing it right away drops the last frames (e.g. the `close` control frame).
+		 */
+		onClosed?: () => void;
+	} = {},
 ): SessionPath {
 	let closed = false;
 	// Receive state: text received but not yet parsed, and the frame being assembled.
@@ -90,6 +100,7 @@ export function dataChannelPath(
 	let outbox: string[] = [];
 	let outboxLength = 0;
 	let scheduled = false;
+	let closing = false;
 
 	const close = (reason: string) => {
 		if (closed) return;
@@ -180,13 +191,30 @@ export function dataChannelPath(
 			}
 		},
 		close() {
+			if (closing) return;
+			closing = true;
 			if (!closed) flush(true);
 			closed = true;
-			try {
-				channel.close();
-			} catch {
-				// Ignore.
-			}
+			const started = Date.now();
+			const finish = () => {
+				try {
+					channel.close();
+				} catch {
+					// Ignore.
+				}
+				options.onClosed?.();
+			};
+			// Let the queued frames leave before tearing the channel down.
+			const wait = () => {
+				if (channel.readyState !== "open" || (channel.bufferedAmount ?? 0) === 0) {
+					setTimeout(finish, 100);
+				} else if (Date.now() - started >= CLOSE_LINGER_MS) {
+					finish();
+				} else {
+					setTimeout(wait, 20);
+				}
+			};
+			wait();
 		},
 		get bufferedAmount() {
 			return (channel.bufferedAmount ?? 0) + outboxLength;
