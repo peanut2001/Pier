@@ -560,18 +560,25 @@ export class SecureWebSocket implements WebSocketLike {
 		// Move the session onto the data channel. The host does the same when it reads our
 		// `fin`, then sends its own `fin` on the relay, which closes it (see onControl).
 		const dc = channel;
-		const path: SessionPath = dataChannelPath(dc, {
-			frame: (text) => this.session?.receive(text, path),
-			close: (reason) => this.pathClosed(path, 1006, reason),
-		});
-		this.paths.set(path, () => {
-			path.close();
+		const closePc = () => {
 			try {
 				pc.close();
 			} catch {
 				// Ignore.
 			}
-		});
+		};
+		const path: SessionPath = dataChannelPath(
+			dc,
+			{
+				frame: (text) => this.session?.receive(text, path),
+				close: (reason) => {
+					this.pathClosed(path, 1006, reason);
+					closePc();
+				},
+			},
+			{ onClosed: closePc },
+		);
+		this.paths.set(path, () => path.close());
 		session.switchPath(path);
 		const next: ConnectionRoute = { kind: "p2p", relay: route.relay };
 		this.route = next;

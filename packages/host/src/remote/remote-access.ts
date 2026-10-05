@@ -926,10 +926,17 @@ export class RemoteAccess {
 				channel.close();
 				return;
 			}
-			const path: SessionPath = dataChannelPath(channel, {
-				frame: (text) => live.session.receive(text, path),
-				close: () => this.pathGone(live, path),
-			});
+			const path: SessionPath = dataChannelPath(
+				channel,
+				{
+					frame: (text) => live.session.receive(text, path),
+					close: () => {
+						this.pathGone(live, path);
+						closePeerConnection(entry.pc);
+					},
+				},
+				{ onClosed: () => closePeerConnection(entry.pc) },
+			);
 			entry.path = path;
 			live.paths.add(path);
 			if (entry.finPending) this.switchToP2P(live, path);
@@ -968,13 +975,19 @@ class LiveSession {
 		this.p2p = undefined;
 		if (!current) return;
 		if (current.path) {
+			// The path closes the peer connection once its last frames went out.
 			this.paths.delete(current.path);
 			current.path.close();
+			return;
 		}
-		try {
-			current.pc.close();
-		} catch {
-			// Ignore.
-		}
+		closePeerConnection(current.pc);
+	}
+}
+
+function closePeerConnection(pc: RtcPeerConnectionLike): void {
+	try {
+		pc.close();
+	} catch {
+		// Ignore.
 	}
 }
