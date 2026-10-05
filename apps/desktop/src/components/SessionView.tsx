@@ -173,37 +173,39 @@ function StatusBar({ chat }: { chat: ChatState }) {
 				<span className="run-dot" />
 				{RUN_STATE_LABEL[chat.runState]}
 			</span>
-			{usage.lastContext ? (
-				<span className="context-usage" title="最近一次请求的上下文大小">
-					{percent !== undefined ? (
-						<span className={`context-meter${percent >= 80 ? " high" : percent >= 50 ? " mid" : ""}`}>
-							<span style={{ width: `${Math.min(100, Math.max(2, percent))}%` }} />
-						</span>
-					) : null}
-					上下文 {formatTokens(usage.lastContext)}
-					{contextWindow ? ` / ${formatTokens(contextWindow)}` : ""}
-					{percent !== undefined ? `（${percent}%）` : ""}
-				</span>
-			) : null}
-			{usage.input || usage.output ? (
-				<span title="本会话累计">
-					↑{formatTokens(usage.input)} ↓{formatTokens(usage.output)}
-					{usage.cost ? ` · ${formatCost(usage.cost)}` : ""}
-				</span>
-			) : null}
-			{usage.cacheHitRate !== undefined ? (
-				<span
-					title={`本会话累计：缓存读取 ${formatTokens(usage.cacheRead)}，缓存写入 ${formatTokens(usage.cacheWrite)}，输入合计 ${formatTokens(usage.input)}`}
-				>
-					缓存命中 {formatPercent(usage.cacheHitRate)}
-				</span>
-			) : null}
-			<span className="spacer" />
 			{Object.entries(chat.statuses).map(([key, text]) => (
 				<span key={key} className="ext-status">
 					{text}
 				</span>
 			))}
+			<span className="spacer" />
+			<span className="status-usage">
+				{usage.lastContext ? (
+					<span className="context-usage" title="最近一次请求的上下文大小">
+						{percent !== undefined ? (
+							<span className={`context-meter${percent >= 80 ? " high" : percent >= 50 ? " mid" : ""}`}>
+								<span style={{ width: `${Math.min(100, Math.max(2, percent))}%` }} />
+							</span>
+						) : null}
+						上下文 {formatTokens(usage.lastContext)}
+						{contextWindow ? ` / ${formatTokens(contextWindow)}` : ""}
+						{percent !== undefined ? `（${percent}%）` : ""}
+					</span>
+				) : null}
+				{usage.input || usage.output ? (
+					<span title="本会话累计">
+						↑{formatTokens(usage.input)} ↓{formatTokens(usage.output)}
+						{usage.cost ? ` · ${formatCost(usage.cost)}` : ""}
+					</span>
+				) : null}
+				{usage.cacheHitRate !== undefined ? (
+					<span
+						title={`本会话累计：缓存读取 ${formatTokens(usage.cacheRead)}，缓存写入 ${formatTokens(usage.cacheWrite)}，输入合计 ${formatTokens(usage.input)}`}
+					>
+						缓存命中 {formatPercent(usage.cacheHitRate)}
+					</span>
+				) : null}
+			</span>
 		</div>
 	);
 }

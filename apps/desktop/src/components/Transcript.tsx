@@ -3,6 +3,7 @@ import type { UiRequest } from "@pier/protocol";
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { clockTime, formatTokens } from "../lib/format.ts";
 import { IconArrowDown, IconBrain, IconChevronRight, IconLayers, IconSparkles, IconTerminal } from "./Icons.tsx";
+import { ImageLightbox } from "./ImageLightbox.tsx";
 import { CopyButton, Markdown } from "./Markdown.tsx";
 import { ToolCard } from "./ToolCard.tsx";
 
@@ -83,6 +84,18 @@ const AssistantMessageView = memo(
 		prev.item.blocks.every((b) => b.kind !== "tool" || prev.approvals.get(b.call.id) === next.approvals.get(b.call.id)),
 );
 
+function MessageImage({ src }: { src: string }) {
+	const [open, setOpen] = useState(false);
+	return (
+		<>
+			<button type="button" className="message-image" onClick={() => setOpen(true)} title="查看大图">
+				<img src={src} alt="附件" />
+			</button>
+			{open ? <ImageLightbox src={src} alt="附件" onClose={() => setOpen(false)} /> : null}
+		</>
+	);
+}
+
 const ItemView = memo(function ItemView({
 	item,
 	approvals,
@@ -98,7 +111,7 @@ const ItemView = memo(function ItemView({
 						<div className="message-images">
 							{item.images.map((image, i) => (
 								// biome-ignore lint/suspicious/noArrayIndexKey: positional attachments.
-								<img key={i} src={`data:${image.mimeType};base64,${image.data}`} alt="附件" />
+								<MessageImage key={i} src={`data:${image.mimeType};base64,${image.data}`} />
 							))}
 						</div>
 					) : null}

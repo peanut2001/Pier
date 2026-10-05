@@ -70,22 +70,11 @@
 }
 
 .workspace-chip {
-	display: inline-flex;
-	align-items: center;
-	gap: 6px;
 	max-width: 260px;
-	height: 30px;
-	padding: 0 10px;
 }
 
 .workspace-chip .icon-svg:first-child {
 	flex: none;
-	color: var(--accent-text);
-}
-
-.workspace-chip.empty {
-	border-style: dashed;
-	color: var(--text-muted);
 }
 
 .workspace-chip-name {
