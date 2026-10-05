@@ -3,7 +3,7 @@
 .home {
 	flex: 1;
 	overflow-y: auto;
-	background: var(--hero-glow), var(--bg);
+	background: var(--bg);
 }
 
 .home-inner {
@@ -53,7 +53,7 @@
 	position: relative;
 	padding: 18px 18px 20px;
 	border-radius: var(--radius-lg);
-	background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 60%), var(--bg-elevated);
+	background: var(--bg-elevated);
 	border: 1px solid var(--border);
 	box-shadow: var(--highlight);
 	transition:
@@ -134,7 +134,7 @@
 	height: 56px;
 	border-radius: 16px;
 	flex: none;
-	background: var(--brand-gradient);
+	background: var(--accent);
 	color: #fff;
 	box-shadow: 0 10px 28px var(--brand-glow);
 }

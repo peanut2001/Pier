@@ -1,5 +1,5 @@
-/* Design tokens. Dark is the default; light follows the OS preference. The brand gradient
-   matches the app icon (deep blue → teal). */
+/* Design tokens. Dark is the default; light applies with data-theme="light", set by
+   lib/theme.ts from the appearance setting. */
 
 :root {
 	color-scheme: dark;
@@ -32,16 +32,7 @@
 	--accent-text: #5fd6cb;
 	--accent-soft: rgba(42, 181, 170, 0.13);
 	--accent-ring: rgba(42, 181, 170, 0.45);
-	--brand-gradient: linear-gradient(135deg, #2f6fc4 0%, #27a79c 100%);
-	--brand-gradient-hover: linear-gradient(135deg, #3a7bd0 0%, #2db5a9 100%);
 	--brand-glow: rgba(39, 140, 170, 0.32);
-	/* faint brand light behind the panels and in empty-state heroes */
-	--ambient:
-		radial-gradient(1200px 600px at -10% -20%, rgba(47, 111, 196, 0.12), transparent 60%),
-		radial-gradient(900px 500px at 110% 120%, rgba(39, 167, 156, 0.08), transparent 60%);
-	--hero-glow:
-		radial-gradient(640px 280px at 50% -60px, rgba(42, 181, 170, 0.14), transparent 70%),
-		radial-gradient(900px 420px at 20% -200px, rgba(47, 111, 196, 0.12), transparent 70%);
 	--success: #3fb96f;
 	--success-soft: rgba(63, 185, 111, 0.13);
 	--danger: #f06464;
@@ -98,53 +89,45 @@
 	--mono: monospace;
 }
 
-@media (prefers-color-scheme: light) {
-	:root {
-		color-scheme: light;
-		--bg-app: #eef0f4;
-		--bg: #ffffff;
-		--bg-elevated: #f7f8fa;
-		--bg-raised: #ffffff;
-		--bg-input: #ffffff;
-		--bg-code: #0f1116;
-		--bg-hover: rgba(15, 23, 42, 0.045);
-		--bg-active: rgba(15, 23, 42, 0.07);
-		--bubble: #f0f2f6;
-		--border: rgba(15, 23, 42, 0.075);
-		--border-strong: rgba(15, 23, 42, 0.13);
-		--highlight: inset 0 1px 0 rgba(255, 255, 255, 0.9);
-		--text: #13161c;
-		--text-muted: #5a6170;
-		--text-faint: #9aa0ac;
-		--ambient:
-			radial-gradient(1200px 600px at -10% -20%, rgba(47, 111, 196, 0.1), transparent 60%),
-			radial-gradient(900px 500px at 110% 120%, rgba(39, 167, 156, 0.08), transparent 60%);
-		--hero-glow:
-			radial-gradient(640px 280px at 50% -60px, rgba(17, 150, 140, 0.1), transparent 70%),
-			radial-gradient(900px 420px at 20% -200px, rgba(47, 111, 196, 0.08), transparent 70%);
-		--accent: #11968c;
-		--accent-strong: #0d7f77;
-		--accent-text: #0d7f77;
-		--accent-soft: rgba(17, 150, 140, 0.1);
-		--accent-ring: rgba(17, 150, 140, 0.4);
-		--brand-glow: rgba(39, 140, 170, 0.25);
-		--success: #1f9d55;
-		--success-soft: rgba(31, 157, 85, 0.1);
-		--danger: #d93b3b;
-		--danger-soft: rgba(217, 59, 59, 0.08);
-		--danger-line: rgba(217, 59, 59, 0.35);
-		--warning: #b7791f;
-		--warning-soft: rgba(214, 158, 46, 0.12);
-		--warning-line: rgba(214, 158, 46, 0.5);
-		--info: #2f6fc4;
-		--info-soft: rgba(47, 111, 196, 0.08);
-		--add-text: #7ee2a8;
-		--del-text: #ff9b94;
-		--select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235a6170' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
-		--shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
-		--shadow-md: 0 10px 30px -8px rgba(15, 23, 42, 0.14), 0 2px 6px rgba(15, 23, 42, 0.05);
-		--shadow-lg: 0 28px 72px -12px rgba(15, 23, 42, 0.22), 0 4px 12px rgba(15, 23, 42, 0.07);
-		--panel-shadow:
-			0 0 0 1px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04), 0 12px 36px -10px rgba(15, 23, 42, 0.12);
-	}
+:root[data-theme="light"] {
+	color-scheme: light;
+	--bg-app: #eef0f4;
+	--bg: #ffffff;
+	--bg-elevated: #f7f8fa;
+	--bg-raised: #ffffff;
+	--bg-input: #ffffff;
+	--bg-code: #0f1116;
+	--bg-hover: rgba(15, 23, 42, 0.045);
+	--bg-active: rgba(15, 23, 42, 0.07);
+	--bubble: #f0f2f6;
+	--border: rgba(15, 23, 42, 0.075);
+	--border-strong: rgba(15, 23, 42, 0.13);
+	--highlight: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+	--text: #13161c;
+	--text-muted: #5a6170;
+	--text-faint: #9aa0ac;
+	--accent: #11968c;
+	--accent-strong: #0d7f77;
+	--accent-text: #0d7f77;
+	--accent-soft: rgba(17, 150, 140, 0.1);
+	--accent-ring: rgba(17, 150, 140, 0.4);
+	--brand-glow: rgba(39, 140, 170, 0.25);
+	--success: #1f9d55;
+	--success-soft: rgba(31, 157, 85, 0.1);
+	--danger: #d93b3b;
+	--danger-soft: rgba(217, 59, 59, 0.08);
+	--danger-line: rgba(217, 59, 59, 0.35);
+	--warning: #b7791f;
+	--warning-soft: rgba(214, 158, 46, 0.12);
+	--warning-line: rgba(214, 158, 46, 0.5);
+	--info: #2f6fc4;
+	--info-soft: rgba(47, 111, 196, 0.08);
+	--add-text: #7ee2a8;
+	--del-text: #ff9b94;
+	--select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235a6170' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+	--shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+	--shadow-md: 0 10px 30px -8px rgba(15, 23, 42, 0.14), 0 2px 6px rgba(15, 23, 42, 0.05);
+	--shadow-lg: 0 28px 72px -12px rgba(15, 23, 42, 0.22), 0 4px 12px rgba(15, 23, 42, 0.07);
+	--panel-shadow:
+		0 0 0 1px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04), 0 12px 36px -10px rgba(15, 23, 42, 0.12);
 }

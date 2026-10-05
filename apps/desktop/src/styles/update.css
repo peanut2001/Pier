@@ -15,7 +15,7 @@
 	width: 38px;
 	height: 38px;
 	border-radius: 11px;
-	background: var(--brand-gradient);
+	background: var(--accent);
 	color: #fff;
 	box-shadow: 0 4px 16px var(--brand-glow);
 }
@@ -74,7 +74,7 @@
 .update-progress-bar {
 	height: 100%;
 	border-radius: inherit;
-	background: var(--brand-gradient);
+	background: var(--accent);
 	transition: width 0.2s var(--ease);
 }
 

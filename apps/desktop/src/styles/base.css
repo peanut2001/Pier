@@ -99,7 +99,7 @@ button:disabled {
 }
 
 button.primary {
-	background: var(--brand-gradient);
+	background: var(--accent);
 	border-color: transparent;
 	color: #fff;
 	box-shadow:
@@ -109,7 +109,7 @@ button.primary {
 }
 
 button.primary:hover:not(:disabled) {
-	background: var(--brand-gradient-hover);
+	background: var(--accent-strong);
 	box-shadow:
 		0 6px 20px -4px var(--brand-glow),
 		inset 0 1px 0 rgba(255, 255, 255, 0.22);
@@ -277,12 +277,7 @@ code {
 }
 
 .shimmer {
-	background: linear-gradient(90deg, var(--text-muted) 0%, var(--text) 45%, var(--text-muted) 90%);
-	background-size: 200% 100%;
-	-webkit-background-clip: text;
-	background-clip: text;
-	color: transparent;
-	animation: shimmer 1.8s linear infinite;
+	animation: shimmer 1.8s ease-in-out infinite;
 }
 
 .pill {
@@ -353,7 +348,7 @@ code {
 	/* The main window sets its own columns inline; this default is the settings screen's. */
 	grid-template-columns: 264px minmax(0, 1fr);
 	height: 100%;
-	background: var(--ambient), var(--bg-app);
+	background: var(--bg-app);
 }
 
 .main {
@@ -531,11 +526,12 @@ code {
 }
 
 @keyframes shimmer {
-	from {
-		background-position: 100% 0;
+	0%,
+	100% {
+		opacity: 1;
 	}
-	to {
-		background-position: -100% 0;
+	50% {
+		opacity: 0.45;
 	}
 }
 

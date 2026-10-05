@@ -27,7 +27,7 @@
 	padding: 16px 18px;
 	border: 1px solid var(--border-strong);
 	border-radius: var(--radius-lg);
-	background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 60%), var(--bg-elevated);
+	background: var(--bg-elevated);
 	box-shadow: var(--shadow-md), var(--highlight);
 	animation: rise-in 0.22s var(--ease);
 }
@@ -254,21 +254,17 @@
 	flex-direction: column;
 	gap: 6px;
 	padding: 13px 10px 9px 16px;
-	/* Two backgrounds: the fill (padding box) and a border ring (border box) that turns into
-	   the brand gradient on focus. */
-	border: 1px solid transparent;
+	border: 1px solid var(--border-strong);
 	border-radius: var(--radius-xl);
-	background:
-		linear-gradient(var(--bg-input), var(--bg-input)) padding-box,
-		linear-gradient(var(--border-strong), var(--border-strong)) border-box;
+	background: var(--bg-input);
 	box-shadow: var(--shadow-md), var(--highlight);
-	transition: box-shadow 0.2s var(--ease);
+	transition:
+		border-color 0.2s var(--ease),
+		box-shadow 0.2s var(--ease);
 }
 
 .composer:focus-within {
-	background:
-		linear-gradient(var(--bg-input), var(--bg-input)) padding-box,
-		var(--brand-gradient) border-box;
+	border-color: var(--accent);
 	box-shadow:
 		0 0 0 4px var(--accent-soft),
 		0 12px 36px -10px var(--brand-glow),
@@ -423,7 +419,7 @@
 }
 
 .round-button.send {
-	background: var(--brand-gradient);
+	background: var(--accent);
 	color: #fff;
 	box-shadow:
 		0 3px 10px -2px var(--brand-glow),
@@ -431,7 +427,7 @@
 }
 
 .round-button.send:hover:not(:disabled) {
-	background: var(--brand-gradient-hover);
+	background: var(--accent-strong);
 	box-shadow:
 		0 6px 18px -4px var(--brand-glow),
 		inset 0 1px 0 rgba(255, 255, 255, 0.26);
@@ -703,7 +699,7 @@
 	width: 300px;
 	max-height: none;
 	overflow: visible;
-	padding: 6px;
+	padding: 8px;
 	transform-origin: bottom right;
 	transition: width 0.26s var(--ease);
 }
@@ -919,18 +915,45 @@
 .model-menu-header {
 	display: flex;
 	align-items: center;
-	gap: 6px;
-	min-height: 30px;
-	padding: 0 4px 4px;
-	font-size: 12.5px;
+	gap: 10px;
+	min-height: 32px;
+	padding: 2px 4px 10px;
+	font-size: 13px;
 	font-weight: 600;
-	color: var(--text-muted);
+	color: var(--text);
 }
 
 .model-menu-header .ghost.icon {
-	width: 26px;
-	height: 26px;
-	border-radius: 7px;
+	width: 28px;
+	height: 28px;
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	background: var(--bg-hover);
+}
+
+.model-menu-header .ghost.icon:hover:not(:disabled) {
+	border-color: var(--border-strong);
+	background: var(--bg-active);
+}
+
+/* The frame clips overflow, so the search box focuses with its border, not an outer ring. */
+.model-menu .dropdown-search {
+	gap: 8px;
+	height: 36px;
+	padding: 0 12px;
+	margin: 0 2px 8px;
+	border: 1px solid var(--border);
+	border-radius: 10px;
+	background: var(--bg-hover);
+	transition:
+		border-color 0.15s var(--ease),
+		background 0.15s var(--ease);
+}
+
+.model-menu .dropdown-search:focus-within {
+	border-color: var(--accent);
+	background: var(--bg-input);
+	box-shadow: none;
 }
 
 .model-menu-list {

@@ -37,44 +37,36 @@
 }
 
 .sidebar-actions {
-	padding: 4px 12px 14px;
+	padding: 4px 10px 12px;
 }
 
+/* A flat row like the workspace rows below it. */
 .new-session-button {
 	width: 100%;
 	justify-content: flex-start;
 	gap: 10px;
-	height: 38px;
-	padding: 0 12px;
-	border-radius: var(--radius);
-	background: linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent), var(--bg-elevated);
-	border-color: var(--border);
-	box-shadow: var(--shadow-sm), var(--highlight);
-	font-size: 13.5px;
+	height: 34px;
+	padding: 0 10px;
+	border: none;
+	border-radius: 8px;
+	background: transparent;
+	color: var(--text);
+	font-size: 14px;
+	font-weight: 500;
+	transition: background 0.12s;
+}
+
+.new-session-button .icon-svg {
+	color: var(--text-muted);
 }
 
 .new-session-button:hover:not(:disabled) {
-	background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent), var(--bg-raised);
-	border-color: var(--accent-ring);
-	box-shadow:
-		0 4px 16px -6px var(--brand-glow),
-		var(--highlight);
-}
-
-/* The icon sits in a small brand-gradient tile. */
-.new-session-button .icon-svg {
-	box-sizing: content-box;
-	padding: 3px;
-	border-radius: 7px;
-	background: var(--brand-gradient);
-	color: #fff;
-	box-shadow: 0 2px 8px -2px var(--brand-glow);
+	background: var(--bg-hover);
 }
 
 .new-session-button.selected,
 .new-session-button.selected:hover:not(:disabled) {
-	background: var(--accent-soft);
-	border-color: var(--accent-ring);
+	background: var(--bg-active);
 }
 
 .sidebar-section-title {
@@ -214,7 +206,7 @@
 	left: -9px;
 	width: 2px;
 	border-radius: 2px;
-	background: var(--brand-gradient);
+	background: var(--accent);
 	box-shadow: 0 0 8px var(--brand-glow);
 }
 
