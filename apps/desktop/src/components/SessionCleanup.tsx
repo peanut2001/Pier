@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { sessionTitle } from "../lib/format.ts";
 import { type SessionCleanupRequest, useAppState, useStore } from "../lib/store.tsx";
 import { Modal } from "./Modal.tsx";
+import { Select } from "./Select.tsx";
 
 type Action = SessionCleanupRequest["action"];
 
@@ -102,13 +103,11 @@ export function SessionCleanupDialog({ workspace, onClose }: { workspace: Worksp
 			</div>
 			<div className="field">
 				<div className="field-label">范围</div>
-				<select value={days} onChange={(e) => setDays(Number(e.target.value))}>
-					{AGE_OPTIONS.map((option) => (
-						<option key={option.days} value={option.days}>
-							{option.label}
-						</option>
-					))}
-				</select>
+				<Select
+					value={days}
+					onChange={setDays}
+					options={AGE_OPTIONS.map((option) => ({ value: option.days, label: option.label }))}
+				/>
 				{action === "delete" ? (
 					<label className="cleanup-checkbox">
 						<input type="checkbox" checked={archivedOnly} onChange={(e) => setArchivedOnly(e.target.checked)} />

@@ -10,6 +10,7 @@ import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } fro
 import { relativeTime } from "../lib/format.ts";
 import { useAppState, useStore } from "../lib/store.tsx";
 import { IconAlert, IconCheck, IconDownload, IconExternal, IconLoader, IconSearch, IconX } from "./Icons.tsx";
+import { Select } from "./Select.tsx";
 import { SettingsCard } from "./SettingsUi.tsx";
 
 /** The official pi package gallery the host searches (`extension.search`). */
@@ -293,31 +294,26 @@ export function ExtensionCatalog({
 						</button>
 					) : null}
 				</div>
-				<select
+				<Select<ExtensionCatalogType | "">
 					className="setting-select compact"
 					value={type}
 					title="按类型筛选"
-					onChange={(e) => setType(e.target.value as ExtensionCatalogType | "")}
-				>
-					<option value="">全部类型</option>
-					{(Object.keys(CATALOG_TYPE_LABEL) as ExtensionCatalogType[]).map((t) => (
-						<option key={t} value={t}>
-							{CATALOG_TYPE_LABEL[t]}
-						</option>
-					))}
-				</select>
-				<select
+					onChange={setType}
+					options={[
+						{ value: "", label: "全部类型" },
+						...(Object.keys(CATALOG_TYPE_LABEL) as ExtensionCatalogType[]).map((t) => ({
+							value: t,
+							label: CATALOG_TYPE_LABEL[t],
+						})),
+					]}
+				/>
+				<Select
 					className="setting-select compact"
 					value={sort}
 					title="排序"
-					onChange={(e) => setSort(e.target.value as ExtensionCatalogSort)}
-				>
-					{(Object.keys(SORT_LABEL) as ExtensionCatalogSort[]).map((s) => (
-						<option key={s} value={s}>
-							{SORT_LABEL[s]}
-						</option>
-					))}
-				</select>
+					onChange={setSort}
+					options={(Object.keys(SORT_LABEL) as ExtensionCatalogSort[]).map((s) => ({ value: s, label: SORT_LABEL[s] }))}
+				/>
 			</div>
 
 			<div className="catalog-status muted small">
@@ -335,18 +331,21 @@ export function ExtensionCatalog({
 				</span>
 				<span className="catalog-status-actions">
 					安装到
-					<select
+					<Select
 						className="setting-select compact"
 						value={scope}
 						disabled={busy}
-						onChange={(e) => onScopeChange(e.target.value as ExtensionScope)}
+						onChange={onScopeChange}
 						title="全局：写入 pi 配置目录的 settings.json，对所有工作区生效；项目：写入工作区的 .pi/settings.json"
-					>
-						<option value="user">全局（所有工作区）</option>
-						<option value="project" disabled={!workspaceName}>
-							{workspaceName ? `仅工作区「${workspaceName}」` : "仅工作区（先在上方选择）"}
-						</option>
-					</select>
+						options={[
+							{ value: "user", label: "全局（所有工作区）" },
+							{
+								value: "project",
+								label: workspaceName ? `仅工作区「${workspaceName}」` : "仅工作区（先在上方选择）",
+								disabled: !workspaceName,
+							},
+						]}
+					/>
 					<button type="button" className="link-button" onClick={galleryLink}>
 						<IconExternal size={12} /> pi.dev
 					</button>

@@ -37,6 +37,7 @@ import {
 	IconRefresh,
 	IconX,
 } from "./Icons.tsx";
+import { Select } from "./Select.tsx";
 import { SettingRow, SettingsCard, SettingsGroup } from "./SettingsUi.tsx";
 
 /** 个人中心: the 云链API account behind Pier — sign-in, registration, balance and per-group keys. */
@@ -742,20 +743,14 @@ function ClaudeRelayRow({
 					</div>
 				</div>
 				<div className="row-actions">
-					<select
+					<Select
 						className="setting-select compact account-token-select"
 						value={model}
 						disabled={busy || !models.length}
 						title="默认模型"
-						onChange={(e) => setModel(e.target.value)}
-					>
-						<option value="">默认模型：按别名</option>
-						{models.map((id) => (
-							<option key={id} value={id}>
-								{id}
-							</option>
-						))}
-					</select>
+						onChange={setModel}
+						options={[{ value: "", label: "默认模型：按别名" }, ...models.map((id) => ({ value: id, label: id }))]}
+					/>
 					<button
 						type="button"
 						className={state.group ? "" : "primary"}
@@ -827,19 +822,14 @@ function CodexRelayRow({
 					</div>
 				</div>
 				<div className="row-actions">
-					<select
+					<Select
 						className="setting-select compact account-token-select"
 						value={chosen?.id ?? ""}
 						disabled={busy || !models.length}
 						title="默认模型"
-						onChange={(e) => setModel(e.target.value)}
-					>
-						{models.map((m) => (
-							<option key={m.id} value={m.id}>
-								{m.id}
-							</option>
-						))}
-					</select>
+						onChange={setModel}
+						options={models.map((m) => ({ value: m.id, label: m.id }))}
+					/>
 					<button type="button" className={state.current ? "" : "primary"} disabled={busy || !chosen} onClick={write}>
 						{busy ? <IconLoader size={13} className="spin" /> : null}
 						{state.current ? "更新" : "接入"}
@@ -939,19 +929,19 @@ function GroupRow({
 					</div>
 				</div>
 				<div className="row-actions">
-					<select
+					<Select<number | "new">
 						className="setting-select compact account-token-select"
 						value={selected}
 						disabled={busy}
-						onChange={(e) => setChoice(e.target.value === "new" ? "new" : Number(e.target.value))}
-					>
-						{usable.map((token) => (
-							<option key={token.id} value={token.id}>
-								{token.name} · {token.maskedKey || `#${token.id}`}
-							</option>
-						))}
-						<option value="new">新建令牌</option>
-					</select>
+						onChange={setChoice}
+						options={[
+							...usable.map((token) => ({
+								value: token.id,
+								label: `${token.name} · ${token.maskedKey || `#${token.id}`}`,
+							})),
+							{ value: "new", label: "新建令牌" },
+						]}
+					/>
 					<button type="button" className={provider ? "" : "primary"} disabled={busy} onClick={configure}>
 						{busy ? <IconLoader size={13} className="spin" /> : null}
 						{provider ? "更新本地配置" : "配置到本地"}
@@ -1139,17 +1129,15 @@ function Dashboard({
 									<div className="muted small">选择一个分组加入列表，然后为它配置令牌。</div>
 								</div>
 								<div className="row-actions">
-									<select
+									<Select
 										className="setting-select compact account-token-select"
 										value={pickValue}
-										onChange={(e) => setPick(e.target.value)}
-									>
-										{addable.map((entry) => (
-											<option key={entry.name} value={entry.name}>
-												{[entry.name, ratioText(entry.ratio), entry.description].filter(Boolean).join(" · ")}
-											</option>
-										))}
-									</select>
+										onChange={setPick}
+										options={addable.map((entry) => ({
+											value: entry.name,
+											label: [entry.name, ratioText(entry.ratio), entry.description].filter(Boolean).join(" · "),
+										}))}
+									/>
 									<button type="button" className="primary" disabled={!pickValue} onClick={addPicked}>
 										添加
 									</button>

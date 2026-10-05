@@ -926,14 +926,7 @@
 .model-menu-header .ghost.icon {
 	width: 28px;
 	height: 28px;
-	border: 1px solid var(--border);
 	border-radius: 8px;
-	background: var(--bg-hover);
-}
-
-.model-menu-header .ghost.icon:hover:not(:disabled) {
-	border-color: var(--border-strong);
-	background: var(--bg-active);
 }
 
 /* The frame clips overflow, so the search box focuses with its border, not an outer ring. */

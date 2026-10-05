@@ -306,14 +306,10 @@
 	color: var(--danger);
 }
 
-.session-action.delete.confirm {
-	border-color: var(--danger-line);
-	background: var(--bg);
-	color: var(--danger);
-}
-
+.session-action.delete.confirm,
 .session-action.delete.confirm:hover:not(:disabled) {
 	background: var(--danger-soft);
+	color: var(--danger);
 }
 
 .session-item.archived .session-row:not(.selected) {

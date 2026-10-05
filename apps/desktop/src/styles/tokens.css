@@ -62,16 +62,14 @@
 		0 0 0 1px rgba(255, 255, 255, 0.055), inset 0 1px 0 rgba(255, 255, 255, 0.035),
 		0 16px 48px -12px rgba(0, 0, 0, 0.55);
 	--ease: cubic-bezier(0.2, 0.8, 0.2, 1);
-	/* drop-down arrow drawn on custom-styled <select>s (the native one differs per platform) */
-	--select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239a9ca8' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
 
 	--content-width: 800px;
 
 	--mono:
 		"SF Mono", Menlo, "Cascadia Code", Consolas, "JetBrains Mono", "DejaVu Sans Mono", "Liberation Mono", monospace;
 	--sans:
-		"Inter Variable", -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", "PingFang SC",
-		"Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+		-apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", "PingFang SC", "Hiragino Sans GB",
+		"Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
 	font-family: var(--sans);
 	font-size: 14px;
 	line-height: 1.6;
@@ -124,7 +122,6 @@
 	--info-soft: rgba(47, 111, 196, 0.08);
 	--add-text: #7ee2a8;
 	--del-text: #ff9b94;
-	--select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235a6170' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
 	--shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
 	--shadow-md: 0 10px 30px -8px rgba(15, 23, 42, 0.14), 0 2px 6px rgba(15, 23, 42, 0.05);
 	--shadow-lg: 0 28px 72px -12px rgba(15, 23, 42, 0.22), 0 4px 12px rgba(15, 23, 42, 0.07);
