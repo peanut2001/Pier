@@ -10,6 +10,7 @@ import {
 	useSettingsTarget,
 	useStore,
 } from "../lib/store.tsx";
+import { setThemePreference, type ThemePreference, useThemePreference } from "../lib/theme.ts";
 import { AccountSettings } from "./AccountPanel.tsx";
 import { ClaudeSettings, CodexSettings } from "./AgentConfigPanel.tsx";
 import { ExtensionsSettings } from "./ExtensionsPanel.tsx";
@@ -108,7 +109,12 @@ const GROUPS: Array<{ title: string; items: SectionDef[] }> = [
 	{
 		title: "通用",
 		items: [
-			{ id: "general", label: "常规", icon: IconSettings, keywords: "host 状态 连接 版本 配置目录 重启 退出 pi" },
+			{
+				id: "general",
+				label: "常规",
+				icon: IconSettings,
+				keywords: "host 状态 连接 版本 配置目录 重启 退出 pi 外观 主题 风格 深色 暗黑 浅色 dark light",
+			},
 			{
 				id: "models",
 				label: "模型与服务商",
@@ -260,9 +266,46 @@ function RemoteGeneralSettings() {
 	);
 }
 
+const THEME_OPTIONS: Array<{ value: ThemePreference; label: string }> = [
+	{ value: "system", label: "跟随系统" },
+	{ value: "light", label: "浅色" },
+	{ value: "dark", label: "深色" },
+];
+
+/** Light/dark appearance of this device's window, whichever computer the settings manage. */
+function AppearanceSettings() {
+	const preference = useThemePreference();
+	return (
+		<SettingsGroup title="外观">
+			<SettingsCard>
+				<SettingRow title="主题" description="界面使用浅色或深色配色，只对这台设备生效。">
+					<div className="segmented">
+						{THEME_OPTIONS.map((option) => (
+							<button
+								type="button"
+								key={option.value}
+								aria-pressed={preference === option.value}
+								className={preference === option.value ? "active" : undefined}
+								onClick={() => setThemePreference(option.value)}
+							>
+								{option.label}
+							</button>
+						))}
+					</div>
+				</SettingRow>
+			</SettingsCard>
+		</SettingsGroup>
+	);
+}
+
 function GeneralSettings() {
 	const remote = useAppState((s) => s.settingsNode !== LOCAL_NODE);
-	return remote ? <RemoteGeneralSettings /> : <LocalGeneralSettings />;
+	return (
+		<>
+			<AppearanceSettings />
+			{remote ? <RemoteGeneralSettings /> : <LocalGeneralSettings />}
+		</>
+	);
 }
 
 function LocalGeneralSettings() {

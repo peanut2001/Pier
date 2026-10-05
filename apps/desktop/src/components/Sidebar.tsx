@@ -19,11 +19,11 @@ import {
 	IconChevronRight,
 	IconFolder,
 	IconFolderPlus,
-	IconMessagePlus,
 	IconMonitor,
 	IconPanelLeft,
 	IconPlus,
 	IconSettings,
+	IconSquarePen,
 	IconTrash,
 	Logo,
 } from "./Icons.tsx";
@@ -501,7 +501,7 @@ export function Sidebar({ open = true }: { open?: boolean }) {
 					title="新建会话：选择工作区后发送第一条消息"
 					onClick={() => store.startNewChat()}
 				>
-					<IconMessagePlus size={16} />
+					<IconSquarePen size={17} />
 					<span>新建会话</span>
 				</button>
 			</div>

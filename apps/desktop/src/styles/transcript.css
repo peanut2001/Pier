@@ -454,7 +454,7 @@
 	height: 60px;
 	margin-bottom: 18px;
 	border-radius: 18px;
-	background: var(--brand-gradient);
+	background: var(--accent);
 	color: #fff;
 	box-shadow: 0 10px 30px var(--brand-glow);
 }

@@ -4,7 +4,7 @@
 	display: flex;
 	flex-direction: column;
 	height: 100%;
-	background: var(--ambient), var(--bg-app);
+	background: var(--bg-app);
 }
 
 .window > .app {

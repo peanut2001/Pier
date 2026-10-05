@@ -191,6 +191,12 @@ export const IconPencil = make(
 		<path d="m15 5 4 4" />
 	</>,
 );
+export const IconSquarePen = make(
+	<>
+		<path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+		<path d="M18.38 2.62a1 1 0 0 1 3 3l-9.01 9.02a2 2 0 0 1-.86.5l-2.87.84a.5.5 0 0 1-.62-.62l.84-2.87a2 2 0 0 1 .5-.86z" />
+	</>,
+);
 export const IconLoader = make(<path d="M21 12a9 9 0 1 1-6.22-8.56" />);
 export const IconKey = make(
 	<>

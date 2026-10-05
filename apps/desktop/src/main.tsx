@@ -8,6 +8,9 @@ import { customTitleBar } from "./components/TitleBar.tsx";
 import { bridge } from "./lib/bridge.ts";
 import { installTerminalResolver } from "./lib/remote-terminals.ts";
 import { PierStore, StoreContext } from "./lib/store.tsx";
+import { installTheme } from "./lib/theme.ts";
+
+installTheme();
 
 if (/Linux/.test(navigator.userAgent) && !/Android/.test(navigator.userAgent)) {
 	document.documentElement.classList.add("linux");
