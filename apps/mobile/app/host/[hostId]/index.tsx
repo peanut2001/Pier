@@ -382,6 +382,9 @@ export default function HostScreen() {
 				keyExtractor={(item) => item.id}
 				contentContainerStyle={styles.list}
 				stickySectionHeadersEnabled={false}
+				// Android defaults this to true, and with the new architecture removing a whole section (a
+				// workspace) while cells are clipped crashes natively ("Cannot remove child at index").
+				removeClippedSubviews={false}
 				refreshControl={
 					<RefreshControl
 						refreshing={refreshing}
