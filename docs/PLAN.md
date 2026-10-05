@@ -4,7 +4,7 @@
 >
 > 本文档是项目的总体规划与里程碑，随开发进度持续更新。
 >
-> **当前进度（2026-09-28）**：M0–M2 已完成；M3 手机端 MVP（局域网）的代码已完成：加密通道、Host 远程访问与配对、桌面配对与设备管理、Expo App，并在 Linux 上用编译后的 sidecar 与 Web 版 App 端到端验证。待办：iOS / Android 真机验证（含 Spike 3 真机数据）、macOS / Windows 安装包真机验证。下一步：M4 体验完善。
+> **当前进度（2026-09-28）**：M0–M2 已完成；M3 手机端 MVP（局域网）的代码已完成：加密通道、Host 远程访问与配对、桌面配对与设备管理、Expo App，并在 Linux 上用编译后的 sidecar 与 Web 版 App 端到端验证。待办：iOS / Android 真机验证（含 Spike 3 真机数据）、macOS / Windows 安装包真机验证。下一步：M4 体验完善。M5 的中继与 P2P 已实现（`apps/relay`，私有 / 开放两种模式，经中继建立 WebRTC 打洞并无缝切换），推送待做。
 
 ## 1. 目标与非目标
 
@@ -73,7 +73,7 @@
 | 加密 | `@noble/curves`、`@noble/ciphers`、`@noble/hashes`（纯 JS，RN 与 Node 通用）；握手采用 Noise 模式（配对用 XX，之后用 IK） |
 | 桌面 | Tauri 2 + React + Vite + Tailwind；插件：shell（sidecar）、single-instance、autostart、updater、notification |
 | 手机 | Expo（最新 SDK）+ expo-router；expo-camera（扫码）、expo-secure-store（设备密钥）、expo-notifications、expo-image-picker、react-native-markdown-display |
-| 中继（M5） | 优先 Cloudflare Workers + Durable Objects（按 hostId 路由 WebSocket）；备选自托管 Node 服务 |
+| 中继（M5） | 自托管 Node 服务（`apps/relay`，ws + 内置 STUN，Docker 镜像）：Cloudflare Workers 无法提供 P2P 打洞所需的 UDP STUN，国内访问也不稳定。P2P：Host 端 werift（纯 TS，不影响单文件 sidecar），手机端 react-native-webrtc |
 | CI | GitHub Actions：lint / typecheck / test；Tauri 多平台构建；Android APK（Gradle）；iOS 待接入 EAS Build |
 
 ## 4. 仓库结构（规划）
@@ -83,7 +83,7 @@ Pier/
 ├─ apps/
 │  ├─ desktop/            # Tauri 2：src-tauri (Rust) + src (React)
 │  ├─ mobile/             # Expo App（SDK 57，expo-router）
-│  └─ relay/              # M5：中继 + 推送代理
+│  └─ relay/              # M5：中继（只转发密文）+ STUN；推送代理待做
 ├─ packages/
 │  ├─ host/               # Pier Host（pi SDK、Gateway、EventLog、UI 桥接）
 │  ├─ protocol/           # 协议 schema 与类型、版本号
@@ -184,7 +184,7 @@ Pier/
 
 1. **局域网直连（M3）**：开启远程访问后 Host 监听 `0.0.0.0:<port>`（默认 `7433`，可配置），并广播 mDNS `_pier._tcp`；二维码携带所有候选地址，手机依次尝试。
 2. **Tailscale / WireGuard**：无需额外开发，二维码中包含 Tailscale 地址即可。
-3. **中继（M5）**：Host 与手机都主动出站连接中继，中继按 `hostId` 配对转发**密文**，无法解密内容；同时承担推送代理（保存设备推送令牌，转发不含敏感内容的通知）。
+3. **中继（M5，已实现）**：Host 与手机都主动出站连接中继，中继按 Host 公钥配对转发**密文**，无法解密内容；Host 注册时证明持有私钥，私有模式另需访问令牌。连上后双方在加密通道内交换 WebRTC 信令、借助中继的 STUN 打洞，成功则无缝切换到 P2P 数据通道（同一会话密钥，按 nonce 排序），失败则继续经中继。之后还将承担推送代理（保存设备推送令牌，转发不含敏感内容的通知）。
 
 ## 9. 功能清单
 
@@ -257,7 +257,8 @@ Pier/
 
 ### M5 远程访问与推送
 
-- [ ] `apps/relay`：按 hostId 路由 WebSocket、只转发密文、限流、认证。
+- [x] `apps/relay`：按 Host 公钥路由 WebSocket、只转发密文、限流、认证（私有模式令牌 / 开放模式限额）、内置 STUN、Docker 镜像（协议 1.26）。
+- [x] P2P：经中继交换 WebRTC 信令并打洞，成功后会话无缝切换到数据通道，失败回退中继；手机与电脑之间、电脑与电脑之间均适用。
 - [ ] 推送：手机上报 Expo push token（经加密通道交给 Host，Host 注册到 relay）；Host 在 `agent_settled`、`ui.request`、错误时触发推送，推送内容不含代码与命令原文。
 - 验收：手机使用移动网络（非同一局域网）可完成配对后的全部操作；锁屏状态下能收到审批通知。
 
@@ -297,7 +298,7 @@ Pier/
 - 目标桌面平台优先级（macOS / Windows / Linux）？
 - 是否开源、采用什么许可证？
 - `smart` 审批策略的默认白名单范围？
-- 中继采用 Cloudflare Workers 还是自托管服务器？
+- ~~中继采用 Cloudflare Workers 还是自托管服务器？~~ 自托管（见 §3）。
 - 是否需要 Pier 自己的模型 / 凭据配置界面，还是先完全依赖 pi CLI 的 `/login` 与配置文件？
 
 ## 13. 下一步

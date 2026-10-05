@@ -8,6 +8,8 @@ export interface PairedHost {
 	hostPublicKey: string;
 	/** Candidate `host:port` addresses, best first. */
 	addresses: string[];
+	/** Pier Relays the computer is registered with, tried when no address answers. */
+	relays?: string[];
 	/** This device's id on that host. */
 	deviceId: string;
 	pairedAt: string;

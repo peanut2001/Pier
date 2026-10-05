@@ -160,6 +160,11 @@ export class SecureTransport {
 		this.remoteStaticKey = result.remoteStaticKey;
 	}
 
+	/** Nonce the next `enc` frame from the other side must carry. */
+	get receiveNonce(): number {
+		return this.receive.nonce;
+	}
+
 	/** Encrypt a text message into an `enc` frame. */
 	seal(plaintext: string): string {
 		const n = this.send.nonce;
@@ -171,6 +176,11 @@ export class SecureTransport {
 	open(raw: string): string {
 		const frame = parseChannelFrame(raw);
 		if (!frame) throw new ChannelError("BAD_HANDSHAKE", "Invalid channel frame");
+		return this.openFrame(frame);
+	}
+
+	/** {@link open} for an already parsed frame. */
+	openFrame(frame: ChannelFrame): string {
 		if (frame.t === "error") throw new ChannelError(frame.code, frame.message);
 		if (frame.t !== "enc") throw new ChannelError("BAD_HANDSHAKE", `Unexpected ${frame.t} frame`);
 		if (frame.n !== this.receive.nonce) throw new ChannelError("BAD_HANDSHAKE", "Unexpected frame nonce");
@@ -242,11 +252,59 @@ function parsePairRequest(value: unknown): PairRequest {
 
 // ---- device (initiator) side -------------------------------------------------------------
 
+/**
+ * Capabilities exchanged in the IK handshake payloads (encrypted and authenticated). Older
+ * hosts and devices send empty payloads and ignore the other side's, so both only use a
+ * feature when the other side announced it.
+ */
+export interface ConnectHello {
+	/** `ctl`: understands control frames inside the channel (see `session.ts`). */
+	caps?: string[];
+	/** Host only: this connection may move to a peer-to-peer path; the ICE servers to use. */
+	p2p?: { iceServers: IceServer[] };
+}
+
+/** A STUN / TURN server for WebRTC ICE (the W3C `RTCIceServer` shape). */
+export interface IceServer {
+	urls: string | string[];
+	username?: string;
+	credential?: string;
+}
+
+function parseConnectHello(value: unknown): ConnectHello {
+	if (!value || typeof value !== "object") return {};
+	const v = value as Record<string, unknown>;
+	const caps = Array.isArray(v.caps) ? v.caps.filter((c): c is string => typeof c === "string").slice(0, 32) : [];
+	const out: ConnectHello = { caps };
+	const p2p = v.p2p as { iceServers?: unknown } | undefined;
+	if (p2p && typeof p2p === "object" && Array.isArray(p2p.iceServers)) {
+		const iceServers: IceServer[] = [];
+		for (const s of p2p.iceServers.slice(0, 8)) {
+			const server = s as Partial<IceServer> | undefined;
+			const urls = typeof server?.urls === "string" ? [server.urls] : server?.urls;
+			if (!Array.isArray(urls)) continue;
+			const valid = urls.filter((u): u is string => typeof u === "string" && /^(stun|stuns|turn|turns):/i.test(u));
+			if (!valid.length) continue;
+			iceServers.push({
+				urls: valid,
+				...(typeof server?.username === "string" ? { username: server.username } : {}),
+				...(typeof server?.credential === "string" ? { credential: server.credential } : {}),
+			});
+		}
+		out.p2p = { iceServers };
+	}
+	return out;
+}
+
 /** Device side of `connect` (Noise IK). */
 export class ConnectInitiator {
 	private readonly handshake: Handshake;
+	private readonly payload: ConnectHello | undefined;
+	/** What the host announced in its handshake reply (empty for older hosts). */
+	hostHello: ConnectHello = {};
 
-	constructor(options: { deviceKeyPair: KeyPair; hostPublicKey: Uint8Array }) {
+	constructor(options: { deviceKeyPair: KeyPair; hostPublicKey: Uint8Array; hello?: ConnectHello }) {
+		this.payload = options.hello;
 		this.handshake = wrapNoise(
 			() =>
 				new Handshake({
@@ -261,7 +319,10 @@ export class ConnectInitiator {
 
 	/** First frame to send after the socket opens. */
 	start(): string {
-		const m = wrapNoise(() => this.handshake.writeMessage());
+		const payload = this.payload;
+		const m = wrapNoise(() =>
+			this.handshake.writeMessage(payload ? utf8Encode(JSON.stringify(payload)) : new Uint8Array(0)),
+		);
 		return JSON.stringify({ t: "hello", v: CHANNEL_VERSION, mode: "connect", m: toBase64(m) } satisfies ChannelFrame);
 	}
 
@@ -270,7 +331,12 @@ export class ConnectInitiator {
 		const frame = parseChannelFrame(raw);
 		if (frame?.t === "error") throw new ChannelError(frame.code, frame.message);
 		if (frame?.t !== "hs") throw new ChannelError("BAD_HANDSHAKE", "Expected a handshake frame");
-		wrapNoise(() => this.handshake.readMessage(decodeMessage(frame.m)));
+		const payload = wrapNoise(() => this.handshake.readMessage(decodeMessage(frame.m)));
+		try {
+			this.hostHello = parseConnectHello(asJson(payload));
+		} catch {
+			this.hostHello = {};
+		}
 		return new SecureTransport(wrapNoise(() => this.handshake.finish()));
 	}
 }
@@ -340,7 +406,14 @@ export type ResponderStep =
 	/** Send `frame` and keep reading handshake frames. */
 	| { kind: "continue"; frame: string }
 	/** IK finished: send `frame`, then the channel carries Pier frames through `transport`. */
-	| { kind: "connected"; frame: string; transport: SecureTransport; remoteStaticKey: Uint8Array }
+	| {
+			kind: "connected";
+			frame: string;
+			transport: SecureTransport;
+			remoteStaticKey: Uint8Array;
+			/** What the device announced (empty for older devices). */
+			deviceHello: ConnectHello;
+	  }
 	/** XX finished: decide, send `transport.seal(JSON.stringify(result))`, then close. */
 	| { kind: "pairRequest"; transport: SecureTransport; remoteStaticKey: Uint8Array; request: PairRequest };
 
@@ -351,6 +424,8 @@ export interface ResponderOptions {
 	isKnownDevice(publicKey: Uint8Array): boolean;
 	/** Whether pairing is currently possible (a pairing code is active). */
 	pairingOpen(): boolean;
+	/** IK: what to announce to a device in the handshake reply, given what it announced. */
+	connectHello?(deviceHello: ConnectHello): ConnectHello | undefined;
 }
 
 /** Host side of both channel modes. Feed every incoming frame to `receive` until it returns a final step. */
@@ -412,18 +487,28 @@ export class ChannelResponder {
 			staticKeyPair: this.options.hostKeyPair,
 		});
 		this.handshake = handshake;
-		wrapNoise(() => handshake.readMessage(decodeMessage(m)));
+		const payload = wrapNoise(() => handshake.readMessage(decodeMessage(m)));
 		const deviceKey = handshake.remoteStaticKey;
 		if (!deviceKey || !this.options.isKnownDevice(deviceKey)) {
 			throw new ChannelError("UNKNOWN_DEVICE", "This device is not paired with the host (or was revoked)");
 		}
-		const reply = wrapNoise(() => handshake.writeMessage());
+		let deviceHello: ConnectHello = {};
+		try {
+			deviceHello = parseConnectHello(asJson(payload));
+		} catch {
+			deviceHello = {};
+		}
+		const hello = this.options.connectHello?.(deviceHello);
+		const reply = wrapNoise(() =>
+			handshake.writeMessage(hello ? utf8Encode(JSON.stringify(hello)) : new Uint8Array(0)),
+		);
 		const result = wrapNoise(() => handshake.finish());
 		return {
 			kind: "connected",
 			frame: JSON.stringify({ t: "hs", m: toBase64(reply) } satisfies ChannelFrame),
 			transport: new SecureTransport(result),
 			remoteStaticKey: result.remoteStaticKey,
+			deviceHello,
 		};
 	}
 }

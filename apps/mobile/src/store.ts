@@ -2,6 +2,7 @@ import { ChatController, type ChatView } from "@pier/chat-state";
 import {
 	CLOSE_DEVICE_REVOKED,
 	type ClientState,
+	type ConnectionRoute,
 	createSecureSocketFactory,
 	type PairingPhase,
 	PierClient,
@@ -42,6 +43,7 @@ import {
 	saveDeviceName,
 } from "./identity.ts";
 import { RemoteTerminal } from "./terminal.ts";
+import { peerConnectionFactory } from "./webrtc.ts";
 
 export const APP_VERSION = "0.2.20";
 
@@ -79,8 +81,10 @@ export interface HostView {
 	info?: HostInfo;
 	workspaces?: WorkspaceInfo[];
 	sessions: Record<string, SessionSummary[] | undefined>;
-	/** Which address the secure channel is using. */
+	/** Which address the secure channel is using (direct connections). */
 	address?: string;
+	/** How the secure channel reaches the computer: directly, through a relay, or peer-to-peer. */
+	route?: ConnectionRoute;
 	/** Terminals opened on this computer from the phone, newest first. */
 	terminals: TerminalSummary[];
 }
@@ -124,7 +128,7 @@ export function pairingErrorText(error: unknown): string {
 				return error.message;
 		}
 	}
-	return `无法连接到电脑：${errorText(error)}。请确认手机与电脑在同一网络，且电脑上已开启远程访问。`;
+	return `无法连接到电脑：${errorText(error)}。请确认手机与电脑在同一网络（不在同一网络时电脑需开启中继），且电脑上已开启远程访问。`;
 }
 
 export class MobileStore {
@@ -218,6 +222,7 @@ export class MobileStore {
 			hostName: outcome.hostName,
 			hostPublicKey: toBase64Url(outcome.hostPublicKey),
 			addresses: outcome.addresses,
+			...(outcome.relays.length ? { relays: outcome.relays } : {}),
 			deviceId: outcome.deviceId,
 			pairedAt: new Date().toISOString(),
 		};
@@ -242,11 +247,17 @@ export class MobileStore {
 	 * one on screen, reconnect through them right away. The pinned host key is unchanged, so a
 	 * different computer at the new address fails the handshake.
 	 */
-	async setHostAddresses(hostId: string, addresses: string[]): Promise<void> {
+	async setHostAddresses(hostId: string, addresses: string[], relays?: string[]): Promise<void> {
 		const current = this.state.hosts.find((h) => h.hostId === hostId);
 		if (!current) throw new Error("这台电脑已不在列表中");
-		if (!addresses.length) throw new Error("至少需要一个地址");
-		const updated = { ...current, addresses: [...addresses] };
+		const nextRelays = relays ?? current.relays ?? [];
+		if (!addresses.length && !nextRelays.length) throw new Error("至少需要一个地址或中继服务器");
+		const { relays: _old, ...rest } = current;
+		const updated: PairedHost = {
+			...rest,
+			addresses: [...addresses],
+			...(nextRelays.length ? { relays: [...nextRelays] } : {}),
+		};
 		const hosts = this.state.hosts.map((h) => (h.hostId === hostId ? updated : h));
 		await saveHost(updated, hosts);
 		this.set({ hosts });
@@ -285,6 +296,7 @@ export class MobileStore {
 	private connect(host: PairedHost): void {
 		const keyPair = this.keyPair;
 		if (!keyPair) return;
+		const p2p = peerConnectionFactory();
 		const client = new PierClient({
 			url: `pier://${host.hostId}`,
 			client: { name: "pier-mobile", version: APP_VERSION, platform: Platform.OS },
@@ -294,8 +306,13 @@ export class MobileStore {
 			reconnect: { initialDelayMs: 500, maxDelayMs: 10_000 },
 			createWebSocket: createSecureSocketFactory({
 				addresses: host.addresses,
+				...(host.relays?.length ? { relays: host.relays } : {}),
+				...(p2p ? { p2p: { createPeerConnection: p2p } } : {}),
 				hostPublicKey: fromBase64Url(host.hostPublicKey),
 				deviceKeyPair: keyPair,
+				onRoute: (route) => {
+					if (this.client === client) this.setHost({ route });
+				},
 				onConnected: (address) => {
 					if (this.client !== client) return;
 					this.setHost({ address });

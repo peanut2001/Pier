@@ -27,7 +27,7 @@ function HostMenu({ host, onClose }: { host: PairedHost; onClose: () => void }) 
 	return (
 		<ActionSheet
 			title={host.hostName}
-			subtitle={host.addresses.join("\n")}
+			subtitle={[...host.addresses, ...(host.relays ?? []).map((r) => `中继 ${r}`)].join("\n")}
 			onClose={onClose}
 			actions={[
 				{
@@ -100,10 +100,12 @@ function HostRow({ host }: { host: PairedHost }) {
 							{status}
 						</Text>
 					</View>
-					{host.addresses[0] ? (
+					{host.addresses[0] || host.relays?.[0] ? (
 						<Text style={[styles.address, { color: p.faint }]} numberOfLines={1}>
-							{host.addresses[0]}
-							{host.addresses.length > 1 ? `  +${host.addresses.length - 1}` : ""}
+							{host.addresses[0] ?? `中继 ${host.relays?.[0]?.replace(/^wss?:\/\//, "")}`}
+							{host.addresses.length + (host.relays?.length ?? 0) > 1
+								? `  +${host.addresses.length + (host.relays?.length ?? 0) - 1}`
+								: ""}
 						</Text>
 					) : null}
 				</View>
@@ -151,7 +153,9 @@ function EmptyHosts() {
 					</View>
 				))}
 			</View>
-			<Muted style={[styles.center, styles.hint]}>手机需要和电脑在同一局域网，或同一 Tailscale 网络。</Muted>
+			<Muted style={[styles.center, styles.hint]}>
+				手机和电脑在同一局域网（或同一 Tailscale 网络）时直连；不在同一网络时，电脑开启中继服务器即可连接。
+			</Muted>
 		</View>
 	);
 }
