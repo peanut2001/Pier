@@ -148,10 +148,10 @@
 	opacity: 1;
 }
 
+/* Same fill as the output underneath, so it covers the text without drawing a frame. */
 .tool-actions .copy-button {
-	background: rgba(30, 33, 40, 0.9);
+	background: var(--bg-code);
 	color: #b8bcc6;
-	border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .tool-actions .copy-button:hover:not(:disabled) {

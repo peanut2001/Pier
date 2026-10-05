@@ -43,6 +43,7 @@ import { CopyButton } from "./Markdown.tsx";
 import { ModelsSettings } from "./ModelsPanel.tsx";
 import { PiSettings } from "./PiSettingsPanel.tsx";
 import { RemoteSettings } from "./RemotePanel.tsx";
+import { Select } from "./Select.tsx";
 import { useOutsideClick } from "./SessionControls.tsx";
 import { SettingRow, SettingsCard, SettingsGroup } from "./SettingsUi.tsx";
 import { addWorkspaceBlocker } from "./Sidebar.tsx";
@@ -436,19 +437,16 @@ function WorkspaceCard({ workspace, readOnly = false }: { workspace: WorkspaceIn
 					</span>
 				}
 			>
-				<select
+				<Select
 					className="setting-select compact"
 					value={workspace.policy}
 					disabled={readOnly}
-					onChange={(e) => void store.setPolicy(workspace.id, e.target.value as ApprovalPolicy)}
-				>
-					{(["ask", "smart", "auto"] as ApprovalPolicy[]).map((policy) => (
-						<option key={policy} value={policy}>
-							{POLICY_LABEL[policy]}
-							{policy === "smart" ? "（默认）" : ""}
-						</option>
-					))}
-				</select>
+					onChange={(policy) => void store.setPolicy(workspace.id, policy)}
+					options={(["ask", "smart", "auto"] as ApprovalPolicy[]).map((policy) => ({
+						value: policy,
+						label: `${POLICY_LABEL[policy]}${policy === "smart" ? "（默认）" : ""}`,
+					}))}
+				/>
 			</SettingRow>
 		</SettingsCard>
 	);

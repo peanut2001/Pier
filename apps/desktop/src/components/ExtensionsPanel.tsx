@@ -23,6 +23,7 @@ import {
 	IconX,
 } from "./Icons.tsx";
 import { CopyButton } from "./Markdown.tsx";
+import { Select } from "./Select.tsx";
 import { SettingRow, SettingsCard, SettingsGroup, Switch } from "./SettingsUi.tsx";
 
 const TYPE_LABEL: Record<ExtensionResourceType, string> = {
@@ -304,18 +305,21 @@ function InstallForm({
 						autoCapitalize="off"
 						autoCorrect="off"
 					/>
-					<select
+					<Select
 						className="setting-select compact"
 						value={scope}
 						disabled={busy}
-						onChange={(e) => setScope(e.target.value as ExtensionScope)}
+						onChange={setScope}
 						title="全局：写入 pi 配置目录的 settings.json，对所有工作区生效；项目：写入工作区的 .pi/settings.json"
-					>
-						<option value="user">全局（所有工作区）</option>
-						<option value="project" disabled={!workspaceName}>
-							{workspaceName ? `仅工作区「${workspaceName}」` : "仅工作区（先在上方选择）"}
-						</option>
-					</select>
+						options={[
+							{ value: "user", label: "全局（所有工作区）" },
+							{
+								value: "project",
+								label: workspaceName ? `仅工作区「${workspaceName}」` : "仅工作区（先在上方选择）",
+								disabled: !workspaceName,
+							},
+						]}
+					/>
 					<button type="submit" className="primary" disabled={busy || !source.trim()}>
 						{installing ? <IconLoader size={14} className="spin" /> : <IconDownload size={14} />}
 						{installing ? "安装中…" : "安装"}
@@ -481,19 +485,16 @@ export function ExtensionsSettings() {
 						title="查看范围"
 						description="选择工作区后，同时列出并管理该工作区 .pi/settings.json 中的项目级扩展。"
 					>
-						<select
+						<Select
 							className="setting-select compact"
 							value={workspaceId}
 							disabled={isBusy}
-							onChange={(e) => setWorkspaceId(e.target.value)}
-						>
-							<option value="">仅全局</option>
-							{workspaces.map((w) => (
-								<option key={w.id} value={w.id}>
-									全局 + 工作区「{w.name}」
-								</option>
-							))}
-						</select>
+							onChange={setWorkspaceId}
+							options={[
+								{ value: "", label: "仅全局" },
+								...workspaces.map((w) => ({ value: w.id, label: `全局 + 工作区「${w.name}」` })),
+							]}
+						/>
 						<button type="button" className="ghost" disabled={loading} onClick={() => void load()}>
 							{loading ? <IconLoader size={13} className="spin" /> : <IconRefresh size={13} />}
 							刷新

@@ -172,7 +172,7 @@ img.account-logo {
 	color: var(--success);
 }
 
-select.account-token-select {
+.select.account-token-select {
 	max-width: 260px;
 }
 

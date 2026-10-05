@@ -98,11 +98,21 @@
 	color: var(--text);
 }
 
+/* Bare icon buttons: no frame, just a soft square on hover. */
 .icon-chip {
 	width: 32px;
 	height: 32px;
 	padding: 0;
+	border-radius: 8px;
+	border-color: transparent;
+	background: transparent;
+	box-shadow: none;
 	color: var(--text-muted);
+}
+
+.icon-chip:hover:not(:disabled) {
+	background: var(--bg-hover);
+	border-color: transparent;
 }
 
 .chip-caret {
