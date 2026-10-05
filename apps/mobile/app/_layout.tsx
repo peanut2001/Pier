@@ -21,7 +21,10 @@ export default function RootLayout() {
 		void Font.loadAsync(Ionicons.font).catch(() => {});
 		// iOS suspends sockets in the background; resume (with seq replay) right away on return.
 		const subscription = AppState.addEventListener("change", (state) => {
-			if (state !== "active") return;
+			if (state !== "active") {
+				store.onBackground();
+				return;
+			}
 			store.onForeground();
 			updater.onForeground();
 		});

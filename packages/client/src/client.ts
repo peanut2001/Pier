@@ -3,6 +3,7 @@ import {
 	type EventFrame,
 	type HelloResult,
 	type HostInfo,
+	type KnownMessages,
 	type MethodName,
 	type MethodParams,
 	type MethodResult,
@@ -71,7 +72,25 @@ interface SubscriptionState {
 	workspaceId?: string;
 	lastSeq: number;
 	epoch?: string;
+	/** The transcript prefix the subscriber already has, asked on every (re)subscribe. */
+	known?: () => KnownMessages | undefined;
 	handlers: Set<SessionEventHandler>;
+}
+
+/** Options of `PierClient.subscribe`. */
+export interface SubscribeOptions {
+	/** Workspace of the session, to reopen it when the host evicted it. */
+	workspaceId?: string;
+	/**
+	 * Where the caller's cached state of the session stands. When the host still has the events
+	 * after `seq` in the same `epoch`, only those are sent instead of a snapshot.
+	 */
+	resume?: { seq: number; epoch: string };
+	/**
+	 * The transcript prefix the caller already has (1.27). When a snapshot is needed and the
+	 * host's transcript starts with it, the snapshot leaves it out (`messagesFrom`).
+	 */
+	known?: () => KnownMessages | undefined;
 }
 
 export interface Subscription {
@@ -435,15 +454,17 @@ export class PierClient {
 	async subscribe(
 		sessionId: string,
 		handler: SessionEventHandler,
-		options: { workspaceId?: string } = {},
+		options: SubscribeOptions = {},
 	): Promise<Subscription> {
 		let sub = this.subscriptions.get(sessionId);
 		if (!sub) {
 			sub = {
 				sessionId,
-				lastSeq: 0,
+				lastSeq: options.resume?.seq ?? 0,
+				...(options.resume ? { epoch: options.resume.epoch } : {}),
 				handlers: new Set(),
 				...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
+				...(options.known ? { known: options.known } : {}),
 			};
 			this.subscriptions.set(sessionId, sub);
 		}
@@ -478,10 +499,12 @@ export class PierClient {
 	}
 
 	private async requestSubscribe(sub: SubscriptionState): Promise<SubscribeResult> {
-		const params =
-			sub.epoch !== undefined
-				? { sessionId: sub.sessionId, sinceSeq: sub.lastSeq, epoch: sub.epoch }
-				: { sessionId: sub.sessionId };
+		const known = sub.known?.();
+		const params = {
+			sessionId: sub.sessionId,
+			...(sub.epoch !== undefined ? { sinceSeq: sub.lastSeq, epoch: sub.epoch } : {}),
+			...(known ? { known } : {}),
+		};
 		const result = await this.request("session.subscribe", params);
 		if (result.mode === "replay") sub.epoch = result.epoch;
 		return result;

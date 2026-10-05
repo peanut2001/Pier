@@ -99,10 +99,14 @@ export function initialChatState(sessionId: string, session?: SessionSummary): C
 
 /** Replace the state with a snapshot (keeps client-local notices). */
 export function applySnapshot(state: ChatState, snapshot: SessionSnapshot): ChatState {
+	// A snapshot that leaves out the transcript prefix the client said it has (1.27).
+	const from = snapshot.messagesFrom ?? 0;
+	if (from > state.messages.length) return { ...state, needsResync: true };
+	const messages = [...state.messages.slice(0, from), ...(snapshot.messages as AnyMessage[])];
 	const tools: Record<string, ToolExecution> = {};
 	const streaming = snapshot.streamingMessage as AssistantMessage | undefined;
 	const calls = new Map<string, ToolCallPart>();
-	for (const message of [...(snapshot.messages as AnyMessage[]), ...(streaming ? [streaming] : [])]) {
+	for (const message of [...messages, ...(streaming ? [streaming] : [])]) {
 		if (message.role !== "assistant") continue;
 		for (const part of (message as AssistantMessage).content ?? []) {
 			if (part?.type === "toolCall") calls.set(part.id, part);
@@ -118,7 +122,7 @@ export function applySnapshot(state: ChatState, snapshot: SessionSnapshot): Chat
 		loaded: true,
 		seq: snapshot.seq,
 		epoch: snapshot.epoch,
-		messages: [...(snapshot.messages as AnyMessage[])],
+		messages,
 		tools,
 		runState: snapshot.session.state,
 		pendingUi: [...snapshot.pendingUi],
@@ -464,4 +468,15 @@ export function reduceChat(state: ChatState, frame: EventFrame): ChatState {
 /** Mark the state as resynced (after a snapshot request was issued). */
 export function clearResync(state: ChatState): ChatState {
 	return state.needsResync ? { ...state, needsResync: false } : state;
+}
+
+/**
+ * The part of a session's state worth keeping on the device, to show it right away next time
+ * and resume from it instead of downloading the whole transcript again. `undefined` when
+ * there is nothing worth keeping (not loaded yet).
+ */
+export function cacheableChatState(state: ChatState): ChatState | undefined {
+	if (!state.loaded || state.needsResync) return undefined;
+	const { notices: _n, editorText: _e, closed: _c, ...rest } = state;
+	return { ...rest, notices: [], nextNoticeId: 1 };
 }

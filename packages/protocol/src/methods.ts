@@ -231,6 +231,12 @@ export const MethodParamsSchemas = {
 		sinceSeq: z.number().int().nonnegative().optional(),
 		/** Event-log epoch the `sinceSeq` belongs to (from a previous subscribe result or snapshot). */
 		epoch: z.string().max(128).optional(),
+		/**
+		 * Transcript prefix the client already has (1.27): its first `count` messages, the last with
+		 * `fingerprint` (`messageFingerprint`). When a snapshot follows and the prefix matches, it
+		 * carries only the messages after it (`messagesFrom`).
+		 */
+		known: z.object({ count: z.number().int().positive(), fingerprint: z.string().min(1).max(64) }).optional(),
 	}),
 	"session.unsubscribe": z.object(SessionRef),
 	"session.snapshot": z.object(SessionRef),

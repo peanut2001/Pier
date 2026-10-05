@@ -1,4 +1,4 @@
-# Pier 协议 v1.26
+# Pier 协议 v1.27
 
 > 实现：`packages/protocol`（zod schema + TS 类型，Host 与所有客户端共享）。
 > 本文档描述线上格式与语义；字段的权威定义以 `packages/protocol/src` 为准。
@@ -60,7 +60,7 @@
 
 ```jsonc
 { "type": "req", "id": "h", "method": "host.hello", "params": {
-  "protocolVersion": "1.26",
+  "protocolVersion": "1.27",
   "client": { "name": "pier-desktop", "version": "0.1.0", "platform": "darwin" },
   "token": "<本地 token>",       // 本地连接必填；远程连接由加密通道认证，不需要
   "coalesceMs": 50               // 可选：合并流式增量的窗口（0–1000ms，默认 0）
@@ -171,7 +171,7 @@ sidecar 的 stdio 协议：桌面端用 `--shell-terminals` 启动 Host，声明
 | `session.forkPoints` | `{ sessionId }` | `{ points: { entryId, text }[] }`（可 fork 的用户消息） |
 | `session.fork` | `{ sessionId, entryId, position?: "before"\|"at" }` | `{ session, selectedText? }`；生成**新**会话，原会话不变 |
 | `session.rename` | `{ sessionId, name }` | `{ session }` |
-| `session.subscribe` | `{ sessionId, sinceSeq?, epoch? }` | `{ mode: "replay"\|"snapshot", currentSeq, epoch }`，见 §5 |
+| `session.subscribe` | `{ sessionId, sinceSeq?, epoch?, known?: { count, fingerprint } }`（`known` 1.27） | `{ mode: "replay"\|"snapshot", currentSeq, epoch }`，见 §5 |
 | `session.unsubscribe` | `{ sessionId }` | `{ unsubscribed }` |
 | `session.snapshot` | `{ sessionId }` | `SessionSnapshot`（一次性读取，不影响订阅） |
 | `session.commands` | `{ sessionId }` | `{ commands: { name, description?, argumentHint?, source: "extension"\|"prompt"\|"skill" }[] }`；会话的 Agent 运行时在 `session.prompt` 中处理的斜杠命令：扩展命令、提示词模板和 `skill:<名称>`（pi 设置 `enableSkillCommands: false` 时不列出 skill，但手动输入仍然有效）。`name` 不含开头的 `/`（1.5） |
@@ -453,6 +453,7 @@ Claude Code 与 Codex 会话（1.22）发出同样形态的事件与 `AgentMessa
 - `session.subscribe` 的语义：
   - 带 `sinceSeq` 且 `epoch` 与当前一致、缺口仍在缓冲内 → `mode: "replay"`，随后按序补发 `seq > sinceSeq` 的事件；
   - 否则 → `mode: "snapshot"`，随后发送一个 `session.snapshot`，再接实时事件。
+  - **已有的转录前缀**（1.27）：客户端可在 `known` 中说明它已有转录的前 `count` 条消息，以及最后一条的指纹 `fingerprint`（`@pier/protocol` 的 `messageFingerprint`：消息按键排序的规范 JSON 的 64 位哈希，16 位十六进制）。需要发快照且 Host 转录的第 `count` 条消息指纹一致时，快照的 `messages` 只含其后的消息，并带 `messagesFrom: count`；客户端保留自己的前 `count` 条再接上。不一致（压缩、换分支或缓存过旧）时照常发完整快照。旧版 Host 忽略 `known`。手机端把看过的会话缓存在本地，下次打开时用 `sinceSeq/epoch` 只补发错过的事件；会话已被 Host 重新加载（新的 epoch）时，用 `known` 只下载新增的消息。
 - **顺序保证**：订阅响应先于补发事件或快照到达；补发 / 快照之后才是订阅期间产生的实时事件。快照的 `seq` 表示它已包含到该 seq 为止的全部事件，之后的事件从 `seq + 1` 开始。
 - 客户端应记录每个会话最后应用的 `seq` 与 `epoch`，并**丢弃 `seq <= lastSeq` 的事件**。`@pier/client` 自动完成这些：断线后指数退避重连，重新 `host.hello`，再用 `sinceSeq/epoch` 重新订阅；若会话已不在活跃池中（`NOT_FOUND`），会先 `session.open` 再从快照开始。
 - **增量合并**：`host.hello` 指定 `coalesceMs > 0` 时，同一会话、同一内容块、相同类型（`text_delta` / `thinking_delta` / `toolcall_delta`）的连续增量在窗口内合并为一帧，合并帧携带最后一条的 `seq`。其他任何帧到来前都会先刷出待合并的帧，顺序不变。建议手机端使用约 50ms。
@@ -464,7 +465,8 @@ Claude Code 与 Codex 会话（1.22）发出同样形态的事件与 `AgentMessa
 {
   session: SessionSummary;     // 含 state
   seq: number; epoch: string;
-  messages: AgentMessage[];    // 完整转录（含 system 消息，客户端可自行过滤）
+  messages: AgentMessage[];    // 完整转录（含 system 消息，客户端可自行过滤）；带 messagesFrom 时只含从该下标起的消息
+  messagesFrom?: number;       // 订阅时 known 前缀一致（1.27）：客户端保留自己的前 messagesFrom 条
   streamingMessage?: AgentMessage; // 正在流式输出的部分消息
   pendingToolCalls: string[];
   pendingUi: UiRequest[];      // 仍待回答的对话框 / 审批

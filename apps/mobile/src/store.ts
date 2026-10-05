@@ -32,6 +32,7 @@ import {
 import { createContext, useContext, useSyncExternalStore } from "react";
 import { Platform } from "react-native";
 import { base64ToBytes, bytesToBase64 } from "./bytes.ts";
+import { ChatCache } from "./chat-cache.ts";
 import { loadHosts, type PairedHost, removeHost, saveHost } from "./hosts.ts";
 import {
 	defaultDeviceName,
@@ -167,6 +168,8 @@ export class MobileStore {
 	private activeHostId: string | undefined;
 	private nextToastId = 1;
 	private readonly drafts = new Map<string, string>();
+	/** Sessions seen before, to show at once and resume without downloading them again. */
+	private readonly chatCache = new ChatCache();
 	private nextTerminalId = 1;
 
 	getState = (): MobileState => this.state;
@@ -272,6 +275,7 @@ export class MobileStore {
 
 	async forgetHost(hostId: string): Promise<void> {
 		this.closeConnection(hostId);
+		this.chatCache.removeHost(hostId);
 		const hosts = this.state.hosts.filter((h) => h.hostId !== hostId);
 		await removeHost(hostId, hosts);
 		this.set({ hosts });
@@ -455,6 +459,14 @@ export class MobileStore {
 		for (const conn of this.connections.values()) this.reconnectNow(conn);
 	}
 
+	/** Called when the app leaves the foreground: keep open sessions on the phone for next time. */
+	onBackground(): void {
+		for (const conn of this.connections.values()) {
+			for (const chat of conn.chats.values()) this.chatCache.put(conn.hostId, chat.chat);
+		}
+		this.chatCache.flush();
+	}
+
 	/** Retry the computer on screen right away. */
 	retryNow(): void {
 		const conn = this.active;
@@ -483,7 +495,10 @@ export class MobileStore {
 		conn.retryTimer = undefined;
 		for (const timer of conn.refreshTimers.values()) clearTimeout(timer);
 		conn.refreshTimers.clear();
-		for (const chat of conn.chats.values()) chat.dispose();
+		for (const chat of conn.chats.values()) {
+			this.chatCache.put(hostId, chat.chat);
+			chat.dispose();
+		}
 		conn.chats.clear();
 		conn.recent = [];
 		for (const terminal of conn.terminals.values()) terminal.dispose();
@@ -672,6 +687,7 @@ export class MobileStore {
 		if (conn.client !== client) return true;
 		for (const [id, chat] of conn.chats) {
 			if (chat.workspaceId !== workspaceId) continue;
+			this.chatCache.put(conn.hostId, chat.chat);
 			chat.dispose();
 			conn.chats.delete(id);
 			conn.recent = conn.recent.filter((r) => r !== id);
@@ -737,19 +753,28 @@ export class MobileStore {
 		if (!conn || !client) return undefined;
 		let chat = conn.chats.get(session.id);
 		if (!chat) {
-			chat = new ChatController(client, session, {
-				onReplaced: (previousId, next) => {
-					const existing = conn.chats.get(previousId);
-					if (existing) {
-						conn.chats.delete(previousId);
-						conn.chats.set(next.id, existing);
-					}
-					this.scheduleRefresh(conn, next.workspaceId);
+			const cached = this.chatCache.get(conn.hostId, session.id);
+			chat = new ChatController(
+				client,
+				session,
+				{
+					onReplaced: (previousId, next) => {
+						const existing = conn.chats.get(previousId);
+						if (existing) {
+							conn.chats.delete(previousId);
+							conn.chats.set(next.id, existing);
+						}
+						this.scheduleRefresh(conn, next.workspaceId);
+					},
+					onSettled: (c) => {
+						this.scheduleRefresh(conn, c.workspaceId);
+						this.chatCache.put(conn.hostId, c.chat);
+					},
+					onChange: () => this.set((s) => ({ chatsVersion: s.chatsVersion + 1 })),
+					onError: (message) => this.toast("error", message),
 				},
-				onSettled: (c) => this.scheduleRefresh(conn, c.workspaceId),
-				onChange: () => this.set((s) => ({ chatsVersion: s.chatsVersion + 1 })),
-				onError: (message) => this.toast("error", message),
-			});
+				cached,
+			);
 			conn.chats.set(session.id, chat);
 			void chat.start();
 		}
@@ -757,15 +782,17 @@ export class MobileStore {
 		while (conn.recent.length > MAX_LIVE_CHATS) {
 			const id = conn.recent.pop();
 			if (!id) break;
-			conn.chats.get(id)?.dispose();
-			conn.chats.delete(id);
+			this.dropChat(conn, id);
 		}
 		return chat;
 	}
 
-	/** Stop following a session on `conn`'s computer. */
-	private dropChat(conn: HostConnection, sessionId: string): void {
-		conn.chats.get(sessionId)?.dispose();
+	/** Stop following a session on `conn`'s computer, keeping its state for next time unless `forget`. */
+	private dropChat(conn: HostConnection, sessionId: string, forget = false): void {
+		const chat = conn.chats.get(sessionId);
+		if (forget) this.chatCache.remove(conn.hostId, sessionId);
+		else if (chat) this.chatCache.put(conn.hostId, chat.chat);
+		chat?.dispose();
 		conn.chats.delete(sessionId);
 		conn.recent = conn.recent.filter((id) => id !== sessionId);
 	}
@@ -828,7 +855,7 @@ export class MobileStore {
 			this.toast("error", `删除会话失败：${errorText(error)}`);
 			return false;
 		}
-		this.dropChat(conn, session.id);
+		this.dropChat(conn, session.id, true);
 		this.drafts.delete(session.id);
 		const workspaceId = session.workspaceId;
 		this.setView(conn.hostId, (h) => ({

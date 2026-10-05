@@ -12,6 +12,7 @@ import {
 	type HostInfo,
 	isMethodName,
 	isProtocolCompatible,
+	type KnownMessages,
 	LOCAL_ONLY_EVENTS,
 	LOCAL_ONLY_METHODS,
 	type MethodName,
@@ -686,8 +687,14 @@ export class PierHost implements RequestHandler {
 		});
 	}
 
-	private subscribeConnection(ctx: HandlerContext, session: ManagedSession, sinceSeq?: number, epoch?: string) {
-		const pending = session.subscribe(ctx.connection, sinceSeq, epoch);
+	private subscribeConnection(
+		ctx: HandlerContext,
+		session: ManagedSession,
+		sinceSeq?: number,
+		epoch?: string,
+		known?: KnownMessages,
+	) {
+		const pending = session.subscribe(ctx.connection, sinceSeq, epoch, known);
 		ctx.connection.subscriptions.add(session);
 		ctx.after(pending.start);
 		return pending.result;
@@ -860,7 +867,7 @@ export class PierHost implements RequestHandler {
 				return { session: summary };
 			},
 			"session.subscribe": (ctx, params) =>
-				this.subscribeConnection(ctx, this.pool.require(params.sessionId), params.sinceSeq, params.epoch),
+				this.subscribeConnection(ctx, this.pool.require(params.sessionId), params.sinceSeq, params.epoch, params.known),
 			"session.unsubscribe": (ctx, params) => {
 				const session = this.pool.get(params.sessionId);
 				if (!session) return { unsubscribed: false };

@@ -471,8 +471,16 @@ export interface SessionSnapshot {
 	session: SessionSummary;
 	seq: number;
 	epoch: string;
-	/** Finalized transcript messages (pi `AgentMessage` values). */
+	/**
+	 * Finalized transcript messages (pi `AgentMessage` values). With `messagesFrom` only the
+	 * messages from that index on; the client keeps the first `messagesFrom` it already has.
+	 */
 	messages: unknown[];
+	/**
+	 * Set when the subscriber's `known` prefix matched (1.27): `messages` starts at this index
+	 * of the transcript instead of at 0.
+	 */
+	messagesFrom?: number;
 	/** Partial assistant message currently being streamed, if any. */
 	streamingMessage?: unknown;
 	pendingToolCalls: string[];
