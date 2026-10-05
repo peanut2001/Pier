@@ -27,7 +27,7 @@
 	padding: 16px 18px;
 	border: 1px solid var(--border-strong);
 	border-radius: var(--radius-lg);
-	background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 60%), var(--bg-elevated);
+	background: var(--bg-elevated);
 	box-shadow: var(--shadow-md), var(--highlight);
 	animation: rise-in 0.22s var(--ease);
 }
@@ -254,24 +254,20 @@
 	flex-direction: column;
 	gap: 6px;
 	padding: 13px 10px 9px 16px;
-	/* Two backgrounds: the fill (padding box) and a border ring (border box) that turns into
-	   the brand gradient on focus. */
-	border: 1px solid transparent;
+	border: 1px solid var(--border-strong);
 	border-radius: var(--radius-xl);
-	background:
-		linear-gradient(var(--bg-input), var(--bg-input)) padding-box,
-		linear-gradient(var(--border-strong), var(--border-strong)) border-box;
-	box-shadow: var(--shadow-md), var(--highlight);
-	transition: box-shadow 0.2s var(--ease);
+	background: var(--bg-input);
+	box-shadow: var(--shadow-composer), var(--highlight);
+	transition:
+		border-color 0.2s var(--ease),
+		box-shadow 0.2s var(--ease);
 }
 
 .composer:focus-within {
-	background:
-		linear-gradient(var(--bg-input), var(--bg-input)) padding-box,
-		var(--brand-gradient) border-box;
+	border-color: var(--accent);
 	box-shadow:
-		0 0 0 4px var(--accent-soft),
-		0 12px 36px -10px var(--brand-glow),
+		0 0 0 3px var(--accent-soft),
+		var(--shadow-composer),
 		var(--highlight);
 }
 
@@ -394,6 +390,37 @@
 	border-radius: 8px;
 }
 
+/* Toolbar pickers (workspace, agent, policy, model) share the attach button's flat look. */
+.composer-toolbar .chip {
+	gap: 6px;
+	height: 30px;
+	padding: 0 9px;
+	border-radius: 8px;
+	border-color: transparent;
+	background: transparent;
+	box-shadow: none;
+	color: var(--text-muted);
+	white-space: nowrap;
+}
+
+.composer-toolbar .chip:hover:not(:disabled),
+.composer-toolbar .chip.open {
+	background: var(--bg-hover);
+	border-color: transparent;
+	color: var(--text);
+}
+
+.composer-toolbar .policy-chip.auto,
+.composer-toolbar .policy-chip.auto:hover:not(:disabled) {
+	color: var(--warning);
+	background: var(--warning-soft);
+}
+
+.composer-toolbar .workspace-chip.empty {
+	border-color: var(--border-strong);
+	border-style: dashed;
+}
+
 .composer-actions {
 	display: flex;
 	align-items: center;
@@ -423,7 +450,7 @@
 }
 
 .round-button.send {
-	background: var(--brand-gradient);
+	background: var(--accent);
 	color: #fff;
 	box-shadow:
 		0 3px 10px -2px var(--brand-glow),
@@ -431,7 +458,7 @@
 }
 
 .round-button.send:hover:not(:disabled) {
-	background: var(--brand-gradient-hover);
+	background: var(--accent-strong);
 	box-shadow:
 		0 6px 18px -4px var(--brand-glow),
 		inset 0 1px 0 rgba(255, 255, 255, 0.26);
@@ -490,15 +517,38 @@
 .status-bar {
 	display: flex;
 	align-items: center;
-	gap: 16px;
-	padding: 8px 8px 0;
+	gap: 12px;
+	padding: 8px 12px 0;
 	font-size: 11.5px;
 	color: var(--text-faint);
 	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
 }
 
 .status-bar .spacer {
 	flex: 1;
+}
+
+/* Usage stats sit on the right, separated by thin rules. */
+.status-usage {
+	display: inline-flex;
+	align-items: center;
+	gap: 10px;
+	min-width: 0;
+	overflow: hidden;
+}
+
+.status-usage > span {
+	display: inline-flex;
+	align-items: center;
+}
+
+.status-usage > span + span::before {
+	content: "";
+	width: 1px;
+	height: 10px;
+	margin-right: 10px;
+	background: var(--border-strong);
 }
 
 .run-state {
@@ -667,22 +717,7 @@
 /* ---- model & thinking picker (composer toolbar) ------------------------------------ */
 
 .composer-model-chip {
-	gap: 6px;
 	max-width: 260px;
-	height: 30px;
-	padding: 0 8px 0 11px;
-	white-space: nowrap;
-	border-color: transparent;
-	background: transparent;
-	box-shadow: none;
-	color: var(--text-muted);
-}
-
-.composer-model-chip:hover:not(:disabled),
-.composer-model-chip.open {
-	background: var(--bg-active);
-	border-color: transparent;
-	color: var(--text);
 }
 
 .composer-model-name {
@@ -703,7 +738,7 @@
 	width: 300px;
 	max-height: none;
 	overflow: visible;
-	padding: 6px;
+	padding: 8px;
 	transform-origin: bottom right;
 	transition: width 0.26s var(--ease);
 }
@@ -919,18 +954,38 @@
 .model-menu-header {
 	display: flex;
 	align-items: center;
-	gap: 6px;
-	min-height: 30px;
-	padding: 0 4px 4px;
-	font-size: 12.5px;
+	gap: 10px;
+	min-height: 32px;
+	padding: 2px 4px 10px;
+	font-size: 13px;
 	font-weight: 600;
-	color: var(--text-muted);
+	color: var(--text);
 }
 
 .model-menu-header .ghost.icon {
-	width: 26px;
-	height: 26px;
-	border-radius: 7px;
+	width: 28px;
+	height: 28px;
+	border-radius: 8px;
+}
+
+/* The frame clips overflow, so the search box focuses with its border, not an outer ring. */
+.model-menu .dropdown-search {
+	gap: 8px;
+	height: 36px;
+	padding: 0 12px;
+	margin: 0 2px 8px;
+	border: 1px solid var(--border);
+	border-radius: 10px;
+	background: var(--bg-hover);
+	transition:
+		border-color 0.15s var(--ease),
+		background 0.15s var(--ease);
+}
+
+.model-menu .dropdown-search:focus-within {
+	border-color: var(--accent);
+	background: var(--bg-input);
+	box-shadow: none;
 }
 
 .model-menu-list {

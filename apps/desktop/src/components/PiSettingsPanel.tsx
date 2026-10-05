@@ -13,6 +13,7 @@ import { useAppState, useSettingsTarget, useSettingsWorkspaces, useStore } from 
 import { ConfigGroups, FieldRow, TextFileEditor } from "./ConfigFields.tsx";
 import { IconAlert, IconBraces, IconLoader, IconRefresh, IconSearch, IconSliders, IconX } from "./Icons.tsx";
 import { CopyButton } from "./Markdown.tsx";
+import { Select } from "./Select.tsx";
 import { SettingRow, SettingsCard, SettingsGroup } from "./SettingsUi.tsx";
 
 type Mode = "form" | "json";
@@ -247,19 +248,16 @@ export function PiSettings() {
 							)
 						}
 					>
-						<select
+						<Select
 							className="setting-select compact"
 							value={workspaceId}
 							disabled={saving !== undefined}
-							onChange={(e) => setWorkspaceId(e.target.value)}
-						>
-							<option value="">全局设置</option>
-							{workspaces.map((w) => (
-								<option key={w.id} value={w.id}>
-									工作区「{w.name}」
-								</option>
-							))}
-						</select>
+							onChange={setWorkspaceId}
+							options={[
+								{ value: "", label: "全局设置" },
+								...workspaces.map((w) => ({ value: w.id, label: `工作区「${w.name}」` })),
+							]}
+						/>
 						{file ? <CopyButton text={file.path} label="复制路径" iconOnly /> : null}
 						<button
 							type="button"

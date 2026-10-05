@@ -495,14 +495,14 @@ code.setting-value {
 	background: none;
 }
 
-select.setting-select {
+.select.setting-select {
 	width: 320px;
 	max-width: 100%;
 	min-width: 0;
 	text-overflow: ellipsis;
 }
 
-select.setting-select.compact {
+.select.setting-select.compact {
 	width: auto;
 	min-width: 150px;
 }

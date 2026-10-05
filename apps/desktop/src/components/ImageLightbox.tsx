@@ -1,0 +1,24 @@
+import { useEffect } from "react";
+import { createPortal } from "react-dom";
+import { IconX } from "./Icons.tsx";
+
+/** Full-size view of an image. Closes on a backdrop click, Esc or the close button. */
+export function ImageLightbox({ src, alt, onClose }: { src: string; alt: string; onClose: () => void }) {
+	useEffect(() => {
+		const onKey = (e: KeyboardEvent) => {
+			if (e.key === "Escape") onClose();
+		};
+		window.addEventListener("keydown", onKey);
+		return () => window.removeEventListener("keydown", onKey);
+	}, [onClose]);
+	return createPortal(
+		// biome-ignore lint/a11y/useKeyWithClickEvents lint/a11y/noStaticElementInteractions: Esc is handled on window.
+		<div className="lightbox" onClick={onClose}>
+			<img src={src} alt={alt} onClick={(e) => e.stopPropagation()} />
+			<button type="button" className="ghost icon lightbox-close" onClick={onClose} title="关闭（Esc）">
+				<IconX size={18} />
+			</button>
+		</div>,
+		document.body,
+	);
+}

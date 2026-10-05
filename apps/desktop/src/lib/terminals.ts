@@ -16,6 +16,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { type ITheme, Terminal } from "@xterm/xterm";
 import { useSyncExternalStore } from "react";
 import { type Bridge, bridge, type TerminalBridge } from "./bridge.ts";
+import { currentTheme as currentAppTheme, onThemeChange } from "./theme.ts";
 
 export type TerminalStatus = "starting" | "running" | "exited" | "failed";
 
@@ -125,7 +126,7 @@ function cssVar(name: string, fallback: string): string {
 }
 
 function currentTheme(): ITheme {
-	const light = window.matchMedia?.("(prefers-color-scheme: light)").matches ?? false;
+	const light = currentAppTheme() === "light";
 	return {
 		background: cssVar("--bg", light ? "#ffffff" : "#111217"),
 		foreground: cssVar("--text", light ? "#1c1d22" : "#ececf1"),
@@ -168,7 +169,7 @@ export class TerminalManager {
 			height: clampTerminalHeight(saved.height ?? TERMINAL_DEFAULT_HEIGHT),
 			tabs: [],
 		};
-		window.matchMedia?.("(prefers-color-scheme: light)").addEventListener?.("change", () => {
+		onThemeChange(() => {
 			const theme = currentTheme();
 			for (const instance of this.instances.values()) instance.term.options.theme = theme;
 		});

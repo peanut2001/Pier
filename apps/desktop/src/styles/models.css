@@ -281,7 +281,7 @@ button.chip-button.added:disabled {
 	padding: 0 2px;
 }
 
-.model-row select.model-api {
+.model-row .select.model-api {
 	min-width: 0;
 }
 

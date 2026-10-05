@@ -43,7 +43,7 @@
 
 .terminal-resize:hover,
 body.resizing-terminal .terminal-resize {
-	background: linear-gradient(180deg, transparent, var(--accent-ring), transparent);
+	background: var(--accent-ring);
 }
 
 body.resizing-terminal {

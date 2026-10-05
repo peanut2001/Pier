@@ -27,6 +27,7 @@ import {
 	IconTrash,
 	IconUndo,
 } from "./Icons.tsx";
+import { Select } from "./Select.tsx";
 import { SettingRow, SettingsCard, SettingsGroup, Switch } from "./SettingsUi.tsx";
 
 /**
@@ -329,21 +330,19 @@ function FieldControl(props: FieldRowProps) {
 		case "enum": {
 			const encode = (value: JsonScalar) => JSON.stringify(value);
 			return (
-				<select
+				<Select
 					className="setting-select pi-setting-select"
 					value={valid ? encode(own as JsonScalar) : ""}
 					disabled={disabled}
-					onChange={(e) => set(e.target.value === "" ? undefined : (JSON.parse(e.target.value) as JsonScalar))}
-				>
-					<option value="">
-						{inheritedFrom ? `继承${inheritedFrom}` : "默认"}（{formatValue(field, fallback)}）
-					</option>
-					{kind.options.map((option) => (
-						<option key={encode(option.value)} value={encode(option.value)}>
-							{option.label}
-						</option>
-					))}
-				</select>
+					onChange={(next) => set(next === "" ? undefined : (JSON.parse(next) as JsonScalar))}
+					options={[
+						{
+							value: "",
+							label: `${inheritedFrom ? `继承${inheritedFrom}` : "默认"}（${formatValue(field, fallback)}）`,
+						},
+						...kind.options.map((option) => ({ value: encode(option.value), label: option.label })),
+					]}
+				/>
 			);
 		}
 		case "number":
