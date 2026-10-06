@@ -21,7 +21,11 @@ import {
 	utf8Encode,
 } from "@pier/crypto";
 import { type RawData, WebSocket, WebSocketServer } from "ws";
+import { createAdmin, type RelayAdmin } from "./admin.ts";
+import { type RelaySettings, RelayStore, type TokenOwner } from "./store.ts";
 import { type StunServer, startStunServer } from "./stun.ts";
+
+export type { RegistrationPolicy, RelaySettings } from "./store.ts";
 
 export const RELAY_VERSION = "0.2.22";
 
@@ -57,7 +61,29 @@ export interface RelayServerOptions {
 	acceptTimeoutMs?: number;
 	/** Ping interval for dead-connection detection (default 30 s). */
 	heartbeatMs?: number;
+	/**
+	 * Directory for the admin panel's data (accounts, their access tokens, settings changed in
+	 * the panel). Turns on the web admin panel at `/` and account tokens; settings saved there
+	 * take precedence over these options.
+	 */
+	dataDir?: string;
 	log?: (message: string) => void;
+}
+
+/** How a registered computer was let in. */
+export type HostVia = "open" | "static" | "account";
+
+export interface RelayHostInfo {
+	/** The computer's public key (base64url). */
+	key: string;
+	address: string;
+	connectedAt: number;
+	/** Device connections through the relay right now. */
+	streams: number;
+	/** `static`: a token from the command line; `account`: an account's token; `open`: none. */
+	via: HostVia;
+	tokenId?: string;
+	userId?: string;
 }
 
 export interface RelayServer {
@@ -67,6 +93,12 @@ export interface RelayServer {
 	/** UDP port of the STUN server, if running. */
 	stunPort: number | undefined;
 	stats(): { hosts: number; streams: number };
+	/** Current settings (changed with `configure` or in the admin panel). */
+	settings(): RelaySettings;
+	/** Change settings while running; computers no longer allowed in are disconnected. */
+	configure(change: Partial<RelaySettings>): RelaySettings;
+	/** Registered computers. */
+	hosts(): RelayHostInfo[];
 	close(): Promise<void>;
 }
 
@@ -86,6 +118,9 @@ interface HostEntry {
 	address: string;
 	host: string | undefined;
 	streams: Set<Stream>;
+	connectedAt: number;
+	via: HostVia;
+	owner?: TokenOwner;
 }
 
 interface Stream {
@@ -137,7 +172,7 @@ class RateLimiter {
 	private readonly hits = new Map<string, number[]>();
 	private readonly sweep: ReturnType<typeof setInterval>;
 
-	constructor(private readonly perMinute: number) {
+	constructor(public perMinute: number) {
 		this.sweep = setInterval(() => {
 			const cutoff = Date.now() - 60_000;
 			for (const [key, times] of this.hits) {
@@ -167,8 +202,8 @@ class RateLimiter {
 	}
 }
 
-/** Pipe messages from `from` to `to` with backpressure and an optional rate limit. */
-function pipe(from: WebSocket, to: WebSocket, bytesPerSecond: number): void {
+/** Pipe messages from `from` to `to` with backpressure and an optional rate limit (read per message). */
+function pipe(from: WebSocket, to: WebSocket, rate: () => number): void {
 	let windowStart = Date.now();
 	let windowBytes = 0;
 	let paused = false;
@@ -186,6 +221,7 @@ function pipe(from: WebSocket, to: WebSocket, bytesPerSecond: number): void {
 			? data.reduce((n, b) => n + b.length, 0)
 			: (data as Buffer | ArrayBuffer).byteLength;
 		to.send(data, { binary: isBinary }, () => resume());
+		const bytesPerSecond = rate();
 		if (bytesPerSecond > 0) {
 			const now = Date.now();
 			if (now - windowStart >= 1000) {
@@ -217,16 +253,40 @@ function pipe(from: WebSocket, to: WebSocket, bytesPerSecond: number): void {
 	});
 }
 
+/** Defaults that depend on the mode. */
+export const MODE_DEFAULTS = {
+	private: { maxHosts: 10_000, bytesPerSecond: 0 },
+	open: { maxHosts: 1000, bytesPerSecond: 2 * 1024 * 1024 },
+} as const;
+
+function initialSettings(options: RelayServerOptions): RelaySettings {
+	return {
+		mode: options.mode,
+		maxHosts: options.maxHosts ?? null,
+		maxStreamsPerHost: options.maxStreamsPerHost ?? 32,
+		bytesPerSecond: options.bytesPerSecond ?? null,
+		connectsPerMinute: options.connectsPerMinute ?? 120,
+		publicHost: options.publicHost ?? null,
+		iceServers: (options.iceServers ?? []).flatMap((s) => (Array.isArray(s.urls) ? s.urls : [s.urls])),
+	};
+}
+
 export async function startRelayServer(options: RelayServerOptions): Promise<RelayServer> {
 	const log = options.log ?? (() => {});
-	const mode = options.mode;
 	const tokens = (options.tokens ?? []).map((t) => t.trim()).filter(Boolean);
-	if (mode === "private" && !tokens.length) throw new Error("Private mode needs at least one access token");
-	const maxHosts = options.maxHosts ?? (mode === "open" ? 1000 : 10_000);
-	const maxStreams = options.maxStreamsPerHost ?? 32;
-	const bytesPerSecond = options.bytesPerSecond ?? (mode === "open" ? 2 * 1024 * 1024 : 0);
+	const store = options.dataDir ? await RelayStore.open(options.dataDir) : undefined;
+	let settings: RelaySettings = store?.settings
+		? { ...initialSettings(options), ...store.settings }
+		: initialSettings(options);
+	if (store?.settings) log(`using the settings saved in the admin panel (${settings.mode} mode)`);
+	if (settings.mode === "private" && !tokens.length && !store) {
+		throw new Error("Private mode needs at least one access token");
+	}
+	const maxHosts = () => settings.maxHosts ?? MODE_DEFAULTS[settings.mode].maxHosts;
+	const bytesPerSecond = () => settings.bytesPerSecond ?? MODE_DEFAULTS[settings.mode].bytesPerSecond;
 	const acceptTimeoutMs = options.acceptTimeoutMs ?? 10_000;
-	const limiter = new RateLimiter(options.connectsPerMinute ?? 120);
+	const limiter = new RateLimiter(settings.connectsPerMinute);
+	const startedAt = Date.now();
 	const hosts = new Map<string, HostEntry>();
 	const pending = new Map<string, Stream>();
 	let streamCount = 0;
@@ -250,21 +310,30 @@ export async function startRelayServer(options: RelayServerOptions): Promise<Rel
 	const iceServersFor = (hostHeader: string | undefined): IceServer[] => {
 		const servers: IceServer[] = [];
 		if (stun) {
-			const name = options.publicHost ?? hostHeader?.replace(/:\d+$/, "");
+			const name = settings.publicHost ?? hostHeader?.replace(/:\d+$/, "");
 			if (name) servers.push({ urls: `stun:${name}:${stun.port}` });
 		}
-		return [...servers, ...(options.iceServers ?? [])];
+		return [...servers, ...settings.iceServers.map((urls) => ({ urls }))];
 	};
 
+	let admin: RelayAdmin | undefined;
 	const server: Server = createServer((req, res) => {
 		const path = (req.url ?? "/").split("?")[0] ?? "/";
 		if (path.endsWith("/health")) {
 			res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
-			res.end(JSON.stringify({ ok: true, service: "pier-relay", version: RELAY_VERSION, mode }));
+			res.end(JSON.stringify({ ok: true, service: "pier-relay", version: RELAY_VERSION, mode: settings.mode }));
+			return;
+		}
+		if (admin) {
+			admin.handle(req, res, path).catch((error: unknown) => {
+				log(`admin: ${error instanceof Error ? error.message : String(error)}`);
+				if (!res.headersSent) res.writeHead(500, { "content-type": "application/json; charset=utf-8" });
+				res.end(JSON.stringify({ error: "服务器内部错误" }));
+			});
 			return;
 		}
 		res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
-		res.end(`Pier Relay ${RELAY_VERSION} (${mode} mode)\n`);
+		res.end(`Pier Relay ${RELAY_VERSION} (${settings.mode} mode)\n`);
 	});
 	const wss = new WebSocketServer({ noServer: true, perMessageDeflate: false, maxPayload: MAX_PAYLOAD });
 	const controlWss = new WebSocketServer({ noServer: true, perMessageDeflate: false, maxPayload: MAX_CONTROL_PAYLOAD });
@@ -312,7 +381,7 @@ export async function startRelayServer(options: RelayServerOptions): Promise<Rel
 		sendControl(socket, {
 			t: "challenge",
 			v: RELAY_PROTOCOL_VERSION,
-			mode,
+			mode: settings.mode,
 			nonce: challenge.nonce,
 			ek: challenge.ek,
 		});
@@ -333,22 +402,24 @@ export async function startRelayServer(options: RelayServerOptions): Promise<Rel
 				refuseHost(socket, "UNSUPPORTED_VERSION", "Unsupported relay protocol version", RELAY_CLOSE.badRequest);
 				return;
 			}
-			if (mode === "private") {
-				const token = typeof message.token === "string" ? message.token : "";
-				if (!token || !tokens.some((t) => constantTimeEqual(t, token))) {
-					log(`host from ${address}: wrong access token`);
-					refuseHost(socket, "UNAUTHORIZED", "Wrong or missing access token", RELAY_CLOSE.unauthorized);
-					return;
-				}
-			}
 			const key = challenge.verify(message.pk, message.proof);
 			if (!key) {
 				refuseHost(socket, "UNAUTHORIZED", "Key proof failed", RELAY_CLOSE.unauthorized);
 				return;
 			}
+			// A token counts in open mode too: it ties the computer to an account.
+			const token = typeof message.token === "string" ? message.token.trim() : "";
+			const isStatic = !!token && tokens.some((t) => constantTimeEqual(t, token));
+			const owner = token && !isStatic ? store?.resolveToken(token, address) : undefined;
+			const via: HostVia = isStatic ? "static" : owner ? "account" : "open";
+			if (settings.mode === "private" && via === "open") {
+				log(`host from ${address}: ${token ? "wrong" : "missing"} access token`);
+				refuseHost(socket, "UNAUTHORIZED", "Wrong or missing access token", RELAY_CLOSE.unauthorized);
+				return;
+			}
 			const id = toBase64Url(key);
 			const previous = hosts.get(id);
-			if (!previous && hosts.size >= maxHosts) {
+			if (!previous && hosts.size >= maxHosts()) {
 				refuseHost(socket, "LIMIT", "Too many hosts on this relay", RELAY_CLOSE.limit);
 				return;
 			}
@@ -363,10 +434,13 @@ export async function startRelayServer(options: RelayServerOptions): Promise<Rel
 				address,
 				host: req.headers.host,
 				streams: previous?.streams ?? new Set(),
+				connectedAt: Date.now(),
+				via,
+				...(owner ? { owner } : {}),
 			};
 			for (const stream of entry.streams) stream.host = entry;
 			hosts.set(id, entry);
-			sendControl(socket, { t: "registered", mode, iceServers: iceServersFor(req.headers.host) });
+			sendControl(socket, { t: "registered", mode: settings.mode, iceServers: iceServersFor(req.headers.host) });
 			log(`host ${id.slice(0, 8)}… registered from ${address} (${hosts.size} online)`);
 		});
 		socket.on("close", () => {
@@ -477,7 +551,7 @@ export async function startRelayServer(options: RelayServerOptions): Promise<Rel
 			if (!valid) return refuseUpgrade(socket, 400, "Bad Request");
 			const host = hosts.get(key);
 			if (!host) return refuseUpgrade(socket, 404, "Host Offline");
-			if (host.streams.size >= maxStreams) return refuseUpgrade(socket, 503, "Too Many Connections");
+			if (host.streams.size >= settings.maxStreamsPerHost) return refuseUpgrade(socket, 503, "Too Many Connections");
 			wss.handleUpgrade(req, socket, head, (ws) => onDevice(ws, req, host));
 			return;
 		}
@@ -510,14 +584,77 @@ export async function startRelayServer(options: RelayServerOptions): Promise<Rel
 	let closing: Promise<void> | undefined;
 	const shown = options.host && options.host !== "::" && options.host !== "0.0.0.0" ? options.host : "127.0.0.1";
 	log(
-		`listening on port ${port} (${mode} mode${stun ? `, STUN on udp ${stun.port}` : ""}${bytesPerSecond ? `, ${bytesPerSecond} B/s per connection` : ""})`,
+		`listening on port ${port} (${settings.mode} mode${stun ? `, STUN on udp ${stun.port}` : ""}${bytesPerSecond() ? `, ${bytesPerSecond()} B/s per connection` : ""}${store ? ", admin panel on" : ""})`,
 	);
+
+	/** Whether a registered computer may stay under the current settings and accounts. */
+	const allowed = (entry: HostEntry): boolean => {
+		if (settings.mode === "open" || entry.via === "static") return true;
+		return entry.via === "account" && !!entry.owner && !!store?.tokenValid(entry.owner.tokenId);
+	};
+	/** Disconnect computers that are no longer allowed in (mode switched, token or account revoked). */
+	const revalidate = (): number => {
+		let dropped = 0;
+		for (const entry of [...hosts.values()]) {
+			if (allowed(entry)) continue;
+			dropped += 1;
+			refuseHost(entry.socket, "UNAUTHORIZED", "Access revoked", RELAY_CLOSE.unauthorized);
+		}
+		if (dropped) log(`disconnected ${dropped} computer(s) that are no longer allowed in`);
+		return dropped;
+	};
+	const currentSettings = (): RelaySettings => ({ ...settings, iceServers: [...settings.iceServers] });
+	const configure = (change: Partial<RelaySettings>): RelaySettings => {
+		const previousMode = settings.mode;
+		settings = { ...settings };
+		for (const [name, value] of Object.entries(change)) {
+			if (value !== undefined && name in settings) (settings as unknown as Record<string, unknown>)[name] = value;
+		}
+		settings.iceServers = [...settings.iceServers];
+		limiter.perMinute = settings.connectsPerMinute;
+		if (settings.mode !== previousMode) log(`switched to ${settings.mode} mode`);
+		revalidate();
+		return currentSettings();
+	};
+	const hostList = (): RelayHostInfo[] =>
+		[...hosts.values()].map((entry) => ({
+			key: entry.key,
+			address: entry.address,
+			connectedAt: entry.connectedAt,
+			streams: entry.streams.size,
+			via: entry.via,
+			...(entry.owner ? { tokenId: entry.owner.tokenId, userId: entry.owner.userId } : {}),
+		}));
+	const stats = () => ({ hosts: hosts.size, streams: streamCount });
+
+	if (store) {
+		admin = createAdmin({
+			store,
+			log,
+			trustProxy: options.trustProxy === true,
+			staticTokens: tokens.length,
+			stunPort: stun?.port,
+			startedAt,
+			version: RELAY_VERSION,
+			relay: {
+				settings: currentSettings,
+				configure,
+				hosts: hostList,
+				stats,
+				revalidate,
+				effective: () => ({ maxHosts: maxHosts(), bytesPerSecond: bytesPerSecond() }),
+			},
+		});
+	}
 
 	return {
 		url: `ws://${shown.includes(":") ? `[${shown}]` : shown}:${port}`,
 		port,
 		stunPort: stun?.port,
-		stats: () => ({ hosts: hosts.size, streams: streamCount }),
+		stats,
+		settings: currentSettings,
+		configure,
+		hosts: hostList,
 		close: async () => {
 			if (closing) return closing;
 			closing = shutdown();
@@ -533,5 +670,7 @@ export async function startRelayServer(options: RelayServerOptions): Promise<Rel
 		server.closeAllConnections();
 		await closed;
 		await stun?.close();
+		admin?.close();
+		await store?.flush();
 	}
 }
