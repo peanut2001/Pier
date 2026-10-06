@@ -8,7 +8,8 @@
   - `private`（私有模式，默认）：只有提供访问令牌的电脑才能注册。适合自己或团队使用。
   - `open`（开放模式）：任何电脑都可以注册，受连接数与带宽限制约束。适合提供公共中继。
 
-  两种模式下手机都不需要令牌：手机只能连到已注册的电脑，且必须通过与那台电脑的配对验证。
+  两种模式下手机都不需要令牌：手机只能连到已注册的电脑，且必须通过与那台电脑的配对验证。模式可以在管理后台中在线切换。
+- **网页管理后台。** 账号注册与登录，每个账号创建自己的访问令牌并查看自己在线的电脑；管理员审核账号、在线切换模式、调整连接数与带宽限制。见下文「管理后台」。
 
 ## 部署
 
@@ -16,7 +17,7 @@
 
 | 端口 | 协议 | 用途 |
 |---|---|---|
-| 7480（或反向代理的 443） | TCP | WebSocket（电脑与手机连接中继） |
+| 7480（或反向代理的 443） | TCP | WebSocket（电脑与手机连接中继）与网页管理后台 |
 | 3478 | UDP | STUN（P2P 打洞），需要从公网直接访问，不能经过 HTTP 反向代理 |
 
 ### Docker Compose
@@ -28,16 +29,21 @@ services:
     restart: unless-stopped
     environment:
       PIER_RELAY_MODE: private
-      PIER_RELAY_TOKENS: <用 openssl rand -base64 24 生成>
       PIER_RELAY_TRUST_PROXY: "1"
+    volumes:
+      - pier-relay-data:/data   # 账号、令牌与管理后台中的设置
     ports:
       - "127.0.0.1:7480:7480"
       - "3478:3478/udp"
+volumes:
+  pier-relay-data:
 ```
+
+启动后打开中继的网址（例如 `https://relay.example.com`），用日志中的初始化码创建管理员（`docker compose logs pier-relay | grep "setup code"`），再在「访问令牌」中创建令牌。不想用管理后台时，可以只用 `PIER_RELAY_TOKENS` 配置固定令牌（两者也可以同时使用）。
 
 完整示例见 [docker-compose.example.yml](docker-compose.example.yml)。也可以在仓库根目录自行构建镜像：`docker build -f apps/relay/Dockerfile -t pier-relay .`。
 
-不用 Docker 时：`bun run relay -- --mode private --token <令牌>`（开发），或 `bun run --cwd apps/relay build` 打包成单个 `dist/pier-relay.mjs` 后用 Node 22+ 运行。
+不用 Docker 时：`bun run relay -- --data-dir ./relay-data`（或 `--mode private --token <令牌>`，开发），或 `bun run --cwd apps/relay build` 打包成单个 `dist/pier-relay.mjs` 后用 Node 22+ 运行。
 
 ### TLS 反向代理
 
@@ -61,11 +67,22 @@ location / {
 
 Caddy：`relay.example.com { reverse_proxy 127.0.0.1:7480 }`。
 
-中继可以挂在子路径下（例如 `wss://example.com/pier-relay`），只要代理把该路径原样转发。
+中继可以挂在子路径下（例如 `wss://example.com/pier-relay`），只要代理把该路径原样转发；管理后台此时在 `https://example.com/pier-relay/`。代理最好同时传递 `X-Forwarded-Proto`（登录 Cookie 会带上 `Secure`）。
+
+### 管理后台
+
+指定数据目录（`--data-dir` / `PIER_RELAY_DATA_DIR`）后，中继在自己的网址上提供网页管理后台。Docker 镜像默认使用 `/data`，请挂载卷，否则重建容器后账号与令牌会丢失。绑定宿主机目录时，容器以 UID 1000（`node`）运行，需要先 `chown 1000:1000` 该目录。
+
+- **初始化**：还没有账号时，中继启动后在日志中打印一个初始化码（`admin panel: … setup code XXXX-XXXX-XXXX`）。打开中继的网址，用它创建第一个管理员。初始化码只保存在内存中，每次启动重新生成，用过即失效。
+- **账号**：管理员可以在「系统设置」中选择注册方式——注册需审核（默认）、开放注册或关闭注册；在「用户」中通过审核、停用、设为管理员、重置密码或删除账号。
+- **访问令牌**：每个账号在「访问令牌」中创建自己的令牌（`prt_` 开头，只显示一次），填到 Pier 的中继设置中；「电脑」列出用自己令牌注册的在线电脑（管理员看到全部）。删除令牌、停用或删除账号后，用它注册的电脑立即断开（私有模式）。开放模式下也可以填令牌，电脑会关联到账号。
+- **系统设置**：在线切换私有 / 开放模式（切到私有模式时，没有有效令牌的电脑立即断开），调整最多注册的电脑数、每台电脑的连接数、带宽上限、每分钟连接次数、STUN 公网地址与额外的 STUN 服务器，都不需要重启。**在后台保存过设置后，保存的设置优先于启动参数与环境变量**（令牌、端口、`--trust-proxy` 等除外）。
+
+数据保存在数据目录的 `pier-relay.json` 中（0600）：密码为 scrypt 哈希，令牌与登录会话只保存 SHA-256。备份这个文件即可；忘记密码时可以让其他管理员重置。不指定数据目录时没有管理后台，行为与之前相同。
 
 ### 在 Pier 中启用
 
-电脑上打开「设置 → 设备与远程 → 中继服务器」，填写中继地址（例如 `wss://relay.example.com`）和访问令牌（私有模式），保存并开启。状态显示「在线」后，新生成的配对二维码会带上中继地址。已经配对过的手机需要重新扫码，或在手机上「修改连接地址」中填写中继地址。「优先点对点直连（P2P）」默认开启。
+电脑上打开「设置 → 设备与远程 → 中继服务器」，填写中继地址（例如 `wss://relay.example.com`）和访问令牌（私有模式；管理后台中创建的令牌或 `PIER_RELAY_TOKENS` 中的令牌），保存并开启。状态显示「在线」后，新生成的配对二维码会带上中继地址。已经配对过的手机需要重新扫码，或在手机上「修改连接地址」中填写中继地址。「优先点对点直连（P2P）」默认开启。
 
 连接其他电脑时同样适用：那台电脑开启中继后，复制它的配对链接添加即可。
 
@@ -74,7 +91,8 @@ Caddy：`relay.example.com { reverse_proxy 127.0.0.1:7480 }`。
 | 参数 | 环境变量 | 说明 |
 |---|---|---|
 | `--mode private\|open` | `PIER_RELAY_MODE` | 默认 `private` |
-| `--token <令牌>`（可重复） | `PIER_RELAY_TOKENS`（逗号分隔） | 私有模式的访问令牌，至少 16 个字符 |
+| `--data-dir <路径>` | `PIER_RELAY_DATA_DIR` | 数据目录，开启网页管理后台与账号令牌；Docker 镜像默认 `/data` |
+| `--token <令牌>`（可重复） | `PIER_RELAY_TOKENS`（逗号分隔） | 私有模式的固定访问令牌，至少 16 个字符；没有数据目录时私有模式必须提供 |
 | `--token-file <路径>` | `PIER_RELAY_TOKEN_FILE` | 每行一个令牌，`#` 开头为注释 |
 | `--port <n>` | `PIER_RELAY_PORT` | WebSocket 端口，默认 7480 |
 | `--host <地址>` | `PIER_RELAY_HOST` | 监听的地址，默认全部 |
@@ -87,6 +105,8 @@ Caddy：`relay.example.com { reverse_proxy 127.0.0.1:7480 }`。
 | `--trust-proxy` | `PIER_RELAY_TRUST_PROXY=1` | 从 `X-Forwarded-For` / `X-Real-IP` 读取客户端地址（在反向代理后面时开启） |
 
 `GET /health` 返回 `{"ok":true,"service":"pier-relay","version":"…","mode":"…"}`，可用于健康检查。每个 IP 每分钟最多发起 120 次连接。
+
+以下选项也可以在管理后台中修改，保存后以后台为准：模式、`--public-host`、`--ice-server`、`--max-hosts`、`--max-streams`、`--rate-limit`。
 
 ## 协议
 

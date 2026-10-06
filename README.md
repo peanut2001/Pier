@@ -7,7 +7,7 @@ Pier 是编码 Agent 在桌面上的停靠点：Agent 常驻在你的电脑上�
 - 桌面端：Tauri 2，内置 Pier Host（Agent 运行时：内置的 pi SDK，以及电脑上安装的 Claude Code、Codex）
 - 手机端：Expo / React Native 原生 App，通过配对后的加密连接驱动桌面 Agent
 - 电脑之间：每台电脑都是一个节点，桌面端可以添加其他电脑，那台电脑的工作区和会话与本机的一起列在侧边栏中，直接查看和驱动那台电脑上的 Agent，并管理它的工作区（配对即完全信任）
-- 不在同一网络：通过自建的 [Pier Relay](apps/relay/README.md) 连接（私有 / 开放两种模式），优先打洞 P2P 直连，打不通时经中继转发；中继只看得到密文
+- 不在同一网络：通过自建的 [Pier Relay](apps/relay/README.md) 连接（私有 / 开放两种模式，带网页管理后台：账号、访问令牌、在线切换模式），优先打洞 P2P 直连，打不通时经中继转发；中继只看得到密文
 
 开发计划见 [docs/PLAN.md](docs/PLAN.md)，协议见 [docs/protocol.md](docs/protocol.md)，远程访问的安全设计见 [docs/security.md](docs/security.md)，技术验证结论见 [docs/spikes.md](docs/spikes.md)。
 
@@ -156,7 +156,7 @@ Pier 自身状态保存在 `~/.pier`（可用 `PIER_DIR` 覆盖）：`config.jso
 
 远程访问相关的命令行参数：`--no-remote`（本次运行不开启远程访问）、`--remote-port <n>`、`--remote-address <host:port>`（写进配对二维码的地址，可重复，例如 Tailscale 域名）、`--no-mdns`、`--relay <url>`（本次运行注册到这个中继，令牌取 `PIER_RELAY_TOKEN`）、`--no-p2p`。
 
-**不在同一网络时（中继与 P2P）**：在一台有公网 IP 的服务器上部署 [Pier Relay](apps/relay/README.md)（Docker 镜像，放在 TLS 反向代理后，并开放 UDP 3478 供 STUN），然后在桌面「设置 → 设备与远程 → 中继服务器」填写 `wss://` 地址和访问令牌（私有模式）。中继在线后，新的配对二维码会带上中继地址；手机和其他电脑先尝试直连地址，连不上再经中继，连上后自动尝试 WebRTC 打洞，成功则切换到 P2P 直连（界面无感，设备列表显示「P2P 直连」），失败继续经中继。已配对的手机可以在「修改连接地址」中补上中继地址。调试：`bun run relay -- --mode open --stun-port 3478` 起一个本地中继，`bun run faux-host --relay ws://127.0.0.1:7480` 注册到它。
+**不在同一网络时（中继与 P2P）**：在一台有公网 IP 的服务器上部署 [Pier Relay](apps/relay/README.md)（Docker 镜像，放在 TLS 反向代理后，并开放 UDP 3478 供 STUN），然后在桌面「设置 → 设备与远程 → 中继服务器」填写 `wss://` 地址和访问令牌（私有模式；在中继的网页管理后台注册账号后创建）。中继在线后，新的配对二维码会带上中继地址；手机和其他电脑先尝试直连地址，连不上再经中继，连上后自动尝试 WebRTC 打洞，成功则切换到 P2P 直连（界面无感，设备列表显示「P2P 直连」），失败继续经中继。已配对的手机可以在「修改连接地址」中补上中继地址。调试：`bun run relay -- --mode open --stun-port 3478` 起一个本地中继，`bun run faux-host --relay ws://127.0.0.1:7480` 注册到它。
 
 ## 发版
 
