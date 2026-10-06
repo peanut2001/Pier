@@ -46,7 +46,7 @@ export function Select<T extends string | number>({
 }: {
 	value: T;
 	options: SelectEntry<T>[];
-	onChange(value: T): void;
+	onChange(value: NoInfer<T>): void;
 	disabled?: boolean;
 	title?: string;
 	className?: string;
