@@ -112,61 +112,59 @@ describe("relay admin panel", () => {
 		});
 		return { relay, base: relay.url.replace(/^ws/, "http") };
 	};
-	const setupCode = () => /setup code ([A-Z0-9-]+)/.exec(logs.join("\n"))?.[1] ?? "";
-
-	/** Start, create the administrator, and return a logged-in client. */
+	/** Start, register the first account (the administrator), and return a logged-in client. */
 	const startWithAdmin = async (mode: "private" | "open" = "private") => {
 		const started = await start(mode);
 		const admin = new Client(started.base);
-		const setup = await admin.call("POST", "setup", {
-			code: setupCode(),
-			username: "admin",
-			password: "admin-password",
-		});
-		expect(setup.status).toBe(200);
+		const first = await admin.call("POST", "register", { username: "admin", password: "admin-password" });
+		expect(first.status).toBe(200);
 		return { ...started, admin };
 	};
 
-	it("creates the first administrator with the setup code from the log", async () => {
+	it("makes the first registered account the administrator", async () => {
 		const { base } = await start();
 		const client = new Client(base);
 		expect((await client.call("GET", "session")).data).toMatchObject({ setupRequired: true, user: null });
-		expect(setupCode()).toMatch(/^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/);
-
-		expect((await client.call("POST", "register", { username: "eve", password: "password1" })).status).toBe(403);
-		const wrong = await client.call("POST", "setup", {
-			code: "AAAA-AAAA-AAAA",
-			username: "admin",
-			password: "pw-12345678",
-		});
-		expect(wrong.status).toBe(403);
+		expect(logs.join("\n")).toContain("the first account registered");
 		// The header is required for anything that changes state.
-		const noHeader = await client.call("POST", "setup", { code: setupCode() }, {});
+		const noHeader = await client.call("POST", "register", { username: "Admin", password: "pw-12345678" }, {});
 		expect(noHeader.status).toBe(403);
 
-		const ok = await client.call("POST", "setup", {
-			code: setupCode().toLowerCase(),
-			username: "Admin",
-			password: "pw-12345678",
-		});
-		expect(ok.status).toBe(200);
-		expect(client.cookie).toMatch(/^pier_relay_session=/);
-		expect((await client.call("GET", "session")).data).toMatchObject({
-			setupRequired: false,
-			user: { username: "Admin", role: "admin" },
-		});
-		// Only once.
-		const again = await new Client(base).call("POST", "setup", {
-			code: setupCode(),
-			username: "x2x",
-			password: "pw-12345678",
-		});
-		expect(again.status).toBe(409);
+		// Two at once: only one becomes the administrator, the other waits for approval.
+		const other = new Client(base);
+		const [a, b] = await Promise.all([
+			client.call("POST", "register", { username: "Admin", password: "pw-12345678" }),
+			other.call("POST", "register", { username: "other", password: "pw-87654321" }),
+		]);
+		expect([a.status, b.status].sort()).toEqual([200, 202]);
+		const winner = a.status === 200 ? client : other;
+		const { data } = await winner.call("GET", "session");
+		expect(data).toMatchObject({ setupRequired: false, user: { role: "admin" } });
+		expect(winner.cookie).toMatch(/^pier_relay_session=/);
+		const users = (await winner.call("GET", "users")).data.users as Array<{ role: string; status: string }>;
+		expect(users.map((u) => `${u.role}/${u.status}`).sort()).toEqual(["admin/active", "user/pending"]);
 
 		// Passwords and session cookies are not stored in the clear.
 		const file = await readFile(join(dir, DATA_FILE), "utf8");
 		expect(file).not.toContain("pw-12345678");
-		expect(file).not.toContain(client.cookie.split("=")[1]);
+		expect(file).not.toContain(winner.cookie.split("=")[1]);
+	});
+
+	it("refuses registration when closed, also after a restart", async () => {
+		const { base } = await start();
+		const admin = new Client(base);
+		expect((await admin.call("POST", "register", { username: "root", password: "root-password" })).status).toBe(200);
+		expect((await admin.call("PUT", "settings", { registration: "closed" })).status).toBe(200);
+		await relay?.close();
+		relay = undefined;
+		// After a restart, closed stays closed and the first account is not created again.
+		const restarted = await start();
+		const late = await new Client(restarted.base).call("POST", "register", {
+			username: "late",
+			password: "late-password",
+		});
+		expect(late).toMatchObject({ status: 403, data: { error: "管理员关闭了注册" } });
+		expect((await new Client(restarted.base).call("GET", "session")).data).toMatchObject({ setupRequired: false });
 	});
 
 	it("registers accounts for approval and lets administrators manage them", async () => {
@@ -307,7 +305,7 @@ describe("relay admin panel", () => {
 		const restarted = await start("open");
 		expect(restarted.relay.settings()).toMatchObject({ mode: "private", maxStreamsPerHost: 4 });
 		expect(logs.join("\n")).toContain("using the settings saved in the admin panel");
-		expect(setupCode()).toBe("");
+		expect(logs.join("\n")).not.toContain("no accounts yet");
 		const login = new Client(restarted.base);
 		expect((await login.call("POST", "login", { username: "admin", password: "admin-password" })).status).toBe(200);
 		const back = await registerHost(restarted.relay, generateKeyPair(), token);
