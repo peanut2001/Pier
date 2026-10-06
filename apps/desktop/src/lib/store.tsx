@@ -61,7 +61,7 @@ import { newSessionDefaultsFromSettings } from "./new-session-defaults.ts";
 import { remotePageBlocker } from "./settings-target.ts";
 import { isYunlianProvider, YUNLIAN_SITE, yunlianGroupOf, yunlianProvider } from "./yunlian.ts";
 
-export const APP_VERSION = "0.2.20";
+export const APP_VERSION = "0.2.21";
 
 /** Node id of this computer; any other node is a paired computer's host id. */
 export const LOCAL_NODE = "local";
@@ -299,7 +299,7 @@ export interface AppState {
 	/** Devices waiting for the user to allow pairing. */
 	pairingRequests: PairingRequest[];
 	/** The pairing code currently shown, if any. */
-	pairing?: { uri: string; expiresAt: string; addresses: string[] };
+	pairing?: { uri: string; expiresAt: string; addresses: string[]; relays?: string[] };
 	/**
 	 * The computer the settings screen manages (`LOCAL_NODE` or a paired computer's id): the
 	 * models, account, extensions and pi settings pages read and write that computer's Pier.
@@ -1177,7 +1177,17 @@ export class PierStore {
 		}
 	}
 
-	async configureRemote(patch: { enabled?: boolean; port?: number }): Promise<RemoteAccessStatus | undefined> {
+	async configureRemote(
+		patch: MethodParams<"remote.configure">,
+		options: { rethrow?: boolean } = {},
+	): Promise<RemoteAccessStatus | undefined> {
+		if (options.rethrow) {
+			const client = this.localClient;
+			if (!client) throw new Error("尚未连接到本机的 Pier Host");
+			const remote = await client.request("remote.configure", patch);
+			this.set({ remote });
+			return remote;
+		}
 		const remote = await this.callLocal("修改远程访问设置", (c) => c.request("remote.configure", patch));
 		if (remote) this.set({ remote });
 		return remote;
@@ -1260,12 +1270,12 @@ export class PierStore {
 	 * Change the addresses used to reach a paired computer (e.g. its IP changed) and reconnect
 	 * to it right away. Rejects with a user-facing message.
 	 */
-	async updatePeerAddresses(peerId: string, addresses: string[]): Promise<PeerInfo> {
+	async updatePeerAddresses(peerId: string, addresses: string[], relays?: string[]): Promise<PeerInfo> {
 		const client = this.localClient;
 		if (!client) throw new Error("尚未连接到本机的 Pier Host");
 		let peer: PeerInfo;
 		try {
-			peer = (await client.request("peer.update", { peerId, addresses })).peer;
+			peer = (await client.request("peer.update", { peerId, addresses, ...(relays ? { relays } : {}) })).peer;
 		} catch (error) {
 			throw new Error(`保存失败：${errorText(error)}`);
 		}
@@ -1395,9 +1405,9 @@ export class PierStore {
 		this.openSettings("models", node);
 	}
 
-	/** Models with usable credentials. */
+	/** Models with usable credentials on the computer the settings screen manages. */
 	async availableModels(): Promise<ModelInfo[]> {
-		const client = this.client;
+		const client = this.settingsClient;
 		if (!client) return [];
 		return (await client.request("model.list")).models;
 	}

@@ -2,6 +2,7 @@ import { ChatController, type ChatView } from "@pier/chat-state";
 import {
 	CLOSE_DEVICE_REVOKED,
 	type ClientState,
+	type ConnectionRoute,
 	createSecureSocketFactory,
 	type PairingPhase,
 	PierClient,
@@ -31,6 +32,7 @@ import {
 import { createContext, useContext, useSyncExternalStore } from "react";
 import { Platform } from "react-native";
 import { base64ToBytes, bytesToBase64 } from "./bytes.ts";
+import { ChatCache } from "./chat-cache.ts";
 import { loadHosts, type PairedHost, removeHost, saveHost } from "./hosts.ts";
 import {
 	defaultDeviceName,
@@ -42,8 +44,9 @@ import {
 	saveDeviceName,
 } from "./identity.ts";
 import { RemoteTerminal } from "./terminal.ts";
+import { peerConnectionFactory } from "./webrtc.ts";
 
-export const APP_VERSION = "0.2.20";
+export const APP_VERSION = "0.2.21";
 
 /** Live session subscriptions kept for quick back-and-forth navigation. */
 const MAX_LIVE_CHATS = 4;
@@ -79,8 +82,10 @@ export interface HostView {
 	info?: HostInfo;
 	workspaces?: WorkspaceInfo[];
 	sessions: Record<string, SessionSummary[] | undefined>;
-	/** Which address the secure channel is using. */
+	/** Which address the secure channel is using (direct connections). */
 	address?: string;
+	/** How the secure channel reaches the computer: directly, through a relay, or peer-to-peer. */
+	route?: ConnectionRoute;
 	/** Terminals opened on this computer from the phone, newest first. */
 	terminals: TerminalSummary[];
 }
@@ -96,12 +101,30 @@ export interface MobileState {
 	hosts: PairedHost[];
 	deviceName: string;
 	fingerprint: string;
+	/** The computer on screen (the last one opened). */
 	host: HostView;
+	/**
+	 * Every computer with a live connection, by host id (the one on screen included). Computers
+	 * stay connected in the background, so switching between them needs no reconnect.
+	 */
+	connections: Record<string, HostView>;
 	chatsVersion: number;
 	toast?: Toast;
 }
 
 const EMPTY_HOST: HostView = { connection: "none", revoked: false, sessions: {}, terminals: [] };
+
+/** A live connection to one paired computer, with the session and terminal state it owns. */
+interface HostConnection {
+	readonly hostId: string;
+	client: PierClient | undefined;
+	readonly chats: Map<string, ChatController>;
+	recent: string[];
+	retryTimer: ReturnType<typeof setTimeout> | undefined;
+	retryAttempt: number;
+	readonly refreshTimers: Map<string, ReturnType<typeof setTimeout>>;
+	readonly terminals: Map<number, RemoteTerminal>;
+}
 
 function errorText(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
@@ -124,7 +147,7 @@ export function pairingErrorText(error: unknown): string {
 				return error.message;
 		}
 	}
-	return `无法连接到电脑：${errorText(error)}。请确认手机与电脑在同一网络，且电脑上已开启远程访问。`;
+	return `无法连接到电脑：${errorText(error)}。请确认手机与电脑在同一网络（不在同一网络时电脑需开启中继），且电脑上已开启远程访问。`;
 }
 
 export class MobileStore {
@@ -134,19 +157,19 @@ export class MobileStore {
 		deviceName: "",
 		fingerprint: "",
 		host: EMPTY_HOST,
+		connections: {},
 		chatsVersion: 0,
 	};
 	private readonly listeners = new Set<() => void>();
 	private keyPair: KeyPair | undefined;
-	private client: PierClient | undefined;
-	private readonly chats = new Map<string, ChatController>();
-	private recent: string[] = [];
-	private retryTimer: ReturnType<typeof setTimeout> | undefined;
-	private retryAttempt = 0;
-	private readonly refreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
+	/** Live connections by host id; they stay open while other computers are on screen. */
+	private readonly connections = new Map<string, HostConnection>();
+	/** The computer on screen, which the screen-facing methods below act on. */
+	private activeHostId: string | undefined;
 	private nextToastId = 1;
 	private readonly drafts = new Map<string, string>();
-	private readonly terminals = new Map<number, RemoteTerminal>();
+	/** Sessions seen before, to show at once and resume without downloading them again. */
+	private readonly chatCache = new ChatCache();
 	private nextTerminalId = 1;
 
 	getState = (): MobileState => this.state;
@@ -162,8 +185,27 @@ export class MobileStore {
 		for (const listener of [...this.listeners]) listener();
 	}
 
-	private setHost(patch: Partial<HostView> | ((host: HostView) => Partial<HostView>)): void {
-		this.set((s) => ({ host: { ...s.host, ...(typeof patch === "function" ? patch(s.host) : patch) } }));
+	/** Update the view of a connected computer (and the on-screen view when it is that computer). */
+	private setView(hostId: string, patch: Partial<HostView> | ((host: HostView) => Partial<HostView>)): void {
+		if (!this.connections.has(hostId)) return;
+		this.set((s) => {
+			const current = s.connections[hostId] ?? { ...EMPTY_HOST, hostId };
+			const next = { ...current, ...(typeof patch === "function" ? patch(current) : patch) };
+			return {
+				connections: { ...s.connections, [hostId]: next },
+				...(this.activeHostId === hostId ? { host: next } : {}),
+			};
+		});
+	}
+
+	/** The connection of the computer on screen. */
+	private get active(): HostConnection | undefined {
+		return this.activeHostId ? this.connections.get(this.activeHostId) : undefined;
+	}
+
+	/** The client of the computer on screen. */
+	private get client(): PierClient | undefined {
+		return this.active?.client;
 	}
 
 	async init(): Promise<void> {
@@ -218,41 +260,51 @@ export class MobileStore {
 			hostName: outcome.hostName,
 			hostPublicKey: toBase64Url(outcome.hostPublicKey),
 			addresses: outcome.addresses,
+			...(outcome.relays.length ? { relays: outcome.relays } : {}),
 			deviceId: outcome.deviceId,
 			pairedAt: new Date().toISOString(),
 		};
 		const hosts = [host, ...this.state.hosts.filter((h) => h.hostId !== host.hostId)];
 		await saveHost(host, hosts);
 		this.set({ hosts });
-		// A re-pair of the active host clears the revoked state; connect right away.
-		if (this.state.host.hostId === host.hostId) this.teardown();
+		// A re-pair clears the revoked state (and may change addresses); connect afresh right away.
+		this.closeConnection(host.hostId);
 		this.openHost(host.hostId);
 		return host.hostId;
 	}
 
 	async forgetHost(hostId: string): Promise<void> {
-		if (this.state.host.hostId === hostId) this.teardown();
+		this.closeConnection(hostId);
+		this.chatCache.removeHost(hostId);
 		const hosts = this.state.hosts.filter((h) => h.hostId !== hostId);
 		await removeHost(hostId, hosts);
 		this.set({ hosts });
 	}
 
 	/**
-	 * Replace the addresses used to reach a paired computer (its IP changed) and, if it is the
-	 * one on screen, reconnect through them right away. The pinned host key is unchanged, so a
+	 * Replace the addresses used to reach a paired computer (its IP changed) and, if it is
+	 * connected, reconnect through them right away. The pinned host key is unchanged, so a
 	 * different computer at the new address fails the handshake.
 	 */
-	async setHostAddresses(hostId: string, addresses: string[]): Promise<void> {
+	async setHostAddresses(hostId: string, addresses: string[], relays?: string[]): Promise<void> {
 		const current = this.state.hosts.find((h) => h.hostId === hostId);
 		if (!current) throw new Error("这台电脑已不在列表中");
-		if (!addresses.length) throw new Error("至少需要一个地址");
-		const updated = { ...current, addresses: [...addresses] };
+		const nextRelays = relays ?? current.relays ?? [];
+		if (!addresses.length && !nextRelays.length) throw new Error("至少需要一个地址或中继服务器");
+		const { relays: _old, ...rest } = current;
+		const updated: PairedHost = {
+			...rest,
+			addresses: [...addresses],
+			...(nextRelays.length ? { relays: [...nextRelays] } : {}),
+		};
 		const hosts = this.state.hosts.map((h) => (h.hostId === hostId ? updated : h));
 		await saveHost(updated, hosts);
 		this.set({ hosts });
-		if (this.state.host.hostId === hostId) {
-			this.teardown();
-			this.openHost(hostId);
+		if (this.connections.has(hostId)) {
+			const onScreen = this.activeHostId === hostId;
+			this.closeConnection(hostId);
+			if (onScreen) this.openHost(hostId);
+			else this.startConnection(updated);
 		}
 	}
 
@@ -271,20 +323,59 @@ export class MobileStore {
 		return this.client;
 	}
 
-	/** Connect to a paired host (no-op if it is already the active one). */
+	/**
+	 * Show a paired host: connect to it unless it already has a live connection. Other
+	 * computers stay connected in the background, so switching back to them is instant.
+	 */
 	openHost(hostId: string): void {
-		if (this.state.host.hostId === hostId && this.client && this.client.state !== "closed") return;
-		if (this.state.host.hostId === hostId && this.state.host.revoked) return;
-		this.teardown();
 		const host = this.state.hosts.find((h) => h.hostId === hostId);
 		if (!host || !this.keyPair) return;
-		this.set({ host: { ...EMPTY_HOST, hostId, connection: "connecting" } });
-		this.connect(host);
+		const existing = this.connections.get(hostId);
+		const view = this.state.connections[hostId];
+		// A revoked or given-up connection starts over (a revoked one fails again until re-paired).
+		if (existing && !view?.revoked && existing.client && existing.client.state === "closed" && !existing.retryTimer) {
+			this.closeConnection(hostId);
+		}
+		this.activeHostId = hostId;
+		if (!this.connections.has(hostId)) this.startConnection(host);
+		this.set((s) => ({ host: s.connections[hostId] ?? { ...EMPTY_HOST, hostId } }));
 	}
 
-	private connect(host: PairedHost): void {
+	/** Disconnect a computer and drop its live sessions and terminals. */
+	disconnectHost(hostId: string): void {
+		this.closeConnection(hostId);
+	}
+
+	private startConnection(host: PairedHost): void {
+		const conn: HostConnection = {
+			hostId: host.hostId,
+			client: undefined,
+			chats: new Map(),
+			recent: [],
+			retryTimer: undefined,
+			retryAttempt: 0,
+			refreshTimers: new Map(),
+			terminals: new Map(),
+		};
+		this.connections.set(host.hostId, conn);
+		this.set((s) => ({
+			connections: {
+				...s.connections,
+				[host.hostId]: { ...EMPTY_HOST, hostId: host.hostId, connection: "connecting" },
+			},
+		}));
+		this.connect(conn, host);
+	}
+
+	/** Whether `conn` is still the live connection for its computer. */
+	private isLive(conn: HostConnection): boolean {
+		return this.connections.get(conn.hostId) === conn;
+	}
+
+	private connect(conn: HostConnection, host: PairedHost): void {
 		const keyPair = this.keyPair;
-		if (!keyPair) return;
+		if (!keyPair || !this.isLive(conn)) return;
+		const p2p = peerConnectionFactory();
 		const client = new PierClient({
 			url: `pier://${host.hostId}`,
 			client: { name: "pier-mobile", version: APP_VERSION, platform: Platform.OS },
@@ -294,11 +385,16 @@ export class MobileStore {
 			reconnect: { initialDelayMs: 500, maxDelayMs: 10_000 },
 			createWebSocket: createSecureSocketFactory({
 				addresses: host.addresses,
+				...(host.relays?.length ? { relays: host.relays } : {}),
+				...(p2p ? { p2p: { createPeerConnection: p2p } } : {}),
 				hostPublicKey: fromBase64Url(host.hostPublicKey),
 				deviceKeyPair: keyPair,
+				onRoute: (route) => {
+					if (current()) this.setView(conn.hostId, { route });
+				},
 				onConnected: (address) => {
-					if (this.client !== client) return;
-					this.setHost({ address });
+					if (!current()) return;
+					this.setView(conn.hostId, { address });
 					if (host.addresses[0] !== address) {
 						void this.updateHost(host.hostId, {
 							addresses: [address, ...host.addresses.filter((a) => a !== address)],
@@ -307,147 +403,201 @@ export class MobileStore {
 				},
 			}),
 		});
-		this.client = client;
+		const current = () => conn.client === client && this.isLive(conn);
+		conn.client = client;
 		client.onState((state) => {
-			if (this.client !== client) return;
-			this.setHost(state === "open" ? { connection: state, error: undefined } : { connection: state });
-			if (state !== "open") this.loseTerminals(`与 ${host.hostName} 的连接已断开，终端已关闭`);
+			if (!current()) return;
+			this.setView(conn.hostId, state === "open" ? { connection: state, error: undefined } : { connection: state });
+			if (state !== "open") this.loseTerminals(conn, `与 ${host.hostName} 的连接已断开，终端已关闭`);
 			if (state === "open") {
-				this.retryAttempt = 0;
+				conn.retryAttempt = 0;
 				void this.updateHost(host.hostId, { lastConnectedAt: new Date().toISOString() });
-				void this.loadWorkspaces();
+				void this.loadWorkspacesOf(conn);
 			}
 		});
 		client.onEvent((frame) => {
-			if (this.client === client && !frame.sessionId) this.onHostEvent(frame);
+			if (current() && !frame.sessionId) this.onHostEvent(conn, frame);
 		});
 		client.onError((error) => {
-			if (this.client !== client) return;
-			if (client.terminalClose?.code === CLOSE_DEVICE_REVOKED) this.markRevoked();
-			else this.setHost({ error: errorText(error) });
+			if (!current()) return;
+			if (client.terminalClose?.code === CLOSE_DEVICE_REVOKED) this.markRevoked(conn);
+			else this.setView(conn.hostId, { error: errorText(error) });
 		});
 		client
 			.connect()
 			.then((hello) => {
-				if (this.client === client) this.setHost({ info: hello.host });
+				if (current()) this.setView(conn.hostId, { info: hello.host });
 			})
 			.catch((error: unknown) => {
-				if (this.client !== client) return;
+				if (!current()) return;
 				if (client.terminalClose?.code === CLOSE_DEVICE_REVOKED) {
-					this.markRevoked();
+					this.markRevoked(conn);
 					return;
 				}
-				// The host may simply be offline or asleep: keep trying while the host is open.
-				this.setHost({ connection: "reconnecting", error: errorText(error) });
-				const delay = Math.min(15_000, 1000 * 2 ** this.retryAttempt);
-				this.retryAttempt += 1;
-				this.retryTimer = setTimeout(() => {
-					this.retryTimer = undefined;
-					if (this.client === client) this.connect(host);
+				// The host may simply be offline or asleep: keep trying while it stays connected.
+				this.setView(conn.hostId, { connection: "reconnecting", error: errorText(error) });
+				const delay = Math.min(15_000, 1000 * 2 ** conn.retryAttempt);
+				conn.retryAttempt += 1;
+				conn.retryTimer = setTimeout(() => {
+					conn.retryTimer = undefined;
+					if (current()) this.connect(conn, this.state.hosts.find((h) => h.hostId === conn.hostId) ?? host);
 				}, delay);
 			});
 	}
 
-	private markRevoked(): void {
-		this.client?.close();
-		this.setHost({ revoked: true, connection: "closed", error: "这台设备已被电脑移除（或电脑重置了 Pier）。" });
+	private markRevoked(conn: HostConnection): void {
+		conn.client?.close();
+		this.setView(conn.hostId, {
+			revoked: true,
+			connection: "closed",
+			error: "这台设备已被电脑移除（或电脑重置了 Pier）。",
+		});
 	}
 
-	/** Called when the app returns to the foreground: reconnect right away. */
+	/** Called when the app returns to the foreground: reconnect every computer right away. */
 	onForeground(): void {
-		const client = this.client;
+		for (const conn of this.connections.values()) this.reconnectNow(conn);
+	}
+
+	/** Called when the app leaves the foreground: keep open sessions on the phone for next time. */
+	onBackground(): void {
+		for (const conn of this.connections.values()) {
+			for (const chat of conn.chats.values()) this.chatCache.put(conn.hostId, chat.chat);
+		}
+		this.chatCache.flush();
+	}
+
+	/** Retry the computer on screen right away. */
+	retryNow(): void {
+		const conn = this.active;
+		if (conn) this.reconnectNow(conn);
+	}
+
+	private reconnectNow(conn: HostConnection): void {
+		const client = conn.client;
 		if (!client) return;
 		if (client.state === "reconnecting") client.reconnectNow();
-		else if (this.retryTimer && this.state.host.hostId) {
-			clearTimeout(this.retryTimer);
-			this.retryTimer = undefined;
-			this.retryAttempt = 0;
-			const host = this.state.hosts.find((h) => h.hostId === this.state.host.hostId);
-			if (host) this.connect(host);
+		else if (conn.retryTimer) {
+			clearTimeout(conn.retryTimer);
+			conn.retryTimer = undefined;
+			conn.retryAttempt = 0;
+			const host = this.state.hosts.find((h) => h.hostId === conn.hostId);
+			if (host) this.connect(conn, host);
 		}
 	}
 
-	retryNow(): void {
-		this.onForeground();
+	/** Close a computer's connection and drop everything it owns. */
+	private closeConnection(hostId: string): void {
+		const conn = this.connections.get(hostId);
+		if (!conn) return;
+		this.connections.delete(hostId);
+		if (conn.retryTimer) clearTimeout(conn.retryTimer);
+		conn.retryTimer = undefined;
+		for (const timer of conn.refreshTimers.values()) clearTimeout(timer);
+		conn.refreshTimers.clear();
+		for (const chat of conn.chats.values()) {
+			this.chatCache.put(hostId, chat.chat);
+			chat.dispose();
+		}
+		conn.chats.clear();
+		conn.recent = [];
+		for (const terminal of conn.terminals.values()) terminal.dispose();
+		conn.terminals.clear();
+		conn.client?.close();
+		conn.client = undefined;
+		this.set((s) => {
+			const { [hostId]: _closed, ...connections } = s.connections;
+			return {
+				connections,
+				...(this.activeHostId === hostId ? { host: { ...EMPTY_HOST, hostId } } : {}),
+				chatsVersion: s.chatsVersion + 1,
+			};
+		});
 	}
 
-	private teardown(): void {
-		if (this.retryTimer) clearTimeout(this.retryTimer);
-		this.retryTimer = undefined;
-		this.retryAttempt = 0;
-		for (const chat of this.chats.values()) chat.dispose();
-		this.chats.clear();
-		this.recent = [];
-		for (const terminal of this.terminals.values()) terminal.dispose();
-		this.terminals.clear();
-		this.client?.close();
-		this.client = undefined;
-		this.set((s) => ({ host: EMPTY_HOST, chatsVersion: s.chatsVersion + 1 }));
-	}
-
-	private onHostEvent(frame: EventFrame): void {
+	private onHostEvent(conn: HostConnection, frame: EventFrame): void {
 		const event = frame.event;
-		if (event.type === "workspace.changed") void this.loadWorkspaces();
-		else if (event.type === "session.listChanged") this.scheduleRefresh(String(event.workspaceId));
+		if (event.type === "workspace.changed") void this.loadWorkspacesOf(conn);
+		else if (event.type === "session.listChanged") this.scheduleRefresh(conn, String(event.workspaceId));
 		else if (event.type === "session.activity") {
 			const workspaceId = String(event.workspaceId);
 			const sessionId = String(event.sessionId);
-			const list = this.state.host.sessions[workspaceId];
+			const list = this.state.connections[conn.hostId]?.sessions[workspaceId];
 			if (!list?.some((s) => s.id === sessionId)) {
-				this.scheduleRefresh(workspaceId);
+				this.scheduleRefresh(conn, workspaceId);
 				return;
 			}
 			const state = event.state as SessionRunState;
 			const pendingUi = Number(event.pendingUi) || 0;
-			this.setHost((h) => ({
+			this.setView(conn.hostId, (h) => ({
 				sessions: {
 					...h.sessions,
 					[workspaceId]: list.map((s) => (s.id === sessionId ? { ...s, state, pendingUi, active: true } : s)),
 				},
 			}));
 		} else if (event.type === "host.notice") {
-			this.toast(event.level === "error" ? "error" : "info", String(event.message ?? ""));
+			const message = String(event.message ?? "");
+			const prefix = this.activeHostId === conn.hostId ? "" : `${this.hostName(conn.hostId)}：`;
+			this.toast(event.level === "error" ? "error" : "info", prefix + message);
 		} else if (event.type === "terminal.output" || event.type === "terminal.exit") {
-			this.onTerminalEvent(event);
+			this.onTerminalEvent(conn, event);
 		}
 	}
 
+	private hostName(hostId: string): string {
+		return this.state.hosts.find((h) => h.hostId === hostId)?.hostName ?? "电脑";
+	}
+
 	async loadWorkspaces(): Promise<void> {
-		const client = this.client;
+		const conn = this.active;
+		if (conn) await this.loadWorkspacesOf(conn);
+	}
+
+	private async loadWorkspacesOf(conn: HostConnection): Promise<void> {
+		const client = conn.client;
 		if (!client) return;
 		try {
 			const { workspaces } = await client.request("workspace.list");
-			if (this.client !== client) return;
-			this.setHost({ workspaces });
-			await Promise.all(workspaces.map((w) => this.refreshSessions(w.id)));
+			if (conn.client !== client) return;
+			this.setView(conn.hostId, { workspaces });
+			await Promise.all(workspaces.map((w) => this.refreshSessionsOf(conn, w.id)));
 		} catch (error) {
-			if (this.client === client) this.toast("error", `加载工作区失败：${errorText(error)}`);
+			if (conn.client === client && this.isLive(conn)) {
+				const prefix = this.activeHostId === conn.hostId ? "" : `${this.hostName(conn.hostId)}：`;
+				this.toast("error", `${prefix}加载工作区失败：${errorText(error)}`);
+			}
 		}
 	}
 
 	/** Reload a workspace's session list shortly (coalesces bursts of changes). */
 	scheduleSessionsRefresh(workspaceId: string): void {
-		this.scheduleRefresh(workspaceId);
+		const conn = this.active;
+		if (conn) this.scheduleRefresh(conn, workspaceId);
 	}
 
-	private scheduleRefresh(workspaceId: string): void {
-		clearTimeout(this.refreshTimers.get(workspaceId));
-		this.refreshTimers.set(
+	private scheduleRefresh(conn: HostConnection, workspaceId: string): void {
+		clearTimeout(conn.refreshTimers.get(workspaceId));
+		conn.refreshTimers.set(
 			workspaceId,
 			setTimeout(() => {
-				this.refreshTimers.delete(workspaceId);
-				void this.refreshSessions(workspaceId);
+				conn.refreshTimers.delete(workspaceId);
+				void this.refreshSessionsOf(conn, workspaceId);
 			}, 200),
 		);
 	}
 
 	async refreshSessions(workspaceId: string): Promise<void> {
-		const client = this.client;
+		const conn = this.active;
+		if (conn) await this.refreshSessionsOf(conn, workspaceId);
+	}
+
+	private async refreshSessionsOf(conn: HostConnection, workspaceId: string): Promise<void> {
+		const client = conn.client;
 		if (!client) return;
 		try {
 			const { sessions } = await client.request("session.list", { workspaceId });
-			if (this.client !== client) return;
-			this.setHost((h) => ({ sessions: { ...h.sessions, [workspaceId]: sessions } }));
+			if (conn.client !== client) return;
+			this.setView(conn.hostId, (h) => ({ sessions: { ...h.sessions, [workspaceId]: sessions } }));
 		} catch {
 			// Transient; refreshed again on the next event or reconnect.
 		}
@@ -476,18 +626,19 @@ export class MobileStore {
 
 	/** Add a directory of the connected computer as a workspace. Resolves to it, or `undefined` on failure. */
 	async addWorkspace(path: string): Promise<WorkspaceInfo | undefined> {
-		const client = this.client;
-		if (!client) return undefined;
+		const conn = this.active;
+		const client = conn?.client;
+		if (!conn || !client) return undefined;
 		try {
 			const { workspace } = await client.request("workspace.add", { path });
-			if (this.client !== client) return workspace;
-			this.setHost((h) => ({
+			if (conn.client !== client) return workspace;
+			this.setView(conn.hostId, (h) => ({
 				workspaces: [...(h.workspaces ?? []).filter((w) => w.id !== workspace.id), workspace],
 			}));
-			void this.refreshSessions(workspace.id);
+			void this.refreshSessionsOf(conn, workspace.id);
 			return workspace;
 		} catch (error) {
-			if (this.client === client) this.toast("error", `添加工作区失败：${errorText(error)}`);
+			if (conn.client === client) this.toast("error", `添加工作区失败：${errorText(error)}`);
 			return undefined;
 		}
 	}
@@ -502,18 +653,19 @@ export class MobileStore {
 
 	/** Change a workspace's tool approval policy. Resolves to whether it worked. */
 	async setWorkspacePolicy(workspaceId: string, policy: ApprovalPolicy): Promise<boolean> {
-		const client = this.client;
-		if (!client) return false;
+		const conn = this.active;
+		const client = conn?.client;
+		if (!conn || !client) return false;
 		try {
 			const { workspace } = await client.request("workspace.setPolicy", { workspaceId, policy });
-			if (this.client === client) {
-				this.setHost((h) => ({
+			if (conn.client === client) {
+				this.setView(conn.hostId, (h) => ({
 					workspaces: (h.workspaces ?? []).map((w) => (w.id === workspace.id ? workspace : w)),
 				}));
 			}
 			return true;
 		} catch (error) {
-			if (this.client === client) this.toast("error", `修改审批策略失败：${errorText(error)}`);
+			if (conn.client === client) this.toast("error", `修改审批策略失败：${errorText(error)}`);
 			return false;
 		}
 	}
@@ -523,25 +675,27 @@ export class MobileStore {
 	 * session histories are deleted. Resolves to whether it worked.
 	 */
 	async removeWorkspace(workspaceId: string): Promise<boolean> {
-		const client = this.client;
-		if (!client) return false;
+		const conn = this.active;
+		const client = conn?.client;
+		if (!conn || !client) return false;
 		try {
 			await client.request("workspace.remove", { workspaceId });
 		} catch (error) {
-			if (this.client === client) this.toast("error", `移除工作区失败：${errorText(error)}`);
+			if (conn.client === client) this.toast("error", `移除工作区失败：${errorText(error)}`);
 			return false;
 		}
-		if (this.client !== client) return true;
-		for (const [id, chat] of this.chats) {
+		if (conn.client !== client) return true;
+		for (const [id, chat] of conn.chats) {
 			if (chat.workspaceId !== workspaceId) continue;
+			this.chatCache.put(conn.hostId, chat.chat);
 			chat.dispose();
-			this.chats.delete(id);
-			this.recent = this.recent.filter((r) => r !== id);
+			conn.chats.delete(id);
+			conn.recent = conn.recent.filter((r) => r !== id);
 			this.drafts.delete(id);
 		}
-		clearTimeout(this.refreshTimers.get(workspaceId));
-		this.refreshTimers.delete(workspaceId);
-		this.setHost((h) => {
+		clearTimeout(conn.refreshTimers.get(workspaceId));
+		conn.refreshTimers.delete(workspaceId);
+		this.setView(conn.hostId, (h) => {
 			const { [workspaceId]: _removed, ...sessions } = h.sessions;
 			return { workspaces: (h.workspaces ?? []).filter((w) => w.id !== workspaceId), sessions };
 		});
@@ -559,17 +713,24 @@ export class MobileStore {
 		}
 	}
 
+	/** Put a new session at the top of its workspace's list on `conn`'s computer. */
+	private addSession(conn: HostConnection, session: SessionSummary): void {
+		const workspaceId = session.workspaceId;
+		this.setView(conn.hostId, (h) => ({
+			sessions: { ...h.sessions, [workspaceId]: [session, ...(h.sessions[workspaceId] ?? [])] },
+		}));
+	}
+
 	async createSession(workspaceId: string, runtime?: AgentRuntimeId): Promise<SessionSummary | undefined> {
-		const client = this.client;
-		if (!client) return undefined;
+		const conn = this.active;
+		const client = conn?.client;
+		if (!conn || !client) return undefined;
 		try {
 			const { session } = await client.request("session.create", {
 				workspaceId,
 				...(runtime && runtime !== "pi" ? { runtime } : {}),
 			});
-			this.setHost((h) => ({
-				sessions: { ...h.sessions, [workspaceId]: [session, ...(h.sessions[workspaceId] ?? [])] },
-			}));
+			this.addSession(conn, session);
 			return session;
 		} catch (error) {
 			this.toast("error", `新建会话失败：${errorText(error)}`);
@@ -582,52 +743,69 @@ export class MobileStore {
 			const found = list?.find((s) => s.id === sessionId);
 			if (found) return found;
 		}
-		return this.chats.get(sessionId)?.chat.session;
+		return this.active?.chats.get(sessionId)?.chat.session;
 	}
 
-	/** Live controller for a session (subscribed on first use). */
+	/** Live controller for a session of the computer on screen (subscribed on first use). */
 	chat(session: SessionSummary): ChatController | undefined {
-		const client = this.client;
-		if (!client) return undefined;
-		let chat = this.chats.get(session.id);
+		const conn = this.active;
+		const client = conn?.client;
+		if (!conn || !client) return undefined;
+		let chat = conn.chats.get(session.id);
 		if (!chat) {
-			chat = new ChatController(client, session, {
-				onReplaced: (previousId, next) => {
-					const existing = this.chats.get(previousId);
-					if (existing) {
-						this.chats.delete(previousId);
-						this.chats.set(next.id, existing);
-					}
-					this.scheduleRefresh(next.workspaceId);
+			const cached = this.chatCache.get(conn.hostId, session.id);
+			chat = new ChatController(
+				client,
+				session,
+				{
+					onReplaced: (previousId, next) => {
+						const existing = conn.chats.get(previousId);
+						if (existing) {
+							conn.chats.delete(previousId);
+							conn.chats.set(next.id, existing);
+						}
+						this.scheduleRefresh(conn, next.workspaceId);
+					},
+					onSettled: (c) => {
+						this.scheduleRefresh(conn, c.workspaceId);
+						this.chatCache.put(conn.hostId, c.chat);
+					},
+					onChange: () => this.set((s) => ({ chatsVersion: s.chatsVersion + 1 })),
+					onError: (message) => this.toast("error", message),
 				},
-				onSettled: (c) => this.scheduleRefresh(c.workspaceId),
-				onChange: () => this.set((s) => ({ chatsVersion: s.chatsVersion + 1 })),
-				onError: (message) => this.toast("error", message),
-			});
-			this.chats.set(session.id, chat);
+				cached,
+			);
+			conn.chats.set(session.id, chat);
 			void chat.start();
 		}
-		this.recent = [session.id, ...this.recent.filter((id) => id !== session.id)];
-		while (this.recent.length > MAX_LIVE_CHATS) {
-			const id = this.recent.pop();
+		conn.recent = [session.id, ...conn.recent.filter((id) => id !== session.id)];
+		while (conn.recent.length > MAX_LIVE_CHATS) {
+			const id = conn.recent.pop();
 			if (!id) break;
-			this.chats.get(id)?.dispose();
-			this.chats.delete(id);
+			this.dropChat(conn, id);
 		}
 		return chat;
 	}
 
+	/** Stop following a session on `conn`'s computer, keeping its state for next time unless `forget`. */
+	private dropChat(conn: HostConnection, sessionId: string, forget = false): void {
+		const chat = conn.chats.get(sessionId);
+		if (forget) this.chatCache.remove(conn.hostId, sessionId);
+		else if (chat) this.chatCache.put(conn.hostId, chat.chat);
+		chat?.dispose();
+		conn.chats.delete(sessionId);
+		conn.recent = conn.recent.filter((id) => id !== sessionId);
+	}
+
 	/** Fork into a new session; the forked message becomes its draft. */
 	async forkSession(sessionId: string, entryId: string): Promise<SessionSummary | undefined> {
-		const client = this.client;
-		if (!client) return undefined;
+		const conn = this.active;
+		const client = conn?.client;
+		if (!conn || !client) return undefined;
 		try {
 			const { session, selectedText } = await client.request("session.fork", { sessionId, entryId });
 			if (selectedText) this.saveDraft(session.id, selectedText);
-			const workspaceId = session.workspaceId;
-			this.setHost((h) => ({
-				sessions: { ...h.sessions, [workspaceId]: [session, ...(h.sessions[workspaceId] ?? [])] },
-			}));
+			this.addSession(conn, session);
 			return session;
 		} catch (error) {
 			this.toast("error", `分叉会话失败：${errorText(error)}`);
@@ -642,8 +820,9 @@ export class MobileStore {
 
 	/** Archive or unarchive a session. Resolves to whether it worked. */
 	async archiveSession(session: SessionSummary, archived: boolean): Promise<boolean> {
-		const client = this.client;
-		if (!client) return false;
+		const conn = this.active;
+		const client = conn?.client;
+		if (!conn || !client) return false;
 		try {
 			await client.request("session.archive", { workspaceId: session.workspaceId, sessionId: session.id, archived });
 		} catch (error) {
@@ -651,7 +830,7 @@ export class MobileStore {
 			return false;
 		}
 		const workspaceId = session.workspaceId;
-		this.setHost((h) => ({
+		this.setView(conn.hostId, (h) => ({
 			sessions: {
 				...h.sessions,
 				[workspaceId]: (h.sessions[workspaceId] ?? []).map((s) => {
@@ -661,29 +840,28 @@ export class MobileStore {
 				}),
 			},
 		}));
-		this.scheduleRefresh(workspaceId);
+		this.scheduleRefresh(conn, workspaceId);
 		return true;
 	}
 
 	/** Delete a session (moved to the computer's Pier trash). `force` aborts a running agent first. */
 	async deleteSession(session: SessionSummary, force = false): Promise<boolean> {
-		const client = this.client;
-		if (!client) return false;
+		const conn = this.active;
+		const client = conn?.client;
+		if (!conn || !client) return false;
 		try {
 			await client.request("session.delete", { workspaceId: session.workspaceId, sessionId: session.id, force });
 		} catch (error) {
 			this.toast("error", `删除会话失败：${errorText(error)}`);
 			return false;
 		}
-		this.chats.get(session.id)?.dispose();
-		this.chats.delete(session.id);
-		this.recent = this.recent.filter((id) => id !== session.id);
+		this.dropChat(conn, session.id, true);
 		this.drafts.delete(session.id);
 		const workspaceId = session.workspaceId;
-		this.setHost((h) => ({
+		this.setView(conn.hostId, (h) => ({
 			sessions: { ...h.sessions, [workspaceId]: (h.sessions[workspaceId] ?? []).filter((s) => s.id !== session.id) },
 		}));
-		this.scheduleRefresh(workspaceId);
+		this.scheduleRefresh(conn, workspaceId);
 		return true;
 	}
 
@@ -704,18 +882,17 @@ export class MobileStore {
 
 	/** Close a session on the computer (it stays in the list). `force` aborts a running agent first. */
 	async closeSession(session: SessionSummary, force = false): Promise<boolean> {
-		const client = this.client;
-		if (!client) return false;
+		const conn = this.active;
+		const client = conn?.client;
+		if (!conn || !client) return false;
 		try {
 			await client.request("session.close", { sessionId: session.id, force });
 		} catch (error) {
 			this.toast("error", `关闭会话失败：${errorText(error)}`);
 			return false;
 		}
-		this.chats.get(session.id)?.dispose();
-		this.chats.delete(session.id);
-		this.recent = this.recent.filter((id) => id !== session.id);
-		this.scheduleRefresh(session.workspaceId);
+		this.dropChat(conn, session.id);
+		this.scheduleRefresh(conn, session.workspaceId);
 		return true;
 	}
 
@@ -857,6 +1034,8 @@ export class MobileStore {
 	/** Open a shell on the connected computer, in `cwd` (its home directory by default). */
 	openTerminal(options: { cwd?: string; cols: number; rows: number; title?: string }): RemoteTerminal {
 		const client = this.requireClient();
+		const conn = this.active;
+		if (!conn) throw new Error("尚未连接到电脑");
 		const id = this.nextTerminalId++;
 		const terminal = new RemoteTerminal(id, client, {
 			...(options.cwd ? { cwd: options.cwd } : {}),
@@ -864,44 +1043,47 @@ export class MobileStore {
 			rows: options.rows,
 			title: options.title ?? "终端",
 		});
-		this.terminals.set(id, terminal);
-		terminal.subscribe(() => this.publishTerminals());
-		this.publishTerminals();
+		conn.terminals.set(id, terminal);
+		terminal.subscribe(() => this.publishTerminals(conn));
+		this.publishTerminals(conn);
 		void terminal.open();
 		return terminal;
 	}
 
+	/** A terminal of the computer on screen. */
 	terminal(id: number): RemoteTerminal | undefined {
-		return this.terminals.get(id);
+		return this.active?.terminals.get(id);
 	}
 
 	/** Hang up a terminal (if it still runs) and forget it. */
 	async removeTerminal(id: number): Promise<void> {
-		const terminal = this.terminals.get(id);
-		if (!terminal) return;
+		const conn = [...this.connections.values()].find((c) => c.terminals.has(id));
+		const terminal = conn?.terminals.get(id);
+		if (!conn || !terminal) return;
 		await terminal.close();
-		this.terminals.delete(id);
+		conn.terminals.delete(id);
 		terminal.dispose();
-		this.publishTerminals();
+		this.publishTerminals(conn);
 	}
 
-	private publishTerminals(): void {
-		const list: TerminalSummary[] = [...this.terminals.values()]
+	private publishTerminals(conn: HostConnection): void {
+		if (!this.isLive(conn)) return;
+		const list: TerminalSummary[] = [...conn.terminals.values()]
 			.reverse()
 			.map((t) => ({ id: t.id, title: t.title, cwd: t.cwd, status: t.status }));
-		const previous = this.state.host.terminals;
+		const previous = this.state.connections[conn.hostId]?.terminals ?? [];
 		const same =
 			previous.length === list.length &&
 			previous.every((t, i) => {
 				const next = list[i];
 				return next && t.id === next.id && t.title === next.title && t.cwd === next.cwd && t.status === next.status;
 			});
-		if (!same) this.setHost({ terminals: list });
+		if (!same) this.setView(conn.hostId, { terminals: list });
 	}
 
-	private onTerminalEvent(event: EventFrame["event"]): void {
+	private onTerminalEvent(conn: HostConnection, event: EventFrame["event"]): void {
 		const terminalId = String((event as { terminalId?: unknown }).terminalId ?? "");
-		const terminal = [...this.terminals.values()].find((t) => t.terminalId === terminalId);
+		const terminal = [...conn.terminals.values()].find((t) => t.terminalId === terminalId);
 		if (!terminal) return;
 		if (event.type === "terminal.output") terminal.output(String(event.data ?? ""));
 		else {
@@ -911,8 +1093,8 @@ export class MobileStore {
 		}
 	}
 
-	private loseTerminals(reason: string): void {
-		for (const terminal of this.terminals.values()) {
+	private loseTerminals(conn: HostConnection, reason: string): void {
+		for (const terminal of conn.terminals.values()) {
 			if (terminal.status !== "exited") terminal.exited(null, reason);
 		}
 	}

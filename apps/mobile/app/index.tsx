@@ -24,12 +24,24 @@ import { MONO, RADIUS, SHADOW, usePalette } from "../src/theme.ts";
 function HostMenu({ host, onClose }: { host: PairedHost; onClose: () => void }) {
 	const store = useStore();
 	const router = useRouter();
+	const connected = useMobileState((s) => !!s.connections[host.hostId]);
 	return (
 		<ActionSheet
 			title={host.hostName}
-			subtitle={host.addresses.join("\n")}
+			subtitle={[...host.addresses, ...(host.relays ?? []).map((r) => `中继 ${r}`)].join("\n")}
 			onClose={onClose}
 			actions={[
+				...(connected
+					? [
+							{
+								label: "断开连接",
+								description: "关闭后台连接，打开的终端也会关闭；电脑上的会话照常运行",
+								icon: "power-outline" as const,
+								testID: "host-disconnect",
+								onPress: () => store.disconnectHost(host.hostId),
+							},
+						]
+					: []),
 				{
 					label: "修改连接地址",
 					description: "电脑的 IP 变了时使用，不用重新配对",
@@ -59,8 +71,8 @@ function HostRow({ host }: { host: PairedHost }) {
 	const router = useRouter();
 	const p = usePalette();
 	const [menu, setMenu] = useState(false);
-	const active = useMobileState((s) => (s.host.hostId === host.hostId ? s.host.connection : undefined));
-	const revoked = useMobileState((s) => s.host.hostId === host.hostId && s.host.revoked);
+	const active = useMobileState((s) => s.connections[host.hostId]?.connection);
+	const revoked = useMobileState((s) => !!s.connections[host.hostId]?.revoked);
 	const online = active === "open" && !revoked;
 	const dot = revoked ? p.danger : online ? p.ok : active ? p.warning : p.faint;
 	const status = revoked
@@ -100,10 +112,12 @@ function HostRow({ host }: { host: PairedHost }) {
 							{status}
 						</Text>
 					</View>
-					{host.addresses[0] ? (
+					{host.addresses[0] || host.relays?.[0] ? (
 						<Text style={[styles.address, { color: p.faint }]} numberOfLines={1}>
-							{host.addresses[0]}
-							{host.addresses.length > 1 ? `  +${host.addresses.length - 1}` : ""}
+							{host.addresses[0] ?? `中继 ${host.relays?.[0]?.replace(/^wss?:\/\//, "")}`}
+							{host.addresses.length + (host.relays?.length ?? 0) > 1
+								? `  +${host.addresses.length + (host.relays?.length ?? 0) - 1}`
+								: ""}
 						</Text>
 					) : null}
 				</View>
@@ -151,7 +165,9 @@ function EmptyHosts() {
 					</View>
 				))}
 			</View>
-			<Muted style={[styles.center, styles.hint]}>手机需要和电脑在同一局域网，或同一 Tailscale 网络。</Muted>
+			<Muted style={[styles.center, styles.hint]}>
+				手机和电脑在同一局域网（或同一 Tailscale 网络）时直连；不在同一网络时，电脑开启中继服务器即可连接。
+			</Muted>
 		</View>
 	);
 }

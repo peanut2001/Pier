@@ -1,4 +1,4 @@
-# Pier 协议 v1.25
+# Pier 协议 v1.27
 
 > 实现：`packages/protocol`（zod schema + TS 类型，Host 与所有客户端共享）。
 > 本文档描述线上格式与语义；字段的权威定义以 `packages/protocol/src` 为准。
@@ -49,7 +49,8 @@
 | 4400 | 远程：握手失败、配对失败，或收到无法解密的帧 | 按错误提示处理 |
 | 4401 | `host.hello` 失败或超时 | 不要自动重试（token / 版本错误） |
 | 4403 | 远程：设备未登记或已被吊销（握手时的 `error` 帧 code 为 `UNKNOWN_DEVICE`） | 停止重连，提示重新配对（`@pier/client` 默认把它视为终止） |
-| 4410 | 远程：桌面关闭了远程访问 | 稍后重连 |
+| 4410 | 远程：桌面关闭了远程访问（或关闭了中继，经中继和 P2P 的连接随之断开） | 稍后重连 |
+| 4604 / 4608 / 4629 | 中继：电脑不在线 / 电脑没有及时接起 / 中继的连接数或速率限制（见 [`apps/relay`](../apps/relay/README.md)） | 尝试其他路径，稍后重连 |
 | 4404 | 本地 `/peer/<id>`：该电脑未配对（或已在本机移除）；`host.hello` 同时返回 `NOT_FOUND` | 不要重连 |
 | 4502 | 本地 `/peer/<id>`：连不上那台电脑，或与它的连接中断（原因写在 reason 中） | 稍后重连 |
 
@@ -59,7 +60,7 @@
 
 ```jsonc
 { "type": "req", "id": "h", "method": "host.hello", "params": {
-  "protocolVersion": "1.25",
+  "protocolVersion": "1.27",
   "client": { "name": "pier-desktop", "version": "0.1.0", "platform": "darwin" },
   "token": "<本地 token>",       // 本地连接必填；远程连接由加密通道认证，不需要
   "coalesceMs": 50               // 可选：合并流式增量的窗口（0–1000ms，默认 0）
@@ -170,7 +171,7 @@ sidecar 的 stdio 协议：桌面端用 `--shell-terminals` 启动 Host，声明
 | `session.forkPoints` | `{ sessionId }` | `{ points: { entryId, text }[] }`（可 fork 的用户消息） |
 | `session.fork` | `{ sessionId, entryId, position?: "before"\|"at" }` | `{ session, selectedText? }`；生成**新**会话，原会话不变 |
 | `session.rename` | `{ sessionId, name }` | `{ session }` |
-| `session.subscribe` | `{ sessionId, sinceSeq?, epoch? }` | `{ mode: "replay"\|"snapshot", currentSeq, epoch }`，见 §5 |
+| `session.subscribe` | `{ sessionId, sinceSeq?, epoch?, known?: { count, fingerprint } }`（`known` 1.27） | `{ mode: "replay"\|"snapshot", currentSeq, epoch }`，见 §5 |
 | `session.unsubscribe` | `{ sessionId }` | `{ unsubscribed }` |
 | `session.snapshot` | `{ sessionId }` | `SessionSnapshot`（一次性读取，不影响订阅） |
 | `session.commands` | `{ sessionId }` | `{ commands: { name, description?, argumentHint?, source: "extension"\|"prompt"\|"skill" }[] }`；会话的 Agent 运行时在 `session.prompt` 中处理的斜杠命令：扩展命令、提示词模板和 `skill:<名称>`（pi 设置 `enableSkillCommands: false` 时不列出 skill，但手动输入仍然有效）。`name` 不含开头的 `/`（1.5） |
@@ -348,9 +349,9 @@ Host 由桌面端启动时（`--watch-stdin`，macOS / Linux），启动过程�
 
 | 方法 | 参数 | 结果 |
 |---|---|---|
-| `peer.list` 🔒 | – | `{ peers: PeerInfo[] }`：`{ id（那台电脑的 hostId）, name, fingerprint, addresses, deviceId, pairedAt, lastConnectedAt?, platform?, version?, connected }`；`connected` 表示当前有桌面窗口经本机连着它 |
+| `peer.list` 🔒 | – | `{ peers: PeerInfo[] }`：`{ id（那台电脑的 hostId）, name, fingerprint, addresses, relays?, deviceId, pairedAt, lastConnectedAt?, platform?, version?, connected }`；`connected` 表示当前有桌面窗口经本机连着它；`relays` 为那台电脑注册的中继（1.26，来自配对链接） |
 | `peer.pair` 🔒 | `{ uri }`（那台电脑显示的 `pier://pair?...` 链接） | `{ peer }`；在那台电脑的用户确认后返回。失败时 `data.reason` 为 `INVALID_LINK`（`BAD_REQUEST`）、`SELF`（本机自己的链接）、`UNREACHABLE`、`PAIRING_INVALID`、`PAIRING_REJECTED`、`PAIRING_TIMEOUT`、`BAD_HANDSHAKE` 等（`CONFLICT`）。可能耗时数分钟，客户端请放宽超时 |
-| `peer.update` 🔒 | `{ peerId, addresses }`（`host:port` 列表，1–16 个，IPv6 加方括号） | `{ peer }`；修改连接那台电脑使用的地址（例如它的 IP 变了），去重后按顺序尝试；地址有变化时以 1012 断开经本机到它的连接以便用新地址重连。固定的公钥不变，新地址上若是另一台电脑会握手失败。未配对时 `NOT_FOUND`，地址无效时 `BAD_REQUEST`（1.24） |
+| `peer.update` 🔒 | `{ peerId, addresses, relays? }`（`host:port` 列表，0–16 个，IPv6 加方括号；`relays` 为中继地址，0–4 个，省略时不变；两者至少一项非空） | `{ peer }`；修改连接那台电脑使用的地址（例如它的 IP 变了），去重后按顺序尝试，地址都连不上时再经中继；有变化时以 1012 断开经本机到它的连接以便用新地址重连。固定的公钥不变，新地址上若是另一台电脑会握手失败。未配对时 `NOT_FOUND`，地址无效时 `BAD_REQUEST`（1.24；`relays` 1.26） |
 | `peer.remove` 🔒 | `{ peerId }` | `{ removed }`；只在本机忘记那台电脑，并断开经本机到它的连接（4404）；那台电脑的设备列表不变 |
 
 Host 保存已配对的电脑于 `~/.pier/peers.json`（0600），每次经代理连接成功后更新名称、系统、版本、最近连接时间，并把成功的地址排到最前。
@@ -359,12 +360,12 @@ Host 保存已配对的电脑于 `~/.pier/peers.json`（0600），每次经代�
 
 | 方法 | 参数 | 结果 |
 |---|---|---|
-| `remote.status` 🔒 | – | `RemoteAccessStatus`：`{ enabled, port, running, addresses, hostFingerprint, mdns, pairingActive, error? }` |
-| `remote.configure` 🔒 | `{ enabled?, port?(1024–65535) }` | `RemoteAccessStatus`；写入 `config.json` 并立即启动 / 停止 / 换端口（换端口或关闭会断开远程连接） |
-| `pairing.start` 🔒 | – | `{ uri, expiresAt, addresses }`；`uri` 即二维码内容。远程访问未运行时 `CONFLICT`。再次调用会让旧配对码失效 |
+| `remote.status` 🔒 | – | `RemoteAccessStatus`：`{ enabled, port, running, addresses, hostFingerprint, mdns, pairingActive, error?, relay?, p2p? }`；`relay`（1.26）为 `{ enabled, url?, hasToken, state: "off" \| "connecting" \| "online" \| "error", error?, mode?: "private" \| "open" }`（从不返回令牌本身），`p2p`（1.26）表示经中继的连接是否尝试切换到点对点路径 |
+| `remote.configure` 🔒 | `{ enabled?, port?(1024–65535), relay?: { enabled?, url?, token?: string \| null }, p2p? }` | `RemoteAccessStatus`；写入 `config.json` 并立即启动 / 停止 / 换端口（换端口或关闭会断开局域网连接）。`relay`（1.26）：`url` 为 `wss://` / `ws://` / `https://` 地址或裸域名（规范化为 `ws(s)://`），`token` 为私有模式中继的访问令牌（`null` 删除），开启时没有地址为 `BAD_REQUEST`；修改或关闭中继会断开经中继与 P2P 的连接（4410）。局域网访问与中继相互独立 |
+| `pairing.start` 🔒 | – | `{ uri, expiresAt, addresses, relays? }`；`uri` 即二维码内容。局域网访问未运行且中继不在线时 `CONFLICT`；只有中继在线时 `addresses` 为空。再次调用会让旧配对码失效 |
 | `pairing.cancel` 🔒 | – | `{ cancelled }` |
 | `pairing.respond` 🔒 | `{ requestId, accept }` | `{ accepted }`；请求已超时或设备已断开时为 `false` |
-| `device.list` 🔒 | – | `{ devices: DeviceInfo[] }`：`{ id, name, platform?, model?, appVersion?, fingerprint, pairedAt, lastSeenAt?, connected }` |
+| `device.list` 🔒 | – | `{ devices: DeviceInfo[] }`：`{ id, name, platform?, model?, appVersion?, fingerprint, pairedAt, lastSeenAt?, connected, route? }`；`route`（1.26）为在线设备的连接方式：`lan`（直连监听端口）、`relay`（经中继）、`p2p`（经中继建立的点对点路径） |
 | `device.rename` 🔒 | `{ deviceId, name }` | `{ device }` |
 | `device.revoke` 🔒 | `{ deviceId }` | `{ revoked }`；该设备的连接立即以 4403 断开 |
 
@@ -425,8 +426,8 @@ Claude Code 与 Codex 会话（1.22）发出同样形态的事件与 `AgentMessa
 
 | 事件 | 字段 | 说明 |
 |---|---|---|
-| `remote.changed` | `status: RemoteAccessStatus` | 远程访问启停、端口变化、配对码生效 / 失效 |
-| `device.changed` | – | 设备登记、吊销、改名，或连接状态变化；重新调用 `device.list` |
+| `remote.changed` | `status: RemoteAccessStatus` | 远程访问启停、端口变化、配对码生效 / 失效、中继状态变化 |
+| `device.changed` | – | 设备登记、吊销、改名，或连接状态 / 连接方式变化；重新调用 `device.list` |
 | `pairing.request` | `request: { id, device, fingerprint, address?, createdAt, expiresAt }` | 设备出示了正确的配对码，等待用户用 `pairing.respond` 确认 |
 | `pairing.resolved` | `requestId, resolution: accepted\|rejected\|expired\|cancelled, deviceId?` | 配对请求结束（`cancelled`：设备在等待中断开） |
 | `peer.changed` | – | 已配对的其他电脑增删、改名，或经本机的连接建立 / 断开（1.9）；重新调用 `peer.list` |
@@ -452,6 +453,7 @@ Claude Code 与 Codex 会话（1.22）发出同样形态的事件与 `AgentMessa
 - `session.subscribe` 的语义：
   - 带 `sinceSeq` 且 `epoch` 与当前一致、缺口仍在缓冲内 → `mode: "replay"`，随后按序补发 `seq > sinceSeq` 的事件；
   - 否则 → `mode: "snapshot"`，随后发送一个 `session.snapshot`，再接实时事件。
+  - **已有的转录前缀**（1.27）：客户端可在 `known` 中说明它已有转录的前 `count` 条消息，以及最后一条的指纹 `fingerprint`（`@pier/protocol` 的 `messageFingerprint`：消息按键排序的规范 JSON 的 64 位哈希，16 位十六进制）。需要发快照且 Host 转录的第 `count` 条消息指纹一致时，快照的 `messages` 只含其后的消息，并带 `messagesFrom: count`；客户端保留自己的前 `count` 条再接上。不一致（压缩、换分支或缓存过旧）时照常发完整快照。旧版 Host 忽略 `known`。手机端把看过的会话缓存在本地，下次打开时用 `sinceSeq/epoch` 只补发错过的事件；会话已被 Host 重新加载（新的 epoch）时，用 `known` 只下载新增的消息。
 - **顺序保证**：订阅响应先于补发事件或快照到达；补发 / 快照之后才是订阅期间产生的实时事件。快照的 `seq` 表示它已包含到该 seq 为止的全部事件，之后的事件从 `seq + 1` 开始。
 - 客户端应记录每个会话最后应用的 `seq` 与 `epoch`，并**丢弃 `seq <= lastSeq` 的事件**。`@pier/client` 自动完成这些：断线后指数退避重连，重新 `host.hello`，再用 `sinceSeq/epoch` 重新订阅；若会话已不在活跃池中（`NOT_FOUND`），会先 `session.open` 再从快照开始。
 - **增量合并**：`host.hello` 指定 `coalesceMs > 0` 时，同一会话、同一内容块、相同类型（`text_delta` / `thinking_delta` / `toolcall_delta`）的连续增量在窗口内合并为一帧，合并帧携带最后一条的 `seq`。其他任何帧到来前都会先刷出待合并的帧，顺序不变。建议手机端使用约 50ms。
@@ -463,7 +465,8 @@ Claude Code 与 Codex 会话（1.22）发出同样形态的事件与 `AgentMessa
 {
   session: SessionSummary;     // 含 state
   seq: number; epoch: string;
-  messages: AgentMessage[];    // 完整转录（含 system 消息，客户端可自行过滤）
+  messages: AgentMessage[];    // 完整转录（含 system 消息，客户端可自行过滤）；带 messagesFrom 时只含从该下标起的消息
+  messagesFrom?: number;       // 订阅时 known 前缀一致（1.27）：客户端保留自己的前 messagesFrom 条
   streamingMessage?: AgentMessage; // 正在流式输出的部分消息
   pendingToolCalls: string[];
   pendingUi: UiRequest[];      // 仍待回答的对话框 / 审批

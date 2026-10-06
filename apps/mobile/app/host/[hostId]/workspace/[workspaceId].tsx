@@ -40,7 +40,6 @@ export default function WorkspaceSettings() {
 	const online = view.hostId === hostId && view.connection === "open";
 	const canManage = online && store.canManageWorkspaces();
 	const [saving, setSaving] = useState<ApprovalPolicy>();
-	const [removing, setRemoving] = useState(false);
 
 	if (!workspace) {
 		return (
@@ -72,13 +71,14 @@ export default function WorkspaceSettings() {
 				running ? `\n\n有 ${running} 个会话正在运行，会先中止。` : ""
 			}`,
 			"移除",
-			async () => {
-				setRemoving(true);
-				const removed = await store.removeWorkspace(workspace.id);
-				setRemoving(false);
-				if (!removed) return;
-				store.toast("info", `已移除工作区「${workspace.name}」`);
+			() => {
+				const { id, name } = workspace;
+				// Leave first: the host screen's list must drop the workspace while it is on screen. Removing a
+				// whole section from it while it sits detached under this modal crashes Android natively.
 				router.back();
+				void store.removeWorkspace(id).then((removed) => {
+					if (removed) store.toast("info", `已移除工作区「${name}」`);
+				});
 			},
 		);
 
@@ -240,7 +240,6 @@ export default function WorkspaceSettings() {
 					title="从 Pier 移除工作区"
 					icon="trash-outline"
 					variant="danger"
-					loading={removing}
 					disabled={!canManage}
 					onPress={remove}
 					style={styles.remove}

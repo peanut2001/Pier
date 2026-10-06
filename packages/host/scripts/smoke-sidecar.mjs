@@ -4,7 +4,8 @@
  * read the `pier.ready` line, speak the protocol over WebSocket (hello, workspace, session
  * via the pi SDK inside the binary), then close stdin and expect a clean exit. Finally run
  * `--check-images` and expect pi to resize an image with the Photon wasm shipped next to the
- * binary or in PI_PACKAGE_DIR (not the build machine's node_modules path baked into it).
+ * binary or in PI_PACKAGE_DIR (not the build machine's node_modules path baked into it), and
+ * `--check-p2p` and expect a local WebRTC data channel (werift inside the binary) to work.
  *
  * Usage: node scripts/smoke-sidecar.mjs <path-to-pier-host> [expected-version]
  */
@@ -121,9 +122,23 @@ async function main() {
 	if (existsSync(join(pierDir, "run", "host.json"))) fail("runtime file was not removed on shutdown");
 
 	const images = checkImages();
+	const p2p = checkP2P();
 	console.log(
-		`smoke OK: pier-host ${ready.version} (protocol ${ready.protocolVersion}, pi ${hello.host.piVersion}, ${hello.host.platform}; images via ${images.wasm})`,
+		`smoke OK: pier-host ${ready.version} (protocol ${ready.protocolVersion}, pi ${hello.host.piVersion}, ${hello.host.platform}; images via ${images.wasm}; p2p data channel in ${p2p.ms} ms)`,
 	);
+}
+
+/** Peer-to-peer paths need WebRTC (werift) to work inside the bundled binary. */
+function checkP2P() {
+	let output;
+	try {
+		output = execFileSync(exe, ["--check-p2p"], { encoding: "utf8", timeout: 90_000 });
+	} catch (error) {
+		fail(`--check-p2p failed: ${error.stdout || error.message}`);
+	}
+	const result = JSON.parse(output.trim().split("\n").at(-1));
+	if (!result.ok) fail(`WebRTC data channels do not work: ${result.error}`);
+	return result;
 }
 
 /** pi must resize images with the bundled Photon wasm, or it silently drops every attachment. */

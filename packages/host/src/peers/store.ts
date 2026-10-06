@@ -10,7 +10,9 @@ const PeerRecordSchema = z.object({
 	name: z.string().min(1),
 	/** The peer's static X25519 public key (base64url), pinned at pairing. */
 	publicKey: z.string().min(1),
-	addresses: z.array(z.string().min(1)).min(1),
+	addresses: z.array(z.string().min(1)),
+	/** Pier Relays the peer is registered with (from its pairing link). */
+	relays: z.array(z.string().min(1)).optional(),
 	/** This host's device id on the peer. */
 	deviceId: z.string().min(1),
 	pairedAt: z.string(),
@@ -41,12 +43,18 @@ export class PeerStore {
 	}
 
 	list(): PeerRecord[] {
-		return this.peers.map((p) => ({ ...p, addresses: [...p.addresses] }));
+		return this.peers.map((p) => ({
+			...p,
+			addresses: [...p.addresses],
+			...(p.relays ? { relays: [...p.relays] } : {}),
+		}));
 	}
 
 	get(id: string): PeerRecord | undefined {
 		const peer = this.peers.find((p) => p.id === id);
-		return peer ? { ...peer, addresses: [...peer.addresses] } : undefined;
+		return peer
+			? { ...peer, addresses: [...peer.addresses], ...(peer.relays ? { relays: [...peer.relays] } : {}) }
+			: undefined;
 	}
 
 	/** Add a peer, or replace the record of a peer paired again. */
@@ -65,7 +73,7 @@ export class PeerStore {
 			Object.assign(peer, patch);
 			this.save();
 		}
-		return { ...peer, addresses: [...peer.addresses] };
+		return { ...peer, addresses: [...peer.addresses], ...(peer.relays ? { relays: [...peer.relays] } : {}) };
 	}
 
 	remove(id: string): boolean {
@@ -89,6 +97,7 @@ export function toPeerInfo(record: PeerRecord, connected: boolean): PeerInfo {
 		name: record.name,
 		fingerprint,
 		addresses: [...record.addresses],
+		...(record.relays?.length ? { relays: [...record.relays] } : {}),
 		deviceId: record.deviceId,
 		pairedAt: record.pairedAt,
 		...(record.lastConnectedAt ? { lastConnectedAt: record.lastConnectedAt } : {}),

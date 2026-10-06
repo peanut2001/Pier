@@ -1,5 +1,6 @@
 import {
 	addressPort,
+	type ConnectionRouteKind,
 	DEFAULT_PIER_PORT,
 	type DeviceInfo,
 	type PairingRequest,
@@ -84,12 +85,23 @@ function platformLabel(device: { platform?: string; model?: string; appVersion?:
 		.join(" · ");
 }
 
+const ROUTE_TEXT: Record<ConnectionRouteKind, string> = {
+	lan: "局域网直连",
+	relay: "经中继",
+	p2p: "P2P 直连",
+};
+
+/** Whether devices can reach this computer right now (LAN listener or relay). */
+function remoteReachable(remote: { running: boolean; relay?: { state: string } } | undefined): boolean {
+	return Boolean(remote?.running || remote?.relay?.state === "online");
+}
+
 function PairingSection() {
 	const store = useStore();
 	const pairing = useAppState((s) => s.pairing);
 	const remote = useAppState((s) => s.remote);
 	const now = useNow();
-	if (!remote?.running) return null;
+	if (!remoteReachable(remote)) return null;
 	if (!pairing) {
 		return (
 			<SettingRow
@@ -117,7 +129,8 @@ function PairingSection() {
 					</ol>
 					<p className="muted small">
 						{expired ? "二维码已过期。" : `二维码 ${countdown(pairing.expiresAt, now)} 后过期。`}
-						对方会依次尝试：{pairing.addresses.join("、")}
+						对方会依次尝试：
+						{[...pairing.addresses, ...(pairing.relays ?? []).map((relay) => `中继 ${relay}`)].join("、")}
 					</p>
 					<div className="row-actions">
 						{expired ? (
@@ -184,7 +197,7 @@ function DeviceRow({ device }: { device: DeviceInfo }) {
 				<div className="muted small">
 					{details ? `${details} · ` : ""}
 					{device.connected
-						? "在线"
+						? `在线${device.route ? ` · ${ROUTE_TEXT[device.route]}` : ""}`
 						: device.lastSeenAt
 							? `最近连接 ${relativeTime(device.lastSeenAt)}`
 							: `配对于 ${relativeTime(device.pairedAt)}`}
@@ -230,7 +243,7 @@ function PeerRow({ peer }: { peer: PeerInfo }) {
 				<div className="device-name">{peer.name}</div>
 				<div className="muted small">{details.join(" · ")}</div>
 				<div className="muted small mono" title="那台电脑的密钥指纹 · 地址">
-					{peer.fingerprint} · {peer.addresses.join("、")}
+					{peer.fingerprint} · {[...peer.addresses, ...(peer.relays ?? []).map((r) => `中继 ${r}`)].join("、")}
 				</div>
 			</div>
 			<button
@@ -265,13 +278,24 @@ function PeerRow({ peer }: { peer: PeerInfo }) {
 function PeerAddressDialog({ peer, onClose }: { peer: PeerInfo; onClose: () => void }) {
 	const store = useStore();
 	const [text, setText] = useState(() => peer.addresses.join("\n"));
+	const [relayText, setRelayText] = useState(() => (peer.relays ?? []).join("\n"));
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | undefined>();
 	const defaultPort = addressPort(peer.addresses[0]) ?? DEFAULT_PIER_PORT;
 	const { addresses, invalid } = parsePeerAddresses(text, defaultPort);
-	const unchanged = addresses.join(",") === peer.addresses.join(",");
+	const relays = [
+		...new Set(
+			relayText
+				.split(/[\s,，、;；]+/)
+				.map((r) => r.trim())
+				.filter(Boolean),
+		),
+	];
+	const unchanged =
+		addresses.join(",") === peer.addresses.join(",") && relays.join(",") === (peer.relays ?? []).join(",");
+	const empty = !addresses.length && !relays.length;
 	const submit = async () => {
-		if (busy || invalid.length || !addresses.length) return;
+		if (busy || invalid.length || empty) return;
 		if (unchanged) {
 			onClose();
 			return;
@@ -279,7 +303,7 @@ function PeerAddressDialog({ peer, onClose }: { peer: PeerInfo; onClose: () => v
 		setBusy(true);
 		setError(undefined);
 		try {
-			await store.updatePeerAddresses(peer.id, addresses);
+			await store.updatePeerAddresses(peer.id, addresses, relays);
 			onClose();
 		} catch (e) {
 			setError(e instanceof Error ? e.message : String(e));
@@ -304,13 +328,26 @@ function PeerAddressDialog({ peer, onClose }: { peer: PeerInfo; onClose: () => v
 						setError(undefined);
 					}}
 				/>
+				<p className="muted small">中继服务器（可选，每行一个，例如 wss://relay.example.com），直连失败时使用：</p>
+				<textarea
+					className="add-peer-link mono"
+					rows={2}
+					placeholder="wss://relay.example.com"
+					value={relayText}
+					disabled={busy}
+					onChange={(e) => {
+						setRelayText(e.target.value);
+						setError(undefined);
+					}}
+				/>
 				{invalid.length ? (
 					<div className="banner error inline">无法识别的地址：{invalid.join("、")}</div>
-				) : !addresses.length ? (
-					<p className="muted small">至少需要一个地址。</p>
+				) : empty ? (
+					<p className="muted small">至少需要一个地址或中继服务器。</p>
 				) : (
 					<p className="muted small">
-						将依次尝试：<span className="mono">{addresses.join("、")}</span>
+						将依次尝试：
+						<span className="mono">{[...addresses, ...relays.map((r) => `中继 ${r}`)].join("、")}</span>
 					</p>
 				)}
 				<p className="muted small">
@@ -326,7 +363,7 @@ function PeerAddressDialog({ peer, onClose }: { peer: PeerInfo; onClose: () => v
 				<button
 					type="button"
 					className="primary"
-					disabled={busy || invalid.length > 0 || !addresses.length}
+					disabled={busy || invalid.length > 0 || empty}
 					onClick={() => void submit()}
 				>
 					{busy ? "保存中…" : "保存并重新连接"}
@@ -362,7 +399,7 @@ function PeersSection() {
 				</SettingsCard>
 			)}
 			<p className="muted small settings-note">
-				连接其他电脑不需要开启本机的局域网访问，但那台电脑需要开启。在这里移除只会忘记那台电脑；要撤销本机对它的访问，请在那台电脑的设备列表中移除本机。
+				连接其他电脑不需要开启本机的局域网访问，但那台电脑需要开启局域网访问或中继。在这里移除只会忘记那台电脑；要撤销本机对它的访问，请在那台电脑的设备列表中移除本机。
 			</p>
 		</SettingsGroup>
 	);
@@ -414,7 +451,7 @@ export function AddPeerDialog() {
 					仍在那台电脑上运行）；两台电脑想互相连接时，在两边各添加一次。
 				</p>
 				<ol className="add-peer-steps">
-					<li>在那台电脑的 Pier 中打开「设置 → 设备与远程」，开启局域网访问。</li>
+					<li>在那台电脑的 Pier 中打开「设置 → 设备与远程」，开启局域网访问（不在同一网络时开启中继）。</li>
 					<li>点「显示配对二维码」，再点「复制配对链接」，把链接发到这台电脑。</li>
 					<li>粘贴到下面并点「配对」，然后在那台电脑上确认。</li>
 				</ol>
@@ -482,7 +519,8 @@ export function RemoteSettings() {
 			<p className="settings-intro">
 				每台运行 Pier 的电脑都是一个节点：手机（Pier
 				App）和其他电脑配对后，可以查看这台电脑上的会话、继续对话和审批工具调用；这台电脑也可以添加其他电脑并切换过去。只有配对过的设备能连接，所有内容端到端加密（Noise
-				协议）；同一局域网、Tailscale / WireGuard 网络内均可使用。
+				协议）；同一局域网、Tailscale / WireGuard 网络内可以直连，不在同一网络时可以通过中继服务器连接（优先打洞 P2P
+				直连，中继只转发密文）。
 			</p>
 			<SettingsGroup title="局域网访问">
 				<SettingsCard>
@@ -532,12 +570,14 @@ export function RemoteSettings() {
 				</SettingsCard>
 			</SettingsGroup>
 
+			<RelaySettings />
+
 			<SettingsGroup title="配对新设备">
 				<SettingsCard>
-					{remote.running ? (
+					{remoteReachable(remote) ? (
 						<PairingSection />
 					) : (
-						<div className="settings-empty">开启局域网访问后即可配对手机或其他电脑。</div>
+						<div className="settings-empty">开启局域网访问或中继后即可配对手机或其他电脑。</div>
 					)}
 				</SettingsCard>
 			</SettingsGroup>
@@ -559,6 +599,157 @@ export function RemoteSettings() {
 
 			<PeersSection />
 		</>
+	);
+}
+
+const RELAY_STATE_TEXT = {
+	off: "未开启",
+	connecting: "正在连接…",
+	online: "在线",
+	error: "连接失败",
+} as const;
+
+/** Registration with a Pier Relay, for devices outside this network, and the P2P switch. */
+function RelaySettings() {
+	const store = useStore();
+	const remote = useAppState((s) => s.remote);
+	const relay = remote?.relay;
+	const [url, setUrl] = useState<string | undefined>();
+	const [token, setToken] = useState("");
+	const [busy, setBusy] = useState(false);
+	const [error, setError] = useState<string | undefined>();
+	if (!remote || !relay) return null;
+	const urlValue = url ?? relay.url ?? "";
+	const dirty = (url !== undefined && url.trim() !== (relay.url ?? "")) || token.trim() !== "";
+
+	const save = async (patch: { enabled?: boolean; url?: string; token?: string | null }) => {
+		setBusy(true);
+		setError(undefined);
+		try {
+			await store.configureRemote({ relay: patch }, { rethrow: true });
+			setUrl(undefined);
+			setToken("");
+		} catch (e) {
+			setError(e instanceof Error ? e.message : String(e));
+		} finally {
+			setBusy(false);
+		}
+	};
+	const status =
+		relay.state === "online"
+			? `在线 · ${relay.mode === "open" ? "开放模式" : "私有模式"}`
+			: relay.enabled
+				? RELAY_STATE_TEXT[relay.state]
+				: "未开启";
+
+	return (
+		<SettingsGroup title="中继服务器">
+			<SettingsCard>
+				<SettingRow
+					title="通过中继服务器连接"
+					description={
+						relay.enabled
+							? `${status}${relay.url ? ` · ${relay.url}` : ""}`
+							: "手机和电脑都没有公网 IP 时，通过一台中继服务器连接。中继只转发端到端加密的数据，看不到内容。"
+					}
+				>
+					<Switch
+						label="通过中继服务器连接"
+						checked={relay.enabled}
+						disabled={busy || (!relay.enabled && !urlValue.trim())}
+						onChange={(enabled) =>
+							void save(
+								enabled
+									? {
+											enabled,
+											...(url !== undefined ? { url: urlValue } : {}),
+											...(token.trim() ? { token: token.trim() } : {}),
+										}
+									: { enabled },
+							)
+						}
+					/>
+				</SettingRow>
+				{relay.enabled && relay.error && relay.state !== "online" ? (
+					<div className="setting-row">
+						<div className="banner error inline">{relay.error}</div>
+					</div>
+				) : null}
+				<SettingRow
+					title="中继地址"
+					description="自建的 Pier Relay 地址，例如 wss://relay.example.com（部署方法见 apps/relay/README.md）。"
+					stack
+				>
+					<input
+						className="mono relay-input"
+						placeholder="wss://relay.example.com"
+						value={urlValue}
+						disabled={busy}
+						onChange={(e) => setUrl(e.target.value)}
+					/>
+				</SettingRow>
+				<SettingRow
+					title="访问令牌"
+					description={
+						relay.hasToken
+							? "已保存。私有模式的中继需要令牌；留空表示不修改。"
+							: "私有模式的中继需要填写服务器上配置的令牌；开放模式留空即可。"
+					}
+					stack
+				>
+					<div className="port-row">
+						<input
+							className="mono relay-input"
+							type="password"
+							autoComplete="off"
+							placeholder={relay.hasToken ? "••••••••（已保存）" : "访问令牌"}
+							value={token}
+							disabled={busy}
+							onChange={(e) => setToken(e.target.value)}
+						/>
+						{relay.hasToken ? (
+							<button type="button" className="ghost" disabled={busy} onClick={() => void save({ token: null })}>
+								清除令牌
+							</button>
+						) : null}
+					</div>
+				</SettingRow>
+				<div className="setting-row">
+					<div className="row-actions">
+						<button
+							type="button"
+							className="primary"
+							disabled={busy || !dirty || !urlValue.trim()}
+							onClick={() =>
+								void save({
+									url: urlValue,
+									...(token.trim() ? { token: token.trim() } : {}),
+									...(relay.enabled ? {} : { enabled: true }),
+								})
+							}
+						>
+							{relay.enabled ? "保存并重新连接" : "保存并开启"}
+						</button>
+					</div>
+				</div>
+				{error ? (
+					<div className="setting-row">
+						<div className="banner error inline">{error}</div>
+					</div>
+				) : null}
+				<SettingRow
+					title="优先点对点直连（P2P）"
+					description="经中继连上后自动尝试打洞直连，成功后数据不再经过中继服务器；打洞失败时继续使用中继。"
+				>
+					<Switch
+						label="优先点对点直连"
+						checked={remote.p2p !== false}
+						disabled={busy}
+						onChange={(p2p) => void store.configureRemote({ p2p })}
+					/>
+				</SettingRow>
+			</SettingsCard>
+		</SettingsGroup>
 	);
 }
 

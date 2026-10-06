@@ -1,6 +1,6 @@
 {
 	"name": "pier",
-	"version": "0.2.20",
+	"version": "0.2.21",
 	"private": true,
 	"type": "module",
 	"packageManager": "bun@1.4.2",
@@ -16,7 +16,8 @@
 		"pier-cli": "tsx packages/client/src/cli.ts",
 		"faux-host": "tsx packages/host/scripts/faux-host.ts",
 		"desktop": "bun run --cwd apps/desktop dev",
-		"build:sidecar": "node packages/host/scripts/build-sidecar.mjs"
+		"build:sidecar": "node packages/host/scripts/build-sidecar.mjs",
+		"relay": "tsx apps/relay/src/main.ts"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.5.14",

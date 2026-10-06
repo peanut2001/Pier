@@ -6,6 +6,7 @@
 		{ "path": "packages/client" },
 		{ "path": "packages/chat-state" },
 		{ "path": "packages/host" },
+		{ "path": "apps/relay" },
 		{ "path": "apps/desktop" },
 		{ "path": "apps/mobile" }
 	]

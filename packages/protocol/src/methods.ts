@@ -231,6 +231,12 @@ export const MethodParamsSchemas = {
 		sinceSeq: z.number().int().nonnegative().optional(),
 		/** Event-log epoch the `sinceSeq` belongs to (from a previous subscribe result or snapshot). */
 		epoch: z.string().max(128).optional(),
+		/**
+		 * Transcript prefix the client already has (1.27): its first `count` messages, the last with
+		 * `fingerprint` (`messageFingerprint`). When a snapshot follows and the prefix matches, it
+		 * carries only the messages after it (`messagesFrom`).
+		 */
+		known: z.object({ count: z.number().int().positive(), fingerprint: z.string().min(1).max(64) }).optional(),
 	}),
 	"session.unsubscribe": z.object(SessionRef),
 	"session.snapshot": z.object(SessionRef),
@@ -521,6 +527,16 @@ export const MethodParamsSchemas = {
 	"remote.configure": z.object({
 		enabled: z.boolean().optional(),
 		port: z.number().int().min(1024).max(65535).optional(),
+		/** Pier Relay settings (1.26). `token: null` removes the saved token. */
+		relay: z
+			.object({
+				enabled: z.boolean().optional(),
+				url: z.string().trim().max(500).optional(),
+				token: z.string().max(500).nullable().optional(),
+			})
+			.optional(),
+		/** Let relayed connections move to a peer-to-peer path (1.26). */
+		p2p: z.boolean().optional(),
 	}),
 
 	/** Computers this host paired with as a device (1.9). */
@@ -535,10 +551,16 @@ export const MethodParamsSchemas = {
 	 * changed). The pinned host key is unchanged, so a different computer at a new address is
 	 * still refused.
 	 */
-	"peer.update": z.object({
-		peerId: Id,
-		addresses: z.array(z.string().trim().max(300).regex(PEER_ADDRESS, "Expected host:port")).min(1).max(16),
-	}),
+	"peer.update": z
+		.object({
+			peerId: Id,
+			addresses: z.array(z.string().trim().max(300).regex(PEER_ADDRESS, "Expected host:port")).max(16),
+			/** Pier Relay URLs to try after the addresses (1.26); omitted keeps the saved ones. */
+			relays: z.array(z.string().trim().min(1).max(500)).max(4).optional(),
+		})
+		.refine((p) => p.addresses.length > 0 || (p.relays?.length ?? 0) > 0, {
+			message: "At least one address or relay is required",
+		}),
 	/** Forget a paired computer here (its device list is not changed). */
 	"peer.remove": z.object({ peerId: Id }),
 } as const;
@@ -705,7 +727,12 @@ export interface MethodResults {
 	"device.list": { devices: DeviceInfo[] };
 	"device.revoke": { revoked: boolean };
 	"device.rename": { device: DeviceInfo };
-	"pairing.start": { uri: string; expiresAt: string; addresses: string[] };
+	"pairing.start": {
+		uri: string;
+		expiresAt: string;
+		addresses: string[] /** Relays in the pairing code (1.26). */;
+		relays?: string[];
+	};
 	"pairing.cancel": { cancelled: boolean };
 	"pairing.respond": { accepted: boolean };
 	"remote.status": RemoteAccessStatus;

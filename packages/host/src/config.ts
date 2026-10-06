@@ -16,9 +16,22 @@ const WorkspaceSchema = z.object({
 /** Default TCP port of the remote (LAN) listener. */
 export const DEFAULT_REMOTE_PORT = 7433;
 
+const RelayConfigSchema = z.object({
+	enabled: z.boolean(),
+	/** Normalized `ws://` / `wss://` URL (empty until set). */
+	url: z.string(),
+	/** Access token for relays in private mode. */
+	token: z.string().optional(),
+});
+export type RelayConfig = z.infer<typeof RelayConfigSchema>;
+
 const RemoteConfigSchema = z.object({
 	enabled: z.boolean(),
 	port: z.number().int().min(1).max(65535),
+	/** Added in 0.3: register with a Pier Relay so devices can connect from anywhere. */
+	relay: RelayConfigSchema.optional(),
+	/** Added in 0.3: let relayed connections move to a peer-to-peer path (default on). */
+	p2p: z.boolean().optional(),
 });
 export type RemoteConfig = z.infer<typeof RemoteConfigSchema>;
 

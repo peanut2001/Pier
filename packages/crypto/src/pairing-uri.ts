@@ -1,5 +1,6 @@
 import { fromBase64Url, toBase64Url } from "./bytes.ts";
 import { DHLEN } from "./noise.ts";
+import { normalizeRelayUrl } from "./relay.ts";
 
 export const PAIRING_URI_VERSION = 1;
 
@@ -11,11 +12,13 @@ export interface PairingInfo {
 	hostPublicKey: Uint8Array;
 	/** Candidate `host:port` addresses, tried in order. IPv6 hosts are bracketed. */
 	addresses: string[];
+	/** Pier Relay URLs the host is registered with (`ws://` / `wss://`), tried after the addresses. */
+	relays?: string[];
 	/** One-time pairing code. */
 	code: string;
 }
 
-/** `pier://pair?v=1&host=<id>&name=<name>&pk=<base64url>&addr=<a,b>&code=<code>` */
+/** `pier://pair?v=1&host=<id>&name=<name>&pk=<base64url>&addr=<a,b>&relay=<url,url>&code=<code>` */
 export function formatPairingUri(info: PairingInfo): string {
 	const params = [
 		["v", String(PAIRING_URI_VERSION)],
@@ -23,6 +26,7 @@ export function formatPairingUri(info: PairingInfo): string {
 		["name", info.hostName],
 		["pk", toBase64Url(info.hostPublicKey)],
 		["addr", info.addresses.join(",")],
+		...(info.relays?.length ? [["relay", info.relays.join(",")]] : []),
 		["code", info.code],
 	];
 	return `pier://pair?${params.map(([k, v]) => `${k}=${encodeURIComponent(v ?? "")}`).join("&")}`;
@@ -79,8 +83,25 @@ export function parsePairingUri(text: string): PairingInfo {
 		.split(",")
 		.map((a) => a.trim())
 		.filter((a) => ADDRESS.test(a));
-	if (!addresses.length) throw new PairingUriError("Pairing code contains no reachable address");
-	return { hostId, hostName: params.get("name") || "Pier", hostPublicKey, addresses, code };
+	const relays: string[] = [];
+	for (const item of (params.get("relay") ?? "").split(",")) {
+		if (!item.trim()) continue;
+		try {
+			const url = normalizeRelayUrl(item);
+			if (!relays.includes(url)) relays.push(url);
+		} catch {
+			// Skip relays this version cannot use.
+		}
+	}
+	if (!addresses.length && !relays.length) throw new PairingUriError("Pairing code contains no reachable address");
+	return {
+		hostId,
+		hostName: params.get("name") || "Pier",
+		hostPublicKey,
+		addresses,
+		...(relays.length ? { relays: relays.slice(0, 4) } : {}),
+		code,
+	};
 }
 
 /** `ws://` URL for a `host:port` address. */
