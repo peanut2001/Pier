@@ -356,12 +356,6 @@ export function panel(): void {
 			required: true,
 		});
 		const confirmPassword = input({ type: "password", autocomplete: "new-password", maxlength: 256 });
-		const code = input({
-			autocomplete: "off",
-			placeholder: "XXXX-XXXX-XXXX",
-			class: "input mono",
-			spellcheck: "false",
-		});
 		const submit = h(
 			"button",
 			{ class: "btn primary block", type: "submit" },
@@ -372,8 +366,8 @@ export function panel(): void {
 			void busy(submit, errorBox, async () => {
 				if (tab !== "login" && password.value !== confirmPassword.value) throw new Error("两次输入的密码不一致");
 				const body: Record<string, string> = { username: username.value.trim(), password: password.value };
-				if (tab === "setup") body.code = code.value;
-				const result = await call<{ pending?: boolean }>("POST", tab, body);
+				// The first account registers like any other and becomes the administrator.
+				const result = await call<{ pending?: boolean }>("POST", tab === "login" ? "login" : "register", body);
 				if (result.pending) {
 					authScreen(s, "login", h("div", { class: "alert ok" }, "注册成功。管理员审核通过后即可登录。"));
 					return;
@@ -402,7 +396,7 @@ export function panel(): void {
 					);
 		const lead =
 			tab === "setup"
-				? "还没有管理员。初始化码在中继启动时打印到日志中（例如 docker logs pier-relay），用它创建第一个管理员账号。"
+				? "这个中继还没有账号。第一个注册的账号将成为管理员，可以审核其他账号并修改中继设置。"
 				: tab === "register"
 					? s.registration === "approval"
 						? "注册后需要管理员审核，通过后即可登录并创建访问令牌。"
@@ -416,13 +410,12 @@ export function panel(): void {
 					"div",
 					{ class: "auth-card" },
 					brand("中继管理后台"),
-					tab === "setup" ? h("h1", null, "初始化管理员") : tabs,
+					tab === "setup" ? h("h1", null, "创建管理员账号") : tabs,
 					lead ? h("p", { class: "lead" }, lead) : null,
 					errorBox,
 					h(
 						"form",
 						{ onsubmit: onSubmit },
-						tab === "setup" ? field("初始化码", code) : null,
 						field("用户名", username, tab === "login" ? undefined : "3–32 个字符：字母、数字、下划线、点或连字符"),
 						field("密码", password, tab === "login" ? undefined : "至少 8 个字符"),
 						tab === "login" ? null : field("确认密码", confirmPassword),
@@ -432,7 +425,7 @@ export function panel(): void {
 				),
 			),
 		);
-		(tab === "setup" ? code : username).focus();
+		username.focus();
 	}
 
 	// ---- shell ----------------------------------------------------------------------------

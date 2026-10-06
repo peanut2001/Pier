@@ -8,7 +8,7 @@
  * custom headers cross-origin without a CORS preflight, which this API never allows, so other
  * sites cannot make a logged-in browser act on the panel (the cookie is also `SameSite=Strict`).
  */
-import { randomBytes, randomInt, timingSafeEqual } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { RelayMode } from "@pier/crypto";
 import { adminPage } from "./admin-page.ts";
@@ -48,7 +48,7 @@ export interface AdminOptions {
 	stunPort: number | undefined;
 	startedAt: number;
 	version: string;
-	/** Login, registration and setup attempts per client address per minute (default 20). */
+	/** Login and registration attempts per client address per minute (default 20). */
 	authAttemptsPerMinute?: number;
 }
 
@@ -71,22 +71,6 @@ class HttpError extends Error {
 	) {
 		super(message);
 	}
-}
-
-/** `XXXX-XXXX-XXXX` from an alphabet without look-alikes. */
-function newSetupCode(): string {
-	const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-	let code = "";
-	for (let i = 0; i < 12; i++) code += alphabet[randomInt(alphabet.length)];
-	return code.replace(/(.{4})(?=.)/g, "$1-");
-}
-
-const normalizeCode = (code: string) => code.toUpperCase().replace(/[^A-Z0-9]/g, "");
-
-function sameText(a: string, b: string): boolean {
-	const x = Buffer.from(a);
-	const y = Buffer.from(b);
-	return x.length === y.length && timingSafeEqual(x, y);
 }
 
 function cookies(req: IncomingMessage): Map<string, string> {
@@ -184,10 +168,8 @@ export function parseSettings(body: Record<string, unknown>): {
 
 export function createAdmin(options: AdminOptions): RelayAdmin {
 	const { store, relay, log } = options;
-	let setupCode: string | undefined;
 	if (!store.hasUsers) {
-		setupCode = newSetupCode();
-		log(`admin panel: no administrator yet; open the relay's web address and create one with setup code ${setupCode}`);
+		log("admin panel: no accounts yet; the first account registered on the relay's web page becomes the administrator");
 	}
 
 	const attempts = new Map<string, number[]>();
@@ -314,31 +296,13 @@ export function createAdmin(options: AdminOptions): RelayAdmin {
 					registration: store.registration,
 					user: me ? { id: me.id, username: me.username, role: me.role } : null,
 				});
-			case "POST setup": {
-				throttle(address);
-				const body = await readJson(req);
-				if (store.hasUsers || !setupCode) throw new HttpError(409, "已经有管理员了，请直接登录");
-				if (typeof body.code !== "string" || !sameText(normalizeCode(body.code), normalizeCode(setupCode))) {
-					throw new HttpError(403, "初始化码不正确，请在中继的日志中查看");
-				}
-				const user = await store.createUser(body.username, body.password, "admin", "active");
-				setupCode = undefined;
-				log(`admin panel: administrator ${user.username} created from ${address}`);
-				return startSession(req, res, base, user);
-			}
 			case "POST register": {
 				throttle(address);
 				const body = await readJson(req);
-				if (!store.hasUsers) throw new HttpError(403, "请先用初始化码创建管理员");
-				const policy = store.registration;
-				if (policy === "closed") throw new HttpError(403, "管理员关闭了注册");
-				const user = await store.createUser(
-					body.username,
-					body.password,
-					"user",
-					policy === "open" ? "active" : "pending",
+				const user = await store.registerUser(body.username, body.password, store.registration);
+				log(
+					`admin panel: ${user.username} registered from ${address}${user.role === "admin" ? " (first account: administrator)" : user.status === "pending" ? " (pending)" : ""}`,
 				);
-				log(`admin panel: ${user.username} registered from ${address}${user.status === "pending" ? " (pending)" : ""}`);
 				if (user.status === "pending") return sendJson(res, 202, { pending: true });
 				return startSession(req, res, base, user);
 			}

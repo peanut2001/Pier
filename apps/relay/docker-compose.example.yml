@@ -1,7 +1,7 @@
 # Example: Pier Relay with the web admin panel. Copy to docker-compose.yml and put a TLS
 # reverse proxy (Caddy, nginx, OpenResty) in front of port 7480 so Pier can use wss://.
-# On first start, open the relay's address and create the administrator with the setup code
-# from the log: docker compose logs pier-relay | grep "setup code"
+# On first start, open the relay's address and register: the first account becomes the
+# administrator, so do it right after deploying.
 services:
   pier-relay:
     image: ghcr.io/yiranxiaohui/pier-relay:latest

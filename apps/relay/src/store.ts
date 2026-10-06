@@ -251,25 +251,30 @@ export class RelayStore {
 		return this.data.users.find((u) => u.username.toLowerCase() === wanted);
 	}
 
-	async createUser(
-		usernameInput: unknown,
-		passwordInput: unknown,
-		role: UserRole,
-		status: UserStatus,
-	): Promise<StoredUser> {
+	/**
+	 * Register an account. The first account becomes an active administrator whatever the
+	 * policy; later ones are refused (`closed`), wait for approval (`approval`) or are active.
+	 */
+	async registerUser(usernameInput: unknown, passwordInput: unknown, policy: RegistrationPolicy): Promise<StoredUser> {
 		const username = validateUsername(usernameInput);
 		const password = validatePassword(passwordInput);
-		if (this.userByName(username)) throw new StoreError(409, "用户名已被使用");
+		const check = () => {
+			if (this.hasUsers && policy === "closed") throw new StoreError(403, "管理员关闭了注册");
+			if (this.userByName(username)) throw new StoreError(409, "用户名已被使用");
+		};
+		check();
+		const hash = await hashPassword(password);
+		// Decided after hashing, which yields to other requests: only one account can be first.
+		check();
+		const first = !this.hasUsers;
 		const user: StoredUser = {
 			id: newId(),
 			username,
-			password: await hashPassword(password),
-			role,
-			status,
+			password: hash,
+			role: first ? "admin" : "user",
+			status: first || policy === "open" ? "active" : "pending",
 			createdAt: Date.now(),
 		};
-		// Checked again: hashing yields to other requests.
-		if (this.userByName(username)) throw new StoreError(409, "用户名已被使用");
 		this.data.users.push(user);
 		await this.save();
 		return user;
