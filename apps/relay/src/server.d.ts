@@ -1,5 +1,5 @@
 import { type IceServer, type RelayMode } from "@pier/crypto";
-export declare const RELAY_VERSION = "0.2.21";
+export declare const RELAY_VERSION = "0.2.22";
 export interface RelayServerOptions {
 	/** TCP port for HTTP / WebSocket (default 7480; 0 picks a free port). */
 	port?: number;
