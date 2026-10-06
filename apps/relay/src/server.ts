@@ -23,7 +23,7 @@ import {
 import { type RawData, WebSocket, WebSocketServer } from "ws";
 import { type StunServer, startStunServer } from "./stun.ts";
 
-export const RELAY_VERSION = "0.2.21";
+export const RELAY_VERSION = "0.2.22";
 
 export interface RelayServerOptions {
 	/** TCP port for HTTP / WebSocket (default 7480; 0 picks a free port). */
