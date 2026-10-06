@@ -28,6 +28,116 @@ export function updatePending(update: UpdateStatus | AppUpdateStatus): boolean {
 	);
 }
 
+/** Download progress in percent, when the size is known. */
+function downloadPercent(update: UpdateStatus): number | undefined {
+	const total = update.total ?? 0;
+	return total ? Math.min(100, Math.round((update.downloaded / total) * 100)) : undefined;
+}
+
+/**
+ * The update notice at the bottom of the sidebar: shows that a new version is out, its
+ * download / install progress, and a one-click install, so nobody has to look for it in the
+ * settings. Renders nothing while no update is pending.
+ */
+export function SidebarUpdate() {
+	const store = useStore();
+	const update = useAppState((s) => s.update);
+	const [busySessions, setBusySessions] = useState<number | undefined>(undefined);
+	const [checking, setChecking] = useState(false);
+	const pending = updatePending(update) && !!update.version;
+	const working = update.state === "downloading" || update.state === "installing";
+	const confirm = !!busySessions && !working;
+
+	// A new pending version (or a finished install attempt) starts over without the warning.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: reset when the version or state changes.
+	useEffect(() => setBusySessions(undefined), [update.version, update.state]);
+
+	if (!pending) return null;
+
+	const install = async () => {
+		if (!confirm) {
+			// Warn before stopping agents that are still working.
+			setChecking(true);
+			const count = await store.busySessionCount().catch(() => 0);
+			setChecking(false);
+			if (count) {
+				setBusySessions(count);
+				return;
+			}
+		}
+		setBusySessions(undefined);
+		void store.installUpdate();
+	};
+
+	const percent = downloadPercent(update);
+	let title: string;
+	let detail: string;
+	let tone = "";
+	if (update.state === "downloading") {
+		title = percent === undefined ? "正在下载更新…" : `正在下载 ${percent}%`;
+		detail = `Pier v${update.version}`;
+	} else if (update.state === "installing") {
+		title = "正在安装更新…";
+		detail = "完成后 Pier 会自动重启";
+	} else if (update.state === "error") {
+		title = "更新失败";
+		detail = update.error ?? `Pier v${update.version} 安装失败`;
+		tone = " error";
+	} else if (confirm) {
+		title = `${busySessions} 个会话正在运行`;
+		detail = "更新会中断它们，重启后可继续";
+		tone = " warning";
+	} else {
+		title = `新版本 v${update.version}`;
+		detail = `当前 v${update.currentVersion}`;
+	}
+
+	return (
+		<div className={`sidebar-update${tone}`}>
+			<button
+				type="button"
+				className="sidebar-update-info"
+				title="查看更新详情"
+				onClick={() => store.openSettings("about")}
+			>
+				<span className="sidebar-update-icon">
+					{working ? (
+						<IconLoader size={14} className="spin" />
+					) : update.state === "error" || confirm ? (
+						<IconAlert size={14} />
+					) : (
+						<IconDownload size={14} />
+					)}
+				</span>
+				<span className="sidebar-update-text">
+					<span className="sidebar-update-title">{title}</span>
+					<span className="sidebar-update-detail">{detail}</span>
+				</span>
+			</button>
+			{working ? null : (
+				<button
+					type="button"
+					className={`sidebar-update-action ${confirm ? "danger" : "primary"}`}
+					disabled={checking}
+					title={confirm ? "中断正在运行的会话并更新" : "下载并安装更新，完成后自动重启"}
+					onClick={() => void install()}
+					onBlur={() => setBusySessions(undefined)}
+				>
+					{confirm ? "仍然更新" : update.state === "error" ? "重试" : "更新"}
+				</button>
+			)}
+			{update.state === "downloading" ? (
+				<div className="sidebar-update-track">
+					<div
+						className={`update-progress-bar${percent === undefined ? " indeterminate" : ""}`}
+						style={percent === undefined ? undefined : { width: `${percent}%` }}
+					/>
+				</div>
+			) : null}
+		</div>
+	);
+}
+
 function Progress({ update }: { update: UpdateStatus }) {
 	const total = update.total ?? 0;
 	const percent = total ? Math.min(100, Math.round((update.downloaded / total) * 100)) : undefined;

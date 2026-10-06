@@ -422,6 +422,133 @@
 	padding: 8px 10px 10px;
 }
 
+/* ---- update notice ---------------------------------------------------------------- */
+
+/* A pending update, above the settings entry: one click installs it. */
+.sidebar-update {
+	position: relative;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin: 6px 10px 0;
+	padding: 6px 8px 6px 6px;
+	overflow: hidden;
+	border: 1px solid var(--border-strong);
+	border-radius: var(--radius);
+	background: var(--bg-elevated);
+	box-shadow: var(--highlight);
+	animation: sidebar-update-in 0.25s var(--ease);
+}
+
+.sidebar-update.warning {
+	border-color: var(--warning-line);
+	background: var(--warning-soft);
+}
+
+.sidebar-update.error {
+	border-color: var(--danger-line);
+	background: var(--danger-soft);
+}
+
+button.sidebar-update-info {
+	flex: 1;
+	min-width: 0;
+	justify-content: flex-start;
+	gap: 9px;
+	padding: 2px 4px;
+	border: none;
+	background: transparent;
+	font-weight: 400;
+	text-align: left;
+}
+
+button.sidebar-update-info:hover:not(:disabled) {
+	background: transparent;
+}
+
+.sidebar-update-icon {
+	display: inline-flex;
+	flex: none;
+	align-items: center;
+	justify-content: center;
+	width: 26px;
+	height: 26px;
+	border-radius: 50%;
+	background: var(--brand-gradient);
+	color: #fff;
+	box-shadow: 0 2px 8px -2px var(--brand-glow);
+}
+
+.sidebar-update.warning .sidebar-update-icon {
+	background: var(--warning);
+	box-shadow: none;
+}
+
+.sidebar-update.error .sidebar-update-icon {
+	background: var(--danger);
+	box-shadow: none;
+}
+
+.sidebar-update-text {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+}
+
+.sidebar-update-title,
+.sidebar-update-detail {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.sidebar-update-title {
+	color: var(--text);
+	font-size: 13px;
+	font-weight: 600;
+	transition: color 0.15s var(--ease);
+}
+
+.sidebar-update-detail {
+	color: var(--text-muted);
+	font-size: 11.5px;
+}
+
+button.sidebar-update-info:hover .sidebar-update-title {
+	color: var(--accent-text);
+}
+
+button.sidebar-update-action {
+	flex: none;
+	padding: 3px 12px;
+	border-radius: 999px;
+	font-size: 12.5px;
+}
+
+/* Download progress along the bottom edge. */
+.sidebar-update-track {
+	position: absolute;
+	right: 0;
+	bottom: 0;
+	left: 0;
+	height: 2px;
+	overflow: hidden;
+	background: var(--bg-active);
+}
+
+@keyframes sidebar-update-in {
+	from {
+		opacity: 0;
+		transform: translateY(4px);
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.sidebar-update {
+		animation: none;
+	}
+}
+
 /* ---- workspaces of other computers --------------------------------------------- */
 
 /* The paired computer a workspace lives on (this computer's workspaces show no tag). */
