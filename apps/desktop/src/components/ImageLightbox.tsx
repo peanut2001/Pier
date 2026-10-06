@@ -13,8 +13,8 @@ export function ImageLightbox({ src, alt, onClose }: { src: string; alt: string;
 	}, [onClose]);
 	return createPortal(
 		// biome-ignore lint/a11y/useKeyWithClickEvents lint/a11y/noStaticElementInteractions: Esc is handled on window.
-		<div className="lightbox" onClick={onClose}>
-			<img src={src} alt={alt} onClick={(e) => e.stopPropagation()} />
+		<div className="lightbox" onClick={(e) => e.target === e.currentTarget && onClose()}>
+			<img src={src} alt={alt} />
 			<button type="button" className="ghost icon lightbox-close" onClick={onClose} title="关闭（Esc）">
 				<IconX size={18} />
 			</button>
