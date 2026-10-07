@@ -346,9 +346,10 @@ export class TerminalManager {
 		if (event.type !== "keydown") return true;
 		const lower = event.key.toLowerCase();
 		const mod = isMac ? event.metaKey : event.ctrlKey;
-		// App shortcuts: Ctrl+` toggles the terminal (on macOS too, like editors), Ctrl/⌘+Shift+E the file panel.
+		// App shortcuts: Ctrl+` toggles the terminal (on macOS too, like editors), Ctrl/⌘+Shift+E / G the file and
+		// source control views.
 		if (event.ctrlKey && !event.altKey && !event.metaKey && event.key === "`") return false;
-		if (mod && event.shiftKey && !event.altKey && lower === "e") return false;
+		if (mod && event.shiftKey && !event.altKey && (lower === "e" || lower === "g")) return false;
 		if (isMac) {
 			if (event.metaKey && !event.ctrlKey && !event.altKey && lower === "k") {
 				event.preventDefault();

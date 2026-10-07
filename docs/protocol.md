@@ -1,4 +1,4 @@
-# Pier 协议 v1.27
+# Pier 协议 v1.28
 
 > 实现：`packages/protocol`（zod schema + TS 类型，Host 与所有客户端共享）。
 > 本文档描述线上格式与语义；字段的权威定义以 `packages/protocol/src` 为准。
@@ -60,7 +60,7 @@
 
 ```jsonc
 { "type": "req", "id": "h", "method": "host.hello", "params": {
-  "protocolVersion": "1.27",
+  "protocolVersion": "1.28",
   "client": { "name": "pier-desktop", "version": "0.1.0", "platform": "darwin" },
   "token": "<本地 token>",       // 本地连接必填；远程连接由加密通道认证，不需要
   "coalesceMs": 50               // 可选：合并流式增量的窗口（0–1000ms，默认 0）
@@ -75,7 +75,7 @@
 
 ## 3. 方法
 
-参数中的 `sessionId` 均为 pi 会话 ID。标注 🔒 的方法仅本地桌面连接可调用（`LOCAL_ONLY_METHODS`），它们决定谁能连接这台电脑：设备、配对、远程访问与 `peer.*`。其余方法对已配对的远程设备（手机和其他电脑）同样开放（1.10）：配对即完全信任，可以管理工作区与审批策略、编辑文件、配置服务商与模型、账号和扩展；1.9 及以前这些方法也仅限本地。
+参数中的 `sessionId` 均为 pi 会话 ID。标注 🔒 的方法仅本地桌面连接可调用（`LOCAL_ONLY_METHODS`），它们决定谁能连接这台电脑：设备、配对、远程访问与 `peer.*`，另外还有在本机回环地址上监听的 `loopback.*`（1.28）。其余方法对已配对的远程设备（手机和其他电脑）同样开放（1.10）：配对即完全信任，可以管理工作区与审批策略、编辑文件、配置服务商与模型、账号和扩展；1.9 及以前这些方法也仅限本地。
 
 ### host
 
@@ -136,6 +136,29 @@ sidecar 的 stdio 协议：桌面端用 `--shell-terminals` 启动 Host，声明
 | `workspace.uploadChunk` | `{ uploadId, offset, data }` | `{ received }`；向上传追加 Base64 数据（1.21）。`offset` 必须等于已收到的字节数，否则 `CONFLICT`（`data.received` 为已收到的字节数，可据此续传）；超过 `chunkBytes` 或累计超过 `size` 时 `BAD_REQUEST`；上传不存在、已过期或属于其他连接时 `NOT_FOUND`；同一上传同时只处理一个请求 |
 | `workspace.uploadFinish` | `{ uploadId }` | `{ path, size, modifiedAt }`；把收齐的上传移动到目标路径（1.21）。未收齐时 `BAD_REQUEST`（`data.received`），上传保留可继续；目标在上传期间变成目录，或未给 `overwrite` 而目标已出现时 `CONFLICT`，上传被丢弃。远程调用写入审计日志 |
 | `workspace.uploadCancel` | `{ uploadId }` | `{ cancelled }`；取消上传并删除已收到的数据（1.21）。上传不存在或属于其他连接时 `cancelled: false` |
+
+### Git 源代码管理（1.28）
+
+Host 用它所在电脑上的 `git` 命令行（`PATH` 中的，或环境变量 `PIER_GIT` 指定的绝对路径）管理工作区所在的 Git 仓库，供桌面端右侧面板的「源代码管理」使用。仓库是工作区所在的工作树（工作区可以是仓库的子目录，此时操作整个仓库）；以下 `path` / `paths` 都是相对**仓库根目录**的路径（`/` 分隔，绝对路径或含 `..` 时 `BAD_REQUEST`），按字面匹配（`GIT_LITERAL_PATHSPECS`），不作为通配符。Git 以参数数组直接运行（不经过 shell），在仓库根目录中执行，不继承 `GIT_DIR` 等指向其他仓库的环境变量，并且没有终端：`GIT_TERMINAL_PROMPT=0`，类 Unix 系统上在新会话中运行，凭据或主机密钥需要交互输入时直接失败而不是等待（凭据助手、SSH agent 照常可用）。改变仓库的命令在同一仓库上依次执行。Git 返回非零退出码时为 `CONFLICT`，`message` 为 Git 的输出（去掉 `hint:` 行），`data.exitCode` 为退出码；运行超时（本地命令 60 秒，`commit` 与网络命令 5 分钟）时 `CONFLICT`。工作区不在仓库中时除 `git.status` / `git.init` 外返回 `NOT_FOUND`，没有安装 Git 时返回 `UNSUPPORTED`。对已配对设备开放，远程调用改变仓库的方法写入审计日志（只记录路径数量、分支名，不记录提交信息）。
+
+| 方法 | 参数 | 结果 |
+|---|---|---|
+| `git.status` | `{ workspaceId }` | `GitStatus = { repository, gitMissing?, root?, prefix?, branch?, head?, upstream?, ahead?, behind?, remotes?, operation?, files?, truncated? }`。不在仓库中时 `{ repository: false }`，没有安装 Git 时另有 `gitMissing: true`。`root` 为仓库根目录的绝对路径，`prefix` 为工作区相对 `root` 的路径（`""` 为根目录）；`branch` 为当前分支（HEAD 游离时省略），`head` 为 HEAD 的完整哈希（还没有提交时省略），`upstream` / `ahead` / `behind` 为上游分支及领先、落后的提交数；`remotes` 为远程仓库名；`operation` 为进行中的 `merge`\|`rebase`\|`cherry-pick`\|`revert`\|`bisect`。`files: GitFileStatus[] = { path, origPath?, index, worktree, conflict?, submodule? }` 来自 `git status --porcelain=v2 --untracked-files=all`，`index` / `worktree` 为暂存区与工作区一侧的状态字母（`.` 未改变，`M` `T` `A` `D` `R` `C` `U`），未跟踪的路径两侧均为 `?`，冲突路径带 `conflict: true`，`origPath` 为重命名或复制前的路径；最多 5000 项，超出时 `truncated: true` |
+| `git.diff` | `{ workspaceId, path, origPath?, staged? }` | `GitDiffResult = { diff, truncated? }`；一个路径的统一差异（`git diff` 的输出，最多 2 MiB，超出时 `truncated: true`）。`staged` 时为暂存区相对 HEAD，否则为工作区相对暂存区；未跟踪的文件显示为整个新增；`origPath` 让暂存的重命名作为一个文件比较 |
+| `git.log` | `{ workspaceId, limit?(50, ≤500), skip? }` | `{ commits: GitCommitInfo[] }`，`GitCommitInfo = { hash, shortHash, subject, authorName, authorEmail, date, refs?, parents }`；从 HEAD 可达的提交，新的在前，`refs` 为 `git log --format=%D` 的引用名，`date` 为作者时间（ISO 8601）。还没有提交时为空 |
+| `git.show` | `{ workspaceId, commit }` | `GitDiffResult`；一个提交（4–64 位十六进制哈希）的完整信息、变更统计与差异（`git show --stat --patch --format=fuller`，最多 2 MiB）。提交不存在时 `NOT_FOUND` |
+| `git.branches` | `{ workspaceId }` | `{ branches: GitBranchInfo[] }`，`GitBranchInfo = { name, remote, current?, upstream?, ahead?, behind?, upstreamGone?, shortHash, subject, date }`；本地分支与远程跟踪分支（不含 `<远程>/HEAD`），按最近提交时间排序 |
+| `git.stage` | `{ workspaceId, paths? }` | `GitCommandResult = { output }`；暂存路径（`git add -A`，包括删除），省略 `paths` 时暂存所有更改。暂存冲突路径即标记为已解决。`paths` 最多 20000 项 |
+| `git.unstage` | `{ workspaceId, paths? }` | `{ output }`；取消暂存路径（`git reset`；还没有提交时从暂存区移除），省略 `paths` 时取消暂存所有更改 |
+| `git.discard` | `{ workspaceId, paths }` | `{ output }`；放弃路径在工作区中的更改：已跟踪的文件恢复为暂存区中的内容，未跟踪的文件被删除（`git clean -f`），没有更改的路径被忽略。无法撤销 |
+| `git.commit` | `{ workspaceId, message, amend?, all? }` | `GitCommitResult = { hash, output }`；提交暂存区，`all` 时先暂存已跟踪文件的更改（`git commit -a`），`amend` 时修改上一个提交（`message` 为空则保留原提交信息）。不修改时 `message` 不能为空（`BAD_REQUEST`）。会运行仓库的提交钩子 |
+| `git.checkout` | `{ workspaceId, branch, create?, startPoint? }` | `{ output }`；切换到本地分支（`git switch`）。`branch` 为远程跟踪分支（如 `origin/x`）时切换到本地分支 `x`，没有时新建并跟踪它；`create` 时新建分支 `branch`（从 `startPoint`，默认 HEAD）并切换。分支名不能以 `-` 开头或含空白，且须通过 `git check-ref-format --branch`，否则 `BAD_REQUEST`；分支不存在时 `NOT_FOUND`。未提交的更改与目标分支冲突时 Git 拒绝切换（`CONFLICT`） |
+| `git.deleteBranch` | `{ workspaceId, branch, force? }` | `{ output }`；删除本地分支（`git branch -d`，`force` 时 `-D`，即使没有合并）。不能删除当前分支 |
+| `git.fetch` | `{ workspaceId }` | `{ output }`；抓取所有远程仓库并清理已删除的远程分支（`git fetch --all --prune`） |
+| `git.pull` | `{ workspaceId, rebase? }` | `{ output }`；从上游拉取当前分支（`git pull --no-edit`，`rebase` 时 `--rebase`），合并方式否则遵循仓库配置 |
+| `git.push` | `{ workspaceId, force? }` | `{ output }`；推送当前分支（`force` 时 `--force-with-lease`）。还没有上游时推送到 `origin`（没有时用第一个远程仓库）的同名分支并设为上游；HEAD 游离或没有远程仓库时 `CONFLICT` |
+| `git.stash` | `{ workspaceId, action: "push"\|"pop", message? }` | `{ output }`；储藏所有更改（包括未跟踪的文件），或应用并删除最近的储藏 |
+| `git.init` | `{ workspaceId }` | `{ output }`；在工作区目录中新建仓库。工作区已在仓库中时 `CONFLICT` |
 
 ### Agent 运行时（1.22）
 
@@ -266,8 +289,9 @@ pi 终端界面自带的命令（`/model`、`/compact`、`/new`、`/fork`、`/na
 | `account.status` | — | `{ site?, siteError?, user? }`；`site = AccountSite = { name, url, version?, logo?, registerEnabled, emailVerification, passwordLogin, browserLogin, turnstile, oauth: string[], quota: { perUnit, type, usdRate?, customSymbol?, customRate? } }`（来自站点的 `/api/status`，`type` 为 `USD`、`CNY`、`CUSTOM` 或 `TOKENS`）；`user` 为保存的登录，没有登录时省略 |
 | `account.login` | `{ username, password }` 或 `{ accessToken, userId? }` | `AccountLoginResult`：`{ status: "ok", overview }` 或需要两步验证时 `{ status: "verify", methods }`。站点开启 Turnstile 时密码登录返回 `BAD_REQUEST` |
 | `account.verify` | `{ code }` | `AccountLoginResult`；提交两步验证码（或备用码） |
-| `account.authorizeStart` | — | `{ flowId, authorizeUrl, expiresAt }`（1.16）；见下文「浏览器登录」。站点不支持时 `BAD_REQUEST` |
+| `account.authorizeStart` | `{ redirectUri? }`（`redirectUri` 1.28） | `{ flowId, authorizeUrl, expiresAt }`（1.16）；见下文「浏览器登录」。站点不支持或 `redirectUri` 不是 `http://127.0.0.1:<端口>/callback` 时 `BAD_REQUEST` |
 | `account.authorizeWait` | `{ flowId }` | `AccountLoginResult`（1.16）；用户在浏览器中登录并同意后返回 `{ status: "ok", overview }` 并保存登录。拒绝、超时、取消或换取失败时返回错误 |
+| `account.authorizeCallback` | `{ flowId, query }` | `{ status, title, detail }`（1.28）；转交客户端在自己电脑上接到的回调（`query` 为回调地址的查询串，如 `?code=…&state=…`），处理完后返回浏览器应显示的页面；只用于带 `redirectUri` 启动的流程，否则 `BAD_REQUEST` |
 | `account.authorizeCancel` | `{ flowId }` | `{ cancelled }`（1.16） |
 | `account.sendCode` | `{ email }` | `{ sent: true }`；发送注册邮箱验证码（`GET /api/verification`） |
 | `account.register` | `{ username, password, email?, code?, affCode? }` | `AccountLoginResult`；注册（`POST /api/user/register`，用户名最多 20 个字符、密码 8–128 位，站点开启邮箱验证时必须提供 `email` 和 `code`，`affCode` 为邀请码）后立即登录。站点关闭注册或开启 Turnstile 时 `BAD_REQUEST` |
@@ -278,7 +302,25 @@ pi 终端界面自带的命令（`/model`、`/compact`、`/new`、`/fork`、`/na
 
 #### 浏览器登录（1.16）
 
-`site.browserLogin` 为 `true`（站点的 `/api/status` 返回 `app_authorization_enabled: true`，且 `app_authorization_scopes` 包含 `account`）时，个人中心只在浏览器中登录，Pier 不接触密码：用户可以用站点支持的任意方式登录（账号密码、GitHub、LinuxDO、Passkey、人机验证等），在授权页面同意后，站点为 Pier 建立一个独立的登录会话（登录方式为「应用」，出现在网页「登录会话」中，可以随时注销）。流程与上文的 `newapi.authorize*` 相同（RFC 8252 回环重定向 + PKCE S256），区别是授权页面地址带 `scope=account`、不带 `key_name`，站点不会新建令牌，`POST /api/app-auth/token` 返回 `{ scope: "account", access_token, access_expires_at, refresh_token, session, user }`。Host 把 `refresh_token` 当作刷新 Cookie 使用，与密码登录一样只保存它，并自动续期。流程属于发起的连接；因为浏览器会跳回 Host 所在电脑的回环地址，所以只适用于本地 UI。Host 请求 NewAPI 站点时使用 `User-Agent: Pier/<版本> (<系统>)`。不支持的站点仍然使用 `account.login` / `account.register`。
+`site.browserLogin` 为 `true`（站点的 `/api/status` 返回 `app_authorization_enabled: true`，且 `app_authorization_scopes` 包含 `account`）时，个人中心只在浏览器中登录，Pier 不接触密码：用户可以用站点支持的任意方式登录（账号密码、GitHub、LinuxDO、Passkey、人机验证等），在授权页面同意后，站点为 Pier 建立一个独立的登录会话（登录方式为「应用」，出现在网页「登录会话」中，可以随时注销）。流程与上文的 `newapi.authorize*` 相同（RFC 8252 回环重定向 + PKCE S256），区别是授权页面地址带 `scope=account`、不带 `key_name`，站点不会新建令牌，`POST /api/app-auth/token` 返回 `{ scope: "account", access_token, access_expires_at, refresh_token, session, user }`。Host 把 `refresh_token` 当作刷新 Cookie 使用，与密码登录一样只保存它，并自动续期。流程属于发起的连接。默认浏览器会跳回 Host 所在电脑的回环地址，只适用于本地 UI；设置其他电脑时见下文「为其他电脑登录」。Host 请求 NewAPI 站点时使用 `User-Agent: Pier/<版本> (<系统>)`。不支持的站点仍然使用 `account.login` / `account.register`。
+
+#### 为其他电脑登录（1.28）
+
+浏览器运行在用户面前的电脑上，只能跳回这台电脑的回环地址。桌面端设置已配对的电脑时，由本机 Host 代收回调，再转交给发起登录的那台电脑：
+
+1. 在本机调用 `loopback.open`，得到 `{ relayId, redirectUri }`（`http://127.0.0.1:<随机端口>/callback`）；
+2. 在那台电脑调用 `account.authorizeStart { redirectUri }`。它照常生成 `state` 与 `code_verifier`，但不监听端口，授权页面地址中的 `redirect_uri` 就是这个地址；
+3. 在本机浏览器中打开 `authorizeUrl`，并在那台电脑调用 `account.authorizeWait`；同时循环调用本机的 `loopback.next`，把每个回调的 `query` 用 `account.authorizeCallback` 交给那台电脑，再把返回的页面用 `loopback.respond` 显示在浏览器中；
+4. 那台电脑校验 `state`（不符时返回 400 页面且不影响流程），用自己保存的 `code_verifier` 换取登录并保存，`account.authorizeWait` 随之返回；完成后调用 `loopback.close`。
+
+`code_verifier` 始终留在发起登录的电脑上，本机代收的授权码单独无法换取凭据。旧版本 Host 忽略 `redirectUri`，因此桌面端只对协议 1.28 及以上的电脑这样做。
+
+| 方法 | 参数 | 结果 |
+|---|---|---|
+| `loopback.open` 🔒 | — | `{ relayId, redirectUri, expiresAt }`；在 `127.0.0.1` 的随机端口监听 `/callback`（11 分钟后、调用 `loopback.close` 或连接断开时关闭）。其他路径返回 404 |
+| `loopback.next` 🔒 | `{ relayId }` | `{ requestId, query }`；等待下一个回调。浏览器一直等到 `loopback.respond`，最多 1 分钟后显示「请回到 Pier 查看登录结果」。中继关闭后 `NOT_FOUND` |
+| `loopback.respond` 🔒 | `{ relayId, requestId, status, title, detail }` | `{ responded }`；在浏览器中显示页面；浏览器已断开或已经回复过时为 `false` |
+| `loopback.close` 🔒 | `{ relayId }` | `{ closed }` |
 
 桌面端把每个分组的令牌保存为自定义服务商 `yunlian-<分组>`（名称为「云链API · 分组」，Base URL 为 `<站点>/v1`）；「模型与服务商」中浏览器授权添加的是 `yunlian`。
 

@@ -1,6 +1,6 @@
 {
 	"name": "@pier/desktop",
-	"version": "0.2.22",
+	"version": "0.2.24",
 	"private": true,
 	"type": "module",
 	"scripts": {
@@ -13,7 +13,6 @@
 	},
 	"dependencies": {
 		"@decimalturn/toml-patch": "3.3.0",
-		"@fontsource-variable/inter": "5.3.0",
 		"@pier/chat-state": "workspace:*",
 		"@pier/client": "workspace:*",
 		"@pier/protocol": "workspace:*",

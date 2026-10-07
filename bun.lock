@@ -14,10 +14,9 @@
     },
     "apps/desktop": {
       "name": "@pier/desktop",
-      "version": "0.2.22",
+      "version": "0.2.24",
       "dependencies": {
         "@decimalturn/toml-patch": "3.3.0",
-        "@fontsource-variable/inter": "5.3.0",
         "@pier/chat-state": "workspace:*",
         "@pier/client": "workspace:*",
         "@pier/protocol": "workspace:*",
@@ -45,7 +44,7 @@
     },
     "apps/mobile": {
       "name": "@pier/mobile",
-      "version": "0.2.22",
+      "version": "0.2.24",
       "dependencies": {
         "@expo/metro-runtime": "~57.0.16",
         "@expo/vector-icons": "^15.0.2",
@@ -91,7 +90,7 @@
     },
     "apps/relay": {
       "name": "@pier/relay",
-      "version": "0.2.22",
+      "version": "0.2.24",
       "bin": {
         "pier-relay": "./src/main.ts",
       },
@@ -106,7 +105,7 @@
     },
     "packages/chat-state": {
       "name": "@pier/chat-state",
-      "version": "0.2.22",
+      "version": "0.2.24",
       "dependencies": {
         "@pier/client": "workspace:*",
         "@pier/protocol": "workspace:*",
@@ -114,7 +113,7 @@
     },
     "packages/client": {
       "name": "@pier/client",
-      "version": "0.2.22",
+      "version": "0.2.24",
       "dependencies": {
         "@pier/crypto": "workspace:*",
         "@pier/protocol": "workspace:*",
@@ -122,7 +121,7 @@
     },
     "packages/crypto": {
       "name": "@pier/crypto",
-      "version": "0.2.22",
+      "version": "0.2.24",
       "dependencies": {
         "@noble/ciphers": "^2.4.0",
         "@noble/curves": "^2.4.0",
@@ -132,7 +131,7 @@
     },
     "packages/host": {
       "name": "@pier/host",
-      "version": "0.2.22",
+      "version": "0.2.24",
       "bin": {
         "pier-host": "./src/main.ts",
       },
@@ -160,7 +159,7 @@
     },
     "packages/protocol": {
       "name": "@pier/protocol",
-      "version": "0.2.22",
+      "version": "0.2.24",
       "dependencies": {
         "zod": "^4.6.5",
       },
@@ -527,7 +526,6 @@
 
     "@fidm/x509": ["@fidm/x509@1.2.1", "", { "dependencies": { "@fidm/asn1": "^1.0.4", "tweetnacl": "^1.0.1" } }, "sha512-nwc2iesjyc9hkuzcrMCBXQRn653XuAUKorfWM8PZyJawiy1QzLj4vahwzaI25+pfpwOLvMzbJ0uKpWLDNmo16w=="],
 
-    "@fontsource-variable/inter": ["@fontsource-variable/inter@5.3.0", "", {}, "sha512-OupL48va4JNofb97w6NYeF9S7W/kHNKM0Er8Dem5nqi4jeOLrVJDoE8tZEpnMJmtkvNbB1EIPPwHcdkF6b1oUA=="],
 
     "@google/genai": ["@google/genai@2.21.0", "", { "dependencies": { "google-auth-library": "10.9.1", "p-retry": "4.6.2", "protobufjs": "7.6.6", "ws": "8.22.0" }, "peerDependencies": { "@modelcontextprotocol/sdk": "^1.25.2" }, "optionalPeers": ["@modelcontextprotocol/sdk"] }, "sha512-+PDtco2/Z0ONdzCGekCoCT+O1VJS9xJQNN4XzQpXG/t3El/SWWMkCWlFRO1KmivOHPa4Q0VjUYu1HBKCZ/v33Q=="],
 

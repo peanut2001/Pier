@@ -3,6 +3,7 @@ import { type CSSProperties, useEffect, useState } from "react";
 import { DirectoryPicker } from "./components/DirectoryPicker.tsx";
 import { FilesPanel } from "./components/FilesPanel.tsx";
 import { FilePreview } from "./components/FileViewer.tsx";
+import { GitPanel } from "./components/GitPanel.tsx";
 import { Welcome, WorkspaceHome } from "./components/Home.tsx";
 import { HostBanner } from "./components/HostPanels.tsx";
 import { IconAlert, IconInfo, IconMessage, IconX } from "./components/Icons.tsx";
@@ -96,7 +97,11 @@ function useScreenWorkspace(): { workspace?: WorkspaceInfo; composerKey?: string
 const FILES_CLOSE_MS = 320;
 
 function RightPanel({ workspace, composerKey }: { workspace?: WorkspaceInfo; composerKey?: string }) {
+	const tab = useAppState((s) => s.rightPanelTab);
 	if (!workspace) return null;
+	if (tab === "git") {
+		return <GitPanel key={workspace.id} workspace={workspace} {...(composerKey ? { composerKey } : {})} />;
+	}
 	return <FilesPanel key={workspace.id} workspace={workspace} {...(composerKey ? { composerKey } : {})} />;
 }
 
@@ -128,7 +133,7 @@ export function App() {
 	}, [showFiles]);
 	const columns = ["auto", "minmax(0, 1fr)", "auto"];
 
-	// Ctrl/⌘+Shift+E toggles the file panel, like the explorer in editors; Ctrl/⌘+B the sidebar;
+	// Ctrl/⌘+Shift+E and Ctrl/⌘+Shift+G show (or hide) the file and source control views, as in editors; Ctrl/⌘+B the sidebar;
 	// Ctrl+` the terminal (Ctrl on macOS too, as in editors: ⌘+` cycles windows there).
 	useEffect(() => {
 		if (settings) return;
@@ -141,9 +146,12 @@ export function App() {
 			}
 			if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
 			const key = e.key.toLowerCase();
-			if (e.shiftKey && key === "e") {
+			if (e.shiftKey && (key === "e" || key === "g")) {
 				e.preventDefault();
-				store.toggleFilesPanel();
+				const tab = key === "g" ? "git" : "files";
+				const { filesPanel, rightPanelTab } = store.getState();
+				if (filesPanel && rightPanelTab === tab) store.toggleFilesPanel(false);
+				else store.showRightPanel(tab);
 			} else if (!e.shiftKey && key === "b") {
 				e.preventDefault();
 				store.toggleSidebar();

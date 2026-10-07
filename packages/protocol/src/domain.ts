@@ -256,6 +256,107 @@ export interface WorkspaceUploadStart {
 	chunkBytes: number;
 }
 
+/**
+ * One changed path of a Git repository (`git.status`, 1.28), from `git status --porcelain=v2`.
+ * `index` and `worktree` are Git's status letters for the staged and unstaged side: `.`
+ * unchanged, `M` modified, `T` type changed, `A` added, `D` deleted, `R` renamed, `C` copied,
+ * `U` unmerged. Untracked paths are `?` on both sides; unmerged ones have `conflict` set.
+ */
+export interface GitFileStatus {
+	/** Path relative to the repository root, joined with "/". */
+	path: string;
+	/** The path before a rename or copy. */
+	origPath?: string;
+	index: string;
+	worktree: string;
+	/** An unmerged path (a merge, rebase or cherry-pick conflict). */
+	conflict?: true;
+	/** A submodule. */
+	submodule?: true;
+}
+
+/** A Git operation in progress that `git.status` reports (1.28). */
+export type GitOperation = "merge" | "rebase" | "cherry-pick" | "revert" | "bisect";
+
+export interface GitStatus {
+	/** Whether the workspace is inside a Git work tree. The other fields are only set when it is. */
+	repository: boolean;
+	/** Git was not found on the host's computer. */
+	gitMissing?: true;
+	/** Absolute path of the repository root (the top of the work tree). */
+	root?: string;
+	/** The workspace relative to `root` ("" when the workspace is the root), joined with "/". */
+	prefix?: string;
+	/** Current branch; omitted when HEAD is detached. */
+	branch?: string;
+	/** Full hash of HEAD; omitted before the first commit. */
+	head?: string;
+	/** Upstream branch of `branch`, e.g. `origin/main`. */
+	upstream?: string;
+	/** Commits on `branch` not on `upstream`, and the other way round. */
+	ahead?: number;
+	behind?: number;
+	/** Names of the configured remotes. */
+	remotes?: string[];
+	operation?: GitOperation;
+	/** Changed paths, in Git's order. */
+	files?: GitFileStatus[];
+	/** Set when there were more changed paths than the host returns. */
+	truncated?: true;
+}
+
+/** A diff of one path or commit (`git.diff` / `git.show`, 1.28). */
+export interface GitDiffResult {
+	/** Unified diff text as printed by `git diff` (may contain several files). */
+	diff: string;
+	/** Set when the diff was longer than the host returns. */
+	truncated?: true;
+}
+
+/** One commit of `git.log` (1.28). */
+export interface GitCommitInfo {
+	hash: string;
+	shortHash: string;
+	subject: string;
+	authorName: string;
+	authorEmail: string;
+	/** Author date, ISO 8601. */
+	date: string;
+	/** Ref names pointing at the commit, as `git log --format=%D` prints them. */
+	refs?: string;
+	parents: string[];
+}
+
+/** A local or remote-tracking branch (`git.branches`, 1.28). */
+export interface GitBranchInfo {
+	/** Short name, e.g. `main` or `origin/main`. */
+	name: string;
+	remote: boolean;
+	current?: true;
+	/** Upstream of a local branch. */
+	upstream?: string;
+	ahead?: number;
+	behind?: number;
+	/** The upstream branch no longer exists. */
+	upstreamGone?: true;
+	shortHash: string;
+	subject: string;
+	/** Committer date of the tip, ISO 8601. */
+	date: string;
+}
+
+/** Result of a Git command that changes the repository (1.28). */
+export interface GitCommandResult {
+	/** What Git printed (stdout and stderr), trimmed and possibly shortened. */
+	output: string;
+}
+
+/** Result of `git.commit` (1.28). */
+export interface GitCommitResult extends GitCommandResult {
+	/** Full hash of the new commit. */
+	hash: string;
+}
+
 /** Runtime state of a session as seen by clients. */
 export type SessionRunState = "inactive" | "idle" | "streaming" | "compacting" | "retrying";
 
@@ -848,10 +949,31 @@ export interface AccountOverview {
 /** Result of `account.authorizeStart` (1.11): open `authorizeUrl` in the user's browser. */
 export interface AccountAuthorizeStart {
 	flowId: string;
-	/** The site's sign-in consent page. The browser returns to a loopback address on the host. */
+	/**
+	 * The site's sign-in consent page. The browser returns to a loopback address on the host, or
+	 * to the `redirectUri` the client passed (1.28).
+	 */
 	authorizeUrl: string;
 	/** ISO time after which the flow is abandoned. */
 	expiresAt: string;
+}
+
+/**
+ * A browser callback caught by a loopback relay on this computer (`loopback.next`, 1.28): the
+ * query string of the redirect, e.g. `?code=…&state=…`, to forward to the host that started
+ * the sign-in.
+ */
+export interface LoopbackRequest {
+	requestId: string;
+	query: string;
+}
+
+/** The page the browser shows after a callback (`account.authorizeCallback` / `loopback.respond`, 1.28). */
+export interface LoopbackCallbackPage {
+	/** HTTP status: 200 when the sign-in succeeded. */
+	status: number;
+	title: string;
+	detail: string;
 }
 
 /** Result of `account.login`, `account.verify`, `account.register` and `account.authorizeWait`. */
