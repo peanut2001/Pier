@@ -29,6 +29,12 @@ import {
 	ExtensionResourceTypeSchema,
 	ExtensionScopeSchema,
 	type ExtensionUpdateInfo,
+	type GitBranchInfo,
+	type GitCommandResult,
+	type GitCommitInfo,
+	type GitCommitResult,
+	type GitDiffResult,
+	type GitStatus,
 	type HostDirectoryListing,
 	type HostInfo,
 	type HostStats,
@@ -68,6 +74,14 @@ import {
 } from "./domain.ts";
 
 const Id = z.string().min(1).max(256);
+/** Repository-relative paths for `git.*` (1.28). */
+const GitPaths = z.array(z.string().min(1).max(4096)).min(1).max(20_000);
+/** A branch name for `git.*`; Git checks the rest of its rules. */
+const GitBranchName = z
+	.string()
+	.min(1)
+	.max(255)
+	.regex(/^[^-\s][^\s]*$/, "Invalid branch name");
 /** Agent runtime id (1.22), e.g. `pi`, `claude-code`, `codex`. */
 const RuntimeId = z.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
 const SessionRef = { sessionId: Id };
@@ -189,6 +203,78 @@ export const MethodParamsSchemas = {
 	"workspace.uploadFinish": z.object({ uploadId: Id }),
 	/** Abandon an upload and delete what was received (1.21). */
 	"workspace.uploadCancel": z.object({ uploadId: Id }),
+
+	/**
+	 * Git source control of a workspace (1.28). The repository is the one the workspace is in;
+	 * paths are relative to its root (`GitStatus.root`). `git.status` also answers for a
+	 * workspace that is not in a repository (`repository: false`).
+	 */
+	"git.status": z.object({ workspaceId: Id }),
+	/**
+	 * Diff of one changed path: staged (index against HEAD) or unstaged (work tree against index).
+	 * `origPath` is the path before a staged rename, so the rename is diffed as one file.
+	 */
+	"git.diff": z.object({
+		workspaceId: Id,
+		path: z.string().min(1).max(4096),
+		origPath: z.string().min(1).max(4096).optional(),
+		staged: z.boolean().optional(),
+	}),
+	/** Commits reachable from HEAD, newest first. */
+	"git.log": z.object({
+		workspaceId: Id,
+		limit: z.number().int().min(1).max(500).optional(),
+		skip: z.number().int().min(0).max(1_000_000).optional(),
+	}),
+	/** Message, stats and diff of one commit. */
+	"git.show": z.object({ workspaceId: Id, commit: z.string().regex(/^[0-9a-fA-F]{4,64}$/) }),
+	"git.branches": z.object({ workspaceId: Id }),
+	/** Stage paths (`git add`), or every change when `paths` is omitted. */
+	"git.stage": z.object({ workspaceId: Id, paths: GitPaths.optional() }),
+	/** Unstage paths, or everything when `paths` is omitted. */
+	"git.unstage": z.object({ workspaceId: Id, paths: GitPaths.optional() }),
+	/**
+	 * Throw away unstaged changes of paths: tracked ones are restored from the index, untracked
+	 * ones are deleted. This cannot be undone.
+	 */
+	"git.discard": z.object({ workspaceId: Id, paths: GitPaths }),
+	/** Commit the index; `all` stages changes of tracked files first (`git commit -a`). */
+	"git.commit": z.object({
+		workspaceId: Id,
+		message: z.string().max(100_000),
+		amend: z.boolean().optional(),
+		all: z.boolean().optional(),
+	}),
+	/**
+	 * Switch to a branch. A remote-tracking branch (`origin/x`) switches to the local branch `x`,
+	 * creating it to track the remote one when needed. With `create`, `branch` is a new branch
+	 * started at `startPoint` (default HEAD).
+	 */
+	"git.checkout": z.object({
+		workspaceId: Id,
+		branch: GitBranchName,
+		create: z.boolean().optional(),
+		startPoint: GitBranchName.optional(),
+	}),
+	/** Delete a local branch; `force` deletes it even when it is not merged. */
+	"git.deleteBranch": z.object({ workspaceId: Id, branch: GitBranchName, force: z.boolean().optional() }),
+	/** Fetch every remote (and prune deleted branches). */
+	"git.fetch": z.object({ workspaceId: Id }),
+	/** Pull the current branch from its upstream; `rebase` rebases instead of merging. */
+	"git.pull": z.object({ workspaceId: Id, rebase: z.boolean().optional() }),
+	/**
+	 * Push the current branch. One without an upstream is pushed to `origin` (or the only
+	 * remote) and tracks it. `force` uses `--force-with-lease`.
+	 */
+	"git.push": z.object({ workspaceId: Id, force: z.boolean().optional() }),
+	/** Stash every change (including untracked files), or apply and drop the latest stash. */
+	"git.stash": z.object({
+		workspaceId: Id,
+		action: z.enum(["push", "pop"]),
+		message: z.string().max(1000).optional(),
+	}),
+	/** Create a repository in the workspace directory. */
+	"git.init": z.object({ workspaceId: Id }),
 
 	/** Agent runtimes the host knows and whether they can run sessions (1.22). */
 	"runtime.list": z.object({}).optional(),
@@ -670,6 +756,22 @@ export interface MethodResults {
 	"workspace.uploadChunk": { received: number };
 	"workspace.uploadFinish": WorkspaceFileWriteResult;
 	"workspace.uploadCancel": { cancelled: boolean };
+	"git.status": GitStatus;
+	"git.diff": GitDiffResult;
+	"git.log": { commits: GitCommitInfo[] };
+	"git.show": GitDiffResult;
+	"git.branches": { branches: GitBranchInfo[] };
+	"git.stage": GitCommandResult;
+	"git.unstage": GitCommandResult;
+	"git.discard": GitCommandResult;
+	"git.commit": GitCommitResult;
+	"git.checkout": GitCommandResult;
+	"git.deleteBranch": GitCommandResult;
+	"git.fetch": GitCommandResult;
+	"git.pull": GitCommandResult;
+	"git.push": GitCommandResult;
+	"git.stash": GitCommandResult;
+	"git.init": GitCommandResult;
 	"runtime.list": { runtimes: AgentRuntimeInfo[] };
 	"session.list": { sessions: SessionSummary[] };
 	"session.create": { session: SessionSummary };
