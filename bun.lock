@@ -14,7 +14,7 @@
     },
     "apps/desktop": {
       "name": "@pier/desktop",
-      "version": "0.2.22",
+      "version": "0.2.23",
       "dependencies": {
         "@decimalturn/toml-patch": "3.3.0",
         "@fontsource-variable/inter": "5.3.0",
@@ -45,7 +45,7 @@
     },
     "apps/mobile": {
       "name": "@pier/mobile",
-      "version": "0.2.22",
+      "version": "0.2.23",
       "dependencies": {
         "@expo/metro-runtime": "~57.0.16",
         "@expo/vector-icons": "^15.0.2",
@@ -91,7 +91,7 @@
     },
     "apps/relay": {
       "name": "@pier/relay",
-      "version": "0.2.22",
+      "version": "0.2.23",
       "bin": {
         "pier-relay": "./src/main.ts",
       },
@@ -106,7 +106,7 @@
     },
     "packages/chat-state": {
       "name": "@pier/chat-state",
-      "version": "0.2.22",
+      "version": "0.2.23",
       "dependencies": {
         "@pier/client": "workspace:*",
         "@pier/protocol": "workspace:*",
@@ -114,7 +114,7 @@
     },
     "packages/client": {
       "name": "@pier/client",
-      "version": "0.2.22",
+      "version": "0.2.23",
       "dependencies": {
         "@pier/crypto": "workspace:*",
         "@pier/protocol": "workspace:*",
@@ -122,7 +122,7 @@
     },
     "packages/crypto": {
       "name": "@pier/crypto",
-      "version": "0.2.22",
+      "version": "0.2.23",
       "dependencies": {
         "@noble/ciphers": "^2.4.0",
         "@noble/curves": "^2.4.0",
@@ -132,7 +132,7 @@
     },
     "packages/host": {
       "name": "@pier/host",
-      "version": "0.2.22",
+      "version": "0.2.23",
       "bin": {
         "pier-host": "./src/main.ts",
       },
@@ -160,7 +160,7 @@
     },
     "packages/protocol": {
       "name": "@pier/protocol",
-      "version": "0.2.22",
+      "version": "0.2.23",
       "dependencies": {
         "zod": "^4.6.5",
       },
