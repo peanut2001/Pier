@@ -31,7 +31,7 @@ import { Modal } from "./Modal.tsx";
 import { platformName } from "./RemotePanel.tsx";
 import { SessionCleanupDialog } from "./SessionCleanup.tsx";
 import { useOutsideClick } from "./SessionControls.tsx";
-import { updatePending } from "./UpdatePanel.tsx";
+import { SidebarUpdate } from "./UpdatePanel.tsx";
 
 const SESSION_PAGE = 30;
 
@@ -465,7 +465,6 @@ export function Sidebar({ open = true }: { open?: boolean }) {
 	const store = useStore();
 	const workspaces = useAppState((s) => s.workspaces);
 	const noModels = useAppState((s) => s.localProviders?.availableCount === 0);
-	const updateReady = updatePending(useAppState((s) => s.update));
 	const addWorkspace = useAddWorkspace();
 	const [settingsFor, setSettingsFor] = useState<string | undefined>();
 	const settingsWorkspace = workspaces.find((w) => w.id === settingsFor);
@@ -476,7 +475,8 @@ export function Sidebar({ open = true }: { open?: boolean }) {
 	const newChat = useAppState((s) => !!s.newChat);
 	const status = useHostStatus();
 	const online = status.online;
-	const attention = updateReady ? "有可用更新" : noModels ? "还没有可用模型" : undefined;
+	// A pending update has its own notice above the settings entry.
+	const attention = noModels ? "还没有可用模型" : undefined;
 
 	return (
 		<aside className="sidebar">
@@ -520,16 +520,17 @@ export function Sidebar({ open = true }: { open?: boolean }) {
 					</button>
 				) : null}
 			</div>
+			<SidebarUpdate />
 			<div className="sidebar-footer">
 				<button
 					type="button"
 					className="settings-entry"
-					onClick={() => store.openSettings(updateReady ? "about" : noModels && online ? "models" : "general")}
+					onClick={() => store.openSettings(noModels && online ? "models" : "general")}
 					title={`${status.text}${attention ? ` · ${attention}` : ""}`}
 				>
 					<span className="settings-entry-icon">
 						<IconSettings size={15} />
-						{attention ? <span className={`entry-dot ${updateReady ? "accent" : "warn"}`} /> : null}
+						{attention ? <span className="entry-dot warn" /> : null}
 					</span>
 					<span className="settings-entry-label">设置</span>
 					<span className={`status-dot ${status.dot}`} />

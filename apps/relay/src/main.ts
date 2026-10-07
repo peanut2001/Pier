@@ -39,6 +39,10 @@ Options:
                                                            [env PIER_RELAY_RATE_LIMIT]
   --trust-proxy           Take client addresses from X-Forwarded-For / X-Real-IP
                                                            [env PIER_RELAY_TRUST_PROXY=1]
+  --data-dir <path>       Keep accounts and settings here and serve the web admin panel at /
+                          (accounts create their own access tokens; settings saved in the
+                          panel take precedence over these options)
+                                                           [env PIER_RELAY_DATA_DIR]
   -h, --help              Show this help
   -v, --version           Print the version
 
@@ -76,6 +80,7 @@ async function main(): Promise<void> {
 			"max-streams": { type: "string" },
 			"rate-limit": { type: "string" },
 			"trust-proxy": { type: "boolean" },
+			"data-dir": { type: "string" },
 			help: { type: "boolean", short: "h" },
 			version: { type: "boolean", short: "v" },
 		},
@@ -101,9 +106,10 @@ async function main(): Promise<void> {
 				.filter((l) => l && !l.startsWith("#")),
 		);
 	}
-	if (mode === "private" && !tokens.length) {
+	const dataDir = values["data-dir"] ?? env.PIER_RELAY_DATA_DIR;
+	if (mode === "private" && !tokens.length && !dataDir) {
 		throw new Error(
-			"Private mode needs an access token: pass --token (or PIER_RELAY_TOKENS), e.g. one from `openssl rand -base64 24`; or use --mode open",
+			"Private mode needs an access token: pass --token (or PIER_RELAY_TOKENS), e.g. one from `openssl rand -base64 24`; or use --data-dir for accounts with their own tokens, or --mode open",
 		);
 	}
 	if (tokens.some((t) => t.length < 16)) throw new Error("Access tokens must be at least 16 characters long");
@@ -130,6 +136,7 @@ async function main(): Promise<void> {
 		...(maxStreams !== undefined ? { maxStreamsPerHost: maxStreams } : {}),
 		...(rateLimit !== undefined ? { bytesPerSecond: rateLimit } : {}),
 		trustProxy: values["trust-proxy"] === true || env.PIER_RELAY_TRUST_PROXY === "1",
+		...(dataDir ? { dataDir } : {}),
 		log,
 	});
 	const stop = () => {

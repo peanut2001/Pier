@@ -1,19 +1,27 @@
-# Example: Pier Relay in private mode. Copy to docker-compose.yml, set the token, and put a
-# TLS reverse proxy (Caddy, nginx, OpenResty) in front of port 7480 so Pier can use wss://.
+# Example: Pier Relay with the web admin panel. Copy to docker-compose.yml and put a TLS
+# reverse proxy (Caddy, nginx, OpenResty) in front of port 7480 so Pier can use wss://.
+# On first start, open the relay's address and register: the first account becomes the
+# administrator, so do it right after deploying.
 services:
   pier-relay:
     image: ghcr.io/yiranxiaohui/pier-relay:latest
     restart: unless-stopped
     environment:
+      # Initial mode; once changed in the admin panel, the panel's setting wins.
       PIER_RELAY_MODE: private
-      # One or more tokens (comma-separated); generate with `openssl rand -base64 24`.
-      PIER_RELAY_TOKENS: change-me-to-a-long-random-token
+      # Optional fixed tokens besides the accounts' own (comma-separated); e.g. from
+      # `openssl rand -base64 24`.
+      # PIER_RELAY_TOKENS: change-me-to-a-long-random-token
       # Behind a reverse proxy: take client addresses from X-Forwarded-For.
       PIER_RELAY_TRUST_PROXY: "1"
       # Optional: the public name for the announced STUN URL (default: the Host header).
       # PIER_RELAY_PUBLIC_HOST: relay.example.com
       # Optional: more STUN servers for hosts and phones.
       # PIER_RELAY_ICE_SERVERS: stun:stun.miwifi.com:3478
+    volumes:
+      - pier-relay-data:/data   # accounts, access tokens and admin-panel settings
     ports:
       - "127.0.0.1:7480:7480"   # only the reverse proxy needs to reach it
       - "3478:3478/udp"         # STUN must be reachable from the internet
+volumes:
+  pier-relay-data:

@@ -61,7 +61,7 @@ import { newSessionDefaultsFromSettings } from "./new-session-defaults.ts";
 import { remotePageBlocker } from "./settings-target.ts";
 import { isYunlianProvider, YUNLIAN_SITE, yunlianGroupOf, yunlianProvider } from "./yunlian.ts";
 
-export const APP_VERSION = "0.2.21";
+export const APP_VERSION = "0.2.22";
 
 /** Node id of this computer; any other node is a paired computer's host id. */
 export const LOCAL_NODE = "local";
@@ -2517,11 +2517,13 @@ export class PierStore {
 			status.state === "available" &&
 			status.version &&
 			status.version !== this.announcedUpdate &&
-			this.state.settings !== "about";
+			this.state.settings !== "about" &&
+			// An open sidebar shows its own update notice.
+			!this.state.sidebar;
 		this.set({ update: status });
 		if (announce && status.version) {
 			this.announcedUpdate = status.version;
-			this.toast("info", `Pier v${status.version} 已发布，可在“设置 → 关于与更新”中安装`);
+			this.toast("info", `Pier v${status.version} 已发布，可在侧边栏左下角或“设置 → 关于与更新”中安装`);
 		}
 	}
 
