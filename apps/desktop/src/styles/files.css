@@ -78,7 +78,7 @@ body.resizing-panel .files-shell {
 
 .files-resize:hover,
 body.resizing-panel .files-resize {
-	background: linear-gradient(90deg, var(--accent-ring), transparent);
+	background: var(--accent-ring);
 }
 
 body.resizing-panel {

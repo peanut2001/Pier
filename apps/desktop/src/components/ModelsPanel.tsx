@@ -36,6 +36,7 @@ import {
 } from "./Icons.tsx";
 import { CopyButton } from "./Markdown.tsx";
 import { Modal } from "./Modal.tsx";
+import { Select, type SelectEntry } from "./Select.tsx";
 import { SettingRow, SettingsCard, SettingsGroup } from "./SettingsUi.tsx";
 
 /** Providers listed first when adding one. */
@@ -168,27 +169,28 @@ function DefaultModelField() {
 				title="新会话的默认模型"
 				description={`共 ${providers.availableCount} 个可用模型。会话中可以随时切换模型，这里只影响新会话。`}
 			>
-				<select
+				<Select
 					className="setting-select"
 					value={value}
-					onChange={(e) => {
-						const [provider, modelId] = e.target.value.split("\u0000");
+					onChange={(next) => {
+						const [provider, modelId] = next.split("\u0000");
 						if (provider && modelId) void store.setDefaultModel(provider, modelId);
 					}}
-				>
-					{!current || !known ? (
-						<option value={value}>{current ? `${current.provider}/${current.modelId}（不可用）` : "未设置"}</option>
-					) : null}
-					{[...groups].map(([provider, list]) => (
-						<optgroup key={provider} label={names.get(provider) ?? provider}>
-							{list.map((model) => (
-								<option key={model.id} value={`${model.provider}\u0000${model.id}`}>
-									{model.name && model.name !== model.id ? `${model.name}（${model.id}）` : model.id}
-								</option>
-							))}
-						</optgroup>
-					))}
-				</select>
+					options={[
+						...(!current || !known
+							? [{ value, label: current ? `${current.provider}/${current.modelId}（不可用）` : "未设置" }]
+							: []),
+						...[...groups].map(
+							([provider, list]): SelectEntry<string> => ({
+								label: names.get(provider) ?? provider,
+								options: list.map((model) => ({
+									value: `${model.provider}\u0000${model.id}`,
+									label: model.name && model.name !== model.id ? `${model.name}（${model.id}）` : model.id,
+								})),
+							}),
+						),
+					]}
+				/>
 			</SettingRow>
 		</SettingsCard>
 	);
@@ -759,16 +761,14 @@ function CustomProviderForm({ editing, onDone }: { editing?: ProviderInfo; onDon
 						}}
 					/>
 				</label>
-				<label className="form-field">
+				<div className="form-field">
 					<span className="field-label">接口类型</span>
-					<select value={api} onChange={(e) => setApi(e.target.value as CustomProviderApi)}>
-						{CUSTOM_PROVIDER_APIS.map((value) => (
-							<option key={value} value={value}>
-								{API_LABEL[value]}
-							</option>
-						))}
-					</select>
-				</label>
+					<Select
+						value={api}
+						onChange={setApi}
+						options={CUSTOM_PROVIDER_APIS.map((value) => ({ value, label: API_LABEL[value] }))}
+					/>
+				</div>
 				<label className="form-field">
 					<span className="field-label">Base URL</span>
 					<input
@@ -876,7 +876,7 @@ function CustomProviderForm({ editing, onDone }: { editing?: ProviderInfo; onDon
 									update(m.key, { contextWindow: n > 0 ? n : undefined });
 								}}
 							/>
-							<select
+							<Select<CustomProviderApi | "">
 								className="model-api"
 								title={
 									m.api && m.api !== api
@@ -884,15 +884,15 @@ function CustomProviderForm({ editing, onDone }: { editing?: ProviderInfo; onDon
 										: "跟随服务商的接口类型"
 								}
 								value={m.api && m.api !== api ? m.api : ""}
-								onChange={(e) => update(m.key, { api: (e.target.value || undefined) as CustomProviderApi | undefined })}
-							>
-								<option value="">默认</option>
-								{CUSTOM_PROVIDER_APIS.filter((value) => value !== api).map((value) => (
-									<option key={value} value={value}>
-										{MODEL_API_LABEL[value]}
-									</option>
-								))}
-							</select>
+								onChange={(next) => update(m.key, { api: next || undefined })}
+								options={[
+									{ value: "", label: "默认" },
+									...CUSTOM_PROVIDER_APIS.filter((value) => value !== api).map((value) => ({
+										value,
+										label: MODEL_API_LABEL[value],
+									})),
+								]}
+							/>
 							<input
 								type="checkbox"
 								title="推理模型（支持思考等级）"

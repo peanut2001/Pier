@@ -18,8 +18,7 @@ body,
 
 button,
 input,
-textarea,
-select {
+textarea {
 	font: inherit;
 	color: inherit;
 }
@@ -99,7 +98,7 @@ button:disabled {
 }
 
 button.primary {
-	background: var(--brand-gradient);
+	background: var(--accent);
 	border-color: transparent;
 	color: #fff;
 	box-shadow:
@@ -109,7 +108,7 @@ button.primary {
 }
 
 button.primary:hover:not(:disabled) {
-	background: var(--brand-gradient-hover);
+	background: var(--accent-strong);
 	box-shadow:
 		0 6px 20px -4px var(--brand-glow),
 		inset 0 1px 0 rgba(255, 255, 255, 0.22);
@@ -175,8 +174,7 @@ button.large {
 /* ---- inputs ---------------------------------------------------------------------- */
 
 input,
-textarea,
-select {
+textarea {
 	background: var(--bg-input);
 	border: 1px solid var(--border-strong);
 	border-radius: 9px;
@@ -187,32 +185,99 @@ select {
 		box-shadow 0.15s var(--ease);
 }
 
-/* One look for drop-downs on every platform (macOS draws its own stepper-like arrows). */
-select {
-	appearance: none;
-	-webkit-appearance: none;
-	padding-right: 30px;
-	background-image: var(--select-chevron);
-	background-repeat: no-repeat;
-	background-position: right 10px center;
-	background-size: 12px 12px;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-	cursor: pointer;
+/* Trigger of the Select drop-down (components/Select.tsx), framed like the text inputs. */
+button.select {
+	justify-content: flex-start;
+	gap: 8px;
+	max-width: 100%;
+	padding: 7px 10px 7px 11px;
+	background: var(--bg-input);
+	font-size: inherit;
+	font-weight: 400;
+	line-height: inherit;
+	text-align: left;
 }
 
-select:hover:not(:disabled):not(:focus) {
+button.select:hover:not(:disabled):not(.open) {
+	background: var(--bg-input);
 	border-color: var(--text-faint);
 }
 
-select:disabled {
-	opacity: 0.55;
-	cursor: default;
+button.select:active:not(:disabled) {
+	transform: none;
 }
 
-select option {
-	background: var(--bg-raised);
-	color: var(--text);
+button.select:disabled {
+	opacity: 0.55;
+}
+
+button.select.open,
+button.select:focus-visible {
+	outline: none;
+	border-color: var(--accent-ring);
+	box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* All option labels stack in one cell; only the chosen one is visible. */
+.select-value {
+	flex: 1;
+	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+	min-width: 0;
+}
+
+.select-value > span {
+	grid-area: 1 / 1;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.select-value > .select-sizer {
+	visibility: hidden;
+}
+
+.select-chevron {
+	color: var(--text-faint);
+	transition: transform 0.15s var(--ease);
+}
+
+button.select.open .select-chevron {
+	transform: rotate(180deg);
+}
+
+.dropdown-menu.select-menu {
+	position: fixed;
+	z-index: 60;
+	min-width: 0;
+	max-width: min(420px, calc(100vw - 12px));
+	padding: 5px;
+	border-radius: 12px;
+	outline: none;
+}
+
+.select-menu .dropdown-item {
+	padding: 6px 9px;
+	font-size: 13px;
+}
+
+.select-menu .dropdown-item:focus-visible {
+	outline: none;
+	background: var(--bg-hover);
+}
+
+.select-menu .dropdown-item.selected:focus-visible {
+	background: var(--accent-soft);
+	box-shadow: inset 0 0 0 1px var(--accent-ring);
+}
+
+.select-option-label {
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+
+.select-check {
+	color: var(--accent-text);
 }
 
 input::placeholder,
@@ -221,15 +286,13 @@ textarea::placeholder {
 }
 
 input:focus,
-textarea:focus,
-select:focus {
+textarea:focus {
 	border-color: var(--accent-ring);
 	box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 input:focus-visible,
-textarea:focus-visible,
-select:focus-visible {
+textarea:focus-visible {
 	outline: none;
 }
 
@@ -277,12 +340,7 @@ code {
 }
 
 .shimmer {
-	background: linear-gradient(90deg, var(--text-muted) 0%, var(--text) 45%, var(--text-muted) 90%);
-	background-size: 200% 100%;
-	-webkit-background-clip: text;
-	background-clip: text;
-	color: transparent;
-	animation: shimmer 1.8s linear infinite;
+	animation: shimmer 1.8s ease-in-out infinite;
 }
 
 .pill {
@@ -353,7 +411,7 @@ code {
 	/* The main window sets its own columns inline; this default is the settings screen's. */
 	grid-template-columns: 264px minmax(0, 1fr);
 	height: 100%;
-	background: var(--ambient), var(--bg-app);
+	background: var(--bg-app);
 }
 
 .main {
@@ -531,11 +589,12 @@ code {
 }
 
 @keyframes shimmer {
-	from {
-		background-position: 100% 0;
+	0%,
+	100% {
+		opacity: 1;
 	}
-	to {
-		background-position: -100% 0;
+	50% {
+		opacity: 0.45;
 	}
 }
 

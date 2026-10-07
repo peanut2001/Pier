@@ -5,7 +5,7 @@
 	flex-direction: column;
 	flex: 1;
 	min-height: 0;
-	background: var(--hero-glow), var(--bg);
+	background: var(--bg);
 }
 
 .new-chat-hero {
@@ -42,7 +42,7 @@
 
 .new-chat-target {
 	margin: 0 0.2em;
-	background: var(--brand-gradient);
+	background: var(--accent);
 	-webkit-background-clip: text;
 	background-clip: text;
 	color: transparent;
@@ -70,22 +70,11 @@
 }
 
 .workspace-chip {
-	display: inline-flex;
-	align-items: center;
-	gap: 6px;
 	max-width: 260px;
-	height: 30px;
-	padding: 0 10px;
 }
 
 .workspace-chip .icon-svg:first-child {
 	flex: none;
-	color: var(--accent-text);
-}
-
-.workspace-chip.empty {
-	border-style: dashed;
-	color: var(--text-muted);
 }
 
 .workspace-chip-name {

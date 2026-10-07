@@ -43,6 +43,7 @@ import {
 	IconX,
 } from "./Icons.tsx";
 import { CopyButton } from "./Markdown.tsx";
+import { Select } from "./Select.tsx";
 import { SettingRow, SettingsCard, SettingsGroup, Switch } from "./SettingsUi.tsx";
 
 type Mode = "form" | "text";
@@ -244,23 +245,22 @@ function AgentConfigPage({ runtime }: { runtime: AgentConfigRuntime }) {
 							)
 						}
 					>
-						<select
+						<Select
 							className="setting-select compact"
 							value={target}
 							disabled={saving !== undefined}
-							onChange={(e) => setTarget(e.target.value)}
-						>
-							<option value="user">全局设置</option>
-							{workspaces.map((w) => (
-								<optgroup key={w.id} label={`工作区「${w.name}」`}>
-									{WORKSPACE_FILES[runtime].map((option) => (
-										<option key={option.scope} value={`${option.scope}:${w.id}`}>
-											{option.label}（{option.file}）
-										</option>
-									))}
-								</optgroup>
-							))}
-						</select>
+							onChange={setTarget}
+							options={[
+								{ value: "user", label: "全局设置" },
+								...workspaces.map((w) => ({
+									label: `工作区「${w.name}」`,
+									options: WORKSPACE_FILES[runtime].map((option) => ({
+										value: `${option.scope}:${w.id}`,
+										label: `${option.label}（${option.file}）`,
+									})),
+								})),
+							]}
+						/>
 						{file ? <CopyButton text={file.path} label="复制路径" iconOnly /> : null}
 						<button
 							type="button"
