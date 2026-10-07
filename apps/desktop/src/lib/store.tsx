@@ -117,6 +117,11 @@ export function hostTransfersFiles(info: HostInfo | undefined): boolean {
 	return hostSpeaks(info, 21);
 }
 
+/** Whether a host offers Git source control for workspaces (`git.*`, 1.28). */
+export function hostSupportsGit(info: HostInfo | undefined): boolean {
+	return hostSpeaks(info, 28);
+}
+
 /** Whether a host runs agents other than pi (`runtime.list`, `session.create` with `runtime`, 1.22). */
 export function hostRunsAgents(info: HostInfo | undefined): boolean {
 	return hostSpeaks(info, 22);
@@ -326,6 +331,8 @@ export interface AppState {
 	filesPanel: boolean;
 	/** Width of the file panel in pixels. */
 	filesPanelWidth: number;
+	/** What the right-hand panel shows: workspace files or Git source control. */
+	rightPanelTab: RightPanelTab;
 	/** Bumped per workspace when its files may have changed (an agent run finished). */
 	filesVersion: Record<string, number>;
 	/**
@@ -392,10 +399,12 @@ const SELECTION_KEY = "pier.selection";
 /** Draft key of the new-chat composer (session ids are UUIDs, so no clash). */
 export const NEW_CHAT_DRAFT = "#new-chat";
 const FILES_PANEL_KEY = "pier.filesPanel";
+/** The views of the right-hand panel. */
+export type RightPanelTab = "files" | "git";
 const SIDEBAR_KEY = "pier.sidebar";
 export const FILES_PANEL_MIN_WIDTH = 220;
 export const FILES_PANEL_MAX_WIDTH = 560;
-const FILES_PANEL_DEFAULT_WIDTH = 280;
+export const FILES_PANEL_DEFAULT_WIDTH = 280;
 
 function clampPanelWidth(width: number): number {
 	if (!Number.isFinite(width)) return FILES_PANEL_DEFAULT_WIDTH;
@@ -516,7 +525,11 @@ export class PierStore {
 		}
 		const panel = (() => {
 			try {
-				return JSON.parse(localStorage.getItem(FILES_PANEL_KEY) ?? "{}") as { open?: boolean; width?: number };
+				return JSON.parse(localStorage.getItem(FILES_PANEL_KEY) ?? "{}") as {
+					open?: boolean;
+					width?: number;
+					tab?: string;
+				};
 			} catch {
 				return {};
 			}
@@ -555,6 +568,7 @@ export class PierStore {
 			sidebar: sidebar.open !== false,
 			filesPanel: panel.open === true,
 			filesPanelWidth: clampPanelWidth(panel.width ?? FILES_PANEL_DEFAULT_WIDTH),
+			rightPanelTab: panel.tab === "git" ? "git" : "files",
 			filesVersion: {},
 			extensionsVersion: 0,
 			piSettingsVersion: 0,
@@ -608,10 +622,14 @@ export class PierStore {
 		if ("sidebar" in next) {
 			localStorage.setItem(SIDEBAR_KEY, JSON.stringify({ open: this.state.sidebar }));
 		}
-		if ("filesPanel" in next || "filesPanelWidth" in next) {
+		if ("filesPanel" in next || "filesPanelWidth" in next || "rightPanelTab" in next) {
 			localStorage.setItem(
 				FILES_PANEL_KEY,
-				JSON.stringify({ open: this.state.filesPanel, width: this.state.filesPanelWidth }),
+				JSON.stringify({
+					open: this.state.filesPanel,
+					width: this.state.filesPanelWidth,
+					tab: this.state.rightPanelTab,
+				}),
 			);
 		}
 		if (nodeChanged) {
@@ -1958,6 +1976,36 @@ export class PierStore {
 
 	toggleFilesPanel(open = !this.state.filesPanel): void {
 		if (open !== this.state.filesPanel) this.set({ filesPanel: open });
+	}
+
+	/** Show the right-hand panel on `tab` (files or source control). */
+	showRightPanel(tab: RightPanelTab): void {
+		if (tab !== this.state.rightPanelTab || !this.state.filesPanel) {
+			this.set({ rightPanelTab: tab, filesPanel: true });
+		}
+	}
+
+	/**
+	 * Call a Git method (`git.*`, 1.28) on the computer of a workspace. Throws with the host's
+	 * error; methods that change the repository refresh the file panel.
+	 */
+	async git<M extends Extract<MethodName, `git.${string}`>>(
+		method: M,
+		params: MethodParams<M>,
+		timeoutMs = 60_000,
+	): Promise<MethodResult<M>> {
+		const workspaceId = (params as { workspaceId: string }).workspaceId;
+		const client = this.clientFor(workspaceId);
+		if (!client) throw new Error("尚未连接到 Pier Host");
+		if (!hostSupportsGit(this.state.nodes[this.nodeOf(workspaceId)]?.hostInfo)) {
+			throw new Error("那台电脑的 Pier 版本过旧，不支持 Git，请先更新它");
+		}
+		const result = await (
+			client.request as (m: M, p: MethodParams<M>, o: { timeoutMs: number }) => Promise<MethodResult<M>>
+		)(method, params, { timeoutMs });
+		const readOnly = ["git.status", "git.diff", "git.log", "git.show", "git.branches"];
+		if (!readOnly.includes(method)) this.bumpFiles(workspaceId);
+		return result;
 	}
 
 	setFilesPanelWidth(width: number): void {

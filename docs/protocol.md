@@ -1,4 +1,4 @@
-# Pier 协议 v1.27
+# Pier 协议 v1.28
 
 > 实现：`packages/protocol`（zod schema + TS 类型，Host 与所有客户端共享）。
 > 本文档描述线上格式与语义；字段的权威定义以 `packages/protocol/src` 为准。
@@ -60,7 +60,7 @@
 
 ```jsonc
 { "type": "req", "id": "h", "method": "host.hello", "params": {
-  "protocolVersion": "1.27",
+  "protocolVersion": "1.28",
   "client": { "name": "pier-desktop", "version": "0.1.0", "platform": "darwin" },
   "token": "<本地 token>",       // 本地连接必填；远程连接由加密通道认证，不需要
   "coalesceMs": 50               // 可选：合并流式增量的窗口（0–1000ms，默认 0）
@@ -136,6 +136,29 @@ sidecar 的 stdio 协议：桌面端用 `--shell-terminals` 启动 Host，声明
 | `workspace.uploadChunk` | `{ uploadId, offset, data }` | `{ received }`；向上传追加 Base64 数据（1.21）。`offset` 必须等于已收到的字节数，否则 `CONFLICT`（`data.received` 为已收到的字节数，可据此续传）；超过 `chunkBytes` 或累计超过 `size` 时 `BAD_REQUEST`；上传不存在、已过期或属于其他连接时 `NOT_FOUND`；同一上传同时只处理一个请求 |
 | `workspace.uploadFinish` | `{ uploadId }` | `{ path, size, modifiedAt }`；把收齐的上传移动到目标路径（1.21）。未收齐时 `BAD_REQUEST`（`data.received`），上传保留可继续；目标在上传期间变成目录，或未给 `overwrite` 而目标已出现时 `CONFLICT`，上传被丢弃。远程调用写入审计日志 |
 | `workspace.uploadCancel` | `{ uploadId }` | `{ cancelled }`；取消上传并删除已收到的数据（1.21）。上传不存在或属于其他连接时 `cancelled: false` |
+
+### Git 源代码管理（1.28）
+
+Host 用它所在电脑上的 `git` 命令行（`PATH` 中的，或环境变量 `PIER_GIT` 指定的绝对路径）管理工作区所在的 Git 仓库，供桌面端右侧面板的「源代码管理」使用。仓库是工作区所在的工作树（工作区可以是仓库的子目录，此时操作整个仓库）；以下 `path` / `paths` 都是相对**仓库根目录**的路径（`/` 分隔，绝对路径或含 `..` 时 `BAD_REQUEST`），按字面匹配（`GIT_LITERAL_PATHSPECS`），不作为通配符。Git 以参数数组直接运行（不经过 shell），在仓库根目录中执行，不继承 `GIT_DIR` 等指向其他仓库的环境变量，并且没有终端：`GIT_TERMINAL_PROMPT=0`，类 Unix 系统上在新会话中运行，凭据或主机密钥需要交互输入时直接失败而不是等待（凭据助手、SSH agent 照常可用）。改变仓库的命令在同一仓库上依次执行。Git 返回非零退出码时为 `CONFLICT`，`message` 为 Git 的输出（去掉 `hint:` 行），`data.exitCode` 为退出码；运行超时（本地命令 60 秒，`commit` 与网络命令 5 分钟）时 `CONFLICT`。工作区不在仓库中时除 `git.status` / `git.init` 外返回 `NOT_FOUND`，没有安装 Git 时返回 `UNSUPPORTED`。对已配对设备开放，远程调用改变仓库的方法写入审计日志（只记录路径数量、分支名，不记录提交信息）。
+
+| 方法 | 参数 | 结果 |
+|---|---|---|
+| `git.status` | `{ workspaceId }` | `GitStatus = { repository, gitMissing?, root?, prefix?, branch?, head?, upstream?, ahead?, behind?, remotes?, operation?, files?, truncated? }`。不在仓库中时 `{ repository: false }`，没有安装 Git 时另有 `gitMissing: true`。`root` 为仓库根目录的绝对路径，`prefix` 为工作区相对 `root` 的路径（`""` 为根目录）；`branch` 为当前分支（HEAD 游离时省略），`head` 为 HEAD 的完整哈希（还没有提交时省略），`upstream` / `ahead` / `behind` 为上游分支及领先、落后的提交数；`remotes` 为远程仓库名；`operation` 为进行中的 `merge`\|`rebase`\|`cherry-pick`\|`revert`\|`bisect`。`files: GitFileStatus[] = { path, origPath?, index, worktree, conflict?, submodule? }` 来自 `git status --porcelain=v2 --untracked-files=all`，`index` / `worktree` 为暂存区与工作区一侧的状态字母（`.` 未改变，`M` `T` `A` `D` `R` `C` `U`），未跟踪的路径两侧均为 `?`，冲突路径带 `conflict: true`，`origPath` 为重命名或复制前的路径；最多 5000 项，超出时 `truncated: true` |
+| `git.diff` | `{ workspaceId, path, origPath?, staged? }` | `GitDiffResult = { diff, truncated? }`；一个路径的统一差异（`git diff` 的输出，最多 2 MiB，超出时 `truncated: true`）。`staged` 时为暂存区相对 HEAD，否则为工作区相对暂存区；未跟踪的文件显示为整个新增；`origPath` 让暂存的重命名作为一个文件比较 |
+| `git.log` | `{ workspaceId, limit?(50, ≤500), skip? }` | `{ commits: GitCommitInfo[] }`，`GitCommitInfo = { hash, shortHash, subject, authorName, authorEmail, date, refs?, parents }`；从 HEAD 可达的提交，新的在前，`refs` 为 `git log --format=%D` 的引用名，`date` 为作者时间（ISO 8601）。还没有提交时为空 |
+| `git.show` | `{ workspaceId, commit }` | `GitDiffResult`；一个提交（4–64 位十六进制哈希）的完整信息、变更统计与差异（`git show --stat --patch --format=fuller`，最多 2 MiB）。提交不存在时 `NOT_FOUND` |
+| `git.branches` | `{ workspaceId }` | `{ branches: GitBranchInfo[] }`，`GitBranchInfo = { name, remote, current?, upstream?, ahead?, behind?, upstreamGone?, shortHash, subject, date }`；本地分支与远程跟踪分支（不含 `<远程>/HEAD`），按最近提交时间排序 |
+| `git.stage` | `{ workspaceId, paths? }` | `GitCommandResult = { output }`；暂存路径（`git add -A`，包括删除），省略 `paths` 时暂存所有更改。暂存冲突路径即标记为已解决。`paths` 最多 20000 项 |
+| `git.unstage` | `{ workspaceId, paths? }` | `{ output }`；取消暂存路径（`git reset`；还没有提交时从暂存区移除），省略 `paths` 时取消暂存所有更改 |
+| `git.discard` | `{ workspaceId, paths }` | `{ output }`；放弃路径在工作区中的更改：已跟踪的文件恢复为暂存区中的内容，未跟踪的文件被删除（`git clean -f`），没有更改的路径被忽略。无法撤销 |
+| `git.commit` | `{ workspaceId, message, amend?, all? }` | `GitCommitResult = { hash, output }`；提交暂存区，`all` 时先暂存已跟踪文件的更改（`git commit -a`），`amend` 时修改上一个提交（`message` 为空则保留原提交信息）。不修改时 `message` 不能为空（`BAD_REQUEST`）。会运行仓库的提交钩子 |
+| `git.checkout` | `{ workspaceId, branch, create?, startPoint? }` | `{ output }`；切换到本地分支（`git switch`）。`branch` 为远程跟踪分支（如 `origin/x`）时切换到本地分支 `x`，没有时新建并跟踪它；`create` 时新建分支 `branch`（从 `startPoint`，默认 HEAD）并切换。分支名不能以 `-` 开头或含空白，且须通过 `git check-ref-format --branch`，否则 `BAD_REQUEST`；分支不存在时 `NOT_FOUND`。未提交的更改与目标分支冲突时 Git 拒绝切换（`CONFLICT`） |
+| `git.deleteBranch` | `{ workspaceId, branch, force? }` | `{ output }`；删除本地分支（`git branch -d`，`force` 时 `-D`，即使没有合并）。不能删除当前分支 |
+| `git.fetch` | `{ workspaceId }` | `{ output }`；抓取所有远程仓库并清理已删除的远程分支（`git fetch --all --prune`） |
+| `git.pull` | `{ workspaceId, rebase? }` | `{ output }`；从上游拉取当前分支（`git pull --no-edit`，`rebase` 时 `--rebase`），合并方式否则遵循仓库配置 |
+| `git.push` | `{ workspaceId, force? }` | `{ output }`；推送当前分支（`force` 时 `--force-with-lease`）。还没有上游时推送到 `origin`（没有时用第一个远程仓库）的同名分支并设为上游；HEAD 游离或没有远程仓库时 `CONFLICT` |
+| `git.stash` | `{ workspaceId, action: "push"\|"pop", message? }` | `{ output }`；储藏所有更改（包括未跟踪的文件），或应用并删除最近的储藏 |
+| `git.init` | `{ workspaceId }` | `{ output }`；在工作区目录中新建仓库。工作区已在仓库中时 `CONFLICT` |
 
 ### Agent 运行时（1.22）
 

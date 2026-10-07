@@ -1,0 +1,336 @@
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { PierClient } from "@pier/client";
+import { PierProtocolError, type WorkspaceInfo } from "@pier/protocol";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { GitService, parseBranches, parseLog, parsePorcelainStatus } from "../src/git.ts";
+import { startTestHost, type TestHost } from "./helpers.ts";
+
+function git(cwd: string, ...args: string[]): string {
+	return execFileSync("git", args, { cwd, encoding: "utf8", env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
+}
+
+function initRepo(dir: string): void {
+	git(dir, "init", "-q", "-b", "main");
+	git(dir, "config", "user.name", "Pier Test");
+	git(dir, "config", "user.email", "pier@example.com");
+	git(dir, "config", "commit.gpgsign", "false");
+}
+
+async function expectCode(promise: Promise<unknown>, code: string): Promise<void> {
+	const error = await promise.then(
+		() => undefined,
+		(e: unknown) => e,
+	);
+	expect(error).toBeInstanceOf(PierProtocolError);
+	expect((error as PierProtocolError).code).toBe(code);
+}
+
+describe("git output parsing", () => {
+	it("parses porcelain v2 status", () => {
+		const output = [
+			"# branch.oid 0123456789abcdef0123456789abcdef01234567",
+			"# branch.head main",
+			"# branch.upstream origin/main",
+			"# branch.ab +2 -1",
+			"1 .M N... 100644 100644 100644 aaa bbb src/a file.ts",
+			"1 A. N... 000000 100644 100644 000 ccc new.ts",
+			"2 R. N... 100644 100644 100644 ddd ddd R100 renamed.ts",
+			"old.ts",
+			"u UU N... 100644 100644 100644 100644 e1 e2 e3 conflict.ts",
+			"? untracked.txt",
+			"",
+		].join("\0");
+		expect(parsePorcelainStatus(output)).toEqual({
+			head: "0123456789abcdef0123456789abcdef01234567",
+			branch: "main",
+			upstream: "origin/main",
+			ahead: 2,
+			behind: 1,
+			files: [
+				{ path: "src/a file.ts", index: ".", worktree: "M" },
+				{ path: "new.ts", index: "A", worktree: "." },
+				{ path: "renamed.ts", origPath: "old.ts", index: "R", worktree: "." },
+				{ path: "conflict.ts", index: "U", worktree: "U", conflict: true },
+				{ path: "untracked.txt", index: "?", worktree: "?" },
+			],
+		});
+	});
+
+	it("leaves out the initial commit and a detached head", () => {
+		const status = parsePorcelainStatus("# branch.oid (initial)\0# branch.head (detached)\0");
+		expect(status.head).toBeUndefined();
+		expect(status.branch).toBeUndefined();
+		expect(status.files).toEqual([]);
+	});
+
+	it("parses log records and branch lists", () => {
+		const log = parseLog(
+			"\x1e\nabc123\x1fabc\x1fp1 p2\x1fAda\x1fada@example.com\x1f2026-01-01T00:00:00+00:00\x1fHEAD -> main\x1fSubject\x1e\n",
+		);
+		expect(log).toEqual([
+			{
+				hash: "abc123",
+				shortHash: "abc",
+				parents: ["p1", "p2"],
+				authorName: "Ada",
+				authorEmail: "ada@example.com",
+				date: "2026-01-01T00:00:00+00:00",
+				refs: "HEAD -> main",
+				subject: "Subject",
+			},
+		]);
+		const branches = parseBranches(
+			[
+				"refs/heads/main\x1fmain\x1forigin/main\x1f[ahead 1, behind 3]\x1fabc\x1f2026\x1f*\x1fTip",
+				"refs/heads/old\x1fold\x1forigin/old\x1f[gone]\x1fdef\x1f2025\x1f \x1fOld",
+				"refs/remotes/origin/HEAD\x1forigin\x1f\x1f\x1fabc\x1f2026\x1f \x1fTip",
+				"refs/remotes/origin/main\x1forigin/main\x1f\x1f\x1fabc\x1f2026\x1f \x1fTip",
+			].join("\n"),
+		);
+		expect(branches).toEqual([
+			{
+				name: "main",
+				remote: false,
+				current: true,
+				upstream: "origin/main",
+				ahead: 1,
+				behind: 3,
+				shortHash: "abc",
+				subject: "Tip",
+				date: "2026",
+			},
+			{
+				name: "old",
+				remote: false,
+				upstream: "origin/old",
+				upstreamGone: true,
+				shortHash: "def",
+				subject: "Old",
+				date: "2025",
+			},
+			{ name: "origin/main", remote: true, shortHash: "abc", subject: "Tip", date: "2026" },
+		]);
+	});
+});
+
+describe("GitService", () => {
+	let root: string;
+	let repo: string;
+	const service = new GitService();
+
+	beforeEach(() => {
+		root = mkdtempSync(join(tmpdir(), "pier-git-"));
+		repo = join(root, "repo");
+		mkdirSync(repo);
+	});
+	afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+	it("reports a directory outside any repository and can initialize one", async () => {
+		expect(await service.status(repo)).toEqual({ repository: false });
+		await service.init(repo);
+		const status = await service.status(repo);
+		expect(status).toMatchObject({ repository: true, prefix: "", files: [], remotes: [] });
+		expect(status.head).toBeUndefined();
+		await expectCode(service.init(repo), "CONFLICT");
+		expect((await service.log(repo)).commits).toEqual([]);
+	});
+
+	it("stages, unstages, commits and lists history", async () => {
+		initRepo(repo);
+		writeFileSync(join(repo, "a.txt"), "one\n");
+		mkdirSync(join(repo, "dir"));
+		writeFileSync(join(repo, "dir", "b c.txt"), "two\n");
+		let status = await service.status(repo);
+		expect(status.branch).toBe("main");
+		expect(status.files?.map((f) => [f.path, f.index, f.worktree])).toEqual([
+			["a.txt", "?", "?"],
+			["dir/b c.txt", "?", "?"],
+		]);
+
+		// Before the first commit, unstaging drops paths from the index.
+		await service.stage(repo, ["a.txt"]);
+		await service.unstage(repo, ["a.txt"]);
+		expect((await service.status(repo)).files?.find((f) => f.path === "a.txt")?.index).toBe("?");
+		await service.stage(repo);
+		await service.unstage(repo);
+		expect((await service.status(repo)).files?.every((f) => f.index === "?")).toBe(true);
+
+		await service.stage(repo);
+		await expectCode(service.commit(repo, "   "), "BAD_REQUEST");
+		const first = await service.commit(repo, "First commit\n\nBody");
+		expect(first.hash).toMatch(/^[0-9a-f]{40}$/);
+		status = await service.status(repo);
+		expect(status.head).toBe(first.hash);
+		expect(status.files).toEqual([]);
+
+		writeFileSync(join(repo, "a.txt"), "one\nmore\n");
+		expect((await service.diff(repo, "a.txt", false)).diff).toContain("+more");
+		expect((await service.diff(repo, "a.txt", true)).diff).toBe("");
+		await service.stage(repo, ["a.txt"]);
+		expect((await service.diff(repo, "a.txt", true)).diff).toContain("+more");
+		await service.unstage(repo, ["a.txt"]);
+		expect((await service.status(repo)).files).toEqual([{ path: "a.txt", index: ".", worktree: "M" }]);
+
+		const second = await service.commit(repo, "Second", false, true);
+		const log = await service.log(repo);
+		expect(log.commits.map((c) => c.subject)).toEqual(["Second", "First commit"]);
+		expect(log.commits[0]).toMatchObject({ hash: second.hash, authorName: "Pier Test", parents: [first.hash] });
+		expect((await service.log(repo, 1, 1)).commits.map((c) => c.subject)).toEqual(["First commit"]);
+
+		const amended = await service.commit(repo, "Second, amended", true);
+		expect(amended.hash).not.toBe(second.hash);
+		expect((await service.log(repo)).commits.map((c) => c.subject)).toEqual(["Second, amended", "First commit"]);
+		// Amending without a message keeps the old one.
+		await service.commit(repo, "", true);
+		expect((await service.log(repo, 1)).commits[0]?.subject).toBe("Second, amended");
+
+		const shown = await service.show(repo, amended.hash.slice(0, 10));
+		expect(shown.diff).toContain("Second, amended");
+		expect(shown.diff).toContain("+more");
+		await expectCode(service.show(repo, "deadbeefdeadbeef"), "NOT_FOUND");
+	});
+
+	it("diffs untracked files and discards changes", async () => {
+		initRepo(repo);
+		writeFileSync(join(repo, "tracked.txt"), "keep\n");
+		git(repo, "add", ".");
+		git(repo, "commit", "-q", "-m", "init");
+		writeFileSync(join(repo, "tracked.txt"), "changed\n");
+		writeFileSync(join(repo, "*.txt"), "glob-looking name\n");
+		writeFileSync(join(repo, "new.txt"), "brand new\n");
+
+		expect((await service.diff(repo, "new.txt", false)).diff).toContain("+brand new");
+		// Paths are literal: discarding "*.txt" must not touch other files.
+		await service.discard(repo, ["*.txt"]);
+		expect(existsSync(join(repo, "*.txt"))).toBe(false);
+		expect(existsSync(join(repo, "new.txt"))).toBe(true);
+		expect(readFileSync(join(repo, "tracked.txt"), "utf8")).toBe("changed\n");
+
+		await service.discard(repo, ["tracked.txt", "new.txt", "not-changed.txt"]);
+		expect(readFileSync(join(repo, "tracked.txt"), "utf8")).toBe("keep\n");
+		expect(existsSync(join(repo, "new.txt"))).toBe(false);
+		await expectCode(service.discard(repo, ["../outside"]), "BAD_REQUEST");
+	});
+
+	it("diffs a staged rename as one file", async () => {
+		initRepo(repo);
+		writeFileSync(join(repo, "old.txt"), "same content\nline 2\nline 3\n");
+		git(repo, "add", ".");
+		git(repo, "commit", "-q", "-m", "init");
+		git(repo, "mv", "old.txt", "new.txt");
+		const status = await service.status(repo);
+		expect(status.files).toEqual([{ path: "new.txt", origPath: "old.txt", index: "R", worktree: "." }]);
+		const { diff } = await service.diff(repo, "new.txt", true, "old.txt");
+		expect(diff).toContain("rename from old.txt");
+		await service.unstage(repo, ["new.txt", "old.txt"]);
+		expect((await service.status(repo)).files?.map((f) => [f.path, f.index, f.worktree])).toEqual([
+			["old.txt", ".", "D"],
+			["new.txt", "?", "?"],
+		]);
+	});
+
+	it("creates, switches and deletes branches, and stashes", async () => {
+		initRepo(repo);
+		writeFileSync(join(repo, "a.txt"), "a\n");
+		git(repo, "add", ".");
+		git(repo, "commit", "-q", "-m", "init");
+		await service.checkout(repo, "feature/x", true);
+		expect((await service.status(repo)).branch).toBe("feature/x");
+		await expectCode(service.checkout(repo, "bad..name", true), "BAD_REQUEST");
+		await expectCode(service.checkout(repo, "missing"), "NOT_FOUND");
+		await service.checkout(repo, "main");
+		const { branches } = await service.branches(repo);
+		expect(branches.map((b) => [b.name, b.remote, b.current ?? false]).sort()).toEqual([
+			["feature/x", false, false],
+			["main", false, true],
+		]);
+		await service.deleteBranch(repo, "feature/x");
+		expect((await service.branches(repo)).branches.map((b) => b.name)).toEqual(["main"]);
+
+		writeFileSync(join(repo, "a.txt"), "changed\n");
+		writeFileSync(join(repo, "u.txt"), "untracked\n");
+		await service.stash(repo, "push", "wip");
+		expect((await service.status(repo)).files).toEqual([]);
+		await service.stash(repo, "pop");
+		expect((await service.status(repo)).files?.map((f) => f.path).sort()).toEqual(["a.txt", "u.txt"]);
+	});
+
+	it("pushes a new branch to origin, tracks it and pulls", async () => {
+		const remote = join(root, "remote.git");
+		git(root, "init", "-q", "--bare", "-b", "main", remote);
+		initRepo(repo);
+		git(repo, "remote", "add", "origin", remote);
+		writeFileSync(join(repo, "a.txt"), "a\n");
+		git(repo, "add", ".");
+		git(repo, "commit", "-q", "-m", "init");
+		await service.push(repo);
+		let status = await service.status(repo);
+		expect(status).toMatchObject({ upstream: "origin/main", ahead: 0, behind: 0, remotes: ["origin"] });
+
+		const other = join(root, "other");
+		git(root, "clone", "-q", remote, other);
+		initRepo(other);
+		writeFileSync(join(other, "b.txt"), "b\n");
+		git(other, "add", ".");
+		git(other, "commit", "-q", "-m", "from other");
+		git(other, "push", "-q");
+
+		await service.fetch(repo);
+		status = await service.status(repo);
+		expect(status.behind).toBe(1);
+		await service.pull(repo);
+		expect(existsSync(join(repo, "b.txt"))).toBe(true);
+
+		// Switching to a remote-tracking branch creates the local branch.
+		git(other, "switch", "-q", "-c", "topic");
+		git(other, "push", "-q", "-u", "origin", "topic");
+		await service.fetch(repo);
+		await service.checkout(repo, "origin/topic");
+		expect((await service.status(repo)).upstream).toBe("origin/topic");
+	});
+
+	it("uses the enclosing repository for a workspace in a subdirectory", async () => {
+		initRepo(repo);
+		mkdirSync(join(repo, "pkg"));
+		writeFileSync(join(repo, "pkg", "x.txt"), "x\n");
+		const status = await service.status(join(repo, "pkg"));
+		expect(status).toMatchObject({ repository: true, prefix: "pkg" });
+		expect(status.files?.map((f) => f.path)).toEqual(["pkg/x.txt"]);
+	});
+});
+
+describe("git.* methods", () => {
+	let t: TestHost;
+	let client: PierClient;
+	let workspace: WorkspaceInfo;
+
+	beforeEach(async () => {
+		t = await startTestHost();
+		client = await t.connect();
+		workspace = (await client.request("workspace.add", { path: t.workspaceDir })).workspace;
+	});
+	afterEach(() => t.close());
+
+	it("initializes a repository, commits and reads it back", async () => {
+		expect(await client.request("git.status", { workspaceId: workspace.id })).toEqual({ repository: false });
+		await expectCode(client.request("git.log", { workspaceId: workspace.id }), "NOT_FOUND");
+		await client.request("git.init", { workspaceId: workspace.id });
+		git(t.workspaceDir, "config", "user.name", "Pier Test");
+		git(t.workspaceDir, "config", "user.email", "pier@example.com");
+		git(t.workspaceDir, "config", "commit.gpgsign", "false");
+		writeFileSync(join(t.workspaceDir, "readme.md"), "# Hi\n");
+		await client.request("git.stage", { workspaceId: workspace.id, paths: ["readme.md"] });
+		const commit = await client.request("git.commit", { workspaceId: workspace.id, message: "Add readme" });
+		const { commits } = await client.request("git.log", { workspaceId: workspace.id });
+		expect(commits).toMatchObject([{ hash: commit.hash, subject: "Add readme" }]);
+		await expectCode(
+			client.request("git.stage", { workspaceId: workspace.id, paths: ["../etc/passwd"] }),
+			"BAD_REQUEST",
+		);
+		await expectCode(client.request("git.checkout", { workspaceId: workspace.id, branch: "--orphan" }), "BAD_REQUEST");
+		await expectCode(client.request("git.status", { workspaceId: "nope" }), "NOT_FOUND");
+	});
+});

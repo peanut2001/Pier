@@ -38,6 +38,7 @@ import {
 	type RequestHandler,
 	type Transport,
 } from "./connection.ts";
+import { GitService } from "./git.ts";
 import { listHostDirectories } from "./host-directories.ts";
 import { HostStatsSampler } from "./host-stats.ts";
 import type { ManagedSession } from "./managed-session.ts";
@@ -173,6 +174,18 @@ const AUDITED_METHODS = new Set<MethodName>([
 	"settings.write",
 	"agentConfig.update",
 	"agentConfig.write",
+	// Git source control (1.28).
+	"git.stage",
+	"git.unstage",
+	"git.discard",
+	"git.commit",
+	"git.checkout",
+	"git.deleteBranch",
+	"git.fetch",
+	"git.pull",
+	"git.push",
+	"git.stash",
+	"git.init",
 	// Opening a shell on this computer (1.18); what is typed into it is not recorded.
 	"terminal.open",
 ]);
@@ -266,6 +279,28 @@ function auditDetail(method: MethodName, params: Record<string, unknown>): Recor
 				...(params.workspaceId ? { workspaceId: params.workspaceId } : {}),
 				bytes: typeof params.text === "string" ? Buffer.byteLength(params.text) : 0,
 			};
+		case "git.stage":
+		case "git.unstage":
+		case "git.discard":
+			return {
+				workspaceId: params.workspaceId,
+				paths: Array.isArray(params.paths) ? params.paths.length : "all",
+			};
+		case "git.commit":
+			return {
+				workspaceId: params.workspaceId,
+				...(params.amend ? { amend: true } : {}),
+				...(params.all ? { all: true } : {}),
+			};
+		case "git.checkout":
+		case "git.deleteBranch":
+			return { workspaceId: params.workspaceId, branch: params.branch, ...(params.create ? { create: true } : {}) };
+		case "git.fetch":
+		case "git.pull":
+		case "git.push":
+		case "git.stash":
+		case "git.init":
+			return { workspaceId: params.workspaceId, ...(params.action ? { action: params.action } : {}) };
 		case "terminal.open":
 			return params.cwd ? { cwd: params.cwd } : undefined;
 		case "agentConfig.update":
@@ -336,6 +371,7 @@ export class PierHost implements RequestHandler {
 	private readonly shell: AppShell | undefined;
 	private readonly terminals: HostTerminals;
 	private readonly uploads: WorkspaceUploads;
+	private readonly git = new GitService();
 	private readonly offShellStatus: (() => void) | undefined;
 	private shuttingDown = false;
 
@@ -808,6 +844,46 @@ export class PierHost implements RequestHandler {
 				this.uploads.chunk(ctx.connection.connectionId, params.uploadId, params.offset, params.data),
 			"workspace.uploadFinish": (ctx, params) => this.uploads.finish(ctx.connection.connectionId, params.uploadId),
 			"workspace.uploadCancel": (ctx, params) => this.uploads.cancel(ctx.connection.connectionId, params.uploadId),
+
+			"git.status": (_ctx, params) => this.git.status(this.requireWorkspace(params.workspaceId).path),
+			"git.diff": (_ctx, params) =>
+				this.git.diff(
+					this.requireWorkspace(params.workspaceId).path,
+					params.path,
+					params.staged ?? false,
+					params.origPath,
+				),
+			"git.log": (_ctx, params) =>
+				this.git.log(this.requireWorkspace(params.workspaceId).path, params.limit, params.skip),
+			"git.show": (_ctx, params) => this.git.show(this.requireWorkspace(params.workspaceId).path, params.commit),
+			"git.branches": (_ctx, params) => this.git.branches(this.requireWorkspace(params.workspaceId).path),
+			"git.stage": (_ctx, params) => this.git.stage(this.requireWorkspace(params.workspaceId).path, params.paths),
+			"git.unstage": (_ctx, params) => this.git.unstage(this.requireWorkspace(params.workspaceId).path, params.paths),
+			"git.discard": (_ctx, params) => this.git.discard(this.requireWorkspace(params.workspaceId).path, params.paths),
+			"git.commit": (_ctx, params) =>
+				this.git.commit(
+					this.requireWorkspace(params.workspaceId).path,
+					params.message,
+					params.amend ?? false,
+					params.all ?? false,
+				),
+			"git.checkout": (_ctx, params) =>
+				this.git.checkout(
+					this.requireWorkspace(params.workspaceId).path,
+					params.branch,
+					params.create ?? false,
+					params.startPoint,
+				),
+			"git.deleteBranch": (_ctx, params) =>
+				this.git.deleteBranch(this.requireWorkspace(params.workspaceId).path, params.branch, params.force ?? false),
+			"git.fetch": (_ctx, params) => this.git.fetch(this.requireWorkspace(params.workspaceId).path),
+			"git.pull": (_ctx, params) =>
+				this.git.pull(this.requireWorkspace(params.workspaceId).path, params.rebase ?? false),
+			"git.push": (_ctx, params) =>
+				this.git.push(this.requireWorkspace(params.workspaceId).path, params.force ?? false),
+			"git.stash": (_ctx, params) =>
+				this.git.stash(this.requireWorkspace(params.workspaceId).path, params.action, params.message),
+			"git.init": (_ctx, params) => this.git.init(this.requireWorkspace(params.workspaceId).path),
 
 			"session.list": async (_ctx, params) => ({
 				sessions: await this.pool.list(this.requireWorkspace(params.workspaceId)),
