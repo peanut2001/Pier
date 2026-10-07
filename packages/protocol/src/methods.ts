@@ -33,6 +33,8 @@ import {
 	type HostInfo,
 	type HostStats,
 	ImageInputSchema,
+	type LoopbackCallbackPage,
+	type LoopbackRequest,
 	type ModelInfo,
 	type NewApiAuthorizeResult,
 	type NewApiAuthorizeStart,
@@ -341,6 +343,24 @@ export const MethodParamsSchemas = {
 	"newapi.authorizeCancel": z.object({ flowId: Id }),
 
 	/**
+	 * Loopback relays (1.28, this computer only): catch a browser sign-in's redirect on this
+	 * computer for a sign-in that runs on another computer's host. `loopback.open` listens on a
+	 * random `http://127.0.0.1:<port>/callback`; `loopback.next` resolves with the next callback,
+	 * whose browser waits until `loopback.respond` gives the page to show (or a minute passes).
+	 * Relays close after 11 minutes, with `loopback.close`, or when the connection closes.
+	 */
+	"loopback.open": z.object({}).optional(),
+	"loopback.next": z.object({ relayId: Id }),
+	"loopback.respond": z.object({
+		relayId: Id,
+		requestId: Id,
+		status: z.number().int().min(200).max(599),
+		title: z.string().max(200),
+		detail: z.string().max(2000),
+	}),
+	"loopback.close": z.object({ relayId: Id }),
+
+	/**
 	 * 云链API personal center (1.6). The host keeps one login for the site (saved in the Pier
 	 * directory, so it survives restarts) and never hands its credentials or token keys to clients.
 	 */
@@ -352,13 +372,22 @@ export const MethodParamsSchemas = {
 	"account.verify": z.object({ code: z.string().trim().min(1).max(100) }),
 	/**
 	 * Browser sign-in (1.16) when `AccountSite.browserLogin`: the user signs in on the website with
-	 * any method and approves Pier, which gets a login session of its own. Only for local UIs,
-	 * because the browser returns to a loopback address on the host's computer.
+	 * any method and approves Pier, which gets a login session of its own. The browser returns to
+	 * a loopback address on the host's computer, unless the client passes `redirectUri` (1.28): a
+	 * loopback address on the client's computer (`loopback.open`), whose callbacks the client
+	 * forwards with `account.authorizeCallback`. That lets the browser of the computer in front of
+	 * the user sign in another computer's Pier.
 	 */
-	"account.authorizeStart": z.object({}).optional(),
+	"account.authorizeStart": z.object({ redirectUri: z.string().trim().min(1).max(200).optional() }).optional(),
 	/** Resolve once the user approves (reject when they decline, the flow expires or is cancelled). */
 	"account.authorizeWait": z.object({ flowId: Id }),
 	"account.authorizeCancel": z.object({ flowId: Id }),
+	/**
+	 * Hand over a browser callback of a flow started with `redirectUri` (1.28): the query string
+	 * of the redirect. Resolves after the host handled it, with the page the browser should show;
+	 * a successful sign-in also settles `account.authorizeWait`.
+	 */
+	"account.authorizeCallback": z.object({ flowId: Id, query: z.string().max(8000) }),
 	/** Email a registration verification code. */
 	"account.sendCode": z.object({ email: z.string().trim().min(3).max(50) }),
 	/** Register with a password, then sign in. */
@@ -592,6 +621,10 @@ export const LOCAL_ONLY_METHODS: ReadonlySet<MethodName> = new Set([
 	"peer.pair",
 	"peer.update",
 	"peer.remove",
+	"loopback.open",
+	"loopback.next",
+	"loopback.respond",
+	"loopback.close",
 ]);
 
 export interface HelloResult {
@@ -695,6 +728,11 @@ export interface MethodResults {
 	"account.authorizeStart": AccountAuthorizeStart;
 	"account.authorizeWait": AccountLoginResult;
 	"account.authorizeCancel": { cancelled: boolean };
+	"account.authorizeCallback": LoopbackCallbackPage;
+	"loopback.open": { relayId: string; redirectUri: string; expiresAt: string };
+	"loopback.next": LoopbackRequest;
+	"loopback.respond": { responded: boolean };
+	"loopback.close": { closed: boolean };
 	"account.sendCode": { sent: true };
 	"account.register": AccountLoginResult;
 	"account.overview": AccountOverview;

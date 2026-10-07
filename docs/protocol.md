@@ -1,4 +1,4 @@
-# Pier 协议 v1.27
+# Pier 协议 v1.28
 
 > 实现：`packages/protocol`（zod schema + TS 类型，Host 与所有客户端共享）。
 > 本文档描述线上格式与语义；字段的权威定义以 `packages/protocol/src` 为准。
@@ -60,7 +60,7 @@
 
 ```jsonc
 { "type": "req", "id": "h", "method": "host.hello", "params": {
-  "protocolVersion": "1.27",
+  "protocolVersion": "1.28",
   "client": { "name": "pier-desktop", "version": "0.1.0", "platform": "darwin" },
   "token": "<本地 token>",       // 本地连接必填；远程连接由加密通道认证，不需要
   "coalesceMs": 50               // 可选：合并流式增量的窗口（0–1000ms，默认 0）
@@ -75,7 +75,7 @@
 
 ## 3. 方法
 
-参数中的 `sessionId` 均为 pi 会话 ID。标注 🔒 的方法仅本地桌面连接可调用（`LOCAL_ONLY_METHODS`），它们决定谁能连接这台电脑：设备、配对、远程访问与 `peer.*`。其余方法对已配对的远程设备（手机和其他电脑）同样开放（1.10）：配对即完全信任，可以管理工作区与审批策略、编辑文件、配置服务商与模型、账号和扩展；1.9 及以前这些方法也仅限本地。
+参数中的 `sessionId` 均为 pi 会话 ID。标注 🔒 的方法仅本地桌面连接可调用（`LOCAL_ONLY_METHODS`），它们决定谁能连接这台电脑：设备、配对、远程访问与 `peer.*`，另外还有在本机回环地址上监听的 `loopback.*`（1.28）。其余方法对已配对的远程设备（手机和其他电脑）同样开放（1.10）：配对即完全信任，可以管理工作区与审批策略、编辑文件、配置服务商与模型、账号和扩展；1.9 及以前这些方法也仅限本地。
 
 ### host
 
@@ -266,8 +266,9 @@ pi 终端界面自带的命令（`/model`、`/compact`、`/new`、`/fork`、`/na
 | `account.status` | — | `{ site?, siteError?, user? }`；`site = AccountSite = { name, url, version?, logo?, registerEnabled, emailVerification, passwordLogin, browserLogin, turnstile, oauth: string[], quota: { perUnit, type, usdRate?, customSymbol?, customRate? } }`（来自站点的 `/api/status`，`type` 为 `USD`、`CNY`、`CUSTOM` 或 `TOKENS`）；`user` 为保存的登录，没有登录时省略 |
 | `account.login` | `{ username, password }` 或 `{ accessToken, userId? }` | `AccountLoginResult`：`{ status: "ok", overview }` 或需要两步验证时 `{ status: "verify", methods }`。站点开启 Turnstile 时密码登录返回 `BAD_REQUEST` |
 | `account.verify` | `{ code }` | `AccountLoginResult`；提交两步验证码（或备用码） |
-| `account.authorizeStart` | — | `{ flowId, authorizeUrl, expiresAt }`（1.16）；见下文「浏览器登录」。站点不支持时 `BAD_REQUEST` |
+| `account.authorizeStart` | `{ redirectUri? }`（`redirectUri` 1.28） | `{ flowId, authorizeUrl, expiresAt }`（1.16）；见下文「浏览器登录」。站点不支持或 `redirectUri` 不是 `http://127.0.0.1:<端口>/callback` 时 `BAD_REQUEST` |
 | `account.authorizeWait` | `{ flowId }` | `AccountLoginResult`（1.16）；用户在浏览器中登录并同意后返回 `{ status: "ok", overview }` 并保存登录。拒绝、超时、取消或换取失败时返回错误 |
+| `account.authorizeCallback` | `{ flowId, query }` | `{ status, title, detail }`（1.28）；转交客户端在自己电脑上接到的回调（`query` 为回调地址的查询串，如 `?code=…&state=…`），处理完后返回浏览器应显示的页面；只用于带 `redirectUri` 启动的流程，否则 `BAD_REQUEST` |
 | `account.authorizeCancel` | `{ flowId }` | `{ cancelled }`（1.16） |
 | `account.sendCode` | `{ email }` | `{ sent: true }`；发送注册邮箱验证码（`GET /api/verification`） |
 | `account.register` | `{ username, password, email?, code?, affCode? }` | `AccountLoginResult`；注册（`POST /api/user/register`，用户名最多 20 个字符、密码 8–128 位，站点开启邮箱验证时必须提供 `email` 和 `code`，`affCode` 为邀请码）后立即登录。站点关闭注册或开启 Turnstile 时 `BAD_REQUEST` |
@@ -278,7 +279,25 @@ pi 终端界面自带的命令（`/model`、`/compact`、`/new`、`/fork`、`/na
 
 #### 浏览器登录（1.16）
 
-`site.browserLogin` 为 `true`（站点的 `/api/status` 返回 `app_authorization_enabled: true`，且 `app_authorization_scopes` 包含 `account`）时，个人中心只在浏览器中登录，Pier 不接触密码：用户可以用站点支持的任意方式登录（账号密码、GitHub、LinuxDO、Passkey、人机验证等），在授权页面同意后，站点为 Pier 建立一个独立的登录会话（登录方式为「应用」，出现在网页「登录会话」中，可以随时注销）。流程与上文的 `newapi.authorize*` 相同（RFC 8252 回环重定向 + PKCE S256），区别是授权页面地址带 `scope=account`、不带 `key_name`，站点不会新建令牌，`POST /api/app-auth/token` 返回 `{ scope: "account", access_token, access_expires_at, refresh_token, session, user }`。Host 把 `refresh_token` 当作刷新 Cookie 使用，与密码登录一样只保存它，并自动续期。流程属于发起的连接；因为浏览器会跳回 Host 所在电脑的回环地址，所以只适用于本地 UI。Host 请求 NewAPI 站点时使用 `User-Agent: Pier/<版本> (<系统>)`。不支持的站点仍然使用 `account.login` / `account.register`。
+`site.browserLogin` 为 `true`（站点的 `/api/status` 返回 `app_authorization_enabled: true`，且 `app_authorization_scopes` 包含 `account`）时，个人中心只在浏览器中登录，Pier 不接触密码：用户可以用站点支持的任意方式登录（账号密码、GitHub、LinuxDO、Passkey、人机验证等），在授权页面同意后，站点为 Pier 建立一个独立的登录会话（登录方式为「应用」，出现在网页「登录会话」中，可以随时注销）。流程与上文的 `newapi.authorize*` 相同（RFC 8252 回环重定向 + PKCE S256），区别是授权页面地址带 `scope=account`、不带 `key_name`，站点不会新建令牌，`POST /api/app-auth/token` 返回 `{ scope: "account", access_token, access_expires_at, refresh_token, session, user }`。Host 把 `refresh_token` 当作刷新 Cookie 使用，与密码登录一样只保存它，并自动续期。流程属于发起的连接。默认浏览器会跳回 Host 所在电脑的回环地址，只适用于本地 UI；设置其他电脑时见下文「为其他电脑登录」。Host 请求 NewAPI 站点时使用 `User-Agent: Pier/<版本> (<系统>)`。不支持的站点仍然使用 `account.login` / `account.register`。
+
+#### 为其他电脑登录（1.28）
+
+浏览器运行在用户面前的电脑上，只能跳回这台电脑的回环地址。桌面端设置已配对的电脑时，由本机 Host 代收回调，再转交给发起登录的那台电脑：
+
+1. 在本机调用 `loopback.open`，得到 `{ relayId, redirectUri }`（`http://127.0.0.1:<随机端口>/callback`）；
+2. 在那台电脑调用 `account.authorizeStart { redirectUri }`。它照常生成 `state` 与 `code_verifier`，但不监听端口，授权页面地址中的 `redirect_uri` 就是这个地址；
+3. 在本机浏览器中打开 `authorizeUrl`，并在那台电脑调用 `account.authorizeWait`；同时循环调用本机的 `loopback.next`，把每个回调的 `query` 用 `account.authorizeCallback` 交给那台电脑，再把返回的页面用 `loopback.respond` 显示在浏览器中；
+4. 那台电脑校验 `state`（不符时返回 400 页面且不影响流程），用自己保存的 `code_verifier` 换取登录并保存，`account.authorizeWait` 随之返回；完成后调用 `loopback.close`。
+
+`code_verifier` 始终留在发起登录的电脑上，本机代收的授权码单独无法换取凭据。旧版本 Host 忽略 `redirectUri`，因此桌面端只对协议 1.28 及以上的电脑这样做。
+
+| 方法 | 参数 | 结果 |
+|---|---|---|
+| `loopback.open` 🔒 | — | `{ relayId, redirectUri, expiresAt }`；在 `127.0.0.1` 的随机端口监听 `/callback`（11 分钟后、调用 `loopback.close` 或连接断开时关闭）。其他路径返回 404 |
+| `loopback.next` 🔒 | `{ relayId }` | `{ requestId, query }`；等待下一个回调。浏览器一直等到 `loopback.respond`，最多 1 分钟后显示「请回到 Pier 查看登录结果」。中继关闭后 `NOT_FOUND` |
+| `loopback.respond` 🔒 | `{ relayId, requestId, status, title, detail }` | `{ responded }`；在浏览器中显示页面；浏览器已断开或已经回复过时为 `false` |
+| `loopback.close` 🔒 | `{ relayId }` | `{ closed }` |
 
 桌面端把每个分组的令牌保存为自定义服务商 `yunlian-<分组>`（名称为「云链API · 分组」，Base URL 为 `<站点>/v1`）；「模型与服务商」中浏览器授权添加的是 `yunlian`。
 

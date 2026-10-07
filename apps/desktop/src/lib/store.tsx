@@ -1623,6 +1623,24 @@ export class PierStore {
 	}
 
 	/**
+	 * Call a loopback relay method (`loopback.*`, 1.28) on this computer's host, which catches a
+	 * browser sign-in's redirect for another computer. Throws with the host's message.
+	 */
+	loopback<M extends Extract<MethodName, `loopback.${string}`>>(
+		method: M,
+		params: MethodParams<M>,
+		timeoutMs = 45_000,
+	): Promise<MethodResult<M>> {
+		const client = this.localClient;
+		if (!client) return Promise.reject(new Error("尚未连接到本机的 Pier Host"));
+		return (client.request as (m: M, p: MethodParams<M>, o: { timeoutMs: number }) => Promise<MethodResult<M>>)(
+			method,
+			params,
+			{ timeoutMs },
+		);
+	}
+
+	/**
 	 * Call a personal-center method (`account.*`) on the computer the settings screen manages.
 	 * Throws with the host's message.
 	 */

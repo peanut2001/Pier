@@ -41,6 +41,7 @@ import {
 import { listHostDirectories } from "./host-directories.ts";
 import { HostStatsSampler } from "./host-stats.ts";
 import type { ManagedSession } from "./managed-session.ts";
+import { LoopbackRelays } from "./oauth-loopback.ts";
 import { detectPackageManagers } from "./package-managers.ts";
 import {
 	accountPath,
@@ -323,6 +324,7 @@ export class PierHost implements RequestHandler {
 	readonly providers: ProviderManager;
 	readonly newapi: NewApiManager;
 	readonly account: AccountManager;
+	readonly loopback = new LoopbackRelays();
 	readonly extensions: ExtensionManager;
 	readonly packageCatalog: PackageCatalog;
 	readonly settings: PiSettingsFiles;
@@ -525,6 +527,7 @@ export class PierHost implements RequestHandler {
 		this.connections.delete(connection);
 		this.providers.connectionClosed(connection.connectionId);
 		this.newapi.connectionClosed(connection.connectionId);
+		this.loopback.connectionClosed(connection.connectionId);
 		this.terminals.connectionClosed(connection);
 		this.uploads.connectionClosed(connection.connectionId);
 		for (const session of connection.subscriptions) session.unsubscribe(connection.connectionId);
@@ -976,8 +979,11 @@ export class PierHost implements RequestHandler {
 			"account.status": () => this.account.getStatus(),
 			"account.login": (_ctx, params) => this.account.login(params),
 			"account.verify": (_ctx, params) => this.account.verify(params.code),
-			"account.authorizeStart": (ctx) => this.account.authorizeStart(ctx.connection.connectionId),
+			"account.authorizeStart": (ctx, params) =>
+				this.account.authorizeStart(ctx.connection.connectionId, params?.redirectUri),
 			"account.authorizeWait": (ctx, params) => this.account.authorizeWait(ctx.connection.connectionId, params.flowId),
+			"account.authorizeCallback": (ctx, params) =>
+				this.account.authorizeCallback(ctx.connection.connectionId, params.flowId, params.query),
 			"account.authorizeCancel": (ctx, params) => ({
 				cancelled: this.account.authorizeCancel(ctx.connection.connectionId, params.flowId),
 			}),
@@ -990,6 +996,12 @@ export class PierHost implements RequestHandler {
 			"newapi.authorizeCancel": (ctx, params) => ({
 				cancelled: this.newapi.authorizeCancel(ctx.connection.connectionId, params.flowId),
 			}),
+			"loopback.open": (ctx) => this.loopback.open(ctx.connection.connectionId),
+			"loopback.next": (ctx, params) => this.loopback.next(ctx.connection.connectionId, params.relayId),
+			"loopback.respond": (ctx, { relayId, requestId, ...page }) => ({
+				responded: this.loopback.respond(ctx.connection.connectionId, relayId, requestId, page),
+			}),
+			"loopback.close": (ctx, params) => ({ closed: this.loopback.close(ctx.connection.connectionId, params.relayId) }),
 
 			"extension.list": (_ctx, params) => this.extensions.list(this.extensionTarget(params?.workspaceId)),
 			"extension.install": async (_ctx, params) => {
@@ -1148,6 +1160,7 @@ export class PierHost implements RequestHandler {
 		this.providers.shutdown();
 		this.account.shutdown();
 		this.newapi.shutdown();
+		this.loopback.closeAll();
 		this.peers.shutdown();
 		this.terminals.shutdown();
 		await this.uploads.shutdown();
