@@ -17,6 +17,8 @@ function initRepo(dir: string): void {
 	git(dir, "config", "user.name", "Pier Test");
 	git(dir, "config", "user.email", "pier@example.com");
 	git(dir, "config", "commit.gpgsign", "false");
+	// Windows runners default to core.autocrlf=true, which would check files out with CRLF.
+	git(dir, "config", "core.autocrlf", "false");
 }
 
 async function expectCode(promise: Promise<unknown>, code: string): Promise<void> {
