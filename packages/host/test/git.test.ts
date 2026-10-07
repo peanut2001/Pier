@@ -199,13 +199,13 @@ describe("GitService", () => {
 		git(repo, "add", ".");
 		git(repo, "commit", "-q", "-m", "init");
 		writeFileSync(join(repo, "tracked.txt"), "changed\n");
-		writeFileSync(join(repo, "*.txt"), "glob-looking name\n");
+		writeFileSync(join(repo, "[n]ew.txt"), "glob-looking name\n");
 		writeFileSync(join(repo, "new.txt"), "brand new\n");
 
 		expect((await service.diff(repo, "new.txt", false)).diff).toContain("+brand new");
-		// Paths are literal: discarding "*.txt" must not touch other files.
-		await service.discard(repo, ["*.txt"]);
-		expect(existsSync(join(repo, "*.txt"))).toBe(false);
+		// Paths are literal: discarding "[n]ew.txt" (a valid name on Windows too) must not touch "new.txt".
+		await service.discard(repo, ["[n]ew.txt"]);
+		expect(existsSync(join(repo, "[n]ew.txt"))).toBe(false);
 		expect(existsSync(join(repo, "new.txt"))).toBe(true);
 		expect(readFileSync(join(repo, "tracked.txt"), "utf8")).toBe("changed\n");
 
