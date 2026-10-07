@@ -462,7 +462,7 @@ button.sidebar-update-info:hover:not(:disabled) {
 	width: 26px;
 	height: 26px;
 	border-radius: 50%;
-	background: var(--brand-gradient);
+	background: var(--accent);
 	color: #fff;
 	box-shadow: 0 2px 8px -2px var(--brand-glow);
 }
