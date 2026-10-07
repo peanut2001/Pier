@@ -41,6 +41,12 @@
 		"externalBin": ["binaries/pier-host"],
 		"resources": { "pi-assets/": "pi-assets/" },
 		"createUpdaterArtifacts": true,
+		"windows": {
+			"nsis": {
+				"languages": ["English", "SimpChinese", "TradChinese"],
+				"displayLanguageSelector": false
+			}
+		},
 		"macOS": {
 			"signingIdentity": "-",
 			"entitlements": "entitlements.plist"

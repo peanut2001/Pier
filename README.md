@@ -97,6 +97,8 @@ bun run --cwd apps/desktop build              # 打包安装包（deb / AppImage
 
 **设置其他电脑上的 Pier**：添加了其他电脑后，设置页左上角会出现「设置哪台电脑上的 Pier」选择框。切换到另一台电脑时，桌面端通过加密通道读取（同步）那台电脑的设置，「常规」「个人中心」「模型与服务商」「扩展」「Agent 配置」这几页随后显示并直接修改那台电脑上的 Pier（凭据、自定义接口、默认模型、扩展包、`settings.json` 都保存在那台电脑上）；点击选择框旁或页面顶部的「同步」可随时重新读取。「设备与远程」「日志」仍只针对本机，「工作区」「关于与更新」同时列出所有电脑。浏览器授权（云链API 浏览器登录、个人中心的浏览器登录）会回到 Host 所在电脑的回环地址，因此只能用于本机；设置其他电脑时，请在个人中心用账号密码或访问令牌登录，或填写 API Key。那台电脑需要协议 1.10 或更高（pi 配置需要 1.15，Claude Code 与 Codex 配置需要 1.23），版本过旧时页面会提示先更新它。
 
+**Windows 安装程序语言**：NSIS 安装 / 卸载程序内置英文、简体中文和繁体中文（`bundle.windows.nsis.languages`），按 Windows 的界面语言自动选择，不弹出语言选择框；系统语言不在列表中时使用英文。
+
 **macOS 首次打开**：安装包目前只做了本机签名（ad-hoc，`bundle.macOS.signingIdentity: "-"`），没有 Apple Developer ID 签名和公证。从浏览器下载后第一次打开时，macOS 会提示“无法验证开发者”（或“Apple 无法检查其是否包含恶意软件”）：把 Pier 拖进「应用程序」，双击打开一次后到「系统设置 → 隐私与安全性」底部点「仍要打开」并确认即可，之后正常启动；应用内自动更新不会再触发该提示。v0.2.2 及更早的安装包完全未签名，macOS 会误报“已损坏，无法打开”，这时在终端执行 `xattr -dr com.apple.quarantine /Applications/Pier.app` 后再打开（仍不行时再执行 `codesign --force --deep --sign - /Applications/Pier.app`）。
 
 只调界面时可以不启动 Tauri：用假模型（faux）起一个 Host，再在浏览器里打开 Vite 开发服务器：
