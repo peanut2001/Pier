@@ -284,6 +284,75 @@ describe("personal center", () => {
 		expect(() => statSync(t.accountFile)).toThrow();
 	});
 
+	it("signs another computer in with a redirect caught on the browser's computer", async () => {
+		await start({ variant: "modern", appAuth: true, appAccount: true });
+		// `t.second` plays this computer (relay), `t.client` the computer being signed in.
+		const relay = await t.second.request("loopback.open", {});
+		expect(relay.redirectUri).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/callback$/);
+		for (const redirectUri of [
+			"http://example.com:80/callback",
+			"http://127.0.0.1:1/other",
+			"https://127.0.0.1:1/callback",
+		]) {
+			await expect(t.client.request("account.authorizeStart", { redirectUri })).rejects.toMatchObject({
+				code: "BAD_REQUEST",
+			});
+		}
+		const started = await t.client.request("account.authorizeStart", { redirectUri: relay.redirectUri });
+		const params = new URL(started.authorizeUrl).searchParams;
+		expect(params.get("redirect_uri")).toBe(relay.redirectUri);
+		const waiting = t.client.request("account.authorizeWait", { flowId: started.flowId });
+
+		// Forward one callback the way the app does; the browser waits for the outcome.
+		const forward = async () => {
+			const callback = await t.second.request("loopback.next", { relayId: relay.relayId });
+			const page = await t.client.request("account.authorizeCallback", {
+				flowId: started.flowId,
+				query: callback.query,
+			});
+			expect(
+				await t.second.request("loopback.respond", { relayId: relay.relayId, requestId: callback.requestId, ...page }),
+			).toEqual({ responded: true });
+			return page;
+		};
+
+		// Only the right state settles the flow.
+		const forged = new URL(relay.redirectUri);
+		forged.searchParams.set("code", "forged");
+		forged.searchParams.set("state", "wrong");
+		const [forgedPage, forgedForward] = await Promise.all([fetch(forged), forward()]);
+		expect(forgedForward.status).toBe(400);
+		expect(forgedPage.status).toBe(400);
+		expect(await forgedPage.text()).toContain("无效的授权回调");
+		// Other paths never reach the app.
+		expect((await fetch(new URL("/other", relay.redirectUri))).status).toBe(404);
+
+		const [page, forwarded] = await Promise.all([fetch(site.approve(started.authorizeUrl)), forward()]);
+		expect(forwarded).toMatchObject({ status: 200, title: "登录成功" });
+		expect(page.status).toBe(200);
+		expect(await page.text()).toContain("Pier 已登录 Alice");
+		const result = await waiting;
+		if (result.status !== "ok") throw new Error("expected a signed-in account");
+		expect(result.overview.user.username).toBe("alice");
+		expect(readFileSync(t.accountFile, "utf8")).toContain(site.refreshToken);
+
+		// The relay belongs to its connection and ends with `loopback.close`.
+		await expect(t.client.request("loopback.next", { relayId: relay.relayId })).rejects.toMatchObject({
+			code: "NOT_FOUND",
+		});
+		const next = t.second.request("loopback.next", { relayId: relay.relayId });
+		expect(await t.second.request("loopback.close", { relayId: relay.relayId })).toEqual({ closed: true });
+		await expect(next).rejects.toMatchObject({ code: "NOT_FOUND" });
+		await expect(fetch(relay.redirectUri)).rejects.toThrow();
+
+		// A flow whose browser returns to this host takes no forwarded callbacks.
+		const own = await t.client.request("account.authorizeStart", {});
+		await expect(
+			t.client.request("account.authorizeCallback", { flowId: own.flowId, query: "?code=x&state=y" }),
+		).rejects.toMatchObject({ code: "BAD_REQUEST" });
+		await t.client.request("account.authorizeCancel", { flowId: own.flowId });
+	});
+
 	it("reports declined, cancelled and unsupported browser sign-ins", async () => {
 		await start({ variant: "modern", appAuth: true, appAccount: true });
 		const declined = await t.client.request("account.authorizeStart", {});

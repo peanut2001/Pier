@@ -12,6 +12,7 @@ import type { AddressInfo } from "node:net";
 import { hostname } from "node:os";
 import {
 	type CustomProviderApi,
+	type LoopbackCallbackPage,
 	type NewApiAccount,
 	type NewApiAuthorizeResult,
 	type NewApiAuthorizeStart,
@@ -21,6 +22,7 @@ import {
 	type NewApiToken,
 	PierProtocolError,
 } from "@pier/protocol";
+import { callbackPage, isLoopbackRedirect } from "../oauth-loopback.ts";
 
 /**
  * Sign-in to NewAPI (https://github.com/QuantumNous/new-api) sites: log in with a password
@@ -262,7 +264,11 @@ interface AuthorizeFlow {
 	state: string;
 	verifier: string;
 	redirectUri: string;
-	server: Server;
+	/**
+	 * Listens for the redirect on this computer; undefined when the client catches it on its own
+	 * computer and hands it over with `authorizeSessionCallback`.
+	 */
+	server?: Server;
 	timer: ReturnType<typeof setTimeout>;
 	/** Set once a callback carrying the right state arrived; later callbacks are ignored. */
 	answered: boolean;
@@ -270,28 +276,6 @@ interface AuthorizeFlow {
 	result: Promise<NewApiAuthorizeResult | SessionLoginResult>;
 	resolve(result: NewApiAuthorizeResult | SessionLoginResult): void;
 	reject(error: Error): void;
-}
-
-const escapeHtml = (text: string) =>
-	text.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] ?? c);
-
-/** The page the browser shows after returning from the site's consent page. */
-function callbackPage(res: ServerResponse, status: number, title: string, detail: string): void {
-	const ok = status === 200;
-	res.writeHead(status, {
-		"content-type": "text/html; charset=utf-8",
-		"cache-control": "no-store",
-		"referrer-policy": "no-referrer",
-		"content-security-policy": "default-src 'none'; style-src 'unsafe-inline'",
-		"x-content-type-options": "nosniff",
-	});
-	res.end(`<!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${escapeHtml(title)} · Pier</title>
-<style>body{font:15px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif;display:grid;place-items:center;min-height:100vh;margin:0;background:#f6f7f9;color:#1f2328}
-main{max-width:420px;padding:32px;text-align:center}h1{font-size:20px;margin:12px 0 8px}p{color:#57606a;margin:0}
-.mark{font-size:36px;color:${ok ? "#1a7f37" : "#cf222e"}}@media(prefers-color-scheme:dark){body{background:#0d1117;color:#e6edf3}p{color:#8d96a0}}</style>
-</head><body><main><div class="mark">${ok ? "✓" : "✕"}</div><h1>${escapeHtml(title)}</h1><p>${escapeHtml(detail)}</p></main></body></html>`);
 }
 
 /** Whether the site's app authorization can sign apps in to the account (not only hand out tokens). */
@@ -967,13 +951,25 @@ export class NewApiManager {
 		return this.startFlow(connectionId, baseUrl, "token");
 	}
 
-	/** Start a browser sign-in to the account (see `authorizeSessionWait`). */
-	authorizeSessionStart(connectionId: string, baseUrl: string): Promise<NewApiAuthorizeStart> {
-		return this.startFlow(connectionId, baseUrl, "account");
+	/**
+	 * Start a browser sign-in to the account (see `authorizeSessionWait`). With `redirectUri` (a
+	 * loopback address on the client's computer) the browser returns there instead, and the
+	 * client hands the callback over with `authorizeSessionCallback`.
+	 */
+	authorizeSessionStart(connectionId: string, baseUrl: string, redirectUri?: string): Promise<NewApiAuthorizeStart> {
+		return this.startFlow(connectionId, baseUrl, "account", redirectUri);
 	}
 
-	/** Listen on a loopback port and build the consent page URL. */
-	private async startFlow(connectionId: string, baseUrl: string, scope: AuthorizeScope): Promise<NewApiAuthorizeStart> {
+	/** Listen on a loopback port (unless the client catches the redirect) and build the consent page URL. */
+	private async startFlow(
+		connectionId: string,
+		baseUrl: string,
+		scope: AuthorizeScope,
+		clientRedirect?: string,
+	): Promise<NewApiAuthorizeStart> {
+		if (clientRedirect !== undefined && !isLoopbackRedirect(clientRedirect)) {
+			fail("回调地址必须是 http://127.0.0.1:<端口>/callback");
+		}
 		this.sweep();
 		const origin = normalizeNewApiUrl(baseUrl);
 		const status = await this.siteStatus(origin);
@@ -986,15 +982,21 @@ export class NewApiManager {
 			fail("该站点的 NewAPI 版本还不支持在浏览器中登录账号，请改用账号密码或访问令牌登录");
 		}
 
-		const server = createServer();
-		await new Promise<void>((resolve, reject) => {
-			server.once("error", reject);
-			server.listen(0, "127.0.0.1", () => {
-				server.off("error", reject);
-				resolve();
+		let server: Server | undefined;
+		let redirectUri = clientRedirect;
+		if (redirectUri === undefined) {
+			const listening = createServer();
+			await new Promise<void>((resolve, reject) => {
+				listening.once("error", reject);
+				listening.listen(0, "127.0.0.1", () => {
+					listening.off("error", reject);
+					resolve();
+				});
 			});
-		});
-		const { port } = server.address() as AddressInfo;
+			const { port } = listening.address() as AddressInfo;
+			server = listening;
+			redirectUri = `http://127.0.0.1:${port}/callback`;
+		}
 		const verifier = randomBytes(32).toString("base64url");
 		let resolve!: (result: NewApiAuthorizeResult | SessionLoginResult) => void;
 		let reject!: (error: Error) => void;
@@ -1012,8 +1014,8 @@ export class NewApiManager {
 			status,
 			state: randomBytes(24).toString("base64url"),
 			verifier,
-			redirectUri: `http://127.0.0.1:${port}/callback`,
-			server,
+			redirectUri,
+			...(server ? { server } : {}),
 			timer: setTimeout(
 				() => this.endFlow(flow, new PierProtocolError("CONFLICT", "浏览器授权已超时，请重新授权")),
 				AUTHORIZE_TTL_MS,
@@ -1025,7 +1027,7 @@ export class NewApiManager {
 			reject,
 		};
 		flow.timer.unref?.();
-		server.on("request", (req, res) => void this.callback(flow, req, res));
+		server?.on("request", (req, res) => void this.serveCallback(flow, req, res));
 		this.flows.set(flow.id, flow);
 
 		const query = new URLSearchParams({
@@ -1044,49 +1046,61 @@ export class NewApiManager {
 		};
 	}
 
-	private async callback(flow: AuthorizeFlow, req: IncomingMessage, res: ServerResponse): Promise<void> {
+	/** A redirect that reached this host's own loopback port. */
+	private async serveCallback(flow: AuthorizeFlow, req: IncomingMessage, res: ServerResponse): Promise<void> {
 		const url = new URL(req.url ?? "/", flow.redirectUri);
 		if (req.method !== "GET" || url.pathname !== "/callback") {
 			res.writeHead(404).end();
 			return;
 		}
-		// Anything on this computer can reach the port; only the right state may settle the flow.
-		if (!sameSecret(url.searchParams.get("state") ?? "", flow.state)) {
-			callbackPage(res, 400, "无效的授权回调", "请回到 Pier 重新发起授权。");
-			return;
+		const page = await this.callback(flow, url.searchParams);
+		callbackPage(res, page.status, page.title, page.detail);
+	}
+
+	/** Handle a redirect from the consent page, settling the flow; returns the page for the browser. */
+	private async callback(flow: AuthorizeFlow, params: URLSearchParams): Promise<LoopbackCallbackPage> {
+		const page = (status: number, title: string, detail: string): LoopbackCallbackPage => ({ status, title, detail });
+		// Anything on the browser's computer can reach the port; only the right state may settle the flow.
+		if (!sameSecret(params.get("state") ?? "", flow.state)) {
+			return page(400, "无效的授权回调", "请回到 Pier 重新发起授权。");
 		}
-		if (flow.answered) {
-			callbackPage(res, 409, "授权已经处理过了", "可以关闭此页面并回到 Pier。");
-			return;
+		if (flow.answered || flow.ended) {
+			return page(409, "授权已经处理过了", "可以关闭此页面并回到 Pier。");
 		}
 		flow.answered = true;
-		const code = url.searchParams.get("code");
+		const code = params.get("code");
 		if (!code) {
-			const denied = url.searchParams.get("error") === "access_denied";
-			const message = denied
-				? "已在浏览器中取消授权"
-				: `授权失败：${url.searchParams.get("error") || "没有返回授权码"}`;
-			callbackPage(res, 400, message, "可以关闭此页面并回到 Pier。");
+			const denied = params.get("error") === "access_denied";
+			const message = denied ? "已在浏览器中取消授权" : `授权失败：${params.get("error") || "没有返回授权码"}`;
 			this.endFlow(flow, new PierProtocolError("CONFLICT", message));
-			return;
+			return page(400, message, "可以关闭此页面并回到 Pier。");
 		}
 		try {
 			if (flow.scope === "account") {
 				const result = await this.exchangeSession(flow, code);
 				const user = result.account.user;
 				const name = user.displayName && user.displayName !== user.username ? user.displayName : user.username;
-				callbackPage(res, 200, "登录成功", `Pier 已登录 ${name}，可以关闭此页面并回到 Pier。`);
 				this.endFlow(flow, result);
-				return;
+				return page(200, "登录成功", `Pier 已登录 ${name}，可以关闭此页面并回到 Pier。`);
 			}
 			const result = await this.exchange(flow, code);
-			callbackPage(res, 200, "授权成功", `令牌「${result.token.name}」已交给 Pier，可以关闭此页面并回到 Pier。`);
 			this.endFlow(flow, result);
+			return page(200, "授权成功", `令牌「${result.token.name}」已交给 Pier，可以关闭此页面并回到 Pier。`);
 		} catch (error) {
 			const message = errorText(error);
-			callbackPage(res, 400, "授权失败", `${message}。请回到 Pier 重新授权。`);
 			this.endFlow(flow, error instanceof Error ? error : new Error(message));
+			return page(400, "授权失败", `${message}。请回到 Pier 重新授权。`);
 		}
+	}
+
+	/**
+	 * Hand over a redirect the client caught on its own computer for a sign-in started with a
+	 * `redirectUri`; returns the page its browser should show.
+	 */
+	authorizeSessionCallback(connectionId: string, flowId: string, query: string): Promise<LoopbackCallbackPage> {
+		const flow = this.flow(connectionId, flowId, "account");
+		if (flow.server) fail("这次浏览器登录会回到本机，不需要转交回调");
+		return this.callback(flow, new URLSearchParams(query));
 	}
 
 	private async exchange(flow: AuthorizeFlow, code: string): Promise<NewApiAuthorizeResult> {
@@ -1168,8 +1182,8 @@ export class NewApiManager {
 		if (outcome instanceof Error) flow.reject(outcome);
 		else flow.resolve(outcome);
 		// Let the callback page finish before the port closes.
-		flow.server.close();
-		flow.server.closeIdleConnections?.();
+		flow.server?.close();
+		flow.server?.closeIdleConnections?.();
 		if (this.flows.get(flow.id) === flow) {
 			// Keep the settled flow briefly so a late `authorizeWait` still gets the outcome.
 			const forget = setTimeout(() => {

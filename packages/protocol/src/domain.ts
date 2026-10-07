@@ -848,10 +848,31 @@ export interface AccountOverview {
 /** Result of `account.authorizeStart` (1.11): open `authorizeUrl` in the user's browser. */
 export interface AccountAuthorizeStart {
 	flowId: string;
-	/** The site's sign-in consent page. The browser returns to a loopback address on the host. */
+	/**
+	 * The site's sign-in consent page. The browser returns to a loopback address on the host, or
+	 * to the `redirectUri` the client passed (1.28).
+	 */
 	authorizeUrl: string;
 	/** ISO time after which the flow is abandoned. */
 	expiresAt: string;
+}
+
+/**
+ * A browser callback caught by a loopback relay on this computer (`loopback.next`, 1.28): the
+ * query string of the redirect, e.g. `?code=…&state=…`, to forward to the host that started
+ * the sign-in.
+ */
+export interface LoopbackRequest {
+	requestId: string;
+	query: string;
+}
+
+/** The page the browser shows after a callback (`account.authorizeCallback` / `loopback.respond`, 1.28). */
+export interface LoopbackCallbackPage {
+	/** HTTP status: 200 when the sign-in succeeded. */
+	status: number;
+	title: string;
+	detail: string;
 }
 
 /** Result of `account.login`, `account.verify`, `account.register` and `account.authorizeWait`. */
