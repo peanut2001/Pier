@@ -21,6 +21,7 @@ import {
 	type RelayGroup,
 	relayModels,
 } from "../lib/agent-relay.ts";
+import { forwardCallbacks } from "../lib/browser-login.ts";
 import { hostSpeaksMinor } from "../lib/settings-target.ts";
 import { useAppState, useSettingsTarget, useStore } from "../lib/store.tsx";
 import { findYunlianGroupProvider, formatQuota, relayProvider, YUNLIAN_NAME, yunlianGroupId } from "../lib/yunlian.ts";
@@ -95,50 +96,93 @@ const BROWSER_LOGIN_TIMEOUT_MS = 11 * 60_000;
 /**
  * Sign in on the website in the system browser: every sign-in method of the site works there
  * (password, GitHub, LinuxDO, passkeys, human verification), and Pier never sees the password.
+ * For another computer's Pier, this computer's host catches the browser's redirect and the
+ * callback is forwarded to that computer, which keeps the login (protocol 1.28).
  */
 function BrowserLogin({ site, onDone }: { site: AccountSite; onDone: (result: AccountLoginResult) => void }) {
 	const store = useStore();
+	const target = useSettingsTarget();
 	const [flow, setFlow] = useState<{ flowId: string; authorizeUrl: string } | undefined>();
 	const [starting, setStarting] = useState(false);
 	const [error, setError] = useState<string | undefined>();
 	// Bumped to abandon the current attempt (cancel, retry or leaving the page).
 	const attempt = useRef(0);
 	const pending = useRef<string | undefined>(undefined);
+	const relay = useRef<string | undefined>(undefined);
+
+	const closeRelay = useCallback(() => {
+		const relayId = relay.current;
+		relay.current = undefined;
+		if (relayId) void store.loopback("loopback.close", { relayId }).catch(() => undefined);
+	}, [store]);
 
 	const cancel = useCallback(() => {
 		attempt.current++;
 		const flowId = pending.current;
 		pending.current = undefined;
 		if (flowId) void store.account("account.authorizeCancel", { flowId }).catch(() => undefined);
+		closeRelay();
 		setFlow(undefined);
 		setStarting(false);
-	}, [store]);
+	}, [store, closeRelay]);
 
 	useEffect(() => cancel, [cancel]);
 
 	const start = async () => {
 		cancel();
 		const current = ++attempt.current;
+		const active = () => current === attempt.current;
 		setError(undefined);
 		setStarting(true);
 		try {
-			const started = await store.account("account.authorizeStart", {});
-			if (current !== attempt.current) {
+			// Another computer: the browser returns to this computer, which hands the callback over.
+			const opened = target.local ? undefined : await store.loopback("loopback.open", {});
+			if (opened) {
+				if (!active()) {
+					void store.loopback("loopback.close", { relayId: opened.relayId }).catch(() => undefined);
+					return;
+				}
+				relay.current = opened.relayId;
+			}
+			const started = await store.account("account.authorizeStart", opened ? { redirectUri: opened.redirectUri } : {});
+			if (!active()) {
 				void store.account("account.authorizeCancel", { flowId: started.flowId }).catch(() => undefined);
 				return;
 			}
 			pending.current = started.flowId;
+			const forwarding = opened
+				? forwardCallbacks(
+						{
+							next: () => store.loopback("loopback.next", { relayId: opened.relayId }, BROWSER_LOGIN_TIMEOUT_MS),
+							forward: (query) => store.account("account.authorizeCallback", { flowId: started.flowId, query }, 60_000),
+							respond: (requestId, page) =>
+								store.loopback("loopback.respond", { relayId: opened.relayId, requestId, ...page }),
+						},
+						active,
+					)
+				: undefined;
 			setFlow(started);
 			setStarting(false);
 			store.openExternal(started.authorizeUrl);
-			const result = await store.account("account.authorizeWait", { flowId: started.flowId }, BROWSER_LOGIN_TIMEOUT_MS);
-			if (current !== attempt.current) return;
-			pending.current = undefined;
-			setFlow(undefined);
-			onDone(result);
+			try {
+				const result = await store.account(
+					"account.authorizeWait",
+					{ flowId: started.flowId },
+					BROWSER_LOGIN_TIMEOUT_MS,
+				);
+				if (!active()) return;
+				pending.current = undefined;
+				setFlow(undefined);
+				onDone(result);
+			} finally {
+				// Let the browser show the outcome before the relay closes.
+				await forwarding?.settle();
+				if (relay.current === opened?.relayId) closeRelay();
+			}
 		} catch (e) {
-			if (current !== attempt.current) return;
+			if (!active()) return;
 			pending.current = undefined;
+			closeRelay();
 			setFlow(undefined);
 			setStarting(false);
 			setError(errorText(e));
@@ -172,6 +216,7 @@ function BrowserLogin({ site, onDone }: { site: AccountSite; onDone: (result: Ac
 				在浏览器中登录{site.name}
 				{site.oauth.length ? `（支持账号密码、${site.oauth.join("、")} 等所有登录方式）` : ""}
 				，并允许 Pier 访问你的账户。没有账号可以在登录页面注册。
+				{target.local ? "" : `浏览器在这台电脑上打开，登录状态保存在 ${target.name} 上的 Pier 中。`}
 			</p>
 			<ErrorBanner error={error} />
 			<div className="account-actions">
@@ -511,9 +556,10 @@ function RegisterForm({ site, onDone }: { site: AccountSite; onDone: (result: Ac
 function SignIn({ site, onDone }: { site: AccountSite; onDone: (result: AccountLoginResult) => void }) {
 	const [tab, setTab] = useState<"login" | "register">("login");
 	const target = useSettingsTarget();
-	// The browser returns to a loopback address on the host's own computer, so a paired
-	// computer signs in with a password or an access token instead.
-	if (site.browserLogin && target.local) {
+	// The browser returns to a loopback address on this computer. A paired computer's Pier takes
+	// the forwarded callback since protocol 1.28; older ones sign in with a password or a token.
+	const browser = site.browserLogin && (target.local || hostSpeaksMinor(target.hostInfo, 28));
+	if (browser) {
 		return (
 			<SettingsGroup>
 				<SettingsCard className="account-card">
@@ -530,8 +576,9 @@ function SignIn({ site, onDone }: { site: AccountSite; onDone: (result: AccountL
 				<SiteHeader site={site} />
 				{site.browserLogin ? (
 					<p className="muted small">
-						浏览器授权只能在 {target.name} 本机上完成。这里请用账号密码或访问令牌登录，登录状态保存在 {target.name} 上的
-						Pier 中。
+						{target.name} 上的 Pier 版本过旧，还不能从这台电脑用浏览器登录（需要协议 1.28
+						或更高）。请先在「关于与更新」中更新那台电脑，或在这里用账号密码、访问令牌登录，登录状态保存在 {target.name}{" "}
+						上的 Pier 中。
 					</p>
 				) : null}
 				<div className="segmented" role="tablist">

@@ -6,6 +6,7 @@ import {
 	type AccountSite,
 	type AccountStatus,
 	type AccountUser,
+	type LoopbackCallbackPage,
 	type NewApiLoginResult,
 	PierProtocolError,
 } from "@pier/protocol";
@@ -225,10 +226,17 @@ export class AccountManager {
 	/**
 	 * Start a browser sign-in: the returned page lets the user sign in with any method the site
 	 * offers and approve Pier. The flow belongs to `connectionId` (closing it cancels the flow).
+	 * With `redirectUri` the browser returns to the client's computer, which hands the callback
+	 * over with `authorizeCallback`.
 	 */
-	async authorizeStart(connectionId: string): Promise<AccountAuthorizeStart> {
-		const started = await this.newapi.authorizeSessionStart(connectionId, this.origin);
+	async authorizeStart(connectionId: string, redirectUri?: string): Promise<AccountAuthorizeStart> {
+		const started = await this.newapi.authorizeSessionStart(connectionId, this.origin, redirectUri);
 		return { flowId: started.flowId, authorizeUrl: started.authorizeUrl, expiresAt: started.expiresAt };
+	}
+
+	/** Hand over a browser callback the client caught; the login is kept by `authorizeWait`. */
+	authorizeCallback(connectionId: string, flowId: string, query: string): Promise<LoopbackCallbackPage> {
+		return this.newapi.authorizeSessionCallback(connectionId, flowId, query);
 	}
 
 	/** Wait for the browser sign-in and keep the login. */

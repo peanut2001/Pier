@@ -313,3 +313,4 @@ export const IconEyeOff = make(
 		<path d="m2 2 20 20" />
 	</>,
 );
+export const IconMinus = make(<path d="M5 12h14" />);

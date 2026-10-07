@@ -1,12 +1,5 @@
 import type { WorkspaceFileEntry, WorkspaceInfo } from "@pier/protocol";
-import {
-	type DragEvent as ReactDragEvent,
-	type PointerEvent as ReactPointerEvent,
-	useCallback,
-	useEffect,
-	useRef,
-	useState,
-} from "react";
+import { type DragEvent as ReactDragEvent, useCallback, useEffect, useRef, useState } from "react";
 import {
 	downloadFile,
 	dragHasFiles,
@@ -47,6 +40,7 @@ import {
 	IconX,
 } from "./Icons.tsx";
 import { Modal } from "./Modal.tsx";
+import { PanelHeading, ResizeHandle } from "./PanelChrome.tsx";
 
 interface DirState {
 	entries?: WorkspaceFileEntry[];
@@ -339,38 +333,6 @@ function entryTitle(entry: WorkspaceFileEntry): string {
 	if (entry.modifiedAt) parts.push(`修改于 ${relativeTime(entry.modifiedAt)}`);
 	if (entry.symlink) parts.push("符号链接");
 	return parts.join(" · ");
-}
-
-function ResizeHandle() {
-	const store = useStore();
-	const width = useAppState((s) => s.filesPanelWidth);
-	const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
-		e.preventDefault();
-		const startX = e.clientX;
-		const startWidth = width;
-		const target = e.currentTarget;
-		target.setPointerCapture(e.pointerId);
-		document.body.classList.add("resizing-panel");
-		const move = (ev: PointerEvent) => store.setFilesPanelWidth(startWidth + (startX - ev.clientX));
-		const up = () => {
-			target.removeEventListener("pointermove", move);
-			target.removeEventListener("pointerup", up);
-			target.removeEventListener("pointercancel", up);
-			document.body.classList.remove("resizing-panel");
-		};
-		target.addEventListener("pointermove", move);
-		target.addEventListener("pointerup", up);
-		target.addEventListener("pointercancel", up);
-	};
-	return (
-		// biome-ignore lint/a11y/noStaticElementInteractions: pointer-only resize affordance; width also persists.
-		<div
-			className="files-resize"
-			title="拖动调整宽度，双击恢复默认"
-			onPointerDown={onPointerDown}
-			onDoubleClick={() => store.setFilesPanelWidth(280)}
-		/>
-	);
 }
 
 /**
@@ -724,19 +686,14 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 		<aside className="files-panel" aria-label="工作区文件">
 			<ResizeHandle />
 			<header className="files-header">
-				<div className="files-heading">
-					<span className="files-title">文件</span>
-					<span className="files-workspace" title={workspace.path}>
-						{workspace.name}
-					</span>
-				</div>
+				<PanelHeading workspaceId={workspace.id} name={workspace.name} title={workspace.path} />
 				<button type="button" className="ghost icon" title="刷新" disabled={connection !== "open"} onClick={refresh}>
 					<IconRefresh size={14} className={loading ? "spin" : undefined} />
 				</button>
 				<button type="button" className="ghost icon" title="全部折叠" disabled={!expanded.size} onClick={collapseAll}>
 					<IconChevronUp size={14} />
 				</button>
-				<button type="button" className="ghost icon" title="关闭文件面板" onClick={() => store.toggleFilesPanel(false)}>
+				<button type="button" className="ghost icon" title="关闭面板" onClick={() => store.toggleFilesPanel(false)}>
 					<IconX size={14} />
 				</button>
 			</header>
@@ -793,7 +750,11 @@ export function FilesPanelToggle() {
 		<button
 			type="button"
 			className={`chip icon-chip${open ? " active" : ""}`}
-			title={open ? "隐藏文件面板（Ctrl/⌘+Shift+E）" : "显示工作区文件（Ctrl/⌘+Shift+E）"}
+			title={
+				open
+					? "隐藏右侧面板（Ctrl/⌘+Shift+E 文件，Ctrl/⌘+Shift+G 源代码管理）"
+					: "显示工作区文件与源代码管理（Ctrl/⌘+Shift+E / G）"
+			}
 			aria-pressed={open}
 			onClick={() => store.toggleFilesPanel()}
 		>

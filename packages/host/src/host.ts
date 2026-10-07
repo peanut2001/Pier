@@ -38,9 +38,11 @@ import {
 	type RequestHandler,
 	type Transport,
 } from "./connection.ts";
+import { GitService } from "./git.ts";
 import { listHostDirectories } from "./host-directories.ts";
 import { HostStatsSampler } from "./host-stats.ts";
 import type { ManagedSession } from "./managed-session.ts";
+import { LoopbackRelays } from "./oauth-loopback.ts";
 import { detectPackageManagers } from "./package-managers.ts";
 import {
 	accountPath,
@@ -76,7 +78,7 @@ import {
 } from "./workspace-files.ts";
 import { WorkspaceUploads } from "./workspace-uploads.ts";
 
-export const PIER_HOST_VERSION = "0.2.22";
+export const PIER_HOST_VERSION = "0.2.23";
 
 /** How Pier introduces itself to NewAPI sites (their login sessions list shows the system). */
 function pierUserAgent(): string {
@@ -173,6 +175,18 @@ const AUDITED_METHODS = new Set<MethodName>([
 	"settings.write",
 	"agentConfig.update",
 	"agentConfig.write",
+	// Git source control (1.28).
+	"git.stage",
+	"git.unstage",
+	"git.discard",
+	"git.commit",
+	"git.checkout",
+	"git.deleteBranch",
+	"git.fetch",
+	"git.pull",
+	"git.push",
+	"git.stash",
+	"git.init",
 	// Opening a shell on this computer (1.18); what is typed into it is not recorded.
 	"terminal.open",
 ]);
@@ -266,6 +280,28 @@ function auditDetail(method: MethodName, params: Record<string, unknown>): Recor
 				...(params.workspaceId ? { workspaceId: params.workspaceId } : {}),
 				bytes: typeof params.text === "string" ? Buffer.byteLength(params.text) : 0,
 			};
+		case "git.stage":
+		case "git.unstage":
+		case "git.discard":
+			return {
+				workspaceId: params.workspaceId,
+				paths: Array.isArray(params.paths) ? params.paths.length : "all",
+			};
+		case "git.commit":
+			return {
+				workspaceId: params.workspaceId,
+				...(params.amend ? { amend: true } : {}),
+				...(params.all ? { all: true } : {}),
+			};
+		case "git.checkout":
+		case "git.deleteBranch":
+			return { workspaceId: params.workspaceId, branch: params.branch, ...(params.create ? { create: true } : {}) };
+		case "git.fetch":
+		case "git.pull":
+		case "git.push":
+		case "git.stash":
+		case "git.init":
+			return { workspaceId: params.workspaceId, ...(params.action ? { action: params.action } : {}) };
 		case "terminal.open":
 			return params.cwd ? { cwd: params.cwd } : undefined;
 		case "agentConfig.update":
@@ -323,6 +359,7 @@ export class PierHost implements RequestHandler {
 	readonly providers: ProviderManager;
 	readonly newapi: NewApiManager;
 	readonly account: AccountManager;
+	readonly loopback = new LoopbackRelays();
 	readonly extensions: ExtensionManager;
 	readonly packageCatalog: PackageCatalog;
 	readonly settings: PiSettingsFiles;
@@ -336,6 +373,7 @@ export class PierHost implements RequestHandler {
 	private readonly shell: AppShell | undefined;
 	private readonly terminals: HostTerminals;
 	private readonly uploads: WorkspaceUploads;
+	private readonly git = new GitService();
 	private readonly offShellStatus: (() => void) | undefined;
 	private shuttingDown = false;
 
@@ -525,6 +563,7 @@ export class PierHost implements RequestHandler {
 		this.connections.delete(connection);
 		this.providers.connectionClosed(connection.connectionId);
 		this.newapi.connectionClosed(connection.connectionId);
+		this.loopback.connectionClosed(connection.connectionId);
 		this.terminals.connectionClosed(connection);
 		this.uploads.connectionClosed(connection.connectionId);
 		for (const session of connection.subscriptions) session.unsubscribe(connection.connectionId);
@@ -809,6 +848,46 @@ export class PierHost implements RequestHandler {
 			"workspace.uploadFinish": (ctx, params) => this.uploads.finish(ctx.connection.connectionId, params.uploadId),
 			"workspace.uploadCancel": (ctx, params) => this.uploads.cancel(ctx.connection.connectionId, params.uploadId),
 
+			"git.status": (_ctx, params) => this.git.status(this.requireWorkspace(params.workspaceId).path),
+			"git.diff": (_ctx, params) =>
+				this.git.diff(
+					this.requireWorkspace(params.workspaceId).path,
+					params.path,
+					params.staged ?? false,
+					params.origPath,
+				),
+			"git.log": (_ctx, params) =>
+				this.git.log(this.requireWorkspace(params.workspaceId).path, params.limit, params.skip),
+			"git.show": (_ctx, params) => this.git.show(this.requireWorkspace(params.workspaceId).path, params.commit),
+			"git.branches": (_ctx, params) => this.git.branches(this.requireWorkspace(params.workspaceId).path),
+			"git.stage": (_ctx, params) => this.git.stage(this.requireWorkspace(params.workspaceId).path, params.paths),
+			"git.unstage": (_ctx, params) => this.git.unstage(this.requireWorkspace(params.workspaceId).path, params.paths),
+			"git.discard": (_ctx, params) => this.git.discard(this.requireWorkspace(params.workspaceId).path, params.paths),
+			"git.commit": (_ctx, params) =>
+				this.git.commit(
+					this.requireWorkspace(params.workspaceId).path,
+					params.message,
+					params.amend ?? false,
+					params.all ?? false,
+				),
+			"git.checkout": (_ctx, params) =>
+				this.git.checkout(
+					this.requireWorkspace(params.workspaceId).path,
+					params.branch,
+					params.create ?? false,
+					params.startPoint,
+				),
+			"git.deleteBranch": (_ctx, params) =>
+				this.git.deleteBranch(this.requireWorkspace(params.workspaceId).path, params.branch, params.force ?? false),
+			"git.fetch": (_ctx, params) => this.git.fetch(this.requireWorkspace(params.workspaceId).path),
+			"git.pull": (_ctx, params) =>
+				this.git.pull(this.requireWorkspace(params.workspaceId).path, params.rebase ?? false),
+			"git.push": (_ctx, params) =>
+				this.git.push(this.requireWorkspace(params.workspaceId).path, params.force ?? false),
+			"git.stash": (_ctx, params) =>
+				this.git.stash(this.requireWorkspace(params.workspaceId).path, params.action, params.message),
+			"git.init": (_ctx, params) => this.git.init(this.requireWorkspace(params.workspaceId).path),
+
 			"session.list": async (_ctx, params) => ({
 				sessions: await this.pool.list(this.requireWorkspace(params.workspaceId)),
 			}),
@@ -976,8 +1055,11 @@ export class PierHost implements RequestHandler {
 			"account.status": () => this.account.getStatus(),
 			"account.login": (_ctx, params) => this.account.login(params),
 			"account.verify": (_ctx, params) => this.account.verify(params.code),
-			"account.authorizeStart": (ctx) => this.account.authorizeStart(ctx.connection.connectionId),
+			"account.authorizeStart": (ctx, params) =>
+				this.account.authorizeStart(ctx.connection.connectionId, params?.redirectUri),
 			"account.authorizeWait": (ctx, params) => this.account.authorizeWait(ctx.connection.connectionId, params.flowId),
+			"account.authorizeCallback": (ctx, params) =>
+				this.account.authorizeCallback(ctx.connection.connectionId, params.flowId, params.query),
 			"account.authorizeCancel": (ctx, params) => ({
 				cancelled: this.account.authorizeCancel(ctx.connection.connectionId, params.flowId),
 			}),
@@ -990,6 +1072,12 @@ export class PierHost implements RequestHandler {
 			"newapi.authorizeCancel": (ctx, params) => ({
 				cancelled: this.newapi.authorizeCancel(ctx.connection.connectionId, params.flowId),
 			}),
+			"loopback.open": (ctx) => this.loopback.open(ctx.connection.connectionId),
+			"loopback.next": (ctx, params) => this.loopback.next(ctx.connection.connectionId, params.relayId),
+			"loopback.respond": (ctx, { relayId, requestId, ...page }) => ({
+				responded: this.loopback.respond(ctx.connection.connectionId, relayId, requestId, page),
+			}),
+			"loopback.close": (ctx, params) => ({ closed: this.loopback.close(ctx.connection.connectionId, params.relayId) }),
 
 			"extension.list": (_ctx, params) => this.extensions.list(this.extensionTarget(params?.workspaceId)),
 			"extension.install": async (_ctx, params) => {
@@ -1148,6 +1236,7 @@ export class PierHost implements RequestHandler {
 		this.providers.shutdown();
 		this.account.shutdown();
 		this.newapi.shutdown();
+		this.loopback.closeAll();
 		this.peers.shutdown();
 		this.terminals.shutdown();
 		await this.uploads.shutdown();

@@ -193,6 +193,8 @@ describe("remote access", () => {
 			phone.request("pairing.start"),
 			phone.request("remote.configure", { enabled: false }),
 			phone.request("peer.list"),
+			// Listening on this computer for another computer's browser sign-in.
+			phone.request("loopback.open"),
 		]) {
 			await expectCode(call, "FORBIDDEN");
 		}
