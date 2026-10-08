@@ -5,7 +5,7 @@
  * reference from `account.useToken`, which the host replaces with the key (protocol 1.25).
  */
 
-import type { CustomProvider, CustomProviderApi } from "@pier/protocol";
+import type { CustomProvider, CustomProviderApi, NewApiModel } from "@pier/protocol";
 import type { SettingsObject } from "./config-fields.ts";
 import { newApiBaseUrl, siteAddresses } from "./yunlian.ts";
 
@@ -29,6 +29,22 @@ export interface RelayGroup {
 /** The models of a group's pi provider, each with the wire API it is called with. */
 export function relayModels(provider: Pick<CustomProvider, "api" | "models">): RelayGroup["models"] {
 	return provider.models.map((m) => ({ id: m.id, api: m.api ?? provider.api }));
+}
+
+/**
+ * The models a token lists (`account.useToken`), for a group not added to pi: each with the API
+ * the site detected for it, Chat Completions when it gave none (as `relayProvider` does).
+ */
+export function tokenRelayModels(models: ReadonlyArray<NewApiModel>): RelayGroup["models"] {
+	const seen = new Set<string>();
+	const list: RelayGroup["models"] = [];
+	for (const model of models) {
+		const id = model.id.trim();
+		if (!id || seen.has(id)) continue;
+		seen.add(id);
+		list.push({ id, api: model.api ?? "openai-completions" });
+	}
+	return list;
 }
 
 function isObject(value: unknown): value is SettingsObject {
