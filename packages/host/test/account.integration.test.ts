@@ -1,9 +1,12 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { createServer, request, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { PierClient } from "@pier/client";
+import type { AccountLine } from "@pier/protocol";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { startLocalGateway } from "../src/gateway/local-gateway.ts";
 import { PierHost } from "../src/host.ts";
@@ -33,7 +36,7 @@ interface Harness {
 	close(): Promise<void>;
 }
 
-async function startHarness(site: string): Promise<Harness> {
+async function startHarness(site: string | AccountLine[]): Promise<Harness> {
 	const root = mkdtempSync(join(tmpdir(), "pier-account-"));
 	const agentDir = join(root, "agent");
 	const modelsPath = join(agentDir, "models.json");
@@ -63,7 +66,7 @@ async function startHarness(site: string): Promise<Harness> {
 				env,
 				localToken: TOKEN,
 				remote: { enabled: false },
-				accountSite: site,
+				...(typeof site === "string" ? { accountSite: site } : { accountLines: site }),
 				agentConfigDirs: { "claude-code": join(root, "claude"), codex: join(root, "codex") },
 			});
 			const gateway = await startLocalGateway(host);
@@ -88,6 +91,27 @@ async function startHarness(site: string): Promise<Harness> {
 	};
 	await harness.restart();
 	return harness;
+}
+
+/** Another address of `target`'s server, the way a second line reaches the same site. */
+function startProxy(target: string): Promise<{ url: string; server: Server }> {
+	const upstream = new URL(target);
+	const server = createServer((req, res) => {
+		const forward = request(
+			{ host: upstream.hostname, port: upstream.port, path: req.url, method: req.method, headers: req.headers },
+			(answer) => {
+				res.writeHead(answer.statusCode ?? 502, answer.headers);
+				answer.pipe(res);
+			},
+		);
+		forward.on("error", () => res.destroy());
+		req.pipe(forward);
+	});
+	return new Promise((resolve) => {
+		server.listen(0, "127.0.0.1", () =>
+			resolve({ url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, server }),
+		);
+	});
 }
 
 describe("personal center site info", () => {
@@ -498,6 +522,79 @@ describe("personal center", () => {
 		await expect(t.client.request("account.register", { username: "x", password: "short" })).rejects.toMatchObject({
 			code: "BAD_REQUEST",
 		});
+	});
+
+	it("switches lines and keeps the login", async () => {
+		site = await startFakeNewApi({ variant: "modern", twoFA: true });
+		const proxy = await startProxy(site.url);
+		const direct = site.url;
+		const lines = [
+			{ id: "cn", name: "国内线路", url: direct, description: "适合中国大陆网络" },
+			{ id: "global", name: "国际线路", url: proxy.url },
+		];
+		try {
+			t = await startHarness(lines);
+			const initial = await t.client.request("account.status", {});
+			expect(initial).toMatchObject({ line: "cn", lines, site: { url: direct } });
+			// The default line alone is not saved.
+			expect(() => statSync(t.accountFile)).toThrow();
+			await expect(t.client.request("account.setLine", { line: "moon" })).rejects.toMatchObject({
+				code: "BAD_REQUEST",
+			});
+
+			// Switching drops a sign-in waiting for its two-factor code.
+			expect((await t.client.request("account.login", { username: "alice", password: PASSWORD })).status).toBe(
+				"verify",
+			);
+			expect((await t.client.request("account.setLine", { line: "global" })).site?.url).toBe(proxy.url);
+			await expect(t.client.request("account.verify", { code: TOTP })).rejects.toMatchObject({
+				message: expect.stringContaining("重新输入"),
+			});
+			expect(JSON.parse(readFileSync(t.accountFile, "utf8"))).toEqual({ version: 1, line: "global" });
+
+			// Signing in on the chosen line.
+			site.url = proxy.url;
+			await t.client.request("account.login", { username: "alice", password: PASSWORD });
+			await t.client.request("account.verify", { code: TOTP });
+			const port = (url: string) => new URL(url).port;
+			expect(site.requests.at(-1)?.headers.host).toContain(port(proxy.url));
+			expect(JSON.parse(readFileSync(t.accountFile, "utf8"))).toMatchObject({
+				line: "global",
+				session: { origin: proxy.url },
+			});
+
+			// The line and the login survive a restart; the login is renewed through the line.
+			await t.restart();
+			const restored = await t.client.request("account.status", {});
+			expect(restored).toMatchObject({ line: "global", site: { url: proxy.url }, user: { username: "alice" } });
+			expect((await t.client.request("account.overview", {})).site.url).toBe(proxy.url);
+			const refresh = site.requests.filter((r) => r.path === "/api/user/auth/refresh").at(-1);
+			expect(refresh?.headers.origin).toBe(proxy.url);
+			expect(refresh?.headers.host).toContain(port(proxy.url));
+
+			// Back to the domestic line: the same login keeps working there.
+			site.url = direct;
+			site.accessTokens.clear();
+			const back = await t.client.request("account.setLine", { line: "cn" });
+			expect(back).toMatchObject({ line: "cn", site: { url: direct }, user: { username: "alice" } });
+			const overview = await t.client.request("account.overview", {});
+			expect(overview.site.url).toBe(direct);
+			expect(site.requests.at(-1)?.headers.host).toContain(port(direct));
+			const saved = JSON.parse(readFileSync(t.accountFile, "utf8"));
+			expect(saved.line).toBeUndefined();
+			expect(saved.session.origin).toBe(direct);
+			expect(saved.session.cookies.new_api_refresh).toBe(site.refreshToken);
+
+			// Signing out keeps the chosen line.
+			await t.client.request("account.setLine", { line: "global" });
+			site.url = proxy.url;
+			expect(await t.client.request("account.logout", {})).toEqual({ loggedOut: true });
+			expect(JSON.parse(readFileSync(t.accountFile, "utf8"))).toEqual({ version: 1, line: "global" });
+			await t.client.request("account.setLine", { line: "cn" });
+			expect(() => statSync(t.accountFile)).toThrow();
+		} finally {
+			proxy.server.close();
+		}
 	});
 
 	it("keeps a system access token login", async () => {

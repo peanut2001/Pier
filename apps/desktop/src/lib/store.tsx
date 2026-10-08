@@ -59,7 +59,7 @@ import type { Bridge, HostStatus, LocalFileSink, UpdateStatus } from "./bridge.t
 import { fileToken } from "./composer-text.ts";
 import { newSessionDefaultsFromSettings } from "./new-session-defaults.ts";
 import { remotePageBlocker } from "./settings-target.ts";
-import { isYunlianProvider, YUNLIAN_SITE, yunlianGroupOf, yunlianProvider } from "./yunlian.ts";
+import { isYunlianProvider, movedToLine, YUNLIAN_SITE, yunlianGroupOf, yunlianProvider } from "./yunlian.ts";
 
 export const APP_VERSION = "0.2.25";
 
@@ -1609,7 +1609,10 @@ export class PierStore {
 		const current = () => seq === this.yunlianSeq;
 		this.set({ yunlian: {} });
 		try {
-			const started = await client.request("newapi.authorizeStart", { baseUrl: YUNLIAN_SITE }, { timeoutMs: 45_000 });
+			// The line this computer's personal center uses (protocol 1.29), else the default one.
+			const account = await client.request("account.status", {}).catch(() => undefined);
+			const siteUrl = account?.lines?.find((line) => line.id === account.line)?.url ?? YUNLIAN_SITE;
+			const started = await client.request("newapi.authorizeStart", { baseUrl: siteUrl }, { timeoutMs: 45_000 });
 			if (!current()) {
 				// Closed while starting: stop the orphaned authorization.
 				void client.request("newapi.authorizeCancel", { flowId: started.flowId }).catch(() => undefined);
@@ -1629,7 +1632,7 @@ export class PierStore {
 			const existing = this.state.localProviders?.providers.find(
 				(p) => p.custom && isYunlianProvider(p) && yunlianGroupOf(p) === undefined,
 			)?.custom;
-			const provider = yunlianProvider(result.models, existing, result.modelsError);
+			const provider = yunlianProvider(result.models, existing, result.modelsError, siteUrl);
 			await this.saveCustomProvider(provider, { apiKeyRef: result.keyRef }, !existing, LOCAL_NODE);
 			if (current()) this.set({ yunlian: undefined });
 		} catch (error) {
@@ -1674,6 +1677,22 @@ export class PierStore {
 			params,
 			{ timeoutMs },
 		);
+	}
+
+	/**
+	 * Move the 云链API providers of the computer the settings screen manages to the line at
+	 * `siteUrl` (their keys stay). Providers whose Base URL was changed by hand are left alone.
+	 * Resolves to the number of providers moved.
+	 */
+	async moveYunlianProviders(siteUrl: string): Promise<number> {
+		const node = this.state.settingsNode;
+		const client = this.openClient(node);
+		if (!client) return 0;
+		const { providers } = await client.request("provider.list");
+		const moved = movedToLine(providers, siteUrl);
+		for (const provider of moved) await client.request("provider.saveCustom", { provider, create: false });
+		if (moved.length) await this.loadProviders(node);
+		return moved.length;
 	}
 
 	/** Close the 云链API sign-in, abandoning a pending authorization. */

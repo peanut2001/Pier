@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, realpathSync, statSync } from "node:fs";
 import { platform } from "node:os";
 import { basename, isAbsolute, resolve } from "node:path";
 import {
+	type AccountLine,
 	type AgentConfigRuntime,
 	type AgentConfigScope,
 	type AppUpdateStatus,
@@ -25,7 +26,7 @@ import {
 	parseClientFrame,
 	type ResponseFrame,
 	type WorkspaceInfo,
-	YUNLIAN_SITE_URL,
+	YUNLIAN_LINES,
 } from "@pier/protocol";
 import { ClaudeCodeRuntime, type ClaudeCodeRuntimeOptions, claudeConfigDir } from "./claude/claude-runtime.ts";
 import { CodexRuntime, type CodexRuntimeOptions, codexHome } from "./codex/codex-runtime.ts";
@@ -105,8 +106,10 @@ export interface PierHostOptions {
 	peers?: PeerManagerOptions;
 	/** Diagnostic log sink (stderr in the sidecar). */
 	log?: (message: string) => void;
-	/** Site of the personal center (tests). Defaults to 云链API. */
+	/** Site of the personal center (tests). Defaults to 云链API and its lines. */
 	accountSite?: string;
+	/** Lines of the personal center's site (tests); win over `accountSite`. */
+	accountLines?: AccountLine[];
 	/** Where `extension.search` looks (tests). Defaults to pi.dev with the npm registry as fallback. */
 	packageCatalog?: PackageCatalogOptions;
 	/** The desktop app the host runs in (its updater and terminals), when there is one. */
@@ -160,6 +163,7 @@ const AUDITED_METHODS = new Set<MethodName>([
 	"provider.removeCustom",
 	"newapi.useToken",
 	"newapi.authorizeStart",
+	"account.setLine",
 	"account.authorizeStart",
 	"account.login",
 	"account.register",
@@ -444,7 +448,9 @@ export class PierHost implements RequestHandler {
 		});
 		this.newapi = new NewApiManager({ log, userAgent: pierUserAgent() });
 		this.account = new AccountManager(this.newapi, {
-			site: options.accountSite ?? YUNLIAN_SITE_URL,
+			lines:
+				options.accountLines ??
+				(options.accountSite ? [{ id: "custom", name: "自定义站点", url: options.accountSite }] : YUNLIAN_LINES),
 			file: accountPath(this.pierDir),
 			log,
 		});
@@ -1053,6 +1059,7 @@ export class PierHost implements RequestHandler {
 			"newapi.authorizeStart": (ctx, params) => this.newapi.authorizeStart(ctx.connection.connectionId, params.baseUrl),
 			"newapi.authorizeWait": (ctx, params) => this.newapi.authorizeWait(ctx.connection.connectionId, params.flowId),
 			"account.status": () => this.account.getStatus(),
+			"account.setLine": (_ctx, params) => this.account.setLine(params.line),
 			"account.login": (_ctx, params) => this.account.login(params),
 			"account.verify": (_ctx, params) => this.account.verify(params.code),
 			"account.authorizeStart": (ctx, params) =>

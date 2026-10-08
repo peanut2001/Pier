@@ -878,7 +878,27 @@ export type NewApiLoginResult =
 
 // ---- 云链API account (1.6) ------------------------------------------------------------
 
-/** The 云链API site the personal center connects to. */
+/**
+ * A line (1.29): one address of the 云链API site. Every line reaches the same site and accounts,
+ * so a login keeps working when the user switches lines.
+ */
+export interface AccountLine {
+	id: string;
+	/** Shown name, e.g. `国内线路`. */
+	name: string;
+	/** The site's address on this line, e.g. `https://api.yunnet.top`. */
+	url: string;
+	/** Who the line suits, e.g. `适合中国大陆网络`. */
+	description?: string;
+}
+
+/** The lines of 云链API (1.29). The first one is the default. */
+export const YUNLIAN_LINES: readonly AccountLine[] = [
+	{ id: "cn", name: "国内线路", url: "https://api.yunnet.top", description: "适合中国大陆网络" },
+	{ id: "global", name: "国际线路", url: "https://api.syixn.com", description: "适合海外网络" },
+];
+
+/** The 云链API site the personal center connects to by default (the domestic line). */
 export const YUNLIAN_SITE_URL = "https://api.yunnet.top";
 
 /** How the site shows amounts of quota (NewAPI `quota_per_unit`, `quota_display_type` and friends). */
@@ -937,6 +957,10 @@ export interface AccountStatus {
 	siteError?: string;
 	/** The saved login, if any. Details and balance come from `account.overview`. */
 	user?: NewApiAccount["user"];
+	/** The lines the host can connect through (1.29); switch with `account.setLine`. */
+	lines?: AccountLine[];
+	/** The id of the line in use (1.29). */
+	line?: string;
 }
 
 export interface AccountOverview {

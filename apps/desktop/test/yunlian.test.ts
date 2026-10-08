@@ -4,8 +4,10 @@ import {
 	formatQuota,
 	isYunlianProvider,
 	legacyYunlianGroupId,
+	movedToLine,
 	newApiBaseUrl,
 	relayProvider,
+	siteAddresses,
 	YUNLIAN_ID,
 	yunlianGroupId,
 	yunlianGroupOf,
@@ -232,6 +234,78 @@ describe("personal center helpers", () => {
 			baseUrl: "https://api.yunnet.top/v1",
 			models: [{ id: "m" }],
 		});
+	});
+
+	it("treats every line of the site as the same site", () => {
+		const custom = { api: "openai-completions" as const, models: [{ id: "m" }], hasConfiguredKey: true };
+		expect(
+			isYunlianProvider({ id: "intl", custom: { ...custom, id: "intl", baseUrl: "https://api.syixn.com/v1" } }),
+		).toBe(true);
+		expect(siteAddresses("https://api.syixn.com")).toEqual(["https://api.syixn.com", "https://api.yunnet.top"]);
+		expect(siteAddresses("https://api.example.com")).toEqual(["https://api.example.com"]);
+
+		// Saving again on the other line moves a derived Base URL, but not one changed by hand.
+		const target = { id: "yunlian-vip", name: "云链API · vip", siteUrl: "https://api.syixn.com" };
+		const existing = {
+			id: "yunlian-vip",
+			api: "anthropic-messages" as const,
+			baseUrl: "https://api.yunnet.top/",
+			models: [{ id: "m" }],
+		};
+		expect(relayProvider(target, [{ id: "m" }], existing).baseUrl).toBe("https://api.syixn.com");
+		const byHand = { ...existing, baseUrl: "https://proxy.example.com" };
+		expect(relayProvider(target, [{ id: "m" }], byHand).baseUrl).toBe("https://proxy.example.com");
+		expect(yunlianProvider([{ id: "m" }], undefined, undefined, "https://api.syixn.com").baseUrl).toBe(
+			"https://api.syixn.com/v1",
+		);
+	});
+
+	it("moves the providers configured from another line", () => {
+		const custom = { models: [{ id: "m" }, { id: "c", api: "anthropic-messages" as const }], hasConfiguredKey: true };
+		const providers = [
+			{
+				id: "yunlian",
+				custom: { ...custom, id: "yunlian", api: "openai-completions" as const, baseUrl: "https://api.yunnet.top/v1" },
+			},
+			{
+				id: "yunlian-claude",
+				custom: {
+					...custom,
+					id: "yunlian-claude",
+					api: "anthropic-messages" as const,
+					baseUrl: "https://api.yunnet.top",
+				},
+			},
+			// Already on the line, changed by hand, not 云链API, built in.
+			{
+				id: "yunlian-vip",
+				custom: {
+					...custom,
+					id: "yunlian-vip",
+					api: "openai-completions" as const,
+					baseUrl: "https://api.syixn.com/v1/",
+				},
+			},
+			{
+				id: "yunlian-x",
+				custom: {
+					...custom,
+					id: "yunlian-x",
+					api: "openai-completions" as const,
+					baseUrl: "https://api.yunnet.top/custom",
+				},
+			},
+			{
+				id: "other",
+				custom: { ...custom, id: "other", api: "openai-completions" as const, baseUrl: "https://api.example.com/v1" },
+			},
+			{ id: "openai" },
+		];
+		expect(movedToLine(providers, "https://api.syixn.com")).toEqual([
+			{ id: "yunlian", api: "openai-completions", baseUrl: "https://api.syixn.com/v1", models: custom.models },
+			{ id: "yunlian-claude", api: "anthropic-messages", baseUrl: "https://api.syixn.com", models: custom.models },
+		]);
+		expect(movedToLine(providers, "https://api.yunnet.top").map((p) => p.id)).toEqual(["yunlian-vip"]);
 	});
 
 	it("formats quota like the site", () => {
