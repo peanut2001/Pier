@@ -81,6 +81,10 @@ describe("pointing Claude Code at a group", () => {
 			claudeRelayState({ model: "gpt-5", env: { ANTHROPIC_BASE_URL: "https://api.example.com" } }, group).group,
 		).toBe(false);
 		expect(claudeRelayState(undefined, group)).toEqual({ site: false, group: false });
+
+		// 云链API is the same site on every line.
+		const yunlian = { ...group, siteUrl: "https://api.syixn.com" };
+		expect(claudeRelayState({ env: { ANTHROPIC_BASE_URL: "https://api.yunnet.top/" } }, yunlian).site).toBe(true);
 	});
 });
 

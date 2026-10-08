@@ -1,4 +1,4 @@
-# Pier 协议 v1.28
+# Pier 协议 v1.29
 
 > 实现：`packages/protocol`（zod schema + TS 类型，Host 与所有客户端共享）。
 > 本文档描述线上格式与语义；字段的权威定义以 `packages/protocol/src` 为准。
@@ -60,7 +60,7 @@
 
 ```jsonc
 { "type": "req", "id": "h", "method": "host.hello", "params": {
-  "protocolVersion": "1.28",
+  "protocolVersion": "1.29",
   "client": { "name": "pier-desktop", "version": "0.1.0", "platform": "darwin" },
   "token": "<本地 token>",       // 本地连接必填；远程连接由加密通道认证，不需要
   "coalesceMs": 50               // 可选：合并流式增量的窗口（0–1000ms，默认 0）
@@ -282,11 +282,12 @@ pi 终端界面自带的命令（`/model`、`/compact`、`/new`、`/fork`、`/na
 
 ### 个人中心（1.6）
 
-桌面端「设置 → 个人中心」直连云链API（`https://api.yunnet.top`，协议里的 `YUNLIAN_SITE_URL`；测试时可以用 `PierHostOptions.accountSite` 或 `faux-host --account-site` 换成其他 NewAPI 站点）。与连接绑定的 `newapi.*` 不同，这里的登录属于 Host：所有连接共用，并保存在 Pier 目录的 `account.json`（仅当前用户可读），重启后仍然有效。密码登录只保存站点发放的刷新 Cookie（`new_api_refresh`，站点每次刷新都会轮换，登录 30 天后需要重新登录），不保存密码和 15 分钟有效的访问令牌；Host 在访问令牌过期前或被拒绝时用 `POST /api/user/auth/refresh` 自动换新。用系统访问令牌登录时保存该令牌。站点拒绝刷新（已退出、被吊销或账号安全信息改变）时，Host 删除保存的登录，之后的调用返回「请先登录」。1.9 及以前所有方法仅限本地连接，1.10 起对已配对设备开放。
+桌面端「设置 → 个人中心」直连云链API（默认 `https://api.yunnet.top`，协议里的 `YUNLIAN_SITE_URL`；测试时可以用 `PierHostOptions.accountSite` / `accountLines` 或 `faux-host --account-site` 换成其他 NewAPI 站点）。与连接绑定的 `newapi.*` 不同，这里的登录属于 Host：所有连接共用，并保存在 Pier 目录的 `account.json`（仅当前用户可读），重启后仍然有效。密码登录只保存站点发放的刷新 Cookie（`new_api_refresh`，站点每次刷新都会轮换，登录 30 天后需要重新登录），不保存密码和 15 分钟有效的访问令牌；Host 在访问令牌过期前或被拒绝时用 `POST /api/user/auth/refresh` 自动换新。用系统访问令牌登录时保存该令牌。站点拒绝刷新（已退出、被吊销或账号安全信息改变）时，Host 删除保存的登录，之后的调用返回「请先登录」。1.9 及以前所有方法仅限本地连接，1.10 起对已配对设备开放。
 
 | 方法 | 参数 | 结果 |
 |---|---|---|
-| `account.status` | — | `{ site?, siteError?, user? }`；`site = AccountSite = { name, url, version?, logo?, registerEnabled, emailVerification, passwordLogin, browserLogin, turnstile, oauth: string[], quota: { perUnit, type, usdRate?, customSymbol?, customRate? } }`（来自站点的 `/api/status`，`type` 为 `USD`、`CNY`、`CUSTOM` 或 `TOKENS`）；`user` 为保存的登录，没有登录时省略 |
+| `account.status` | — | `{ site?, siteError?, user?, lines?, line? }`；`lines`（1.29）为可选的线路 `AccountLine = { id, name, url, description? }`，`line` 为当前线路的 `id`，`site` 来自当前线路；`site = AccountSite = { name, url, version?, logo?, registerEnabled, emailVerification, passwordLogin, browserLogin, turnstile, oauth: string[], quota: { perUnit, type, usdRate?, customSymbol?, customRate? } }`（来自站点的 `/api/status`，`type` 为 `USD`、`CNY`、`CUSTOM` 或 `TOKENS`）；`user` 为保存的登录，没有登录时省略 |
+| `account.setLine` | `{ line }` | `AccountStatus`（1.29）；切换线路并保存，见下文「线路」。未知线路 `BAD_REQUEST` |
 | `account.login` | `{ username, password }` 或 `{ accessToken, userId? }` | `AccountLoginResult`：`{ status: "ok", overview }` 或需要两步验证时 `{ status: "verify", methods }`。站点开启 Turnstile 时密码登录返回 `BAD_REQUEST` |
 | `account.verify` | `{ code }` | `AccountLoginResult`；提交两步验证码（或备用码） |
 | `account.authorizeStart` | `{ redirectUri? }`（`redirectUri` 1.28） | `{ flowId, authorizeUrl, expiresAt }`（1.16）；见下文「浏览器登录」。站点不支持或 `redirectUri` 不是 `http://127.0.0.1:<端口>/callback` 时 `BAD_REQUEST` |
@@ -299,6 +300,19 @@ pi 终端界面自带的命令（`/model`、`/compact`、`/new`、`/fork`、`/na
 | `account.createToken` | `{ name, group? }` | `{ tokenId, tokens }`；在分组中新建无限额度、永不过期、不限模型的令牌 |
 | `account.useToken` | `{ tokenId }` | `{ keyRef, models, modelsError? }`；与 `newapi.useToken` 相同，`keyRef` 属于调用的连接 |
 | `account.logout` | — | `{ loggedOut }`；退出站点上的会话（不会吊销用户自己的访问令牌）并删除 `account.json` |
+
+#### 线路（1.29）
+
+同一个云链API站点有两个入口，用户可以选择网络更顺畅的一条（`@pier/protocol` 的 `YUNLIAN_LINES`）：
+
+| `id` | 名称 | 地址 |
+|---|---|---|
+| `cn` | 国内线路（默认） | `https://api.yunnet.top` |
+| `global` | 国际线路 | `https://api.syixn.com` |
+
+两条线路是同一个站点、同一套账号，因此 `account.setLine` 只改变 Host 访问站点的地址：已保存的登录随之改用新线路（刷新 Cookie 与访问令牌照常可用），站点信息缓存失效；等待两步验证码的密码登录被丢弃。切换前发起、之后才完成的浏览器登录也保存到当前线路。所选线路与登录一起保存在 `account.json` 的 `line` 字段（默认线路不写），退出登录后保留；旧版本 Host 读到其他线路的登录时当作未登录。使用 `accountSite` 的 Host 只有一条线路 `custom`。
+
+桌面端在个人中心顶部显示线路选择（Host 返回多条线路时），切换后把那台电脑上 Base URL 由云链API线路派生的服务商（`yunlian`、`yunlian-<分组>` 以及指向任一线路的自定义服务商）一并改为新线路的地址（密钥不变，手动改过 Base URL 的不动）；之后「配置到本地」「接入 Claude Code / Codex」也使用当前线路。「模型与服务商」中的「云链API」浏览器授权使用本机个人中心的线路。
 
 #### 浏览器登录（1.16）
 

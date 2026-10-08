@@ -451,6 +451,11 @@ export const MethodParamsSchemas = {
 	 * directory, so it survives restarts) and never hands its credentials or token keys to clients.
 	 */
 	"account.status": z.object({}).optional(),
+	/**
+	 * Switch the line (1.29), one of `AccountStatus.lines`. The saved login moves along (every line
+	 * reaches the same site); a sign-in waiting for its two-factor code is dropped.
+	 */
+	"account.setLine": z.object({ line: z.string().trim().min(1).max(50) }),
 	"account.login": z.union([
 		z.object({ username: z.string().trim().min(1).max(200), password: z.string().min(1).max(1000) }),
 		z.object({ accessToken: z.string().trim().min(1).max(2000), userId: z.number().int().positive().optional() }),
@@ -825,6 +830,7 @@ export interface MethodResults {
 	"newapi.authorizeWait": NewApiAuthorizeResult;
 	"newapi.authorizeCancel": { cancelled: boolean };
 	"account.status": AccountStatus;
+	"account.setLine": AccountStatus;
 	"account.login": AccountLoginResult;
 	"account.verify": AccountLoginResult;
 	"account.authorizeStart": AccountAuthorizeStart;

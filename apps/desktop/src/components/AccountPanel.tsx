@@ -1,4 +1,5 @@
 import type {
+	AccountLine,
 	AccountLoginResult,
 	AccountOverview,
 	AccountSite,
@@ -1175,6 +1176,71 @@ function Dashboard({
 	);
 }
 
+// ---- line ------------------------------------------------------------------------------
+
+/**
+ * The line the host reaches 云链API through (protocol 1.29): the domestic and the international
+ * address of the same site. Shown only when the host offers more than one.
+ */
+function LineSettings({
+	lines,
+	line,
+	busy,
+	signedIn,
+	onChange,
+}: {
+	lines: AccountLine[];
+	line: string | undefined;
+	busy: boolean;
+	signedIn: boolean;
+	onChange: (line: AccountLine) => void;
+}) {
+	const target = useSettingsTarget();
+	const current = lines.find((l) => l.id === line) ?? lines[0];
+	if (lines.length < 2 || !current) return null;
+	return (
+		<SettingsGroup>
+			<SettingsCard>
+				<SettingRow
+					title={
+						<span className="account-line-title">
+							线路
+							{busy ? <IconLoader size={13} className="spin" /> : null}
+						</span>
+					}
+					description={
+						<>
+							当前使用{current.name}（<span className="mono">{new URL(current.url).host}</span>）
+							{current.description ? `，${current.description}` : ""}。
+							{signedIn ? "切换后登录状态保留，" : "请选择网络更顺畅的线路再登录，"}
+							已配置到本地的云链API服务商会一起改用新线路。
+							{target.local ? "" : `线路保存在 ${target.name} 上的 Pier 中。`}
+						</>
+					}
+				>
+					<div className="segmented" title="线路">
+						{lines.map((l) => (
+							<button
+								type="button"
+								key={l.id}
+								aria-pressed={l.id === current.id}
+								className={l.id === current.id ? "active" : undefined}
+								title={new URL(l.url).host}
+								disabled={busy}
+								onClick={() => {
+									if (l.id !== current.id) onChange(l);
+								}}
+							>
+								{l.name}
+							</button>
+						))}
+					</div>
+				</SettingRow>
+			</SettingsCard>
+		</SettingsGroup>
+	);
+}
+
 // ---- page ------------------------------------------------------------------------------
 
 /** The “个人中心” settings page. */
@@ -1183,6 +1249,7 @@ export function AccountSettings() {
 	const [status, setStatus] = useState<AccountStatus | undefined>();
 	const [overview, setOverview] = useState<AccountOverview | undefined>();
 	const [loading, setLoading] = useState(true);
+	const [switching, setSwitching] = useState(false);
 	const [error, setError] = useState<string | undefined>();
 
 	const load = useCallback(async () => {
@@ -1223,6 +1290,41 @@ export function AccountSettings() {
 		store.toast("info", `已登录 ${result.overview.site.name}：${result.overview.user.username}`);
 	};
 
+	const switchLine = async (line: AccountLine) => {
+		setSwitching(true);
+		setError(undefined);
+		try {
+			const next = await store.account("account.setLine", { line: line.id });
+			setStatus(next);
+			if (!next.user) setOverview(undefined);
+			// The 云链API providers of the computer follow the line.
+			let moved = 0;
+			let moveError: string | undefined;
+			try {
+				moved = await store.moveYunlianProviders(line.url);
+			} catch (e) {
+				moveError = `本地服务商没有改用新线路：${errorText(e)}`;
+			}
+			store.toast("info", `已切换到${line.name}${moved ? `，${moved} 个本地服务商已改用新线路` : ""}`);
+			await load();
+			if (moveError) setError(moveError);
+		} catch (e) {
+			setError(errorText(e));
+		} finally {
+			setSwitching(false);
+		}
+	};
+
+	const lines = status?.lines?.length ? (
+		<LineSettings
+			lines={status.lines}
+			line={status.line}
+			busy={switching}
+			signedIn={Boolean(status.user)}
+			onChange={(line) => void switchLine(line)}
+		/>
+	) : null;
+
 	const logout = async () => {
 		try {
 			await store.account("account.logout", {});
@@ -1248,6 +1350,7 @@ export function AccountSettings() {
 		return (
 			<>
 				<ErrorBanner error={error} />
+				{lines}
 				<Dashboard
 					overview={overview}
 					loading={loading}
@@ -1259,19 +1362,32 @@ export function AccountSettings() {
 		);
 	}
 	if (status.user) {
-		return loading ? (
-			<p className="muted account-loading">
-				<IconLoader size={14} className="spin" /> 正在读取账户信息…
-			</p>
-		) : (
-			<LoadError error={error} onRetry={() => void load()} onLogout={() => void logout()} />
+		return (
+			<>
+				{lines}
+				{loading ? (
+					<p className="muted account-loading">
+						<IconLoader size={14} className="spin" /> 正在读取账户信息…
+					</p>
+				) : (
+					<LoadError error={error} onRetry={() => void load()} onLogout={() => void logout()} />
+				)}
+			</>
 		);
 	}
-	if (!status.site) return <LoadError error={status.siteError ?? error} onRetry={() => void load()} />;
+	if (!status.site) {
+		return (
+			<>
+				{lines}
+				<LoadError error={status.siteError ?? error} onRetry={() => void load()} />
+			</>
+		);
+	}
 	return (
 		<>
 			<ErrorBanner error={error} />
-			<SignIn site={status.site} onDone={signedIn} />
+			{lines}
+			<SignIn key={status.line} site={status.site} onDone={signedIn} />
 		</>
 	);
 }

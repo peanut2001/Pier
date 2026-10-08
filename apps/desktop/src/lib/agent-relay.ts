@@ -7,7 +7,7 @@
 
 import type { CustomProvider, CustomProviderApi } from "@pier/protocol";
 import type { SettingsObject } from "./config-fields.ts";
-import { newApiBaseUrl } from "./yunlian.ts";
+import { newApiBaseUrl, siteAddresses } from "./yunlian.ts";
 
 /** One change for `agentConfig.update`: set `value`, set the key behind `apiKeyRef`, or remove. */
 export interface AgentConfigEdit {
@@ -127,7 +127,7 @@ function isClaudeAlias(value: string): boolean {
 }
 
 export interface ClaudeRelayState {
-	/** `ANTHROPIC_BASE_URL` is the site's. */
+	/** `ANTHROPIC_BASE_URL` is the site's (on any of its lines). */
 	site: boolean;
 	/**
 	 * Also every model id Claude Code is set to use (main model and aliases) is among the group's
@@ -140,7 +140,8 @@ export interface ClaudeRelayState {
 /** How Claude Code's user settings relate to a group of the site. */
 export function claudeRelayState(settings: SettingsObject | undefined, group: RelayGroup): ClaudeRelayState {
 	const env = isObject(settings?.env) ? settings.env : {};
-	const site = sameUrl(text(env.ANTHROPIC_BASE_URL), newApiBaseUrl(group.siteUrl, "anthropic-messages"));
+	const baseUrl = text(env.ANTHROPIC_BASE_URL);
+	const site = siteAddresses(group.siteUrl).some((url) => sameUrl(baseUrl, newApiBaseUrl(url, "anthropic-messages")));
 	const model = text(settings?.model);
 	const ids = [model, ...CLAUDE_FAMILIES.map((f) => text(env[familyEnv(f)]))].filter(
 		(id): id is string => id !== undefined && !isClaudeAlias(id),
