@@ -1709,7 +1709,11 @@ export class PierStore {
 		const client = this.clients.get(node);
 		// An offline computer's lists load once it is connected again.
 		if (!client || this.state.nodes[node]?.connection !== "open") return;
-		const current = () => this.clients.get(node) === client;
+		// A removed workspace can still get a late refresh (closing its sessions announces list
+		// changes); its list is gone, so there is nothing to load or report.
+		const known = () => workspaceId in this.state.workspaceNodes;
+		if (!known()) return;
+		const current = () => this.clients.get(node) === client && known();
 		try {
 			const { sessions } = await client.request("session.list", { workspaceId });
 			if (!current()) return;
@@ -2193,7 +2197,25 @@ export class PierStore {
 		if (this.state.selectedWorkspaceId === workspaceId) {
 			this.set({ selectedWorkspaceId: undefined, selectedSessionId: undefined });
 		}
+		this.forgetWorkspace(node, workspaceId);
 		await this.loadWorkspaces(node);
+	}
+
+	/** Drop a removed workspace and its session list right away, cancelling any pending refresh. */
+	private forgetWorkspace(node: string, workspaceId: string): void {
+		clearTimeout(this.refreshTimers.get(workspaceId));
+		this.refreshTimers.delete(workspaceId);
+		const workspaces = this.state.nodes[node]?.workspaces ?? [];
+		if (workspaces.some((w) => w.id === workspaceId)) {
+			this.patchNode(node, { workspaces: workspaces.filter((w) => w.id !== workspaceId) });
+			if (node !== LOCAL_NODE) this.saveNodeCache();
+		}
+		if (workspaceId in this.state.sessions) {
+			this.set((s) => {
+				const { [workspaceId]: _removed, ...sessions } = s.sessions;
+				return { sessions };
+			});
+		}
 	}
 
 	async setPolicy(workspaceId: string, policy: ApprovalPolicy): Promise<void> {
