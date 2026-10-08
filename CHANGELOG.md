@@ -2,6 +2,22 @@
 
 Pier 的所有重要变更都记录在这里。版本号规则：日常发版只递增最后一位（0.2.1、0.2.2……），`x.y.0` 留给大版本；1.0 之前，大版本可能包含不兼容的变更。
 
+## v0.2.25 — 2026-10-08
+
+内置的 pi 从 0.87.1 升级到 1.1.0。
+
+### 变更
+
+- **pi 1.1.0**：Pier Host 内置的 pi SDK 升级到 1.1.0，带来新的模型（如 GPT-6.1 Sol、Claude Haiku 5.5）和各服务商的修复；OpenAI 服务商可以用 ChatGPT 订阅登录（Sign in with ChatGPT）。详见 pi 的 CHANGELOG。
+- **Azure 服务商改名**：pi 把 Azure 服务商从 `azure-openai-responses` 改名为 `azure`。用过 Azure 的话，请在 `~/.pi/agent` 的 `auth.json`（或重新登录）、`models.json` 和 `settings.json`（默认服务商、启用的模型、模型思考等级）中把服务商名一并改掉；`AZURE_OPENAI_*` 环境变量不变。
+- **常用服务商**：添加服务商时的常用列表不再列出「OpenAI Codex」，pi 已将它标为旧版，由 OpenAI 服务商的 ChatGPT 登录取代；已配置的仍然可用。
+- **手机端**：Expo 相关依赖更新到 SDK 57.0.27 的配套版本。
+- **跟进 pi 新版本**：仓库新增每天检查 npm 的 `pi update` 工作流，pi 发布新版本后自动开升级 PR 并运行 CI，之后的 pi 更新会更快地通过应用内更新到达。
+
+### 已知限制
+
+- pi 1.x 的 codemode（默认关闭）尚未在 Pier 中适配，请暂勿在 Pier 使用的 pi 设置中启用它。
+
 ## v0.2.24 — 2026-10-07
 
 桌面端新增浅色 / 深色外观设置，界面整体改为更扁平的风格。感谢 @peanut2001 的贡献（#3）。
