@@ -3,13 +3,13 @@ import type { AgentRuntimeInfo, WorkspaceInfo } from "@pier/protocol";
 import { useEffect, useRef, useState } from "react";
 import { draftToPrompt } from "../lib/composer-text.ts";
 import { type Draft, LOCAL_NODE, NEW_CHAT_DRAFT, useAppState, useComputers, useStore } from "../lib/store.tsx";
+import { AgentIcon } from "./AgentIcons.tsx";
 import { readImages, useComposerInsert } from "./Composer.tsx";
 import { ComposerInput, type ComposerInputHandle } from "./ComposerInput.tsx";
 import { FilesPanelToggle } from "./FilesPanel.tsx";
 import { useNodeStatus } from "./HostPanels.tsx";
 import {
 	IconArrowUp,
-	IconBot,
 	IconCheck,
 	IconChevronUp,
 	IconFolder,
@@ -181,7 +181,7 @@ function AgentPicker({ workspace, disabled }: { workspace: WorkspaceInfo; disabl
 				onClick={() => setOpen(!open)}
 				title="选择运行这个对话的 Agent"
 			>
-				<IconBot size={14} />
+				<AgentIcon runtime={runtime} size={14} />
 				<span>{agentRuntimeLabel(runtime)}</span>
 				<IconChevronUp size={13} className="chip-caret" />
 			</button>
@@ -208,7 +208,7 @@ function AgentPicker({ workspace, disabled }: { workspace: WorkspaceInfo; disabl
 							>
 								<span className="workspace-item-text">
 									<span className="workspace-item-name">
-										<IconBot size={14} />
+										<AgentIcon runtime={r.id} size={14} />
 										{r.name}
 										{r.version ? <span className="mini-tag">{r.version}</span> : null}
 										{!r.available && (r.id === "claude-code" || r.id === "codex") ? (

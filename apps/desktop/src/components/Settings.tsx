@@ -13,6 +13,7 @@ import {
 import { setThemePreference, type ThemePreference, useThemePreference } from "../lib/theme.ts";
 import { AccountSettings } from "./AccountPanel.tsx";
 import { ClaudeSettings, CodexSettings } from "./AgentConfigPanel.tsx";
+import { IconClaudeCode, IconCodex, IconPi } from "./AgentIcons.tsx";
 import { ExtensionsSettings } from "./ExtensionsPanel.tsx";
 import { HostBanner, LogsSettings, useHostStatus } from "./HostPanels.tsx";
 import {
@@ -32,10 +33,8 @@ import {
 	IconRefresh,
 	IconSearch,
 	IconSettings,
-	IconSliders,
 	IconSmartphone,
 	IconSparkles,
-	IconTerminal,
 	IconUser,
 	IconX,
 } from "./Icons.tsx";
@@ -71,7 +70,7 @@ const AGENT_PAGES: SectionDef[] = [
 	{
 		id: "pi",
 		label: "pi",
-		icon: IconSliders,
+		icon: IconPi,
 		keywords:
 			"pi 配置 settings settings.json 配置文件 思考 压缩 重试 超时 代理 proxy shell 工具 tools 传输 缓存 主题 终端 json 编辑",
 		online: true,
@@ -79,7 +78,7 @@ const AGENT_PAGES: SectionDef[] = [
 	{
 		id: "claude",
 		label: "Claude Code",
-		icon: IconBot,
+		icon: IconClaudeCode,
 		keywords:
 			"claude code 配置 anthropic settings.json 配置文件 中转 base url api key token 令牌 模型 思考 权限 permissions 沙箱 mcp hooks 环境变量 env 代理 json 编辑",
 		online: true,
@@ -87,7 +86,7 @@ const AGENT_PAGES: SectionDef[] = [
 	{
 		id: "codex",
 		label: "Codex",
-		icon: IconTerminal,
+		icon: IconCodex,
 		keywords:
 			"codex 配置 openai config.toml toml 配置文件 服务商 model_providers 中转 base url api key 模型 思考 reasoning 审批 沙箱 sandbox 网页搜索 mcp profile 编辑",
 		online: true,
