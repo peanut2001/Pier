@@ -349,7 +349,7 @@ export async function previewWorkspaceFile(workspaceRoot: string, path: string):
 	return readPreviewFile(real, path);
 }
 
-/** One bounded read of the exact target confirmed by the local user; stores no permission. */
+/** One bounded read of the exact target confirmed by the user; stores no permission. */
 export async function authorizeWorkspaceFilePreview(
 	workspaceRoot: string,
 	path: string,

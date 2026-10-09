@@ -1,3 +1,4 @@
+import type { HostInfo } from "@pier/protocol";
 import { describe, expect, it } from "vitest";
 import {
 	filePreviewAuthorizationPath,
@@ -5,6 +6,7 @@ import {
 	markdownFilePath,
 	markdownUrlTransform,
 } from "../src/lib/markdown-files.ts";
+import { hostAuthorizesFilePreviews } from "../src/lib/store.tsx";
 
 describe("Markdown file references", () => {
 	it("resolves agent screenshots, encoded filenames and source line references", () => {
@@ -56,6 +58,17 @@ describe("Markdown file references", () => {
 
 describe("file preview permission errors", () => {
 	const error = (code: string, message: string, data?: unknown) => Object.assign(new Error(message), { code, data });
+
+	it("requires remote preview support on the target host while keeping older local previews available", () => {
+		const host = (protocolVersion: string) => ({ protocolVersion }) as HostInfo;
+		expect(hostAuthorizesFilePreviews(host("1.32"))).toBe(false);
+		for (const version of ["1.33", "1.34"]) {
+			expect(hostAuthorizesFilePreviews(host(version))).toBe(true);
+			expect(hostAuthorizesFilePreviews(host(version), true)).toBe(false);
+		}
+		expect(hostAuthorizesFilePreviews(host("1.35"), true)).toBe(true);
+		expect(hostAuthorizesFilePreviews(undefined, true)).toBe(false);
+	});
 
 	it("offers authorization only for a resolved path refused by the host boundary", () => {
 		const outside = error("FORBIDDEN", "outside", {

@@ -199,7 +199,7 @@ export function FileViewer({
 	const previewNode = useAppState((s) => s.workspaceNodes[workspaceId] || s.node);
 	const previewHost = useAppState((s) => s.nodes[previewNode]?.hostInfo);
 	const authorizationPath = fromMarkdown ? filePreviewAuthorizationPath(error) : undefined;
-	const canAuthorize = !!authorizationPath && previewNode === LOCAL_NODE && hostAuthorizesFilePreviews(previewHost);
+	const canAuthorize = !!authorizationPath && hostAuthorizesFilePreviews(previewHost, previewNode !== LOCAL_NODE);
 
 	const name = path.split("/").pop() ?? path;
 	const isMarkdown = MARKDOWN.test(path) && file?.kind === "text";
@@ -268,7 +268,7 @@ export function FileViewer({
 				<IconShieldAlert size={22} />
 				<div>
 					<strong>授权读取工作区外的文件？</strong>
-					<p>将读取并显示以下文件：</p>
+					<p>将读取并显示「{store.nodeName(previewNode)}」上的以下文件：</p>
 					<p className="file-viewer-authorization-path">{authorizationPath}</p>
 					<p>仅授权这次只读预览。刷新或重新打开文件时需要再次确认。</p>
 					{isSensitiveFile(authorizationPath) ? <p>该文件可能包含私钥或凭据，请确认后再显示。</p> : null}
@@ -294,7 +294,7 @@ export function FileViewer({
 						<p>
 							{previewNode === LOCAL_NODE
 								? "请更新 Pier 后授权预览，或将文件放到当前工作区。"
-								: "请在文件所在电脑的 Pier 中授权预览，或将文件放到当前工作区。"}
+								: "请更新文件所在电脑的 Pier 以支持远程授权，或将文件放到当前工作区。"}
 						</p>
 					) : null}
 				</div>

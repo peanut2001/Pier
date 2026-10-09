@@ -123,9 +123,9 @@ export function hostSupportsGit(info: HostInfo | undefined): boolean {
 	return hostSpeaks(info, 28);
 }
 
-/** Whether a host supports explicit local authorization of a single file preview (1.33). */
-export function hostAuthorizesFilePreviews(info: HostInfo | undefined): boolean {
-	return hostSpeaks(info, 33);
+/** Whether a host supports one-time preview authorization locally (1.33) or remotely (1.35). */
+export function hostAuthorizesFilePreviews(info: HostInfo | undefined, remote = false): boolean {
+	return hostSpeaks(info, remote ? 35 : 33);
 }
 
 /** Whether a host runs agents other than pi (`runtime.list`, `session.create` with `runtime`, 1.22). */
@@ -2120,16 +2120,15 @@ export class PierStore {
 		return client.request("workspace.previewFile", { workspaceId, path });
 	}
 
-	/** Read just the file the user confirmed, on this computer, without saving an allowance. */
+	/** Read just the file the user confirmed, on its owning computer, without saving an allowance. */
 	async authorizeFilePreview(
 		workspaceId: string,
 		path: string,
 		expectedRealPath: string,
 	): Promise<WorkspaceFileContent> {
 		const node = this.nodeOf(workspaceId);
-		if (node !== LOCAL_NODE) throw new Error("请在文件所在电脑的 Pier 中授权预览");
-		if (!hostAuthorizesFilePreviews(this.state.nodes[node]?.hostInfo)) {
-			throw new Error("当前 Pier Host 不支持文件预览授权，请更新 Pier");
+		if (!hostAuthorizesFilePreviews(this.state.nodes[node]?.hostInfo, node !== LOCAL_NODE)) {
+			throw new Error("文件所在电脑的 Pier 不支持本次预览授权，请更新它的 Pier");
 		}
 		const client = this.clientFor(workspaceId);
 		if (!client) throw new Error("尚未连接到 Pier Host");

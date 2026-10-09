@@ -139,6 +139,8 @@ sidecar 的 stdio 协议：桌面端用 `--shell-terminals` 启动 Host，声明
 
 `workspace.previewFile`（1.31）：参数 `{ workspaceId, path }`，返回 `WorkspaceFileContent`，用于聊天和 Markdown 中的图片、文件链接。相对路径以工作区根目录为基准，允许 `.` / `..`，但解析符号链接后必须仍在工作区内；绝对路径必须位于工作区或 Host 的系统临时目录（`os.tmpdir()`，Unix 另含 `/tmp`、`/var/tmp`）中。`file://`、URL 编码和行号后缀由客户端转成文件路径。目录及特殊文件返回 `BAD_REQUEST`，越界返回 `FORBIDDEN`，不存在返回 `NOT_FOUND`；图片、文本大小限制与 `workspace.readFile` 相同。该只读方法可经已认证的远程连接调用，不改变 `workspace.readFile` 及所有写入、下载方法的路径规则。
 
+`workspace.authorizeFilePreview`（本机 1.33，已配对设备 1.35）：参数 `{ workspaceId, path, expectedRealPath }`，返回 `WorkspaceFileContent`。当预览返回 `FORBIDDEN` 且 `data.reason` 为 `OUTSIDE_ALLOWED_ROOTS` 时，客户端显示文件所在电脑与 `data.resolvedPath`，由用户确认后将该实际路径作为 `expectedRealPath` 传入。Host 重新解析文件路径，若与确认路径不一致则返回 `CONFLICT`（`PREVIEW_TARGET_CHANGED`）；否则按相同类型与大小限制只读取这一次。不会保存文件或目录授权，刷新及重新打开须重新确认，系统读取权限错误不能用此方法绕过。远程调用写入审计日志，仅记录工作区、请求路径与确认的实际路径，不记录文件内容。
+
 ### Git 源代码管理（1.28）
 
 Host 用它所在电脑上的 `git` 命令行（`PATH` 中的，或环境变量 `PIER_GIT` 指定的绝对路径）管理工作区所在的 Git 仓库，供桌面端右侧面板的「源代码管理」使用。仓库是工作区所在的工作树（工作区可以是仓库的子目录，此时操作整个仓库）；以下 `path` / `paths` 都是相对**仓库根目录**的路径（`/` 分隔，绝对路径或含 `..` 时 `BAD_REQUEST`），按字面匹配（`GIT_LITERAL_PATHSPECS`），不作为通配符。Git 以参数数组直接运行（不经过 shell），在仓库根目录中执行，不继承 `GIT_DIR` 等指向其他仓库的环境变量，并且没有终端：`GIT_TERMINAL_PROMPT=0`，类 Unix 系统上在新会话中运行，凭据或主机密钥需要交互输入时直接失败而不是等待（凭据助手、SSH agent 照常可用）。改变仓库的命令在同一仓库上依次执行。Git 返回非零退出码时为 `CONFLICT`，`message` 为 Git 的输出（去掉 `hint:` 行），`data.exitCode` 为退出码；运行超时（本地命令 60 秒，`commit` 与网络命令 5 分钟）时 `CONFLICT`。工作区不在仓库中时除 `git.status` / `git.init` 外返回 `NOT_FOUND`，没有安装 Git 时返回 `UNSUPPORTED`。对已配对设备开放，远程调用改变仓库的方法写入审计日志（只记录路径数量、分支名，不记录提交信息）。

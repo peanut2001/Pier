@@ -157,6 +157,7 @@ const AUDITED_METHODS = new Set<MethodName>([
 	"workspace.add",
 	"workspace.remove",
 	"workspace.setPolicy",
+	"workspace.authorizeFilePreview",
 	"workspace.writeFile",
 	"workspace.deletePath",
 	"workspace.uploadStart",
@@ -249,6 +250,8 @@ function auditDetail(method: MethodName, params: Record<string, unknown>): Recor
 			};
 		case "workspace.deletePath":
 			return { workspaceId: params.workspaceId, path: params.path };
+		case "workspace.authorizeFilePreview":
+			return { workspaceId: params.workspaceId, path: params.path, expectedRealPath: params.expectedRealPath };
 		case "workspace.uploadStart":
 			return {
 				workspaceId: params.workspaceId,

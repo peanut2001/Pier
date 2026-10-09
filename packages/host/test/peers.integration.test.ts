@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { CLOSE_DEVICE_REVOKED, PierClient } from "@pier/client";
 import { formatPairingUri, keyFingerprint } from "@pier/crypto";
 import type { EventFrame, PairingRequest, PeerInfo, WorkspaceInfo } from "@pier/protocol";
@@ -114,14 +117,6 @@ describe("computer-to-computer (peers)", () => {
 		expect((await remote.request("host.stats")).memory.total).toBeGreaterThan(0);
 		await expectCode(remote.request("pairing.start"), "FORBIDDEN");
 		await expectCode(remote.request("peer.list"), "FORBIDDEN");
-		await expectCode(
-			remote.request("workspace.authorizeFilePreview", {
-				workspaceId: bWorkspace.id,
-				path: "/outside/private.txt",
-				expectedRealPath: "/outside/private.txt",
-			}),
-			"FORBIDDEN",
-		);
 
 		b.faux.setResponses([fauxAssistantMessage("answered by computer B")]);
 		const { session } = await remote.request("session.create", { workspaceId: bWorkspace.id });
@@ -145,6 +140,61 @@ describe("computer-to-computer (peers)", () => {
 		remote.close();
 		await aEvents.waitFor((f) => f.event.type === "peer.changed", aEvents.mark());
 		expect((await aDesktop.request("peer.list")).peers[0]?.connected).toBe(false);
+	});
+
+	it("previews a confirmed artifact outside the remote workspace once through the local gateway", async () => {
+		const outside = mkdtempSync(join(homedir(), ".pier-peer-preview-test-"));
+		try {
+			const directory = join(outside, "artifacts", "Pier", "sidebar-navigation");
+			mkdirSync(directory, { recursive: true });
+			const path = join(directory, "light.png");
+			const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a7l8AAAAASUVORK5CYII=";
+			writeFileSync(path, Buffer.from(png, "base64"));
+			const otherPath = join(directory, "other.txt");
+			writeFileSync(otherPath, "ARTIFACT-CONTENT-MUST-NOT-BE-AUDITED");
+			const remote = viaA((await pair()).id);
+			await remote.connect();
+			const params = { workspaceId: bWorkspace.id, path };
+			const denied = await expectCode(remote.request("workspace.previewFile", params), "FORBIDDEN");
+			const expectedRealPath = realpathSync(path);
+			expect(denied).toMatchObject({ data: { reason: "OUTSIDE_ALLOWED_ROOTS", resolvedPath: expectedRealPath } });
+			expect(await remote.request("workspace.authorizeFilePreview", { ...params, expectedRealPath })).toMatchObject({
+				path,
+				kind: "image",
+				mimeType: "image/png",
+				data: png,
+			});
+			// Confirming one target must neither authorize a different target nor persist access.
+			await expectCode(
+				remote.request("workspace.authorizeFilePreview", { ...params, path: otherPath, expectedRealPath }),
+				"CONFLICT",
+			);
+			for (const client of [remote, bDesktop]) {
+				await expectCode(client.request("workspace.previewFile", params), "FORBIDDEN");
+				await expectCode(client.request("workspace.previewFile", { ...params, path: otherPath }), "FORBIDDEN");
+				await expectCode(client.request("workspace.readFile", params), "BAD_REQUEST");
+			}
+			await remote.request("workspace.authorizeFilePreview", {
+				...params,
+				path: otherPath,
+				expectedRealPath: realpathSync(otherPath),
+			});
+			const audit = readFileSync(join(b.root, "pier", "audit.log"), "utf8");
+			const entries = audit
+				.split("\n")
+				.filter(Boolean)
+				.map((line) => JSON.parse(line));
+			expect(entries).toContainEqual(
+				expect.objectContaining({
+					event: "workspace.authorizeFilePreview",
+					detail: { workspaceId: bWorkspace.id, path, expectedRealPath },
+				}),
+			);
+			expect(audit).not.toContain(png);
+			expect(audit).not.toContain("ARTIFACT-CONTENT-MUST-NOT-BE-AUDITED");
+		} finally {
+			rmSync(outside, { recursive: true, force: true });
+		}
 	});
 
 	it("checks the local token before connecting and never forwards it", async () => {
