@@ -241,7 +241,7 @@ function SessionRow({
 	const p = usePalette();
 	const pending = session.pendingUi ?? 0;
 	const busy = isBusy(session.state);
-	const runtime = session.runtime && session.runtime !== "pi" ? agentRuntimeLabel(session.runtime) : undefined;
+	const runtime = agentRuntimeLabel(session.runtime);
 	return (
 		<Pressable
 			testID={`session-${session.id}`}
@@ -269,9 +269,7 @@ function SessionRow({
 					{session.archived ? (
 						<Text style={[styles.badge, { color: p.muted, backgroundColor: p.elevated }]}>已归档</Text>
 					) : null}
-					{runtime ? (
-						<Text style={[styles.badge, { color: p.accent, backgroundColor: p.accentSoft }]}>{runtime}</Text>
-					) : null}
+					<Text style={[styles.badge, { color: p.accent, backgroundColor: p.accentSoft }]}>{runtime}</Text>
 					<Icon name="time-outline" size={12} color={p.faint} />
 					<Text style={[styles.sessionMeta, { color: p.faint }]}>{relativeTime(session.modifiedAt)}</Text>
 					<Icon name="chatbubble-outline" size={11.5} color={p.faint} style={styles.metaGap} />

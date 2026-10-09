@@ -87,7 +87,7 @@ export function agentRuntimeLabel(id: AgentRuntimeId | undefined): string {
 	switch (id) {
 		case undefined:
 		case "pi":
-			return "pi";
+			return "PI";
 		case "claude-code":
 			return "Claude Code";
 		case "codex":

@@ -625,7 +625,7 @@ button.sidebar-update-action {
 	color: var(--text-muted);
 }
 
-/* Which agent runs a session that pi does not (Claude Code, Codex). */
+/* Which agent runs each session (PI, Claude Code, Codex, or another runtime). */
 .session-agent {
 	flex-shrink: 0;
 	font-size: 10px;
@@ -635,6 +635,11 @@ button.sidebar-update-action {
 	border-radius: 4px;
 	background: var(--bg-active);
 	color: var(--text-muted);
+}
+
+.session-agent.agent-pi {
+	color: #0d9488;
+	background: color-mix(in srgb, #0d9488 14%, transparent);
 }
 
 .session-agent.agent-claude-code {

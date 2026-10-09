@@ -215,8 +215,8 @@ describe("runtime capabilities", () => {
 
 	it("names agent runtimes", () => {
 		expect([undefined, "pi", "claude-code", "codex", "other"].map((id) => agentRuntimeLabel(id))).toEqual([
-			"pi",
-			"pi",
+			"PI",
+			"PI",
 			"Claude Code",
 			"Codex",
 			"other",

@@ -1,5 +1,6 @@
 import { agentRuntimeLabel } from "@pier/chat-state";
 import type { ApprovalPolicy, PeerInfo, SessionSummary, WorkspaceInfo } from "@pier/protocol";
+import { DEFAULT_AGENT_RUNTIME } from "@pier/protocol";
 import { useEffect, useState } from "react";
 import { POLICY_DESCRIPTION, POLICY_LABEL, relativeTime, sessionTitle } from "../lib/format.ts";
 import {
@@ -199,6 +200,7 @@ function SessionItem({
 	const live = store.liveChat(session.id)?.chat;
 	const running = isRunning(live?.loaded ? live.runState : session.state);
 	const archived = !!session.archived;
+	const runtime = session.runtime ?? DEFAULT_AGENT_RUNTIME;
 	return (
 		<div className={`session-item${confirm ? " confirming" : ""}${archived ? " archived" : ""}`}>
 			<button
@@ -208,14 +210,9 @@ function SessionItem({
 				title={session.firstMessage || session.name || session.id}
 			>
 				<span className="session-row-title">{sessionTitle(session)}</span>
-				{session.runtime && session.runtime !== "pi" ? (
-					<span
-						className={`session-agent agent-${session.runtime}`}
-						title={`由 ${agentRuntimeLabel(session.runtime)} 运行`}
-					>
-						{agentRuntimeLabel(session.runtime)}
-					</span>
-				) : null}
+				<span className={`session-agent agent-${runtime}`} title={`由 ${agentRuntimeLabel(runtime)} 运行`}>
+					{agentRuntimeLabel(runtime)}
+				</span>
 				<SessionBadge session={session} />
 				<span className="session-row-time">{relativeTime(session.modifiedAt)}</span>
 			</button>
