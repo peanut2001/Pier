@@ -437,6 +437,7 @@ code {
  * strip as the main panel's left gap. The sidebar itself slides and fades out meanwhile.
  */
 .sidebar-shell {
+	position: relative;
 	display: flex;
 	width: var(--sidebar-width);
 	min-width: 0;
@@ -447,6 +448,34 @@ code {
 
 .sidebar-shell.collapsed {
 	width: 8px;
+}
+
+/* Width changes follow the pointer immediately while dragging. */
+body.resizing-sidebar .sidebar-shell {
+	transition: none;
+}
+
+.sidebar-resize {
+	position: absolute;
+	top: 8px;
+	bottom: 8px;
+	right: 0;
+	width: 6px;
+	cursor: col-resize;
+	touch-action: none;
+	z-index: 3;
+	border-radius: 3px;
+}
+
+.sidebar-resize:hover,
+.sidebar-resize:focus-visible,
+body.resizing-sidebar .sidebar-resize {
+	background: var(--accent-ring);
+}
+
+body.resizing-sidebar {
+	cursor: col-resize;
+	user-select: none;
 }
 
 .sidebar-shell > .sidebar {

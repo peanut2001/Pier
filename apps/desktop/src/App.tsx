@@ -14,6 +14,7 @@ import { AddPeerDialog, PairingRequestDialog } from "./components/RemotePanel.ts
 import { SessionView } from "./components/SessionView.tsx";
 import { SettingsPage } from "./components/Settings.tsx";
 import { Sidebar, SidebarToggle } from "./components/Sidebar.tsx";
+import { SidebarResizeHandle } from "./components/SidebarResizeHandle.tsx";
 import { StatusBar } from "./components/StatusBar.tsx";
 import { TerminalPanel } from "./components/TerminalPanel.tsx";
 import { TitleBar } from "./components/TitleBar.tsx";
@@ -113,6 +114,7 @@ export function App() {
 	const filesPanelWidth = useAppState((s) => s.filesPanelWidth);
 	const hasWorkspace = useAppState((s) => s.workspaces.length > 0);
 	const sidebar = useAppState((s) => s.sidebar);
+	const sidebarWidth = useAppState((s) => s.sidebarWidth);
 	// Terminals run on the computer of the workspace they were opened for; the panel shows them all.
 	const terminalOpen = useTerminals((s) => s.open);
 	const hasTerminals = useTerminals((s) => s.tabs.length > 0);
@@ -172,10 +174,11 @@ export function App() {
 				) : (
 					<div
 						className={`app with-files-shell${sidebar ? "" : " no-sidebar"}`}
-						style={{ gridTemplateColumns: columns.join(" ") }}
+						style={{ gridTemplateColumns: columns.join(" "), "--sidebar-width": `${sidebarWidth}px` } as CSSProperties}
 					>
 						<div className={`sidebar-shell${sidebar ? "" : " collapsed"}`} inert={!sidebar}>
 							<Sidebar open={sidebar} />
+							{sidebar ? <SidebarResizeHandle /> : null}
 						</div>
 						<main className="main">
 							<HostBanner scope="node" onShowLogs={() => store.openSettings("logs")} />

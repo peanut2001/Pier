@@ -333,6 +333,8 @@ export interface AppState {
 	settings?: SettingsSection;
 	/** The left-hand sidebar (workspaces and sessions) is shown. */
 	sidebar: boolean;
+	/** Width of the left-hand sidebar in pixels. */
+	sidebarWidth: number;
 	/** The right-hand workspace file panel is shown. */
 	filesPanel: boolean;
 	/** Width of the file panel in pixels. */
@@ -408,9 +410,17 @@ const FILES_PANEL_KEY = "pier.filesPanel";
 /** The views of the right-hand panel. */
 export type RightPanelTab = "files" | "git";
 const SIDEBAR_KEY = "pier.sidebar";
+export const SIDEBAR_MIN_WIDTH = 180;
+export const SIDEBAR_MAX_WIDTH = 480;
+export const SIDEBAR_DEFAULT_WIDTH = 228;
 export const FILES_PANEL_MIN_WIDTH = 220;
 export const FILES_PANEL_MAX_WIDTH = 560;
 export const FILES_PANEL_DEFAULT_WIDTH = 280;
+
+function clampSidebarWidth(width: number): number {
+	if (!Number.isFinite(width)) return SIDEBAR_DEFAULT_WIDTH;
+	return Math.round(Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, width)));
+}
 
 function clampPanelWidth(width: number): number {
 	if (!Number.isFinite(width)) return FILES_PANEL_DEFAULT_WIDTH;
@@ -543,7 +553,7 @@ export class PierStore {
 		})();
 		const sidebar = (() => {
 			try {
-				return JSON.parse(localStorage.getItem(SIDEBAR_KEY) ?? "{}") as { open?: boolean };
+				return JSON.parse(localStorage.getItem(SIDEBAR_KEY) ?? "{}") as { open?: boolean; width?: number };
 			} catch {
 				return {};
 			}
@@ -573,6 +583,7 @@ export class PierStore {
 			settingsSyncing: false,
 			update: { state: "idle", currentVersion: APP_VERSION, autoCheck: true, downloaded: 0 },
 			sidebar: sidebar.open !== false,
+			sidebarWidth: clampSidebarWidth(sidebar.width ?? SIDEBAR_DEFAULT_WIDTH),
 			filesPanel: panel.open === true,
 			filesPanelWidth: clampPanelWidth(panel.width ?? FILES_PANEL_DEFAULT_WIDTH),
 			rightPanelTab: panel.tab === "git" ? "git" : "files",
@@ -626,8 +637,8 @@ export class PierStore {
 				} satisfies SavedSelection),
 			);
 		}
-		if ("sidebar" in next) {
-			localStorage.setItem(SIDEBAR_KEY, JSON.stringify({ open: this.state.sidebar }));
+		if ("sidebar" in next || "sidebarWidth" in next) {
+			localStorage.setItem(SIDEBAR_KEY, JSON.stringify({ open: this.state.sidebar, width: this.state.sidebarWidth }));
 		}
 		if ("filesPanel" in next || "filesPanelWidth" in next || "rightPanelTab" in next) {
 			localStorage.setItem(
@@ -2058,6 +2069,11 @@ export class PierStore {
 
 	toggleSidebar(open = !this.state.sidebar): void {
 		if (open !== this.state.sidebar) this.set({ sidebar: open });
+	}
+
+	setSidebarWidth(width: number): void {
+		const sidebarWidth = clampSidebarWidth(width);
+		if (sidebarWidth !== this.state.sidebarWidth) this.set({ sidebarWidth });
 	}
 
 	toggleFilesPanel(open = !this.state.filesPanel): void {

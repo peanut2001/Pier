@@ -557,7 +557,7 @@ export function Sidebar({ open = true }: { open?: boolean }) {
 	const online = status.online;
 
 	return (
-		<aside className="sidebar">
+		<aside id="workspace-sidebar" className="sidebar">
 			<div className="brand">
 				<span className="brand-name">Pier</span>
 				<button
