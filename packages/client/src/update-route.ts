@@ -1,3 +1,11 @@
+/** Shared desktop and Android choices, stored using the existing mirror prefix setting. */
+export const UPDATE_ROUTES = [
+	{ id: "github", label: "GitHub 直连", prefix: "" },
+	{ id: "ghfast", label: "GHFast", prefix: "https://ghfast.top/" },
+	{ id: "gh-proxy", label: "GH-Proxy", prefix: "https://gh-proxy.com/" },
+	{ id: "ghproxy", label: "GHProxy", prefix: "https://ghproxy.net/" },
+] as const;
+
 /** An empty prefix uses GitHub directly; a mirror receives the full GitHub URL as its path. */
 export function normalizeUpdateMirror(value: string): string {
 	const prefix = value.trim();

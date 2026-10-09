@@ -1,3 +1,4 @@
+import { UPDATE_ROUTES } from "@pier/client";
 import { useRouter } from "expo-router";
 import { useState } from "react";
 import { Alert, Pressable, StyleSheet, Switch, Text, View } from "react-native";
@@ -108,6 +109,7 @@ function statusLine(status: UpdateStatus): string {
 
 function UpdateRouteSettings({ status, busy }: { status: UpdateStatus; busy: boolean }) {
 	const p = usePalette();
+	const selected = UPDATE_ROUTES.find((route) => route.prefix === status.mirrorPrefix);
 	const [editing, setEditing] = useState(false);
 	const save = async (prefix: string): Promise<boolean> => {
 		try {
@@ -122,23 +124,27 @@ function UpdateRouteSettings({ status, busy }: { status: UpdateStatus; busy: boo
 		<View style={styles.route}>
 			<Text style={[styles.switchLabel, { color: p.text }]}>更新线路</Text>
 			<View style={styles.actions}>
-				<Button
-					title="GitHub 直连"
-					small
-					variant={status.mirrorPrefix ? "secondary" : "primary"}
-					disabled={busy || !status.mirrorPrefix}
-					onPress={() => void save("")}
-				/>
+				{UPDATE_ROUTES.map((route) => (
+					<Button
+						key={route.id}
+						title={route.label}
+						small
+						variant={selected?.id === route.id ? "primary" : "secondary"}
+						disabled={busy || selected?.id === route.id}
+						onPress={() => void save(route.prefix)}
+					/>
+				))}
 				<Button
 					title="自定义加速线路"
 					small
-					variant={status.mirrorPrefix ? "primary" : "secondary"}
+					variant={selected ? "secondary" : "primary"}
 					disabled={busy}
 					onPress={() => setEditing(true)}
 				/>
 			</View>
 			<Muted>
-				{status.mirrorPrefix ? `当前加速地址：${status.mirrorPrefix}` : "当前线路：GitHub 直连"}
+				当前线路：{selected?.label ?? "自定义加速线路"}
+				{status.mirrorPrefix ? `\n加速地址：${status.mirrorPrefix}` : ""}
 				{"\n"}检查更新和下载安装包都使用所选线路，自动检查也会沿用此设置。
 			</Muted>
 			{editing ? (

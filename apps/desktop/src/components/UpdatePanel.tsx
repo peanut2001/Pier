@@ -1,3 +1,4 @@
+import { UPDATE_ROUTES } from "@pier/client";
 import type { AppUpdateStatus, PeerInfo } from "@pier/protocol";
 import { type ReactNode, useEffect, useState } from "react";
 import type { UpdateStatus } from "../lib/bridge.ts";
@@ -323,6 +324,7 @@ function UpdateRouteSettings() {
 	const store = useStore();
 	const update = useAppState((s) => s.update);
 	const current = update.mirrorPrefix ?? "";
+	const selected = UPDATE_ROUTES.find((route) => route.prefix === current)?.id ?? "custom";
 	const [prefix, setPrefix] = useState(current);
 	const [editing, setEditing] = useState(false);
 	const busy = update.state === "checking" || update.state === "downloading" || update.state === "installing";
@@ -334,22 +336,28 @@ function UpdateRouteSettings() {
 			<SettingRow title="更新线路" description="检查更新和下载安装包都使用所选线路，自动检查也会沿用此设置。">
 				<select
 					aria-label="更新线路"
-					value={editing || current ? "mirror" : "github"}
+					value={editing ? "custom" : selected}
 					disabled={busy}
 					onChange={(event) => {
-						if (event.target.value === "github") {
-							setEditing(false);
-							void store.setUpdateMirror("");
-						} else {
+						if (event.target.value === "custom") {
 							setEditing(true);
+						} else {
+							const route = UPDATE_ROUTES.find((route) => route.id === event.target.value);
+							if (!route) return;
+							setEditing(false);
+							void store.setUpdateMirror(route.prefix);
 						}
 					}}
 				>
-					<option value="github">GitHub 直连</option>
-					<option value="mirror">自定义加速线路</option>
+					{UPDATE_ROUTES.map((route) => (
+						<option key={route.id} value={route.id}>
+							{route.prefix ? `${route.label}（${new URL(route.prefix).hostname}）` : route.label}
+						</option>
+					))}
+					<option value="custom">自定义加速线路</option>
 				</select>
 			</SettingRow>
-			{editing || current ? (
+			{editing || selected === "custom" ? (
 				<SettingRow
 					title="加速地址"
 					description="填写支持在地址后附加完整 GitHub 链接的 HTTPS 加速服务，保存后生效并重新检查更新。"

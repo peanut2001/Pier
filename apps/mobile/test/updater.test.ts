@@ -1,3 +1,4 @@
+import { UPDATE_ROUTES } from "@pier/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.hoisted(() => vi.stubGlobal("__DEV__", false));
@@ -77,6 +78,26 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("mobile update routes", () => {
+	it.each(UPDATE_ROUTES.filter((route) => route.prefix))(
+		"saves and uses the $label preset for checks and downloads",
+		async (route) => {
+			const updater = new MobileUpdater();
+			await updater.init();
+			await updater.setMirror(route.prefix);
+			await vi.waitFor(() => expect(updater.getStatus().state).toBe("available"));
+			expect(fetch).toHaveBeenLastCalledWith(`${route.prefix}${ANDROID_UPDATE_MANIFEST_URL}`, expect.anything());
+			await updater.install();
+			expect(mock.download).toHaveBeenCalledWith(
+				`${route.prefix}${manifest.url}`,
+				expect.anything(),
+				expect.anything(),
+			);
+			const restored = new MobileUpdater();
+			await restored.init();
+			expect(restored.getStatus().mirrorPrefix).toBe(route.prefix);
+		},
+	);
+
 	it("loads old settings with GitHub direct and retains other preferences", async () => {
 		const updater = new MobileUpdater();
 		await updater.init();
