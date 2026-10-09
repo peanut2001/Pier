@@ -33,8 +33,8 @@ describe("thinking levels", () => {
 		expect(clampThinking("weird", levels)).toBe("low");
 	});
 
-	it("labels levels", () => {
-		expect(thinkingLabel("xhigh")).toBe("很高");
+	it("displays the original thinking level", () => {
+		expect(thinkingLabel("xhigh")).toBe("xhigh");
 		expect(thinkingLabel("custom")).toBe("custom");
 	});
 

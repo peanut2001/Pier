@@ -1,20 +1,20 @@
 import type { ModelInfo, ThinkingLevel } from "@pier/protocol";
 
-/** Every thinking level, lowest first, with the label the clients show. */
+/** Every thinking level, lowest first, displayed using its original value. */
 export const THINKING_LEVELS: ReadonlyArray<{ value: ThinkingLevel; label: string }> = [
-	{ value: "off", label: "不思考" },
-	{ value: "minimal", label: "极少" },
-	{ value: "low", label: "低" },
-	{ value: "medium", label: "中" },
-	{ value: "high", label: "高" },
-	{ value: "xhigh", label: "很高" },
-	{ value: "max", label: "最高" },
+	{ value: "off", label: "off" },
+	{ value: "minimal", label: "minimal" },
+	{ value: "low", label: "low" },
+	{ value: "medium", label: "medium" },
+	{ value: "high", label: "high" },
+	{ value: "xhigh", label: "xhigh" },
+	{ value: "max", label: "max" },
 ];
 
 const ORDER: ThinkingLevel[] = THINKING_LEVELS.map((l) => l.value);
 
 export function thinkingLabel(level: string): string {
-	return THINKING_LEVELS.find((l) => l.value === level)?.label ?? level;
+	return level;
 }
 
 /** Thinking levels a model supports, lowest first (all of them for hosts before protocol 1.19). */

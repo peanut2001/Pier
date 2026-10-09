@@ -22,13 +22,13 @@ export {
 } from "./config-fields.ts";
 
 export const THINKING_LEVEL_OPTIONS: Array<{ value: string; label: string }> = [
-	{ value: "off", label: "不思考" },
-	{ value: "minimal", label: "极少" },
-	{ value: "low", label: "低" },
-	{ value: "medium", label: "中" },
-	{ value: "high", label: "高" },
-	{ value: "xhigh", label: "很高" },
-	{ value: "max", label: "最高" },
+	{ value: "off", label: "off" },
+	{ value: "minimal", label: "minimal" },
+	{ value: "low", label: "low" },
+	{ value: "medium", label: "medium" },
+	{ value: "high", label: "high" },
+	{ value: "xhigh", label: "xhigh" },
+	{ value: "max", label: "max" },
 ];
 
 export const BUILTIN_TOOLS = ["read", "bash", "powershell", "edit", "write", "grep", "find", "ls"] as const;
@@ -70,26 +70,26 @@ export const SETTINGS_GROUPS: GroupDef[] = [
 			},
 			{
 				path: ["thinkingBudgets", "minimal"],
-				label: "思考预算：极少",
-				description: "按 token 数控制思考的模型在「极少」等级下的预算。",
+				label: "思考预算：minimal",
+				description: "按 token 数控制思考的模型在 minimal 等级下的预算。",
 				kind: { type: "number", ...TOKENS },
 				defaultLabel: "内置值",
 			},
 			{
 				path: ["thinkingBudgets", "low"],
-				label: "思考预算：低",
+				label: "思考预算：low",
 				kind: { type: "number", ...TOKENS },
 				defaultLabel: "内置值",
 			},
 			{
 				path: ["thinkingBudgets", "medium"],
-				label: "思考预算：中",
+				label: "思考预算：medium",
 				kind: { type: "number", ...TOKENS },
 				defaultLabel: "内置值",
 			},
 			{
 				path: ["thinkingBudgets", "high"],
-				label: "思考预算：高",
+				label: "思考预算：high",
 				kind: { type: "number", ...TOKENS },
 				defaultLabel: "内置值",
 			},

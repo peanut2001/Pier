@@ -29,13 +29,13 @@ export interface SlashCommand {
 }
 
 export const THINKING_LEVEL_LABELS: Record<ThinkingLevel, string> = {
-	off: "不思考",
-	minimal: "极少",
-	low: "低",
-	medium: "中",
-	high: "高",
-	xhigh: "很高",
-	max: "最高",
+	off: "off",
+	minimal: "minimal",
+	low: "low",
+	medium: "medium",
+	high: "high",
+	xhigh: "xhigh",
+	max: "max",
 };
 
 export const BUILTIN_COMMANDS: readonly SlashCommand[] = [

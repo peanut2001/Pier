@@ -44,7 +44,7 @@ describe("pi settings fields", () => {
 	});
 
 	it("formats values and defaults", () => {
-		expect(formatValue(field("defaultThinkingLevel"), builtinDefault(field("defaultThinkingLevel")))).toBe("中");
+		expect(formatValue(field("defaultThinkingLevel"), builtinDefault(field("defaultThinkingLevel")))).toBe("medium");
 		expect(formatValue(field("compaction.reserveTokens"), 16384)).toBe("16384 tokens");
 		expect(formatValue(field("defaultTools"), builtinDefault(field("defaultTools")))).toBe("read、bash、edit、write");
 		expect(formatValue(field("shellPath"), undefined)).toBe("系统默认");
