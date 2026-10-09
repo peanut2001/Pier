@@ -131,7 +131,7 @@ export interface PierHostOptions {
 	 */
 	agentConfigDirs?: Partial<Record<AgentConfigRuntime, string>>;
 	/** Installer dependencies for tests; production always downloads official native releases. */
-	agentInstaller?: Pick<AgentInstallerOptions, "fetch" | "probe">;
+	agentInstaller?: Pick<AgentInstallerOptions, "fetch" | "probe" | "homeDirectory" | "configurePath">;
 }
 
 /** Remote methods recorded in the audit log. */
@@ -403,13 +403,16 @@ export class PierHost implements RequestHandler {
 		this.log = log;
 		const agents = options.agents ?? {};
 		const managedDirectory = join(this.pierDir, "agents");
+		const installationHome = options.agentInstaller?.homeDirectory;
 		this.pool = new SessionPool({
 			runtimes: [
 				new PiRuntime(env),
 				...(agents.claudeCode === false
 					? []
-					: [new ClaudeCodeRuntime({ log, managedDirectory, ...agents.claudeCode })]),
-				...(agents.codex === false ? [] : [new CodexRuntime({ log, managedDirectory, ...agents.codex })]),
+					: [new ClaudeCodeRuntime({ log, managedDirectory, installationHome, ...agents.claudeCode })]),
+				...(agents.codex === false
+					? []
+					: [new CodexRuntime({ log, managedDirectory, installationHome, ...agents.codex })]),
 			],
 			log,
 			config: this.config,
@@ -937,7 +940,7 @@ export class PierHost implements RequestHandler {
 						"CONFLICT",
 						`当前使用 ${override} 指定的程序，请先移除此环境变量再使用 Pier 安装`,
 					);
-				// Windows cannot replace a running executable; managed releases use distinct paths.
+				// Publication retains the old command if Windows prevents replacing an executable in use.
 				const installation = this.agentInstaller.start(params.runtime);
 				const device = ctx.connection.device;
 				if (device)

@@ -1,12 +1,15 @@
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { createWriteStream, existsSync, readFileSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
-import { join, resolve, sep } from "node:path";
+import { chmod, cp, mkdir, mkdtemp, rename, rm } from "node:fs/promises";
+import { homedir } from "node:os";
+import { dirname, join, resolve, sep } from "node:path";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { type AgentConfigRuntime, type AgentInstallationStatus, PierProtocolError } from "@pier/protocol";
 import { probeVersion } from "./executable.ts";
+import { configureInstallationPath } from "./installation-path.ts";
+import { publishAgentCommand, sharedAgentExecutable, sharedAgentPaths } from "./shared-installation.ts";
 
 const CLAUDE_DOWNLOADS = "https://downloads.claude.ai/claude-code-releases";
 const CODEX_RELEASE = "https://api.github.com/repos/openai/codex/releases/latest";
@@ -35,6 +38,9 @@ export function installationTarget(
 }
 
 export interface AgentInstallerOptions {
+	/** Defaults to the OS user's home; tests use a separate temporary home. */
+	homeDirectory?: string;
+	configurePath?: typeof configureInstallationPath;
 	fetch?: typeof fetch;
 	probe?: typeof probeVersion;
 	onInstalled?: (runtime: AgentConfigRuntime) => Promise<void> | void;
@@ -47,7 +53,7 @@ interface Release {
 	archive: boolean;
 }
 
-/** Verified, versioned native installations owned by Pier; never changes an existing system CLI. */
+/** Verified native releases, with public user-level commands shared by Pier and external terminals. */
 export class AgentInstaller {
 	private readonly statuses = new Map<AgentConfigRuntime, AgentInstallationStatus>();
 	private readonly jobs = new Map<AgentConfigRuntime, { abort: AbortController; done: Promise<void> }>();
@@ -58,8 +64,10 @@ export class AgentInstaller {
 		private readonly options: AgentInstallerOptions = {},
 	) {}
 
-	/** A saved selection, including after Host restarts. Explicit PIER_*_PATH overrides still win. */
-	static executable(directory: string, runtime: AgentConfigRuntime): string | undefined {
+	/** Prefer the shared command; retain old Pier-only installations until the next install/update. */
+	static executable(directory: string, runtime: AgentConfigRuntime, homeDirectory = homedir()): string | undefined {
+		const shared = sharedAgentExecutable(runtime, homeDirectory);
+		if (shared) return shared;
 		try {
 			// Reading is deliberately synchronous: executable discovery is synchronous too.
 			const text = readFileSync(join(directory, runtime, "current.json"), "utf8");
@@ -180,22 +188,33 @@ export class AgentInstaller {
 		);
 		timeout.unref?.();
 		try {
+			const home = this.options.homeDirectory ?? homedir();
+			const paths = sharedAgentPaths(runtime, home);
 			const release = await this.release(runtime, signal);
 			this.update(runtime, { version: release.version });
-			const current = AgentInstaller.executable(this.directory, runtime);
-			if (current && (await (this.options.probe ?? probeVersion)(current)) === release.version) {
+			const current = AgentInstaller.executable(this.directory, runtime, home);
+			const upToDate = current && (await (this.options.probe ?? probeVersion)(current)) === release.version;
+			if (upToDate && sharedAgentExecutable(runtime, home)) {
 				signal.throwIfAborted();
+				await (this.options.configurePath ?? configureInstallationPath)(paths.bin, { home });
+				await this.options.onInstalled?.(runtime);
 				this.update(runtime, { state: "ready" });
 				return;
 			}
-			const root = join(this.directory, runtime);
+			const root = paths.versions;
 			await mkdir(root, { recursive: true, mode: 0o700 });
 			staging = await mkdtemp(join(root, ".install-"));
 			const filename = `${runtime === "codex" ? "codex" : "claude"}${process.platform === "win32" ? ".exe" : ""}`;
 			const downloaded = join(staging, release.archive ? "download.tar.gz" : filename);
-			await this.download(runtime, release, downloaded, signal);
+			if (upToDate && current) {
+				// Migrate an already verified Pier-only installation even when its version is latest.
+				if (release.archive) await cp(dirname(current), join(staging, "bin"), { recursive: true });
+				else await cp(current, downloaded);
+			} else {
+				await this.download(runtime, release, downloaded, signal);
+			}
 			this.update(runtime, { state: "installing" });
-			if (release.archive) {
+			if (release.archive && !upToDate) {
 				const extractionDirectory = staging;
 				await new Promise<void>((resolve, reject) =>
 					execFile(
@@ -218,16 +237,15 @@ export class AgentInstaller {
 			const destination = join(root, name);
 			await rename(staging, destination);
 			staging = destination;
-			const relative = join(name, ...(release.archive ? ["bin", filename] : [filename]));
-			const selection = join(root, `.current-${randomUUID()}.json`);
-			try {
-				await writeFile(selection, JSON.stringify({ executable: relative }), { mode: 0o600 });
-				signal.throwIfAborted();
-				await rename(selection, join(root, "current.json"));
-				staging = undefined;
-			} finally {
-				await rm(selection, { force: true });
-			}
+			await (this.options.configurePath ?? configureInstallationPath)(paths.bin, { home });
+			signal.throwIfAborted();
+			// Retain this verified release if publication/rollback encounters a filesystem error.
+			staging = undefined;
+			await publishAgentCommand(
+				runtime,
+				join(destination, ...(release.archive ? ["bin", filename] : [filename])),
+				home,
+			);
 			await this.options.onInstalled?.(runtime);
 			this.update(runtime, { state: "ready" });
 		} catch (error) {

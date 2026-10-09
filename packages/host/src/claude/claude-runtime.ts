@@ -28,6 +28,7 @@ import {
 import { CLAUDE_PROVIDER, convertTranscript } from "./convert.ts";
 
 export interface ClaudeCodeRuntimeOptions {
+	installationHome?: string;
 	managedDirectory?: string;
 	/** `claude` executable. Defaults to `PIER_CLAUDE_PATH`, then `claude` on `PATH`. */
 	executable?: string;
@@ -123,7 +124,9 @@ export class ClaudeCodeRuntime implements AgentRuntime {
 		return findExecutable(
 			"claude",
 			process.env.PIER_CLAUDE_PATH,
-			this.options.managedDirectory ? AgentInstaller.executable(this.options.managedDirectory, this.id) : undefined,
+			this.options.managedDirectory
+				? AgentInstaller.executable(this.options.managedDirectory, this.id, this.options.installationHome)
+				: undefined,
 		);
 	}
 

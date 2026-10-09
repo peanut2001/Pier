@@ -30,7 +30,7 @@ function isExecutable(path: string): boolean {
 
 /**
  * Find a CLI: the path in `override` (an environment variable's value) when set, otherwise the
- * the verified Pier-managed executable, then `name` on `PATH` or in common install directories.
+ * shared user-level command (or a legacy Pier installation), then `name` on `PATH` or in common install directories.
  */
 export function findExecutable(name: string, override?: string, managed?: string): string | undefined {
 	if (override) return isAbsolute(override) && isExecutable(override) ? override : undefined;

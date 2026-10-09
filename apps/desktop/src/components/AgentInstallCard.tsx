@@ -113,7 +113,7 @@ export function AgentInstallCard({ runtime }: { runtime: AgentConfigRuntime }) {
 					}
 					description={
 						supported
-							? `在${target.local ? "本机" : target.name}安装官方最新原生版本，无需 Node.js。Pier 管理的版本供 Pier 使用。`
+							? `在${target.local ? "本机" : target.name}安装官方最新原生版本，无需 Node.js。Pier 与外部终端共用；安装后请重新打开终端。`
 							: "请先更新这台电脑上的 Pier，以支持应用内安装和更新。"
 					}
 				>

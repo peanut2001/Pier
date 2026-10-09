@@ -17,6 +17,7 @@ import { CODEX_CAPABILITIES, CodexSession, type CodexSessionHost } from "./codex
 import { codexPolicy, convertTurns, toModelInfo } from "./convert.ts";
 
 export interface CodexRuntimeOptions {
+	installationHome?: string;
 	managedDirectory?: string;
 	/** `codex` executable. Defaults to `PIER_CODEX_PATH`, then `codex` on `PATH`. */
 	executable?: string;
@@ -71,7 +72,9 @@ export class CodexRuntime implements AgentRuntime {
 		return findExecutable(
 			"codex",
 			process.env.PIER_CODEX_PATH,
-			this.options.managedDirectory ? AgentInstaller.executable(this.options.managedDirectory, this.id) : undefined,
+			this.options.managedDirectory
+				? AgentInstaller.executable(this.options.managedDirectory, this.id, this.options.installationHome)
+				: undefined,
 		);
 	}
 

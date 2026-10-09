@@ -85,6 +85,11 @@ export async function startTestHost(
 		// Only pi unless a test sets up other runtimes (the CLIs may be installed on this machine).
 		agents: { claudeCode: false, codex: false },
 		...hostOptions,
+		agentInstaller: {
+			homeDirectory: join(root, "home"),
+			configurePath: async () => {}, // Never change the test runner's shell profiles or Windows registry.
+			...hostOptions.agentInstaller,
+		},
 	});
 	const gateway = await startLocalGateway(host);
 	const clients: PierClient[] = [];

@@ -168,11 +168,11 @@ Host 用它所在电脑上的 `git` 命令行（`PATH` 中的，或环境变量 
 
 | 方法 | 参数 | 结果 |
 |---|---|---|
-| `runtime.list` | `{}` | `{ runtimes: AgentRuntimeInfo[] }`；`AgentRuntimeInfo = { id, name, available, reason?, version?, executable?, capabilities }`。`available` 表示能新建会话（CLI 已安装；登录状态在使用时才检查），不可用时 `reason` 说明原因。CLI 依次从 `PIER_CLAUDE_PATH` / `PIER_CODEX_PATH`、Pier 管理的安装、`PATH` 与常见安装目录中查找 |
+| `runtime.list` | `{}` | `{ runtimes: AgentRuntimeInfo[] }`；`AgentRuntimeInfo = { id, name, available, reason?, version?, executable?, capabilities }`。`available` 表示能新建会话（CLI 已安装；登录状态在使用时才检查），不可用时 `reason` 说明原因。CLI 依次从 `PIER_CLAUDE_PATH` / `PIER_CODEX_PATH`、用户级公共安装（旧版 Pier 独立安装作为兼容回退）、`PATH` 与常见安装目录中查找 |
 | `runtime.installStatus`（1.32） | `{ runtime: "claude-code" \| "codex", refresh?: boolean }` | `{ installation: AgentInstallationStatus, agent: AgentRuntimeInfo }`；`refresh: true` 重新运行版本探测，其余请求使用缓存 |
 | `runtime.install`（1.32） | `{ runtime: "claude-code" \| "codex" }` | 同上；异步启动官方最新原生 CLI 的安装或更新，立即返回。不能指定下载地址、路径或命令；同一运行时已有安装任务时返回 `CONFLICT`，显式路径覆盖存在时也返回 `CONFLICT` |
 
-`AgentInstallationStatus = { runtime, state: "idle" | "checking" | "downloading" | "verifying" | "installing" | "ready" | "error", version?, downloadedBytes?, totalBytes?, error? }`。客户端通过 `runtime.installStatus` 轮询进度，连接断开不影响任务；Host 退出会取消安装并清理暂存文件。仅支持 x64 / arm64 的 Windows、macOS、Linux。Claude Code 使用官方原生二进制和平台清单，Codex 使用官方完整原生发行包（含辅助程序），两者都校验 SHA-256 并运行 `--version` 验证后才原子切换持久化选择；失败时保持之前的程序，系统 CLI、配置、凭据与会话目录不变。最新版本已经安装时直接返回 `ready`。成功安装广播 `{ type: "runtime.changed", runtime }`，客户端应刷新 Agent 列表；该事件不含凭据。已打开的 Codex 会话保留原来的 app-server 进程，全部关闭后才切换到新版。这两个方法向已配对设备开放，远程 `runtime.install` 记录运行时名称到审计日志。
+`AgentInstallationStatus = { runtime, state: "idle" | "checking" | "downloading" | "verifying" | "installing" | "ready" | "error", version?, downloadedBytes?, totalBytes?, error? }`。客户端通过 `runtime.installStatus` 轮询进度，连接断开不影响任务；Host 退出会取消安装并清理暂存文件。仅支持 x64 / arm64 的 Windows、macOS、Linux。Claude Code 使用官方原生二进制和平台清单，Codex 使用官方完整原生发行包（含辅助程序），两者都校验 SHA-256 并运行 `--version` 验证后才更新用户级公共命令（`~/.local/bin`），并配置用户 `PATH`；外部终端重新打开后与 Pier 共用安装。程序按版本保存在 `~/.local/share/claude/versions` / `~/.local/share/codex/versions`。失败时恢复旧命令，配置、凭据与会话目录保留；Windows 程序被占用时提示关闭相关会话后重试。旧版 Pier 独立安装在下次更新时迁移，已经是最新版也会迁移；公共安装已经是最新版时检查 `PATH` 后返回 `ready`。成功安装广播 `{ type: "runtime.changed", runtime }`，客户端应刷新 Agent 列表；该事件不含凭据。已打开的 Codex 会话保留原来的 app-server 进程，全部关闭后才切换到新版。这两个方法向已配对设备开放，远程 `runtime.install` 记录运行时名称到审计日志。
 
 `capabilities: AgentRuntimeCapabilities = { steer, followUp, compact, fork, rename, setModel, thinking, reload, images, piExtensions }`：客户端据此隐藏会失败的操作。不支持的方法返回 `UNSUPPORTED`（例如 Claude Code / Codex 会话的 `session.reload`）。`piExtensions` 为 `false` 的运行时不加载 pi 的扩展、技能、提示词模板与 `settings.json`，扩展或设置变更后 Host 也不会重新加载这些会话。
 
