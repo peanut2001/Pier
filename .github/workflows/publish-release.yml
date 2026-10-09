@@ -112,6 +112,7 @@ jobs:
         run: |
           prerelease=""
           case "$RELEASE_TAG" in *-*) prerelease="--prerelease" ;; esac
+          # The existing tag is verified above. Targeting an older commit separately requires workflow-write permission.
           gh release create "$RELEASE_TAG" "$RELEASE_ASSETS_DIR/"* \
             --title "Pier $RELEASE_TAG" --notes-file notes.md \
-            --verify-tag --target "$(git rev-parse HEAD)" $prerelease
+            --verify-tag $prerelease
