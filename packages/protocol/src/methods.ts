@@ -526,10 +526,15 @@ export const MethodParamsSchemas = {
 		workspaceId: Id.optional(),
 	}),
 	/**
-	 * Delete a top-level extension: a file or directory in an `extensions` directory moves to
-	 * Pier's trash; a settings path entry is removed from settings (the files stay).
+	 * Delete a top-level resource: an auto-discovered file or skill/extension directory moves
+	 * to Pier's trash; a settings path entry is removed from settings (the files stay).
+	 * `type` (1.30) defaults to extensions for older clients.
 	 */
-	"extension.delete": z.object({ path: z.string().min(1).max(4096), workspaceId: Id.optional() }),
+	"extension.delete": z.object({
+		type: ExtensionResourceTypeSchema.optional(),
+		path: z.string().min(1).max(4096),
+		workspaceId: Id.optional(),
+	}),
 	/**
 	 * Search the pi package gallery (https://pi.dev/packages, 1.20) from the host's computer,
 	 * falling back to the npm registry. `page` starts at 1. Install a result with `extension.install`.

@@ -1068,7 +1068,7 @@ export interface ExtensionResourceInfo {
 	origin: "package" | "top-level";
 	/** Package source for `package`; `auto` (resource directory) or `local` (settings entry) for `top-level`. */
 	source: string;
-	/** Can be removed with `extension.delete` (top-level extensions only). */
+	/** Can be removed with `extension.delete` (top-level resources; skills/prompts/themes since 1.30). */
 	deletable: boolean;
 }
 

@@ -315,7 +315,7 @@ export default function ExtensionsScreen() {
 						{!resources.length ? (
 							<Muted style={styles.empty}>pi 没有发现任何扩展、技能、提示词模板或主题。</Muted>
 						) : null}
-						<Muted style={styles.note}>修改会让电脑上已打开的 pi 会话重新加载。长按可删除的独立扩展可以删除它。</Muted>
+						<Muted style={styles.note}>修改会让电脑上已打开的 pi 会话重新加载。长按可删除的独立资源可以删除它。</Muted>
 					</>
 				) : null}
 			</ScrollView>
@@ -339,14 +339,17 @@ export default function ExtensionsScreen() {
 							danger: true,
 							confirm: {
 								title: `删除“${resourceMenu.name}”？`,
-								message: "pi 不会再加载它，已打开的 pi 会话会重新加载。",
+								message:
+									resourceMenu.type === "skills" && resourceMenu.source === "auto"
+										? "技能及其脚本、资源会移入 Pier 回收站，其他读取同一目录的工具也会受影响。已打开的 pi 会话会重新加载。"
+										: "pi 不会再加载它，已打开的 pi 会话会重新加载。",
 								action: "删除",
 							},
 							onPress: () =>
 								void run(
 									`res:${resourceMenu.path}`,
 									"删除",
-									() => store.deleteExtension(resourceMenu.path, workspaceId),
+									() => store.deleteExtension(resourceMenu, workspaceId),
 									`已删除 ${resourceMenu.name}`,
 								),
 						},

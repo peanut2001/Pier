@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import type { PierClient } from "@pier/client";
 import { LOCAL_ONLY_METHODS, PierProtocolError, type SessionSummary, type WorkspaceInfo } from "@pier/protocol";
@@ -7,6 +7,10 @@ import { fauxAssistantMessage, Recorder, startTestHost, type TestHost } from "./
 
 function extensionSource(command: string): string {
 	return `export default function (pi) {\n\tpi.registerCommand(${JSON.stringify(command)}, { description: "From a test extension", handler: async () => {} });\n}\n`;
+}
+
+function skillSource(name: string): string {
+	return `---\nname: ${name}\ndescription: A test skill\n---\n\nBody\n`;
 }
 
 function settingsOf(path: string): Record<string, unknown> {
@@ -199,6 +203,160 @@ describe("extension management", () => {
 		await client.request("extension.delete", { path: file });
 		expect(settingsOf(join(agentDir, "settings.json")).extensions).toEqual([]);
 		expect(existsSync(file)).toBe(true);
+	});
+
+	it("trashes disabled skill directories with their assets and reloads sessions", async () => {
+		const skillDir = join(agentDir, "skills", "nested", "standalone");
+		const path = join(skillDir, "SKILL.md");
+		const sibling = join(agentDir, "skills", "loose.md");
+		mkdirSync(join(skillDir, "scripts"), { recursive: true });
+		writeFileSync(path, skillSource("standalone"));
+		writeFileSync(join(skillDir, "scripts", "helper.js"), "export const value = 42;\n");
+		writeFileSync(sibling, skillSource("loose"));
+		const { session } = await newSession();
+		expect(await commandNames(session.id)).toContain("skill:standalone");
+
+		await client.request("extension.setEnabled", { type: "skills", path, enabled: false });
+		expect((await client.request("extension.list")).resources.find((r) => r.path === path)).toMatchObject({
+			type: "skills",
+			source: "auto",
+			enabled: false,
+			deletable: true,
+		});
+		// Omitting type retains the old extension-only API behavior.
+		const wrongType = await client.request("extension.delete", { path }).catch((e: unknown) => e);
+		expect((wrongType as PierProtocolError).code).toBe("NOT_FOUND");
+		expect(existsSync(skillDir)).toBe(true);
+
+		const deleted = await client.request("extension.delete", { type: "skills", path });
+		expect(deleted).toEqual({ deleted: true, reload: { reloaded: 1, pending: 0, failed: 0 } });
+		expect(existsSync(skillDir)).toBe(false);
+		expect(existsSync(sibling)).toBe(true);
+		expect((await client.request("extension.list")).resources.some((r) => r.path === path)).toBe(false);
+		expect(await commandNames(session.id)).not.toContain("skill:standalone");
+		const trashDir = join(t.root, "pier", "trash", "extensions");
+		const [trashed = ""] = readdirSync(trashDir);
+		expect(trashed).toMatch(/-standalone$/);
+		expect(readFileSync(join(trashDir, trashed, "scripts", "helper.js"), "utf8")).toContain("value = 42");
+
+		await client.request("extension.delete", { type: "skills", path: sibling });
+		expect(existsSync(sibling)).toBe(false);
+		expect(await commandNames(session.id)).not.toContain("skill:loose");
+	});
+
+	it("deletes a project .agents skill without touching global skills", async () => {
+		const projectSkill = join(t.workspaceDir, ".agents", "skills", "project-skill");
+		const globalSkill = join(agentDir, "skills", "global-skill");
+		for (const [dir, name] of [
+			[projectSkill, "project-skill"],
+			[globalSkill, "global-skill"],
+		] as const) {
+			mkdirSync(dir, { recursive: true });
+			writeFileSync(join(dir, "SKILL.md"), skillSource(name));
+		}
+		const { session } = await newSession();
+		const path = join(projectSkill, "SKILL.md");
+		const listed = await client.request("extension.list", { workspaceId: workspace.id });
+		expect(listed.resources.find((r) => r.path === path)).toMatchObject({
+			scope: "project",
+			source: "auto",
+			deletable: true,
+		});
+		const deleted = await client.request("extension.delete", { type: "skills", path, workspaceId: workspace.id });
+		expect(deleted.reload.reloaded).toBe(1);
+		expect(existsSync(projectSkill)).toBe(false);
+		expect(existsSync(globalSkill)).toBe(true);
+		expect(await commandNames(session.id)).not.toContain("skill:project-skill");
+		expect(await commandNames(session.id)).toContain("skill:global-skill");
+	});
+
+	it.each(["prompts", "themes"] as const)("trashes auto-discovered %s files", async (type) => {
+		const filename = type === "prompts" ? "demo.md" : "demo.json";
+		const path = join(agentDir, type, filename);
+		mkdirSync(join(agentDir, type), { recursive: true });
+		writeFileSync(path, type === "prompts" ? "A prompt template\n" : "{}\n");
+		expect((await client.request("extension.list")).resources.find((r) => r.path === path)).toMatchObject({
+			type,
+			source: "auto",
+			deletable: true,
+		});
+		await client.request("extension.delete", { type, path });
+		expect(existsSync(path)).toBe(false);
+		expect((await client.request("extension.list")).resources.some((r) => r.path === path)).toBe(false);
+		const trashDir = join(t.root, "pier", "trash", "extensions");
+		const [trashed] = readdirSync(trashDir);
+		expect(trashed).toMatch(new RegExp(`-${filename.replace(".", "\\.")}$`));
+	});
+
+	it.each(["skills", "prompts", "themes"] as const)("unlinks explicit %s entries and preserves files", async (type) => {
+		const dir = join(t.root, "external-skill");
+		mkdirSync(dir);
+		const path =
+			type === "skills" ? join(dir, "SKILL.md") : join(t.root, type === "prompts" ? "loose.md" : "loose.json");
+		writeFileSync(path, type === "skills" ? skillSource("external-skill") : "{}\n");
+		const entry = type === "skills" ? dir : path;
+		writeFileSync(
+			join(agentDir, "settings.json"),
+			JSON.stringify({ defaultProvider: "faux", defaultModel: "faux-1", [type]: [entry] }),
+		);
+		expect((await client.request("extension.list")).resources.find((r) => r.path === path)).toMatchObject({
+			type,
+			source: "local",
+			deletable: true,
+		});
+		await client.request("extension.setEnabled", { type, path, enabled: false });
+		await client.request("extension.delete", { type, path });
+		expect(settingsOf(join(agentDir, "settings.json"))[type]).toEqual([]);
+		expect(existsSync(path)).toBe(true);
+		expect((await client.request("extension.list")).resources.some((r) => r.path === path)).toBe(false);
+	});
+
+	it("preserves package resources and resources discovered through a settings directory", async () => {
+		await client.request("extension.install", { source: pkgDir });
+		const path = join(pkgDir, "skills", "demo-skill", "SKILL.md");
+		const error = await client.request("extension.delete", { type: "skills", path }).catch((e: unknown) => e);
+		expect((error as PierProtocolError).code).toBe("BAD_REQUEST");
+		expect(existsSync(path)).toBe(true);
+
+		writeFileSync(
+			join(agentDir, "settings.json"),
+			JSON.stringify({ defaultProvider: "faux", defaultModel: "faux-1", skills: [join(pkgDir, "skills")] }),
+		);
+		expect((await client.request("extension.list")).resources.find((r) => r.path === path)).toMatchObject({
+			origin: "top-level",
+			source: "local",
+			deletable: false,
+		});
+		const directoryError = await client.request("extension.delete", { type: "skills", path }).catch((e: unknown) => e);
+		expect((directoryError as PierProtocolError).code).toBe("BAD_REQUEST");
+		expect(existsSync(path)).toBe(true);
+	});
+
+	it("trashes a skill symlink while preserving its target and refuses to traverse ancestor symlinks", async () => {
+		const external = join(t.root, "external-skill");
+		const linked = join(agentDir, "skills", "linked-skill");
+		mkdirSync(external);
+		mkdirSync(join(agentDir, "skills"), { recursive: true });
+		writeFileSync(join(external, "SKILL.md"), skillSource("linked-skill"));
+		symlinkSync(external, linked, "junction");
+		const path = join(linked, "SKILL.md");
+		expect((await client.request("extension.list")).resources.find((r) => r.path === path)?.deletable).toBe(true);
+		await client.request("extension.delete", { type: "skills", path });
+		expect(existsSync(linked)).toBe(false);
+		expect(readFileSync(join(external, "SKILL.md"), "utf8")).toContain("linked-skill");
+		const trashDir = join(t.root, "pier", "trash", "extensions");
+		const [trashed = ""] = readdirSync(trashDir);
+		expect(lstatSync(join(trashDir, trashed)).isSymbolicLink()).toBe(true);
+
+		const collection = join(t.root, "external-collection");
+		mkdirSync(join(collection, "nested"), { recursive: true });
+		writeFileSync(join(collection, "nested", "SKILL.md"), skillSource("nested"));
+		symlinkSync(collection, linked, "junction");
+		const nested = join(linked, "nested", "SKILL.md");
+		expect((await client.request("extension.list")).resources.find((r) => r.path === nested)?.deletable).toBe(false);
+		const error = await client.request("extension.delete", { type: "skills", path: nested }).catch((e: unknown) => e);
+		expect((error as PierProtocolError).code).toBe("BAD_REQUEST");
+		expect(existsSync(join(collection, "nested", "SKILL.md"))).toBe(true);
 	});
 
 	it("installs into a workspace's project settings", async () => {

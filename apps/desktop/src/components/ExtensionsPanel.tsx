@@ -136,8 +136,10 @@ function ResourceRow({
 						confirmLabel={resource.source === "auto" ? "确认删除" : "确认移除"}
 						title={
 							resource.source === "auto"
-								? "从扩展目录移到 Pier 回收站（~/.pier/trash/extensions）"
-								: "从 settings.json 的 extensions 中移除这一项（文件保留）"
+								? resource.type === "skills"
+									? "将技能及其脚本、资源移到 Pier 回收站；其他读取同一目录的工具也会受影响"
+									: "移到 Pier 回收站（~/.pier/trash/extensions）"
+								: `从 settings.json 的 ${resource.type} 中移除这一项（文件保留）`
 						}
 						disabled={busy}
 						onConfirm={() => onDelete(resource)}
@@ -661,6 +663,9 @@ export function ExtensionsSettings() {
 
 							{view.otherCount ? (
 								<SettingsGroup title={`技能、提示词与主题（${view.otherCount}）`}>
+									<p className="muted small settings-note">
+										自动发现的资源删除后会移入 Pier 回收站，技能目录会整体移入。删除全局共享技能会影响其他使用它的工具。
+									</p>
 									{others.length ? (
 										<div className="provider-list">
 											{others.map((resource) => (
@@ -669,6 +674,7 @@ export function ExtensionsSettings() {
 													resource={resource}
 													busy={isBusy}
 													onToggle={onToggle}
+													onDelete={onDelete}
 												/>
 											))}
 											{!showAllOthers && !q && view.others.length > COLLAPSED_OTHERS ? (

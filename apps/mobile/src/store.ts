@@ -1153,8 +1153,12 @@ export class MobileStore {
 		);
 	}
 
-	async deleteExtension(path: string, workspaceId?: string): Promise<void> {
-		await this.requireClient().request("extension.delete", { path, ...(workspaceId ? { workspaceId } : {}) });
+	async deleteExtension(resource: ExtensionResourceInfo, workspaceId?: string): Promise<void> {
+		await this.requireClient().request("extension.delete", {
+			type: resource.type,
+			path: resource.path,
+			...(workspaceId ? { workspaceId } : {}),
+		});
 	}
 }
 

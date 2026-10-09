@@ -269,7 +269,7 @@ function auditDetail(method: MethodName, params: Record<string, unknown>): Recor
 		case "extension.setEnabled":
 			return { type: params.type, path: params.path, enabled: params.enabled };
 		case "extension.delete":
-			return { path: params.path };
+			return { type: params.type ?? "extensions", path: params.path };
 		case "settings.update":
 			return {
 				scope: params.scope,
@@ -1118,7 +1118,7 @@ export class PierHost implements RequestHandler {
 			},
 			"extension.delete": async (_ctx, params) => {
 				const target = this.extensionTarget(params.workspaceId);
-				const scope = await this.extensions.delete(params.path, target);
+				const scope = await this.extensions.delete(params.path, target, params.type);
 				return {
 					deleted: true,
 					reload: await this.applyExtensionChange(scope === "project" ? target?.id : undefined),

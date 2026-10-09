@@ -1,4 +1,4 @@
-# Pier 协议 v1.29
+# Pier 协议 v1.30
 
 > 实现：`packages/protocol`（zod schema + TS 类型，Host 与所有客户端共享）。
 > 本文档描述线上格式与语义；字段的权威定义以 `packages/protocol/src` 为准。
@@ -60,7 +60,7 @@
 
 ```jsonc
 { "type": "req", "id": "h", "method": "host.hello", "params": {
-  "protocolVersion": "1.29",
+  "protocolVersion": "1.30",
   "client": { "name": "pier-desktop", "version": "0.1.0", "platform": "darwin" },
   "token": "<本地 token>",       // 本地连接必填；远程连接由加密通道认证，不需要
   "coalesceMs": 50               // 可选：合并流式增量的窗口（0–1000ms，默认 0）
@@ -354,7 +354,7 @@ pi 终端界面自带的命令（`/model`、`/compact`、`/new`、`/fork`、`/na
 | `extension.update` | `{ source?, workspaceId? }` | `{ reload }`；更新一个包，省略 `source` 时更新全部（`pi update --extensions`）。固定版本的 npm 包与固定 ref 的 git 包只会校准到配置的版本。没有匹配的包时 `NOT_FOUND` |
 | `extension.checkUpdates` | `{ workspaceId? }` | `{ updates: { source, name, kind: "npm"\|"git", scope }[] }`；列出有新版本的未固定包（需要网络） |
 | `extension.setEnabled` | `{ type, path, enabled, workspaceId? }` | `{ resource, reload }`；在资源所属范围的 settings 中启用 / 停用一个已列出的资源（与 `pi config` 相同）：独立资源在 `extensions` / `skills` / `prompts` / `themes` 数组中写入 `+路径` / `-路径`，包内资源写入该包条目的筛选。`path` 与 `type` 必须与 `extension.list` 的某一项一致，否则 `NOT_FOUND` |
-| `extension.delete` | `{ path, workspaceId? }` | `{ deleted: true, reload }`；删除一个独立扩展（`deletable: true`）：扩展目录中的文件或带 `index.ts` 的目录移到 Pier 回收站（`~/.pier/trash/extensions`），settings 中列出的路径只从 settings 移除（文件保留）。包内扩展或通过目录条目加载的扩展返回 `BAD_REQUEST`（改为移除包或停用） |
+| `extension.delete` | `{ type?, path, workspaceId? }` | `{ deleted: true, reload }`；删除一个独立资源（`deletable: true`）。`type`（1.30）为 `extensions`、`skills`、`prompts` 或 `themes`，省略时默认为 `extensions`，兼容旧客户端。自动发现的文件移到 Pier 回收站（`~/.pier/trash/extensions`）；带 `index.ts` 的扩展目录、带 `SKILL.md` 的技能目录整体移入，保留脚本和资源。支持 `~/.agents/skills`、项目及祖先目录的 `.agents/skills`。settings 中明确列出的资源文件或单个技能/扩展目录只从 settings 移除（文件保留）。包内资源、通过集合目录条目加载的资源、需穿过父级符号链接才能删除的资源返回 `BAD_REQUEST`（改为移除包或停用）；单个技能目录本身是符号链接时只移动链接，保留目标。删除全局共享技能会影响其他读取同一目录的工具 |
 | `extension.search` | `{ query?, type?: "extension"\|"skill"\|"theme"\|"prompt", sort?: "downloads"\|"recent"\|"name"("downloads"), page?(1) }` | `ExtensionCatalogResult = { origin: "pi.dev"\|"npm", packages, total, page, pageSize, hasMore, notice? }`（1.20）；在 Host 所在电脑上搜索 pi 官方扩展仓库 [pi.dev/packages](https://pi.dev/packages)（发布到 npm、带 `pi-package` 关键词的包），每页 50 个。`packages: ExtensionCatalogPackage[] = { name, source, description?, version?, author?, types, monthlyDownloads?, publishedAt?, npmUrl, repositoryUrl?, galleryUrl? }`，`source`（`npm:<包名>`）可直接传给 `extension.install`；`types` 为空表示仓库没有标注类型。仓库无法访问时改用 npm registry 搜索（`keywords:pi-package`），此时 `origin: "npm"`、`notice` 说明原因，`type` 与 `sort` 不生效。结果在 Host 中缓存 5 分钟；只读，不写审计日志。两者都无法访问时返回 `INTERNAL` |
 
 settings 文件无法解析时，修改类方法返回 `CONFLICT`，避免覆盖用户的文件。

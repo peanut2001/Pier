@@ -1989,7 +1989,12 @@ export class PierStore {
 		const result = await this.extensionOperation(
 			"删除",
 			resource.source === "auto" ? `已删除 ${resource.name}（已移到 Pier 回收站）` : `已从配置中移除 ${resource.name}`,
-			(c) => c.request("extension.delete", { path: resource.path, ...(workspaceId ? { workspaceId } : {}) }),
+			(c) =>
+				c.request("extension.delete", {
+					type: resource.type,
+					path: resource.path,
+					...(workspaceId ? { workspaceId } : {}),
+				}),
 		);
 		return result?.deleted ?? false;
 	}
