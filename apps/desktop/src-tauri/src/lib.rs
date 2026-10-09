@@ -1,3 +1,4 @@
+mod appimage_env;
 mod host;
 mod terminal;
 mod transfer;
@@ -9,6 +10,8 @@ use tauri::{AppHandle, Manager, RunEvent, WindowEvent};
 use terminal::TerminalManager;
 use transfer::DownloadManager;
 use updater::UpdateManager;
+
+pub use appimage_env::drop_stale_entries as drop_stale_appimage_env;
 
 pub(crate) fn show_main_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
