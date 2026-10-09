@@ -50,19 +50,24 @@ export function findExecutable(name: string, override?: string, managed?: string
 /** Run `<executable> --version` and return the first version-looking token of its output. */
 export function probeVersion(executable: string, timeoutMs = 10_000): Promise<string | undefined> {
 	return new Promise((resolve) => {
-		execFile(
-			executable,
-			["--version"],
-			{
-				timeout: timeoutMs,
-				windowsHide: true,
-				shell: process.platform === "win32" && /\.(cmd|bat)$/i.test(executable),
-			},
-			(error, stdout) => {
-				if (error) return resolve(undefined);
-				const match = /\d+\.\d+\.\d+[\w.+-]*/.exec(String(stdout));
-				resolve(match ? match[0] : String(stdout).trim().split(/\s+/)[0] || undefined);
-			},
-		);
+		try {
+			execFile(
+				executable,
+				["--version"],
+				{
+					timeout: timeoutMs,
+					windowsHide: true,
+					shell: process.platform === "win32" && /\.(cmd|bat)$/i.test(executable),
+				},
+				(error, stdout) => {
+					if (error) return resolve(undefined);
+					const match = /\d+\.\d+\.\d+[\w.+-]*/.exec(String(stdout));
+					resolve(match ? match[0] : String(stdout).trim().split(/\s+/)[0] || undefined);
+				},
+			);
+		} catch {
+			// Invalid native executables can throw before the callback on macOS and Windows.
+			resolve(undefined);
+		}
 	});
 }
