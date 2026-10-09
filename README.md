@@ -41,6 +41,10 @@ bun run test       # Vitest：单元测试 + 基于 faux 模型的端到端测�
 
 ### Claude Code 与 Codex
 
+**应用内安装与更新**：在「设置 → Agent 配置 → Claude Code / Codex → 安装与更新」点击「安装」或「更新到最新版本」，Pier 会下载官方最新原生程序、核对 SHA-256 并验证版本，无需访问官网下载安装包，也不需要先装 Node.js。支持 Windows、macOS、Linux 的 x64 / arm64，在选择其他电脑的设置时会安装到那台电脑上（需要协议 1.32）。页面显示当前版本、下载进度和失败原因；断开客户端连接不会中止安装，重新打开页面可继续查看。安装保存在 `~/.pier/agents`（或 `PIER_DIR/agents`），只供 Pier 使用；已有系统 CLI、配置、凭据和会话目录继续保留。Pier 优先使用自己安装的版本，显式设置的 `PIER_CLAUDE_PATH` / `PIER_CODEX_PATH` 仍优先，使用它们时需先移除环境变量才能改用 Pier 管理的安装。下载或验证失败时保持之前的版本，安装成功无需重启 Pier。已有 Codex 会话沿用之前的进程，关闭这些会话后再创建会话使用新版。
+
+首次使用仍需要账号登录或配置接口；安装页提供可复制到这台电脑终端的登录命令，也可以在「个人中心」把接口配置到对应 Agent。
+
 新建会话时，输入框下方的「Agent」选择框可以选择 pi、Claude Code 或 Codex（手机端点「新建」时选择）。Claude Code 与 Codex 使用电脑上安装的 CLI 和它们自己的登录、配置与会话目录，Pier 不需要另外配置模型或凭据：
 
 - **Claude Code**：安装 `claude` 并登录（`claude` 中执行 `/login`，或设置 `ANTHROPIC_API_KEY`）。Pier 通过 [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/overview) 驱动这个 CLI，会话保存在 `~/.claude/projects`，可以随时用 `claude --resume` 在终端继续。

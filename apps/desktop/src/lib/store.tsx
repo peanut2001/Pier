@@ -1069,6 +1069,9 @@ export class PierStore {
 			if (managed || node === LOCAL_NODE) this.scheduleRefresh(`${PROVIDERS_KEY}${node}`);
 			// Setting the default model writes the user settings.
 			if (managed) this.set((s) => ({ piSettingsVersion: s.piSettingsVersion + 1 }));
+		} else if (event.type === "runtime.changed") {
+			// New-chat pickers may target a different computer than the settings page.
+			this.set((s) => ({ agentConfigVersion: s.agentConfigVersion + 1 }));
 		} else if (!managed) {
 			return;
 		} else if (event.type === "extension.changed") {
@@ -1828,6 +1831,21 @@ export class PierStore {
 	}
 
 	// ---- Claude Code and Codex configuration files ----------------------------------------
+
+	async getAgentInstallation(
+		runtime: AgentConfigRuntime,
+		refresh = false,
+	): Promise<MethodResult<"runtime.installStatus">> {
+		const client = this.settingsClient;
+		if (!client) throw this.settingsOffline();
+		return client.request("runtime.installStatus", { runtime, ...(refresh ? { refresh } : {}) });
+	}
+
+	async installAgent(runtime: AgentConfigRuntime): Promise<MethodResult<"runtime.install">> {
+		const client = this.settingsClient;
+		if (!client) throw this.settingsOffline();
+		return client.request("runtime.install", { runtime });
+	}
 
 	/** Read a runtime's user file, plus a workspace's files; rejects with the host's error. */
 	async getAgentConfig(runtime: AgentConfigRuntime, workspaceId?: string): Promise<AgentConfigResult> {

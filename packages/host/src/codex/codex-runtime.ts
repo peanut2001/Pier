@@ -10,12 +10,14 @@ import {
 } from "@pier/protocol";
 import type { ManagedSession, ManagedSessionOptions } from "../managed-session.ts";
 import { findExecutable, probeVersion } from "../runtimes/executable.ts";
+import { AgentInstaller } from "../runtimes/installation.ts";
 import type { AgentRuntime, ForkResult, StoredSession } from "../runtimes/types.ts";
 import { CodexAppServer } from "./app-server.ts";
 import { CODEX_CAPABILITIES, CodexSession, type CodexSessionHost } from "./codex-session.ts";
 import { codexPolicy, convertTurns, toModelInfo } from "./convert.ts";
 
 export interface CodexRuntimeOptions {
+	managedDirectory?: string;
 	/** `codex` executable. Defaults to `PIER_CODEX_PATH`, then `codex` on `PATH`. */
 	executable?: string;
 	/** Arguments that start the app server (tests use a fake server). Defaults to `["app-server"]`. */
@@ -66,7 +68,18 @@ export class CodexRuntime implements AgentRuntime {
 
 	executable(): string | undefined {
 		if (this.options.executable) return this.options.executable;
-		return findExecutable("codex", process.env.PIER_CODEX_PATH);
+		return findExecutable(
+			"codex",
+			process.env.PIER_CODEX_PATH,
+			this.options.managedDirectory ? AgentInstaller.executable(this.options.managedDirectory, this.id) : undefined,
+		);
+	}
+
+	installationChanged(): void {
+		this.versionFor = undefined;
+		this.versionPromise = undefined;
+		this.models = undefined;
+		this.appServerFor = undefined;
 	}
 
 	/** The shared app server (started on first use, stopped when idle). */
@@ -74,7 +87,8 @@ export class CodexRuntime implements AgentRuntime {
 		const executable = this.executable();
 		if (!executable) throw new PierProtocolError("CONFLICT", "Codex (`codex`) is not installed on this computer");
 		this.scheduleIdleShutdown();
-		if (this.appServer && this.appServerFor === executable) return this.appServer;
+		// Open sessions keep their app-server process until they close, including across CLI updates.
+		if (this.appServer && (this.appServerFor === executable || this.sessions.size > 0)) return this.appServer;
 		void this.appServer?.close();
 		const server = new CodexAppServer({
 			executable,
@@ -106,18 +120,18 @@ export class CodexRuntime implements AgentRuntime {
 		this.idleTimer.unref?.();
 	}
 
-	async info(): Promise<AgentRuntimeInfo> {
+	async info(refresh = false): Promise<AgentRuntimeInfo> {
 		const executable = this.executable();
 		if (!executable) {
 			return {
 				id: this.id,
 				name: this.name,
 				available: false,
-				reason: "Codex (`codex`) was not found. Install it and sign in, or set PIER_CODEX_PATH.",
+				reason: "未找到 Codex，请在「设置 → Agent 配置 → Codex」安装并登录，或设置 PIER_CODEX_PATH。",
 				capabilities: this.capabilities,
 			};
 		}
-		if (this.versionFor !== executable) {
+		if (refresh || this.versionFor !== executable) {
 			this.versionFor = executable;
 			this.versionPromise = this.options.args ? Promise.resolve(undefined) : probeVersion(executable);
 		}

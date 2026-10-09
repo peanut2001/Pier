@@ -9,6 +9,7 @@ import {
 	type AgentConfigResult,
 	AgentConfigRuntimeSchema,
 	AgentConfigScopeSchema,
+	type AgentInstallationResult,
 	type AgentRuntimeInfo,
 	ApprovalPolicySchema,
 	type AppUpdateStatus,
@@ -280,6 +281,10 @@ export const MethodParamsSchemas = {
 
 	/** Agent runtimes the host knows and whether they can run sessions (1.22). */
 	"runtime.list": z.object({}).optional(),
+	/** Native CLI installation and progress on the Host computer (1.32). */
+	"runtime.installStatus": z.object({ runtime: AgentConfigRuntimeSchema, refresh: z.boolean().optional() }),
+	/** Starts an asynchronous install/update of the latest official native CLI. */
+	"runtime.install": z.object({ runtime: AgentConfigRuntimeSchema }),
 
 	"session.list": z.object({ workspaceId: Id }),
 	/** `runtime` (1.22) picks the agent runtime; the default is `pi`. */
@@ -786,6 +791,8 @@ export interface MethodResults {
 	"git.stash": GitCommandResult;
 	"git.init": GitCommandResult;
 	"runtime.list": { runtimes: AgentRuntimeInfo[] };
+	"runtime.installStatus": AgentInstallationResult;
+	"runtime.install": AgentInstallationResult;
 	"session.list": { sessions: SessionSummary[] };
 	"session.create": { session: SessionSummary };
 	"session.open": { session: SessionSummary };

@@ -1184,6 +1184,21 @@ export interface PiSettingsChangeResult {
 export const AgentConfigRuntimeSchema = z.enum(["claude-code", "codex"]);
 export type AgentConfigRuntime = z.infer<typeof AgentConfigRuntimeSchema>;
 
+/** A native CLI installation on the Host computer (1.32). Jobs survive client disconnects. */
+export interface AgentInstallationStatus {
+	runtime: AgentConfigRuntime;
+	state: "idle" | "checking" | "downloading" | "verifying" | "installing" | "ready" | "error";
+	version?: string;
+	downloadedBytes?: number;
+	totalBytes?: number;
+	error?: string;
+}
+
+export interface AgentInstallationResult {
+	installation: AgentInstallationStatus;
+	agent: AgentRuntimeInfo;
+}
+
 /**
  * A configuration file of an agent runtime. `user`: in the runtime's configuration directory
  * (`~/.claude/settings.json`, `~/.codex/config.toml`). `project`: shared settings of a workspace

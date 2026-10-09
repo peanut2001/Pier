@@ -1,7 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { existsSync, mkdirSync, realpathSync, statSync } from "node:fs";
 import { platform } from "node:os";
-import { basename, isAbsolute, resolve } from "node:path";
+import { basename, isAbsolute, join, resolve } from "node:path";
 import {
 	type AccountLine,
 	type AgentConfigRuntime,
@@ -66,6 +66,7 @@ import { ProviderManager } from "./pi/providers.ts";
 import { PiSettingsFiles } from "./pi/settings-files.ts";
 import { RemoteAccess, type RemoteAccessOptions } from "./remote/remote-access.ts";
 import { AgentConfigFiles } from "./runtimes/agent-config.ts";
+import { AgentInstaller, type AgentInstallerOptions } from "./runtimes/installation.ts";
 import { SessionArchiveStore } from "./session-archive.ts";
 import { SessionPool } from "./session-pool.ts";
 import type { AppShell, ShellMethod } from "./shell.ts";
@@ -128,6 +129,8 @@ export interface PierHostOptions {
 	 * the runtimes' own (`CLAUDE_CONFIG_DIR` / `CODEX_HOME`, else `~/.claude` / `~/.codex`).
 	 */
 	agentConfigDirs?: Partial<Record<AgentConfigRuntime, string>>;
+	/** Installer dependencies for tests; production always downloads official native releases. */
+	agentInstaller?: Pick<AgentInstallerOptions, "fetch" | "probe">;
 }
 
 /** Remote methods recorded in the audit log. */
@@ -176,6 +179,7 @@ const AUDITED_METHODS = new Set<MethodName>([
 	"extension.setEnabled",
 	"extension.delete",
 	"update.install",
+	"runtime.install",
 	"settings.update",
 	"settings.write",
 	"agentConfig.update",
@@ -198,6 +202,8 @@ const AUDITED_METHODS = new Set<MethodName>([
 
 function auditDetail(method: MethodName, params: Record<string, unknown>): Record<string, unknown> | undefined {
 	switch (method) {
+		case "runtime.install":
+			return { runtime: params.runtime };
 		case "session.prompt":
 		case "session.steer":
 		case "session.followUp":
@@ -369,6 +375,7 @@ export class PierHost implements RequestHandler {
 	readonly packageCatalog: PackageCatalog;
 	readonly settings: PiSettingsFiles;
 	readonly agentConfig: AgentConfigFiles;
+	readonly agentInstaller: AgentInstaller;
 	readonly peers: PeerManager;
 	private readonly log: (message: string) => void;
 	private readonly connections = new Set<Connection>();
@@ -394,11 +401,14 @@ export class PierHost implements RequestHandler {
 		const log = options.log ?? (() => {});
 		this.log = log;
 		const agents = options.agents ?? {};
+		const managedDirectory = join(this.pierDir, "agents");
 		this.pool = new SessionPool({
 			runtimes: [
 				new PiRuntime(env),
-				...(agents.claudeCode === false ? [] : [new ClaudeCodeRuntime({ log, ...agents.claudeCode })]),
-				...(agents.codex === false ? [] : [new CodexRuntime({ log, ...agents.codex })]),
+				...(agents.claudeCode === false
+					? []
+					: [new ClaudeCodeRuntime({ log, managedDirectory, ...agents.claudeCode })]),
+				...(agents.codex === false ? [] : [new CodexRuntime({ log, managedDirectory, ...agents.codex })]),
 			],
 			log,
 			config: this.config,
@@ -430,6 +440,13 @@ export class PierHost implements RequestHandler {
 			trashDir: extensionTrashDir(this.pierDir),
 			onProgress: (progress) => this.broadcast({ type: "extension.progress", ...progress }),
 			log,
+		});
+		this.agentInstaller = new AgentInstaller(managedDirectory, {
+			...options.agentInstaller,
+			onInstalled: (runtime) => {
+				this.pool.runtime(runtime).installationChanged?.();
+				this.broadcast({ type: "runtime.changed", runtime });
+			},
 		});
 		this.packageCatalog = new PackageCatalog({ userAgent: pierUserAgent(), log, ...options.packageCatalog });
 		this.settings = new PiSettingsFiles(env.agentDir);
@@ -901,6 +918,29 @@ export class PierHost implements RequestHandler {
 				sessions: await this.pool.list(this.requireWorkspace(params.workspaceId)),
 			}),
 			"runtime.list": async () => ({ runtimes: await this.pool.runtimeInfos() }),
+			"runtime.installStatus": async (_ctx, params) => ({
+				installation: this.agentInstaller.status(params.runtime),
+				agent: await this.pool.runtime(params.runtime).info(params.refresh),
+			}),
+			"runtime.install": async (ctx, params) => {
+				const agent = this.pool.runtime(params.runtime);
+				const override = params.runtime === "codex" ? "PIER_CODEX_PATH" : "PIER_CLAUDE_PATH";
+				if (process.env[override])
+					throw new PierProtocolError(
+						"CONFLICT",
+						`当前使用 ${override} 指定的程序，请先移除此环境变量再使用 Pier 安装`,
+					);
+				// Windows cannot replace a running executable; managed releases use distinct paths.
+				const installation = this.agentInstaller.start(params.runtime);
+				const device = ctx.connection.device;
+				if (device)
+					this.broadcastLocal({
+						type: "host.notice",
+						level: "info",
+						message: `${device.name} 正在远程安装或更新 ${agent.name}`,
+					});
+				return { installation, agent: await agent.info() };
+			},
 			"session.create": async (_ctx, params) => {
 				const session = await this.pool.create(this.requireWorkspace(params.workspaceId), params.name, params.runtime);
 				this.broadcast({ type: "session.listChanged", workspaceId: params.workspaceId });
@@ -1249,6 +1289,7 @@ export class PierHost implements RequestHandler {
 		this.loopback.closeAll();
 		this.peers.shutdown();
 		this.terminals.shutdown();
+		await this.agentInstaller.shutdown();
 		await this.uploads.shutdown();
 		await this.remote.shutdown();
 		await this.pool.disposeAll();

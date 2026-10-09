@@ -1,6 +1,7 @@
 import type {
 	AgentConfigRuntime,
 	AgentConfigScope,
+	AgentRuntimeId,
 	AppUpdateStatus,
 	AuthNotice,
 	AuthPromptInfo,
@@ -122,6 +123,8 @@ export type PierHostEvent =
 	 * `agentConfig.write` (1.23). `workspaceId` is set for a workspace's files. Sent to every connection.
 	 */
 	| { type: "agentConfig.changed"; runtime: AgentConfigRuntime; scope: AgentConfigScope; workspaceId?: string }
+	/** A CLI was installed or updated (1.32); refresh runtime availability and models. */
+	| { type: "runtime.changed"; runtime: AgentRuntimeId }
 	// Terminals (1.18), sent only to the connection that opened the terminal.
 	/** Output of a terminal: raw bytes, base64-encoded (UTF-8 sequences may be split across events). */
 	| { type: "terminal.output"; terminalId: string; data: string }

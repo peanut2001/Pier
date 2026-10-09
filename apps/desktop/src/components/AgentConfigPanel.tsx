@@ -29,6 +29,7 @@ import {
 	sameValue,
 } from "../lib/config-fields.ts";
 import { useAppState, useSettingsWorkspaces, useStore } from "../lib/store.tsx";
+import { AgentInstallCard } from "./AgentInstallCard.tsx";
 import { ConfigGroups, FieldRow, resolveFallback, TextFileEditor } from "./ConfigFields.tsx";
 import {
 	IconAlert,
@@ -229,6 +230,7 @@ function AgentConfigPage({ runtime }: { runtime: AgentConfigRuntime }) {
 	return (
 		<>
 			<Intro runtime={runtime} />
+			<AgentInstallCard runtime={runtime} />
 
 			<SettingsGroup>
 				<SettingsCard>

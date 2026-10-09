@@ -30,10 +30,11 @@ function isExecutable(path: string): boolean {
 
 /**
  * Find a CLI: the path in `override` (an environment variable's value) when set, otherwise the
- * first `name` on `PATH` or in common install directories.
+ * the verified Pier-managed executable, then `name` on `PATH` or in common install directories.
  */
-export function findExecutable(name: string, override?: string): string | undefined {
+export function findExecutable(name: string, override?: string, managed?: string): string | undefined {
 	if (override) return isAbsolute(override) && isExecutable(override) ? override : undefined;
+	if (managed && isExecutable(managed)) return managed;
 	const names =
 		process.platform === "win32" ? [`${name}.exe`, `${name}.cmd`, `${name}.bat`, `${name}.ps1`, name] : [name];
 	const dirs = [...(process.env.PATH ?? "").split(delimiter).filter(Boolean), ...extraDirectories()];

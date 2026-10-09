@@ -56,6 +56,19 @@ describe("Codex runtime", () => {
 		return { rec, state: () => state };
 	}
 
+	it("keeps existing sessions usable across an installation and switches servers after they close", async () => {
+		const { session } = await client.request("session.create", { workspaceId: workspace.id, runtime: "codex" });
+		const before = runtime().server();
+		const { rec } = await open(session);
+		runtime().installationChanged();
+		expect(runtime().server()).toBe(before);
+		await client.request("session.prompt", { sessionId: session.id, text: "hello" });
+		await rec.waitForType("agent_settled");
+		expect(rec.text()).toBe("Reply to hello");
+		await client.request("session.close", { sessionId: session.id });
+		expect(runtime().server()).not.toBe(before);
+	});
+
 	it("runs a turn with an approval and stores the thread", async () => {
 		const { runtimes } = await client.request("runtime.list", {});
 		expect(runtimes.find((r) => r.id === "codex")).toMatchObject({ available: true, name: "Codex" });

@@ -143,6 +143,7 @@ function AgentPicker({ workspace, disabled }: { workspace: WorkspaceInfo; disabl
 	const online = useAppState((s) => s.nodes[node]?.connection === "open");
 	const hostInfo = useAppState((s) => s.nodes[node]?.hostInfo);
 	const runtime = useAppState((s) => s.newChatRuntime[node] ?? "pi");
+	const installationVersion = useAppState((s) => s.agentConfigVersion);
 	const [runtimes, setRuntimes] = useState<AgentRuntimeInfo[]>([]);
 	const [open, setOpen] = useState(false);
 	const ref = useOutsideClick(open, () => setOpen(false));
@@ -162,7 +163,7 @@ function AgentPicker({ workspace, disabled }: { workspace: WorkspaceInfo; disabl
 		return () => {
 			live = false;
 		};
-	}, [store, workspace.id, online, hostInfo]);
+	}, [store, workspace.id, online, hostInfo, installationVersion]);
 
 	const current = runtimes.find((r) => r.id === runtime);
 	// A runtime that went away (CLI uninstalled, older host) falls back to pi.
@@ -194,10 +195,14 @@ function AgentPicker({ workspace, disabled }: { workspace: WorkspaceInfo; disabl
 								type="button"
 								key={r.id}
 								className={`dropdown-item${selected ? " selected" : ""}`}
-								disabled={!r.available}
+								disabled={!r.available && r.id !== "claude-code" && r.id !== "codex"}
 								title={r.available ? (r.executable ?? r.name) : r.reason}
 								onClick={() => {
 									setOpen(false);
+									if (!r.available && (r.id === "claude-code" || r.id === "codex")) {
+										store.openSettings(r.id === "codex" ? "codex" : "claude", node);
+										return;
+									}
 									store.setNewChatRuntime(workspace.id, r.id);
 								}}
 							>
@@ -206,6 +211,9 @@ function AgentPicker({ workspace, disabled }: { workspace: WorkspaceInfo; disabl
 										<IconBot size={14} />
 										{r.name}
 										{r.version ? <span className="mini-tag">{r.version}</span> : null}
+										{!r.available && (r.id === "claude-code" || r.id === "codex") ? (
+											<span className="mini-tag">安装</span>
+										) : null}
 									</span>
 									<span className="muted">{r.available ? agentDescription(r.id) : (r.reason ?? "不可用")}</span>
 								</span>
