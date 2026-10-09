@@ -1,9 +1,9 @@
 import type { WorkspaceFileContent } from "@pier/protocol";
 import { type KeyboardEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatBytes, languageForPath, relativeTime } from "../lib/format.ts";
-import { filePreviewError } from "../lib/markdown-files.ts";
+import { filePreviewAuthorizationPath, filePreviewError } from "../lib/markdown-files.ts";
 import { isSensitiveFile } from "../lib/sensitive-files.ts";
-import { useAppState, useCanManageWorkspace, useStore } from "../lib/store.tsx";
+import { hostAuthorizesFilePreviews, LOCAL_NODE, useAppState, useCanManageWorkspace, useStore } from "../lib/store.tsx";
 import {
 	IconAlert,
 	IconFile,
@@ -154,7 +154,8 @@ export function FileViewer({
 	const store = useStore();
 	const [confirmed, setConfirmed] = useState(() => !isSensitiveFile(path));
 	const [file, setFile] = useState<WorkspaceFileContent>();
-	const [error, setError] = useState<string>();
+	const [error, setError] = useState<unknown>();
+	const [authorizationPrompt, setAuthorizationPrompt] = useState(false);
 	const [loading, setLoading] = useState(false);
 	const [rendered, setRendered] = useState(true);
 	/** The text being edited; undefined while previewing. */
@@ -165,23 +166,40 @@ export function FileViewer({
 	const [closePrompt, setClosePrompt] = useState(false);
 	const request = useRef(0);
 
-	const load = useCallback(async () => {
-		const id = ++request.current;
-		setLoading(true);
-		setError(undefined);
-		try {
-			const result = await (fromMarkdown ? store.previewFile(workspaceId, path) : store.readFile(workspaceId, path));
-			if (request.current === id) setFile(result);
-		} catch (e) {
-			if (request.current === id) setError(fromMarkdown ? filePreviewError(e) : errorText(e));
-		} finally {
-			if (request.current === id) setLoading(false);
-		}
-	}, [store, workspaceId, path, fromMarkdown]);
+	const load = useCallback(
+		async (authorizedPath?: string) => {
+			const id = ++request.current;
+			setLoading(true);
+			setError(undefined);
+			setFile(undefined);
+			setAuthorizationPrompt(false);
+			try {
+				const result = await (authorizedPath
+					? store.authorizeFilePreview(workspaceId, path, authorizedPath)
+					: fromMarkdown
+						? store.previewFile(workspaceId, path)
+						: store.readFile(workspaceId, path));
+				if (request.current === id) setFile(result);
+			} catch (e) {
+				if (request.current === id) setError(e);
+			} finally {
+				if (request.current === id) setLoading(false);
+			}
+		},
+		[store, workspaceId, path, fromMarkdown],
+	);
 
 	useEffect(() => {
 		if (confirmed) void load();
+		return () => {
+			++request.current;
+		};
 	}, [confirmed, load]);
+
+	const previewNode = useAppState((s) => s.workspaceNodes[workspaceId] || s.node);
+	const previewHost = useAppState((s) => s.nodes[previewNode]?.hostInfo);
+	const authorizationPath = fromMarkdown ? filePreviewAuthorizationPath(error) : undefined;
+	const canAuthorize = !!authorizationPath && previewNode === LOCAL_NODE && hostAuthorizesFilePreviews(previewHost);
 
 	const name = path.split("/").pop() ?? path;
 	const isMarkdown = MARKDOWN.test(path) && file?.kind === "text";
@@ -244,16 +262,48 @@ export function FileViewer({
 				</button>
 			</div>
 		);
-	} else if (error) {
+	} else if (authorizationPrompt && canAuthorize && authorizationPath) {
+		body = (
+			<div className="file-viewer-notice warning file-viewer-authorization">
+				<IconShieldAlert size={22} />
+				<div>
+					<strong>授权读取工作区外的文件？</strong>
+					<p>将读取并显示以下文件：</p>
+					<p className="file-viewer-authorization-path">{authorizationPath}</p>
+					<p>仅授权这次只读预览。刷新或重新打开文件时需要再次确认。</p>
+					{isSensitiveFile(authorizationPath) ? <p>该文件可能包含私钥或凭据，请确认后再显示。</p> : null}
+					<div className="file-viewer-confirm-actions">
+						<button type="button" className="subtle" onClick={() => setAuthorizationPrompt(false)}>
+							取消
+						</button>
+						<button type="button" className="primary" onClick={() => void load(authorizationPath)}>
+							仅授权这次预览
+						</button>
+					</div>
+				</div>
+			</div>
+		);
+	} else if (error !== undefined) {
 		body = (
 			<div className="file-viewer-notice error">
 				<IconAlert size={20} />
 				<div>
 					<strong>无法打开文件</strong>
-					<p>{error}</p>
+					<p>{fromMarkdown ? filePreviewError(error, previewHost?.platform) : errorText(error)}</p>
+					{authorizationPath && !canAuthorize ? (
+						<p>
+							{previewNode === LOCAL_NODE
+								? "请更新 Pier 后授权预览，或将文件放到当前工作区。"
+								: "请在文件所在电脑的 Pier 中授权预览，或将文件放到当前工作区。"}
+						</p>
+					) : null}
 				</div>
-				<button type="button" className="subtle" onClick={() => void load()}>
-					重试
+				<button
+					type="button"
+					className={canAuthorize ? "primary" : "subtle"}
+					onClick={() => (canAuthorize ? setAuthorizationPrompt(true) : void load())}
+				>
+					{canAuthorize ? "授权并打开" : "重试"}
 				</button>
 			</div>
 		);

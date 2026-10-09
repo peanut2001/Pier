@@ -158,6 +158,16 @@ export const MethodParamsSchemas = {
 	/** Preview a Markdown file reference in the workspace or an absolute path in host temp directories (1.31). */
 	"workspace.previewFile": z.object({ workspaceId: Id, path: z.string().min(1).max(4096) }),
 	/**
+	 * Read one file after explicit local confirmation (1.33). `expectedRealPath` is the resolved
+	 * path shown in previewFile's OUTSIDE_ALLOWED_ROOTS error; changing targets requires a new
+	 * confirmation. Grants no lasting access and is unavailable to remote connections.
+	 */
+	"workspace.authorizeFilePreview": z.object({
+		workspaceId: Id,
+		path: z.string().min(1).max(4096),
+		expectedRealPath: z.string().min(1).max(4096),
+	}),
+	/**
 	 * Overwrite an existing workspace file with UTF-8 text (1.8). With `expectedModifiedAt`
 	 * (the `modifiedAt` the client read), fails with `CONFLICT` if the file changed since.
 	 */
@@ -707,11 +717,13 @@ export function isMethodName(method: string): method is MethodName {
 
 /**
  * Methods that only the local desktop UI may call: managing who can reach this computer
- * (paired devices, pairing, remote access, paired computers). A paired device is fully
+ * (paired devices, pairing, remote access, paired computers), and confirming a file preview
+ * outside the allowed roots. A paired device is fully
  * trusted otherwise (1.10): it can manage workspaces and policies, edit files, and
  * configure models, providers, accounts, and extensions.
  */
 export const LOCAL_ONLY_METHODS: ReadonlySet<MethodName> = new Set([
+	"workspace.authorizeFilePreview",
 	"device.list",
 	"device.revoke",
 	"device.rename",
@@ -767,6 +779,7 @@ export interface MethodResults {
 	"workspace.files": WorkspaceFilesResult;
 	"workspace.readFile": WorkspaceFileContent;
 	"workspace.previewFile": WorkspaceFileContent;
+	"workspace.authorizeFilePreview": WorkspaceFileContent;
 	"workspace.writeFile": WorkspaceFileWriteResult;
 	"workspace.deletePath": WorkspacePathDeleteResult;
 	"workspace.readBytes": WorkspaceFileBytes;

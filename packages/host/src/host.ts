@@ -72,6 +72,7 @@ import { SessionPool } from "./session-pool.ts";
 import type { AppShell, ShellMethod } from "./shell.ts";
 import { HostTerminals } from "./terminals.ts";
 import {
+	authorizeWorkspaceFilePreview,
 	deleteWorkspacePath,
 	listWorkspaceDirectory,
 	previewWorkspaceFile,
@@ -850,6 +851,12 @@ export class PierHost implements RequestHandler {
 				readWorkspaceFile(this.requireWorkspace(params.workspaceId).path, params.path),
 			"workspace.previewFile": (_ctx, params) =>
 				previewWorkspaceFile(this.requireWorkspace(params.workspaceId).path, params.path),
+			"workspace.authorizeFilePreview": (_ctx, params) =>
+				authorizeWorkspaceFilePreview(
+					this.requireWorkspace(params.workspaceId).path,
+					params.path,
+					params.expectedRealPath,
+				),
 			"workspace.writeFile": (_ctx, params) =>
 				writeWorkspaceFile(
 					this.requireWorkspace(params.workspaceId).path,

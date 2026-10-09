@@ -1,8 +1,14 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { MAX_IMAGE_PREVIEW_BYTES, previewWorkspaceFile, readWorkspaceFile } from "../src/workspace-files.ts";
+import {
+	authorizeWorkspaceFilePreview,
+	MAX_IMAGE_PREVIEW_BYTES,
+	MAX_TEXT_PREVIEW_BYTES,
+	previewWorkspaceFile,
+	readWorkspaceFile,
+} from "../src/workspace-files.ts";
 import { startTestHost } from "./helpers.ts";
 
 describe("Markdown file previews on the host", () => {
@@ -62,10 +68,85 @@ describe("Markdown file previews on the host", () => {
 	});
 
 	it("rejects absolute files outside the workspace and temporary directories", async () => {
-		await expect(previewWorkspaceFile(workspace, join(outside, "private.txt"))).rejects.toMatchObject({
+		const path = join(outside, "private.txt");
+		await expect(previewWorkspaceFile(workspace, path)).rejects.toMatchObject({
 			code: "FORBIDDEN",
+			data: { reason: "OUTSIDE_ALLOWED_ROOTS", resolvedPath: realpathSync(path) },
 		});
 	});
+
+	it("reads only the confirmed file once, preserving boundaries for subsequent previews and workspace reads", async () => {
+		const path = join(outside, "private.txt");
+		const expectedRealPath = realpathSync(path);
+		expect(await authorizeWorkspaceFilePreview(workspace, path, expectedRealPath)).toMatchObject({
+			path,
+			kind: "text",
+			text: "outside",
+		});
+		await expect(previewWorkspaceFile(workspace, path)).rejects.toMatchObject({ code: "FORBIDDEN" });
+		await expect(readWorkspaceFile(workspace, path)).rejects.toMatchObject({ code: "BAD_REQUEST" });
+		writeFileSync(join(outside, "other.txt"), "another file");
+		await expect(
+			authorizeWorkspaceFilePreview(workspace, join(outside, "other.txt"), expectedRealPath),
+		).rejects.toMatchObject({ code: "CONFLICT", data: { reason: "PREVIEW_TARGET_CHANGED" } });
+	});
+
+	it.skipIf(process.platform === "win32")("requires fresh confirmation after a symlink changes target", async () => {
+		const link = join(workspace, "linked.txt");
+		const first = join(outside, "private.txt");
+		const second = join(outside, "other.txt");
+		writeFileSync(second, "different file");
+		symlinkSync(first, link);
+		await expect(previewWorkspaceFile(workspace, "linked.txt")).rejects.toMatchObject({
+			data: { reason: "OUTSIDE_ALLOWED_ROOTS", resolvedPath: realpathSync(first) },
+		});
+		rmSync(link);
+		symlinkSync(second, link);
+		await expect(authorizeWorkspaceFilePreview(workspace, "linked.txt", realpathSync(first))).rejects.toMatchObject({
+			code: "CONFLICT",
+		});
+		expect(await authorizeWorkspaceFilePreview(workspace, "linked.txt", realpathSync(second))).toMatchObject({
+			text: "different file",
+		});
+	});
+
+	it("retains size limits, file-type checks and path validation for authorized reads", async () => {
+		const text = join(outside, "large.txt");
+		const image = join(outside, "large.png");
+		writeFileSync(text, "x".repeat(MAX_TEXT_PREVIEW_BYTES + 1));
+		writeFileSync(image, Buffer.alloc(MAX_IMAGE_PREVIEW_BYTES + 1));
+		expect(await authorizeWorkspaceFilePreview(workspace, text, realpathSync(text))).toMatchObject({
+			kind: "text",
+			truncated: true,
+		});
+		expect(await authorizeWorkspaceFilePreview(workspace, image, realpathSync(image))).toMatchObject({
+			kind: "image",
+			tooLarge: true,
+		});
+		await expect(authorizeWorkspaceFilePreview(workspace, outside, realpathSync(outside))).rejects.toMatchObject({
+			code: "BAD_REQUEST",
+		});
+		for (const path of ["file:///tmp/screen.png", "https://example.com/screen.png", "x\0.png", "//server/share.png"]) {
+			await expect(authorizeWorkspaceFilePreview(workspace, path, path)).rejects.toMatchObject({ code: "BAD_REQUEST" });
+		}
+	});
+
+	it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+		"keeps OS permission failures distinct and cannot override them with preview authorization",
+		async () => {
+			const path = join(outside, "private.txt");
+			const expectedRealPath = realpathSync(path);
+			chmodSync(path, 0);
+			try {
+				await expect(authorizeWorkspaceFilePreview(workspace, path, expectedRealPath)).rejects.toMatchObject({
+					code: "FORBIDDEN",
+					data: { reason: "FILESYSTEM_PERMISSION_DENIED" },
+				});
+			} finally {
+				chmodSync(path, 0o600);
+			}
+		},
+	);
 
 	it.skipIf(process.platform === "win32")("checks symlink targets before reading", async () => {
 		symlinkSync(join(outside, "private.txt"), join(root, "escape.txt"));
@@ -92,6 +173,15 @@ describe("Markdown file previews on the host", () => {
 				kind: "image",
 				data: png.toString("base64"),
 			});
+			const path = join(outside, "private.txt");
+			const params = { workspaceId: info.id, path, expectedRealPath: realpathSync(path) };
+			expect(await client.request("workspace.authorizeFilePreview", params)).toMatchObject({ text: "outside" });
+			await expect(client.request("workspace.previewFile", { workspaceId: info.id, path })).rejects.toMatchObject({
+				code: "FORBIDDEN",
+			});
+			await expect(
+				client.request("workspace.authorizeFilePreview", { ...params, expectedRealPath: join(outside, "other.txt") }),
+			).rejects.toMatchObject({ code: "CONFLICT" });
 			await expect(
 				client.request("workspace.previewFile", { workspaceId: "missing", path: "screen.png" }),
 			).rejects.toMatchObject({ code: "NOT_FOUND" });

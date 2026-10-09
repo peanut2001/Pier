@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { markdownFilePath, markdownUrlTransform } from "../src/lib/markdown-files.ts";
+import {
+	filePreviewAuthorizationPath,
+	filePreviewError,
+	markdownFilePath,
+	markdownUrlTransform,
+} from "../src/lib/markdown-files.ts";
 
 describe("Markdown file references", () => {
 	it("resolves agent screenshots, encoded filenames and source line references", () => {
@@ -46,5 +51,40 @@ describe("Markdown file references", () => {
 		expect(markdownUrlTransform("data:image/png;base64,AA==", "src")).toBe("data:image/png;base64,AA==");
 		expect(markdownUrlTransform("data:image/png;base64,AA==", "href")).toBe("");
 		expect(markdownUrlTransform("data:image/svg+xml;base64,AA==", "src")).toBe("");
+	});
+});
+
+describe("file preview permission errors", () => {
+	const error = (code: string, message: string, data?: unknown) => Object.assign(new Error(message), { code, data });
+
+	it("offers authorization only for a resolved path refused by the host boundary", () => {
+		const outside = error("FORBIDDEN", "outside", {
+			reason: "OUTSIDE_ALLOWED_ROOTS",
+			resolvedPath: "/home/me/ui.html",
+		});
+		expect(filePreviewAuthorizationPath(outside)).toBe("/home/me/ui.html");
+		expect(filePreviewError(outside)).toContain("需要授权");
+		expect(
+			filePreviewError(error("FORBIDDEN", "Preview path is outside the workspace and temporary directories")),
+		).toContain("请更新");
+		for (const denied of [
+			error("FORBIDDEN", "Permission denied: /home/me/ui.html", { reason: "FILESYSTEM_PERMISSION_DENIED" }),
+			error("FORBIDDEN", "unknown"),
+			error("FORBIDDEN", "outside", { reason: "OUTSIDE_ALLOWED_ROOTS", resolvedPath: 123 }),
+			error("NOT_FOUND", "missing", { reason: "OUTSIDE_ALLOWED_ROOTS", resolvedPath: "/missing" }),
+			undefined,
+		]) {
+			expect(filePreviewAuthorizationPath(denied)).toBeUndefined();
+		}
+	});
+
+	it("explains system permissions and requests fresh confirmation for changed targets", () => {
+		const denied = error("FORBIDDEN", "Permission denied: /Desktop/ui.html", {
+			reason: "FILESYSTEM_PERMISSION_DENIED",
+		});
+		expect(filePreviewError(denied, "darwin")).toContain("文件与文件夹");
+		expect(filePreviewError(denied, "linux")).toContain("读取权限");
+		expect(filePreviewError(error("FORBIDDEN", "Permission denied: /Desktop/ui.html"), "darwin")).toContain("macOS");
+		expect(filePreviewError(error("CONFLICT", "changed", { reason: "PREVIEW_TARGET_CHANGED" }))).toContain("重新确认");
 	});
 });

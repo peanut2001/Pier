@@ -114,6 +114,14 @@ describe("computer-to-computer (peers)", () => {
 		expect((await remote.request("host.stats")).memory.total).toBeGreaterThan(0);
 		await expectCode(remote.request("pairing.start"), "FORBIDDEN");
 		await expectCode(remote.request("peer.list"), "FORBIDDEN");
+		await expectCode(
+			remote.request("workspace.authorizeFilePreview", {
+				workspaceId: bWorkspace.id,
+				path: "/outside/private.txt",
+				expectedRealPath: "/outside/private.txt",
+			}),
+			"FORBIDDEN",
+		);
 
 		b.faux.setResponses([fauxAssistantMessage("answered by computer B")]);
 		const { session } = await remote.request("session.create", { workspaceId: bWorkspace.id });
