@@ -24,7 +24,9 @@ def artwork(layer="all", monochrome=False):
                 svg.remove(child)
             elif layer == "mark":
                 # Android's guaranteed safe area is a circle, not just a square.
-                child.set("transform", "translate(512 512) scale(.9) translate(-512 -512)")
+                # Scale the entire mark while preserving its original forward lean.
+                original_transform = child.get("transform", "")
+                child.set("transform", f"translate(512 512) scale(.9) translate(-512 -512) {original_transform}".strip())
     if monochrome:
         for element in svg.iter():
             for attribute in ("fill", "stroke"):
