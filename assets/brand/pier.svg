@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>Pier</title>
+  <desc>A P-shaped workspace with a terminal prompt and a connected device node.</desc>
+  <defs>
+    <linearGradient id="surface" x1="0" y1="0" x2="1024" y2="1024" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#253d68"/>
+      <stop offset=".52" stop-color="#14283f"/>
+      <stop offset="1" stop-color="#102e37"/>
+    </linearGradient>
+    <radialGradient id="light" cx="0" cy="0" r="950" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#688cff" stop-opacity=".22"/>
+      <stop offset="1" stop-color="#688cff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="tide" cx="1024" cy="1024" r="820" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2bd4bc" stop-opacity=".18"/>
+      <stop offset="1" stop-color="#2bd4bc" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="ink" x1="340" y1="284" x2="668" y2="758" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#dcf2f7"/>
+    </linearGradient>
+    <linearGradient id="signal" x1="446" y1="414" x2="674" y2="736" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#a3f6ea"/>
+      <stop offset="1" stop-color="#50dac8"/>
+    </linearGradient>
+  </defs>
+  <g id="background">
+    <path fill="url(#surface)" d="M0 0h1024v1024H0z"/>
+    <path fill="url(#light)" d="M0 0h1024v1024H0z"/>
+    <path fill="url(#tide)" d="M0 0h1024v1024H0z"/>
+  </g>
+  <g id="mark" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M340 758V294h184c112 0 178 62 178 166s-66 166-178 166H340" stroke="url(#ink)" stroke-width="76"/>
+    <path d="m456 412 56 48-56 48" stroke="url(#signal)" stroke-width="36"/>
+    <path d="M340 738h278" stroke="url(#signal)" stroke-width="36"/>
+    <path d="M340 680v78" stroke="url(#ink)" stroke-width="76"/>
+    <circle cx="660" cy="738" r="44" fill="url(#signal)"/>
+  </g>
+</svg>
