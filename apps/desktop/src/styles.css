@@ -1,6 +1,7 @@
 /* Pier desktop stylesheet. Split by area; order matters (tokens and base first). */
 @import "./styles/tokens.css";
 @import "./styles/base.css";
+@import "./styles/navigation.css";
 @import "./styles/sidebar.css";
 @import "./styles/home.css";
 @import "./styles/session.css";

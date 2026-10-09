@@ -409,11 +409,12 @@ code {
 /* ---- app layout ------------------------------------------------------------------ */
 
 .app {
+	--sidebar-width: 228px;
 	--sidebar-duration: 0.3s;
 	--sidebar-ease: cubic-bezier(0.4, 0, 0.2, 1);
 	display: grid;
 	/* The main window sets its own columns inline; this default is the settings screen's. */
-	grid-template-columns: 264px minmax(0, 1fr);
+	grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
 	height: 100%;
 	background: var(--bg-app);
 }
@@ -437,7 +438,7 @@ code {
  */
 .sidebar-shell {
 	display: flex;
-	width: 264px;
+	width: var(--sidebar-width);
 	min-width: 0;
 	min-height: 0;
 	overflow: hidden;
@@ -450,7 +451,7 @@ code {
 
 .sidebar-shell > .sidebar {
 	flex: none;
-	width: 264px;
+	width: var(--sidebar-width);
 	/* `transform: none` when open so fixed-position dialogs inside are not contained. */
 	transform: none;
 	transition:

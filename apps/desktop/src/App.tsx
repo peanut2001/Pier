@@ -8,6 +8,7 @@ import { Welcome, WorkspaceHome } from "./components/Home.tsx";
 import { HostBanner } from "./components/HostPanels.tsx";
 import { IconAlert, IconInfo, IconMessage, IconX } from "./components/Icons.tsx";
 import { AuthDialog, YunlianDialog } from "./components/ModelsPanel.tsx";
+import { NavigationRail } from "./components/NavigationRail.tsx";
 import { NewChatView } from "./components/NewChat.tsx";
 import { AddPeerDialog, PairingRequestDialog } from "./components/RemotePanel.tsx";
 import { SessionView } from "./components/SessionView.tsx";
@@ -164,32 +165,35 @@ export function App() {
 	return (
 		<div className="window">
 			<TitleBar />
-			{settings ? (
-				<SettingsPage section={settings} />
-			) : (
-				<div
-					className={`app with-files-shell${sidebar ? "" : " no-sidebar"}`}
-					style={{ gridTemplateColumns: columns.join(" ") }}
-				>
-					<div className={`sidebar-shell${sidebar ? "" : " collapsed"}`} inert={!sidebar}>
-						<Sidebar open={sidebar} />
-					</div>
-					<main className="main">
-						<HostBanner scope="node" onShowLogs={() => store.openSettings("logs")} />
-						<div className="main-body">
-							<Main />
-						</div>
-						{terminalOpen ? <TerminalPanel {...(screenWorkspace ? { workspace: screenWorkspace } : {})} /> : null}
-					</main>
+			<div className="window-body">
+				<NavigationRail />
+				{settings ? (
+					<SettingsPage section={settings} />
+				) : (
 					<div
-						className={`files-shell${showFiles ? "" : " collapsed"}`}
-						style={{ "--files-width": `${filesPanelWidth}px` } as CSSProperties}
-						inert={!showFiles}
+						className={`app with-files-shell${sidebar ? "" : " no-sidebar"}`}
+						style={{ gridTemplateColumns: columns.join(" ") }}
 					>
-						{showFiles || filesMounted ? <RightPanel {...screen} /> : null}
+						<div className={`sidebar-shell${sidebar ? "" : " collapsed"}`} inert={!sidebar}>
+							<Sidebar open={sidebar} />
+						</div>
+						<main className="main">
+							<HostBanner scope="node" onShowLogs={() => store.openSettings("logs")} />
+							<div className="main-body">
+								<Main />
+							</div>
+							{terminalOpen ? <TerminalPanel {...(screenWorkspace ? { workspace: screenWorkspace } : {})} /> : null}
+						</main>
+						<div
+							className={`files-shell${showFiles ? "" : " collapsed"}`}
+							style={{ "--files-width": `${filesPanelWidth}px` } as CSSProperties}
+							inert={!showFiles}
+						>
+							{showFiles || filesMounted ? <RightPanel {...screen} /> : null}
+						</div>
 					</div>
-				</div>
-			)}
+				)}
+			</div>
 			<StatusBar />
 			{settings ? null : <FilePreview />}
 			<Toasts />

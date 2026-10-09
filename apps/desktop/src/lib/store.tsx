@@ -2698,13 +2698,11 @@ export class PierStore {
 			status.state === "available" &&
 			status.version &&
 			status.version !== this.announcedUpdate &&
-			this.state.settings !== "about" &&
-			// An open sidebar shows its own update notice.
-			!this.state.sidebar;
+			this.state.settings !== "about";
 		this.set({ update: status });
 		if (announce && status.version) {
 			this.announcedUpdate = status.version;
-			this.toast("info", `Pier v${status.version} 已发布，可在侧边栏左下角或“设置 → 关于与更新”中安装`);
+			this.toast("info", `Pier v${status.version} 已发布，可在左下角的更新入口或“设置 → 关于与更新”中安装`);
 		}
 	}
 

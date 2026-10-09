@@ -36,7 +36,7 @@ function downloadPercent(update: UpdateStatus): number | undefined {
 }
 
 /**
- * The update notice at the bottom of the sidebar: shows that a new version is out, its
+ * The update card in the navigation rail: shows that a new version is out, its
  * download / install progress, and a one-click install, so nobody has to look for it in the
  * settings. Renders nothing while no update is pending.
  */

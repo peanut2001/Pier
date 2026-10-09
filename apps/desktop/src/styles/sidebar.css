@@ -1,4 +1,4 @@
-/* Sidebar: brand, new-session button, workspace tree, host status. */
+/* Sidebar: heading, new-session button, workspace tree and update card. */
 
 .sidebar {
 	display: flex;
@@ -12,12 +12,6 @@
 	align-items: center;
 	gap: 10px;
 	padding: 12px 18px;
-}
-
-.brand .logo {
-	box-shadow:
-		0 4px 14px var(--brand-glow),
-		0 0 0 1px rgba(255, 255, 255, 0.08);
 }
 
 .brand-name {
@@ -542,16 +536,9 @@
 	background: var(--accent-soft);
 }
 
-.sidebar-footer {
-	display: flex;
-	align-items: center;
-	gap: 4px;
-	padding: 8px 10px 10px;
-}
-
 /* ---- update notice ---------------------------------------------------------------- */
 
-/* A pending update, above the settings entry: one click installs it. */
+/* A pending update in the navigation popover: one click installs it. */
 .sidebar-update {
 	position: relative;
 	display: flex;
