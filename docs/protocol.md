@@ -1,4 +1,4 @@
-# Pier 协议 v1.30
+# Pier 协议 v1.31
 
 > 实现：`packages/protocol`（zod schema + TS 类型，Host 与所有客户端共享）。
 > 本文档描述线上格式与语义；字段的权威定义以 `packages/protocol/src` 为准。
@@ -136,6 +136,8 @@ sidecar 的 stdio 协议：桌面端用 `--shell-terminals` 启动 Host，声明
 | `workspace.uploadChunk` | `{ uploadId, offset, data }` | `{ received }`；向上传追加 Base64 数据（1.21）。`offset` 必须等于已收到的字节数，否则 `CONFLICT`（`data.received` 为已收到的字节数，可据此续传）；超过 `chunkBytes` 或累计超过 `size` 时 `BAD_REQUEST`；上传不存在、已过期或属于其他连接时 `NOT_FOUND`；同一上传同时只处理一个请求 |
 | `workspace.uploadFinish` | `{ uploadId }` | `{ path, size, modifiedAt }`；把收齐的上传移动到目标路径（1.21）。未收齐时 `BAD_REQUEST`（`data.received`），上传保留可继续；目标在上传期间变成目录，或未给 `overwrite` 而目标已出现时 `CONFLICT`，上传被丢弃。远程调用写入审计日志 |
 | `workspace.uploadCancel` | `{ uploadId }` | `{ cancelled }`；取消上传并删除已收到的数据（1.21）。上传不存在或属于其他连接时 `cancelled: false` |
+
+`workspace.previewFile`（1.31）：参数 `{ workspaceId, path }`，返回 `WorkspaceFileContent`，用于聊天和 Markdown 中的图片、文件链接。相对路径以工作区根目录为基准，允许 `.` / `..`，但解析符号链接后必须仍在工作区内；绝对路径必须位于工作区或 Host 的系统临时目录（`os.tmpdir()`，Unix 另含 `/tmp`、`/var/tmp`）中。`file://`、URL 编码和行号后缀由客户端转成文件路径。目录及特殊文件返回 `BAD_REQUEST`，越界返回 `FORBIDDEN`，不存在返回 `NOT_FOUND`；图片、文本大小限制与 `workspace.readFile` 相同。该只读方法可经已认证的远程连接调用，不改变 `workspace.readFile` 及所有写入、下载方法的路径规则。
 
 ### Git 源代码管理（1.28）
 

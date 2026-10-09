@@ -154,6 +154,8 @@ export const MethodParamsSchemas = {
 	"workspace.files": z.object({ workspaceId: Id, path: z.string().max(4096).optional() }),
 	/** Read one workspace file for preview (1.7). `path` is relative to the workspace root. */
 	"workspace.readFile": z.object({ workspaceId: Id, path: z.string().min(1).max(4096) }),
+	/** Preview a Markdown file reference in the workspace or an absolute path in host temp directories (1.31). */
+	"workspace.previewFile": z.object({ workspaceId: Id, path: z.string().min(1).max(4096) }),
 	/**
 	 * Overwrite an existing workspace file with UTF-8 text (1.8). With `expectedModifiedAt`
 	 * (the `modifiedAt` the client read), fails with `CONFLICT` if the file changed since.
@@ -759,6 +761,7 @@ export interface MethodResults {
 	"workspace.setPolicy": { workspace: WorkspaceInfo };
 	"workspace.files": WorkspaceFilesResult;
 	"workspace.readFile": WorkspaceFileContent;
+	"workspace.previewFile": WorkspaceFileContent;
 	"workspace.writeFile": WorkspaceFileWriteResult;
 	"workspace.deletePath": WorkspacePathDeleteResult;
 	"workspace.readBytes": WorkspaceFileBytes;

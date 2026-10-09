@@ -253,7 +253,7 @@ export function SessionView({ session }: { session: SessionSummary }) {
 				</div>
 			</header>
 			{error ? <div className="banner error">无法打开会话：{error}</div> : null}
-			<Transcript chat={chat} />
+			<Transcript chat={chat} workspaceId={session.workspaceId} />
 			<div className="session-bottom">
 				<Banners chat={chat} />
 				<Notices chat={chat} controller={controller} />

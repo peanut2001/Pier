@@ -1,6 +1,7 @@
 import type { Dirent } from "node:fs";
 import { lstat, open, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
-import { extname, isAbsolute, join, relative, sep } from "node:path";
+import { tmpdir } from "node:os";
+import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
 	PierProtocolError,
 	type WorkspaceFileBytes,
@@ -322,6 +323,39 @@ export async function readWorkspaceFile(workspaceRoot: string, path: string): Pr
 	if (!relPath) throw new PierProtocolError("BAD_REQUEST", "Not a file: .");
 	const root = await workspaceRealRoot(workspaceRoot);
 	const real = await resolveInside(root, relPath, "file");
+	return readPreviewFile(real, relPath);
+}
+
+/**
+ * Preview a file referenced in Markdown. Relative paths stay in the workspace; absolute
+ * paths may also point into the host's temporary directories (where agents save screenshots).
+ * This does not relax the workspace's write, download or directory-listing operations.
+ */
+export async function previewWorkspaceFile(workspaceRoot: string, path: string): Promise<WorkspaceFileContent> {
+	if (!path || path.includes("\0") || path.startsWith("//") || path.startsWith("\\\\")) {
+		throw new PierProtocolError("BAD_REQUEST", "Invalid preview path");
+	}
+	if (!isAbsolute(path) && /^[a-zA-Z][\w+.-]*:/.test(path)) {
+		throw new PierProtocolError("BAD_REQUEST", "Preview path must be a local file path");
+	}
+	const root = await workspaceRealRoot(workspaceRoot);
+	let real: string;
+	try {
+		real = await realpath(resolve(root, path));
+	} catch (error) {
+		fsError(error, path);
+	}
+	if (!isInside(root, real)) {
+		const directories = process.platform === "win32" ? [tmpdir()] : [tmpdir(), "/tmp", "/var/tmp"];
+		const temporaryRoots = await Promise.all(directories.map((dir) => realpath(dir).catch(() => undefined)));
+		if (!isAbsolute(path) || !temporaryRoots.some((dir) => dir && isInside(dir, real))) {
+			throw new PierProtocolError("FORBIDDEN", "Preview path is outside the workspace and temporary directories");
+		}
+	}
+	return readPreviewFile(real, path);
+}
+
+async function readPreviewFile(real: string, relPath: string): Promise<WorkspaceFileContent> {
 	let info: Awaited<ReturnType<typeof stat>>;
 	try {
 		info = await stat(real);

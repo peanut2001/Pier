@@ -192,9 +192,9 @@ export interface WorkspaceFilesResult {
 	total?: number;
 }
 
-/** A workspace file read for preview (`workspace.readFile`, 1.7). */
+/** A file read for preview (`workspace.readFile`, 1.7; `workspace.previewFile`, 1.31). */
 export interface WorkspaceFileContent {
-	/** Path relative to the workspace root, normalized and joined with "/". */
+	/** Workspace-relative path, or the requested local path for `workspace.previewFile`. */
 	path: string;
 	/** Size in bytes of the file on disk. */
 	size: number;

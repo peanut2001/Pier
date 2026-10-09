@@ -73,6 +73,7 @@ import { HostTerminals } from "./terminals.ts";
 import {
 	deleteWorkspacePath,
 	listWorkspaceDirectory,
+	previewWorkspaceFile,
 	readWorkspaceBytes,
 	readWorkspaceFile,
 	writeWorkspaceFile,
@@ -830,6 +831,8 @@ export class PierHost implements RequestHandler {
 				listWorkspaceDirectory(this.requireWorkspace(params.workspaceId).path, params.path),
 			"workspace.readFile": (_ctx, params) =>
 				readWorkspaceFile(this.requireWorkspace(params.workspaceId).path, params.path),
+			"workspace.previewFile": (_ctx, params) =>
+				previewWorkspaceFile(this.requireWorkspace(params.workspaceId).path, params.path),
 			"workspace.writeFile": (_ctx, params) =>
 				writeWorkspaceFile(
 					this.requireWorkspace(params.workspaceId).path,

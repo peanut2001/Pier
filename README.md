@@ -26,6 +26,8 @@ M0–M2（Host 核心、桌面端 MVP）已完成；M3（手机端 MVP，局域�
 | `apps/relay` | Pier Relay：手机 / 电脑都没有公网 IP 时转发端到端加密的连接，内置 STUN 帮助 P2P 打洞；私有模式（令牌）与开放模式，Docker 镜像 `ghcr.io/yiranxiaohui/pier-relay` |
 | `apps/mobile` | Expo（SDK 57）手机 App：扫码配对、多台电脑、会话列表、流式聊天、工具卡片、审批、steer / follow-up / 中止、附图、模型切换、斜杠命令、上下文与 token 用量、重命名 / 分叉 / 压缩、工作区文件（预览、编辑、上传下载）、远程终端、主机状态、pi 扩展管理、断线重连补发、Android 应用内更新 |
 
+桌面聊天中的本地图片会直接显示，点击图片或文件链接可打开预览窗口；支持相对路径、绝对路径、`file://` 和带行号的源码链接。文件从会话所在电脑的 Host 读取（需协议 1.31+），可预览工作区内文件及系统临时目录中的截图。图片上限 8 MiB，文件缺失或超限会显示原因。
+
 ## 开发
 
 需要 Node 22+（推荐 24）和 [Bun](https://bun.sh)：Bun 管理依赖（`bun.lock`，版本见 `package.json` 的 `packageManager`）并编译 sidecar，脚本和测试仍在 Node 上运行。

@@ -4,7 +4,7 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "rea
 import { clockTime, formatTokens } from "../lib/format.ts";
 import { IconArrowDown, IconBrain, IconChevronRight, IconLayers, IconSparkles, IconTerminal } from "./Icons.tsx";
 import { ImageLightbox } from "./ImageLightbox.tsx";
-import { CopyButton, Markdown } from "./Markdown.tsx";
+import { CopyButton, Markdown, MarkdownFiles } from "./Markdown.tsx";
 import { ToolCard } from "./ToolCard.tsx";
 
 function Thinking({ text, redacted, live }: { text: string; redacted: boolean; live: boolean }) {
@@ -185,7 +185,7 @@ const ItemView = memo(function ItemView({
 	}
 });
 
-export function Transcript({ chat }: { chat: ChatState }) {
+export function Transcript({ chat, workspaceId }: { chat: ChatState; workspaceId: string }) {
 	const items = useMemo(() => buildTranscript(chat), [chat]);
 	const approvals = useMemo(() => {
 		const map = new Map<string, UiRequest>();
@@ -220,53 +220,55 @@ export function Transcript({ chat }: { chat: ChatState }) {
 		!(lastItem?.kind === "assistant" && lastItem.streaming && lastItem.blocks.length > 0);
 
 	return (
-		<div
-			className="transcript"
-			ref={scroller}
-			onScroll={(event) => {
-				const el = event.currentTarget;
-				const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-				stick.current = atBottom;
-				setShowJump(!atBottom);
-			}}
-		>
-			<div className="transcript-inner">
-				{!chat.loaded ? <div className="placeholder">正在加载会话…</div> : null}
-				{chat.loaded && items.length === 0 ? (
-					<div className="placeholder new-chat">
-						<div className="new-chat-icon">
-							<IconSparkles size={26} />
+		<MarkdownFiles workspaceId={workspaceId}>
+			<div
+				className="transcript"
+				ref={scroller}
+				onScroll={(event) => {
+					const el = event.currentTarget;
+					const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+					stick.current = atBottom;
+					setShowJump(!atBottom);
+				}}
+			>
+				<div className="transcript-inner">
+					{!chat.loaded ? <div className="placeholder">正在加载会话…</div> : null}
+					{chat.loaded && items.length === 0 ? (
+						<div className="placeholder new-chat">
+							<div className="new-chat-icon">
+								<IconSparkles size={26} />
+							</div>
+							<h2>开始新的对话</h2>
+							<p>在下方输入任务，Agent 将在该工作区中读写文件、运行命令。高风险操作会先请求你批准。</p>
 						</div>
-						<h2>开始新的对话</h2>
-						<p>在下方输入任务，Agent 将在该工作区中读写文件、运行命令。高风险操作会先请求你批准。</p>
-					</div>
-				) : null}
-				{items.map((item) => (
-					<ItemView key={item.key} item={item} approvals={approvals} />
-				))}
-				{waitingForModel ? (
-					<div className="typing">
-						<span />
-						<span />
-						<span />
-					</div>
+					) : null}
+					{items.map((item) => (
+						<ItemView key={item.key} item={item} approvals={approvals} />
+					))}
+					{waitingForModel ? (
+						<div className="typing">
+							<span />
+							<span />
+							<span />
+						</div>
+					) : null}
+				</div>
+				{showJump ? (
+					<button
+						type="button"
+						className="jump-bottom"
+						onClick={() => {
+							const el = scroller.current;
+							if (el) el.scrollTop = el.scrollHeight;
+							stick.current = true;
+							setShowJump(false);
+						}}
+					>
+						<IconArrowDown size={14} />
+						回到底部
+					</button>
 				) : null}
 			</div>
-			{showJump ? (
-				<button
-					type="button"
-					className="jump-bottom"
-					onClick={() => {
-						const el = scroller.current;
-						if (el) el.scrollTop = el.scrollHeight;
-						stick.current = true;
-						setShowJump(false);
-					}}
-				>
-					<IconArrowDown size={14} />
-					回到底部
-				</button>
-			) : null}
-		</div>
+		</MarkdownFiles>
 	);
 }

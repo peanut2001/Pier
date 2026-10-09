@@ -339,7 +339,7 @@ export interface AppState {
 	 * The workspace file shown in the preview dialog. `composerKey` is the composer that the
 	 * dialog's "insert" button targets, when there is one.
 	 */
-	filePreview?: { workspaceId: string; path: string; composerKey?: string } | undefined;
+	filePreview?: { workspaceId: string; path: string; composerKey?: string; fromMarkdown?: boolean } | undefined;
 	/** Bumped when pi extension or package settings changed, so the extensions page reloads. */
 	extensionsVersion: number;
 	/** Bumped when a pi settings file may have changed, so the pi settings page reloads. */
@@ -2073,6 +2073,13 @@ export class PierStore {
 		return client.request("workspace.readFile", { workspaceId, path });
 	}
 
+	/** Read a Markdown reference on the computer that owns the conversation. */
+	async previewFile(workspaceId: string, path: string): Promise<WorkspaceFileContent> {
+		const client = this.clientFor(workspaceId);
+		if (!client) throw new Error("尚未连接到 Pier Host");
+		return client.request("workspace.previewFile", { workspaceId, path });
+	}
+
 	/**
 	 * Overwrite a workspace file with text; rejects with the host's error (`CONFLICT` when the
 	 * file changed since `expectedModifiedAt`). Refreshes the file panel on success.
@@ -2137,6 +2144,10 @@ export class PierStore {
 
 	openFilePreview(workspaceId: string, path: string, composerKey?: string): void {
 		this.set({ filePreview: { workspaceId, path, ...(composerKey ? { composerKey } : {}) } });
+	}
+
+	openMarkdownFilePreview(workspaceId: string, path: string): void {
+		this.set({ filePreview: { workspaceId, path, fromMarkdown: true } });
 	}
 
 	closeFilePreview(): void {

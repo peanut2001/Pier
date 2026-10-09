@@ -1,6 +1,7 @@
 import type { WorkspaceFileContent } from "@pier/protocol";
 import { type KeyboardEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatBytes, languageForPath, relativeTime } from "../lib/format.ts";
+import { filePreviewError } from "../lib/markdown-files.ts";
 import { isSensitiveFile } from "../lib/sensitive-files.ts";
 import { useAppState, useCanManageWorkspace, useStore } from "../lib/store.tsx";
 import {
@@ -12,7 +13,7 @@ import {
 	IconRefresh,
 	IconShieldAlert,
 } from "./Icons.tsx";
-import { CopyButton, Markdown } from "./Markdown.tsx";
+import { CopyButton, Markdown, MarkdownFiles } from "./Markdown.tsx";
 import { Modal } from "./Modal.tsx";
 import { Highlighted } from "./ToolCard.tsx";
 
@@ -142,11 +143,13 @@ export function FileViewer({
 	path,
 	onClose,
 	onInsert,
+	fromMarkdown = false,
 }: {
 	workspaceId: string;
 	path: string;
 	onClose: () => void;
 	onInsert?: (() => void) | undefined;
+	fromMarkdown?: boolean;
 }) {
 	const store = useStore();
 	const [confirmed, setConfirmed] = useState(() => !isSensitiveFile(path));
@@ -167,14 +170,14 @@ export function FileViewer({
 		setLoading(true);
 		setError(undefined);
 		try {
-			const result = await store.readFile(workspaceId, path);
+			const result = await (fromMarkdown ? store.previewFile(workspaceId, path) : store.readFile(workspaceId, path));
 			if (request.current === id) setFile(result);
 		} catch (e) {
-			if (request.current === id) setError(errorText(e));
+			if (request.current === id) setError(fromMarkdown ? filePreviewError(e) : errorText(e));
 		} finally {
 			if (request.current === id) setLoading(false);
 		}
-	}, [store, workspaceId, path]);
+	}, [store, workspaceId, path, fromMarkdown]);
 
 	useEffect(() => {
 		if (confirmed) void load();
@@ -184,7 +187,7 @@ export function FileViewer({
 	const isMarkdown = MARKDOWN.test(path) && file?.kind === "text";
 	// Paired computers on protocol 1.10+ accept edits; older ones are read-only from here.
 	const local = useCanManageWorkspace(workspaceId);
-	const editable = local && file?.kind === "text" && !file.truncated;
+	const editable = !fromMarkdown && local && file?.kind === "text" && !file.truncated;
 	const editing = draft !== undefined && !!file;
 	const original = useMemo(() => toLf(file?.text ?? ""), [file?.text]);
 	const dirty = editing && draft !== original;
@@ -328,7 +331,12 @@ export function FileViewer({
 				) : null}
 				{isMarkdown && rendered ? (
 					<div className="file-viewer-markdown">
-						<Markdown text={file.text ?? ""} />
+						<MarkdownFiles
+							workspaceId={workspaceId}
+							basePath={path.replace(/\\/g, "/").split("/").slice(0, -1).join("/")}
+						>
+							<Markdown text={file.text ?? ""} />
+						</MarkdownFiles>
 					</div>
 				) : (
 					<TextView file={file} />
@@ -435,12 +443,13 @@ export function FilePreview() {
 	const preview = useAppState((s) => s.filePreview);
 	const known = useAppState((s) => !!preview && s.workspaces.some((w) => w.id === preview.workspaceId));
 	if (!preview || !known) return null;
-	const { workspaceId, path, composerKey } = preview;
+	const { workspaceId, path, composerKey, fromMarkdown } = preview;
 	return (
 		<FileViewer
-			key={`${workspaceId}:${path}`}
+			key={`${workspaceId}:${path}:${fromMarkdown ?? false}`}
 			workspaceId={workspaceId}
 			path={path}
+			fromMarkdown={fromMarkdown}
 			onClose={() => store.closeFilePreview()}
 			onInsert={composerKey ? () => store.insertFileIntoComposer(composerKey, path) : undefined}
 		/>
