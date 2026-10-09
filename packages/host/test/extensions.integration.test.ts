@@ -245,7 +245,8 @@ describe("extension management", () => {
 	});
 
 	it("deletes a project .agents skill without touching global skills", async () => {
-		const projectSkill = join(t.workspaceDir, ".agents", "skills", "project-skill");
+		// Host canonicalizes workspace paths; macOS temporary paths can contain symlinks.
+		const projectSkill = join(workspace.path, ".agents", "skills", "project-skill");
 		const globalSkill = join(agentDir, "skills", "global-skill");
 		for (const [dir, name] of [
 			[projectSkill, "project-skill"],
