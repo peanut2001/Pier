@@ -1,7 +1,16 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildTranscript, type ChatState, initialChatState, reduceChat } from "@pier/chat-state";
+import {
+	buildTranscript,
+	ChatController,
+	type ChatState,
+	initialChatState,
+	reduceChat,
+	resolveSlash,
+	runBuiltin,
+	type SlashActions,
+} from "@pier/chat-state";
 import type { PierClient } from "@pier/client";
 import type { SessionSummary, WorkspaceInfo } from "@pier/protocol";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -70,6 +79,38 @@ describe("Claude Code runtime", () => {
 		await rec.waitForType("session.snapshot");
 		return { rec, state: () => state };
 	}
+
+	it("routes native names to Claude session operations and retains runtime commands", async () => {
+		const { session } = await client.request("session.create", { workspaceId: workspace.id, runtime: "claude-code" });
+		const controller = new ChatController(client, session, {
+			onChange() {},
+			onReplaced() {},
+			onSettled() {},
+			onError(message) {
+				throw new Error(message);
+			},
+		});
+		await controller.start();
+		const list = await controller.loadCommands();
+		expect(resolveSlash("/review", list.commands, list.known)).toEqual({ kind: "host", command: "review" });
+		const actions: SlashActions = {
+			newSession: () => true,
+			fork: () => false,
+			notify() {},
+		};
+		for (const text of ["/rename Claude native", "/effort low"]) {
+			const command = resolveSlash(text, list.commands, list.known);
+			expect(command.kind).toBe("builtin");
+			if (command.kind !== "builtin") throw new Error("Expected a native command");
+			expect(await runBuiltin(controller, command.name, command.args, actions)).toEqual({ kind: "done" });
+		}
+		const snapshot = await client.request("session.snapshot", { sessionId: session.id });
+		expect(snapshot.session.name).toBe("Claude native");
+		expect(snapshot.thinkingLevel).toBe("low");
+		expect(snapshot.messages).toEqual([]);
+		expect(fake.options).toHaveLength(0);
+		controller.dispose();
+	});
 
 	it("lists the runtime with its capabilities", async () => {
 		const { runtimes } = await client.request("runtime.list", {});

@@ -2,7 +2,16 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildTranscript, type ChatState, initialChatState, reduceChat } from "@pier/chat-state";
+import {
+	buildTranscript,
+	ChatController,
+	type ChatState,
+	initialChatState,
+	reduceChat,
+	resolveSlash,
+	runBuiltin,
+	type SlashActions,
+} from "@pier/chat-state";
 import type { PierClient } from "@pier/client";
 import type { SessionSummary, WorkspaceInfo } from "@pier/protocol";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -55,6 +64,47 @@ describe("Codex runtime", () => {
 		await rec.waitForType("session.snapshot");
 		return { rec, state: () => state };
 	}
+
+	it("routes native slash commands to session operations and clears into another Codex session", async () => {
+		const { session } = await client.request("session.create", { workspaceId: workspace.id, runtime: "codex" });
+		const controller = new ChatController(client, session, {
+			onChange() {},
+			onReplaced() {},
+			onSettled() {},
+			onError(message) {
+				throw new Error(message);
+			},
+		});
+		await controller.start();
+		const list = await controller.loadCommands();
+		let created = session;
+		const actions: SlashActions = {
+			newSession: async () => {
+				created = (
+					await client.request("session.create", {
+						workspaceId: workspace.id,
+						runtime: controller.chat.session?.runtime,
+					})
+				).session;
+				return true;
+			},
+			fork: () => false,
+			notify() {},
+		};
+		for (const text of ["/rename Codex native", "/reasoning high", "/clear"]) {
+			const command = resolveSlash(text, list.commands, list.known);
+			expect(command.kind).toBe("builtin");
+			if (command.kind !== "builtin") throw new Error("Expected a native command");
+			expect(await runBuiltin(controller, command.name, command.args, actions)).toEqual({ kind: "done" });
+		}
+		expect(created.id).not.toBe(session.id);
+		expect(created.runtime).toBe("codex");
+		const previous = await client.request("session.snapshot", { sessionId: session.id });
+		expect(previous.session.name).toBe("Codex native");
+		expect(previous.thinkingLevel).toBe("high");
+		expect(previous.messages).toEqual([]);
+		await controller.dispose();
+	});
 
 	it("keeps existing sessions usable across an installation and switches servers after they close", async () => {
 		const { session } = await client.request("session.create", { workspaceId: workspace.id, runtime: "codex" });

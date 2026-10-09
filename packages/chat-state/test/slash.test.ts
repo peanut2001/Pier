@@ -211,6 +211,82 @@ describe("runtime capabilities", () => {
 		// The runtime's own command of a hidden built-in's name stays.
 		const merged = mergeCommands([{ name: "reload", source: "prompt" }], capabilities);
 		expect(merged.find((c) => c.name === "reload")?.source).toBe("prompt");
+		expect(resolveSlash("/reload", merged)).toEqual({ kind: "host", command: "reload" });
+		expect(resolveSlash("/fork", merged)).toEqual({ kind: "unknown", name: "fork" });
+		expect(slashMenu("/fork ", merged)).toBeUndefined();
+	});
+
+	it("offers each agent's own command names before and after loading capabilities", () => {
+		for (const caps of [undefined, capabilities]) {
+			const codex = builtinCommands(caps, "codex");
+			const claude = builtinCommands(caps, "claude-code");
+			expect(codex.map((c) => c.name)).toEqual([
+				"new",
+				"clear",
+				"model",
+				"reasoning",
+				"compact",
+				...(caps ? [] : ["fork"]),
+				"rename",
+			]);
+			expect(claude.map((c) => c.name)).toEqual([
+				"clear",
+				"model",
+				"effort",
+				"compact",
+				...(caps ? [] : ["fork"]),
+				"rename",
+			]);
+			expect(slashMenu("/clear", codex)).toMatchObject({ kind: "commands", items: [{ name: "clear" }] });
+			expect(resolveSlash("/clear", codex)).toEqual({ kind: "builtin", name: "clear", args: "" });
+			expect(resolveSlash("/thinking high", codex)).toEqual({ kind: "unknown", name: "thinking" });
+			expect(slashMenu("/effort ", claude)).toEqual({ kind: "arguments", command: "effort", query: "" });
+		}
+	});
+
+	it("passes agent commands through even when their names are pi built-ins", () => {
+		const claude = mergeCommands(
+			[
+				{ name: "thinking", source: "prompt" },
+				{ name: "new", source: "prompt" },
+				{ name: "rename", source: "prompt" },
+			],
+			capabilities,
+			"claude-code",
+		);
+		expect(resolveSlash("/thinking high", claude)).toEqual({ kind: "host", command: "thinking" });
+		expect(resolveSlash("/new", claude)).toEqual({ kind: "host", command: "new" });
+		expect(resolveSlash("/rename title", claude)).toEqual({ kind: "builtin", name: "rename", args: "title" });
+		expect(slashMenu("/thinking high", claude)).toBeUndefined();
+	});
+
+	it("does not send unlisted native CLI controls as prompts when command discovery fails", () => {
+		for (const runtime of ["claude-code", "codex"]) {
+			const list = builtinCommands(undefined, runtime);
+			expect(resolveSlash("/login", list, false, runtime)).toEqual({ kind: "unknown", name: "login" });
+			expect(resolveSlash("/clear", list, false, runtime)).toEqual({ kind: "builtin", name: "clear", args: "" });
+		}
+		expect(resolveSlash("/legacy-extension", builtinCommands(), false, "pi")).toEqual({
+			kind: "host",
+			command: "legacy-extension",
+		});
+	});
+
+	it("executes native command names and preserves them when completing arguments", async () => {
+		const t = target();
+		const a = actions();
+		expect(await runBuiltin(t, "clear", "", a)).toEqual({ kind: "done" });
+		expect(a.newSession).toHaveBeenCalledOnce();
+		expect(t.compact).not.toHaveBeenCalled();
+		expect(await runBuiltin(t, "rename", "", a)).toEqual({ kind: "complete", text: "/rename " });
+		expect(await runBuiltin(t, "rename", "Native name", a)).toEqual({ kind: "done" });
+		expect(t.rename).toHaveBeenCalledWith("Native name");
+		for (const name of ["effort", "reasoning"]) {
+			expect(await runBuiltin(t, name, "", a)).toEqual({ kind: "complete", text: `/${name} ` });
+			expect(await runBuiltin(t, name, "high", a)).toEqual({ kind: "done" });
+			expect(t.setThinking).toHaveBeenLastCalledWith("high");
+			expect(await loadArgumentOptions(t, name)).toEqual(await loadArgumentOptions(t, "thinking"));
+		}
 	});
 
 	it("names agent runtimes", () => {

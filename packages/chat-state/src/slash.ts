@@ -59,10 +59,14 @@ export const BUILTIN_COMMANDS: readonly SlashCommand[] = [
 	},
 ];
 
-const BUILTIN_NAMES = new Set(BUILTIN_COMMANDS.map((c) => c.name));
-
 /** Built-in commands whose argument is picked from a list. */
-export const ARGUMENT_COMMANDS: ReadonlySet<string> = new Set(["model", "thinking", "fork"]);
+export const ARGUMENT_COMMANDS: ReadonlySet<string> = new Set(["model", "thinking", "reasoning", "effort", "fork"]);
+
+/** Use each agent's command names for the operations Pier implements. */
+const RUNTIME_COMMAND_NAMES: Record<string, Partial<Record<string, string>>> = {
+	"claude-code": { new: "clear", thinking: "effort", name: "rename" },
+	codex: { thinking: "reasoning", name: "rename" },
+};
 
 /** Built-in commands that need a runtime capability (see `AgentRuntimeCapabilities`). */
 const BUILTIN_CAPABILITY: Partial<Record<string, keyof AgentRuntimeCapabilities>> = {
@@ -75,11 +79,26 @@ const BUILTIN_CAPABILITY: Partial<Record<string, keyof AgentRuntimeCapabilities>
 };
 
 /** The built-in commands a session supports (all of them without `capabilities`, as for pi). */
-export function builtinCommands(capabilities?: AgentRuntimeCapabilities): SlashCommand[] {
-	return BUILTIN_COMMANDS.filter((command) => {
+export function builtinCommands(capabilities?: AgentRuntimeCapabilities, runtime?: AgentRuntimeId): SlashCommand[] {
+	const names = runtime ? RUNTIME_COMMAND_NAMES[runtime] : undefined;
+	const commands = BUILTIN_COMMANDS.filter((command) => {
+		// These runtimes cannot reload pi resources, including before the first snapshot.
+		if (names && command.name === "reload") return false;
 		const needs = BUILTIN_CAPABILITY[command.name];
 		return !needs || !capabilities || capabilities[needs];
+	}).map((command) => {
+		const name = names?.[command.name];
+		return name ? { ...command, name } : command;
 	});
+	if (runtime === "codex") {
+		commands.splice(1, 0, {
+			name: "clear",
+			description: "新建会话，清空当前上下文",
+			source: "builtin",
+			immediate: true,
+		});
+	}
+	return commands;
 }
 
 /** Display name of an agent runtime. */
@@ -104,8 +123,9 @@ export function agentRuntimeLabel(id: AgentRuntimeId | undefined): string {
 export function mergeCommands(
 	host: readonly SessionCommandInfo[],
 	capabilities?: AgentRuntimeCapabilities,
+	runtime?: AgentRuntimeId,
 ): SlashCommand[] {
-	const builtins = builtinCommands(capabilities);
+	const builtins = builtinCommands(capabilities, runtime);
 	const seen = new Set(builtins.map((c) => c.name));
 	const merged: SlashCommand[] = [...builtins];
 	for (const command of host) {
@@ -167,7 +187,11 @@ export function slashMenu(text: string, commands: readonly SlashCommand[]): Slas
 	const name = /^\/([^\s/]*)$/.exec(text);
 	if (name) return { kind: "commands", query: name[1] as string, items: filterCommands(commands, name[1] as string) };
 	const args = /^\/(\S+)\s([\s\S]*)$/.exec(text);
-	if (args && ARGUMENT_COMMANDS.has(args[1] as string)) {
+	if (
+		args &&
+		ARGUMENT_COMMANDS.has(args[1] as string) &&
+		commands.some((command) => command.name === args[1] && command.source === "builtin")
+	) {
 		return { kind: "arguments", command: args[1] as string, query: (args[2] as string).trimStart() };
 	}
 	return undefined;
@@ -211,7 +235,9 @@ export async function loadArgumentOptions(target: SlashTarget, command: string):
 				selected: current?.provider === model.provider && current.id === model.id,
 			}));
 		}
-		case "thinking": {
+		case "thinking":
+		case "reasoning":
+		case "effort": {
 			// Offer only what the current model supports (every level while it is unknown).
 			const model = target.chat.model;
 			const levels = model ? supportedThinkingLevels(model) : (Object.keys(THINKING_LEVEL_LABELS) as ThinkingLevel[]);
@@ -268,13 +294,20 @@ export type SlashResolution =
 
 /**
  * Classify composer text. `known` is false when the host could not list its commands
- * (an older host): unknown commands are then passed to the agent unchanged.
+ * (an older host): unknown pi commands are then passed to the agent unchanged.
+ * Native agents require a listed command so CLI-only controls never become ordinary prompts.
  */
-export function resolveSlash(text: string, commands: readonly SlashCommand[], known = true): SlashResolution {
+export function resolveSlash(
+	text: string,
+	commands: readonly SlashCommand[],
+	known = true,
+	runtime?: AgentRuntimeId,
+): SlashResolution {
 	const parsed = parseSlash(text);
 	if (!parsed) return { kind: "message" };
-	if (BUILTIN_NAMES.has(parsed.name)) return { kind: "builtin", ...parsed };
-	if (!known || commands.some((c) => c.name === parsed.name)) return { kind: "host", command: parsed.name };
+	const command = commands.find((c) => c.name === parsed.name);
+	if (command?.source === "builtin") return { kind: "builtin", ...parsed };
+	if (command || (!known && (!runtime || runtime === "pi"))) return { kind: "host", command: parsed.name };
 	return { kind: "unknown", name: parsed.name };
 }
 
@@ -300,6 +333,7 @@ export async function runBuiltin(
 ): Promise<SlashResult> {
 	switch (name) {
 		case "new":
+		case "clear":
 			return (await actions.newSession()) ? DONE : FAILED;
 		case "model": {
 			if (!args) return { kind: "complete", text: "/model " };
@@ -317,8 +351,10 @@ export async function runBuiltin(
 			}
 			return (await target.setModel(model.provider, model.id)) === undefined ? FAILED : DONE;
 		}
-		case "thinking": {
-			if (!args) return { kind: "complete", text: "/thinking " };
+		case "thinking":
+		case "reasoning":
+		case "effort": {
+			if (!args) return { kind: "complete", text: `/${name} ` };
 			const level = args.toLowerCase();
 			if (!Object.hasOwn(THINKING_LEVEL_LABELS, level)) {
 				actions.notify("error", `未知的思考等级 ${args}，可选：${Object.keys(THINKING_LEVEL_LABELS).join("、")}`);
@@ -351,9 +387,10 @@ export async function runBuiltin(
 			return (await actions.fork(args)) ? DONE : FAILED;
 		}
 		case "name":
+		case "rename":
 			if (!args) {
-				actions.notify("warning", "用法：/name <名称>");
-				return { kind: "complete", text: "/name " };
+				actions.notify("warning", `用法：/${name} <名称>`);
+				return { kind: "complete", text: `/${name} ` };
 			}
 			return (await target.rename(args.slice(0, 200))) === undefined ? FAILED : DONE;
 		case "reload":

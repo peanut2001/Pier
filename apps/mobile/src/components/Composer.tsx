@@ -50,7 +50,7 @@ export function Composer({
 		return true;
 	};
 	const actions: SlashActions = {
-		newSession: async () => openSession(await store.createSession(chat.workspaceId)),
+		newSession: async () => openSession(await store.createSession(chat.workspaceId, chat.chat.session?.runtime)),
 		fork: async (entryId) => openSession(await store.forkSession(chat.sessionId, entryId)),
 		notify: (level, message) => store.toast(level === "error" ? "error" : "info", message),
 	};
@@ -77,10 +77,10 @@ export function Composer({
 	const send = async (mode: "auto" | "steer" | "followUp", override?: string) => {
 		const body = (override ?? text).trim();
 		if (sending || (!body && !images.length)) return;
-		let resolution = resolveSlash(body, menu.list.commands, menu.list.known);
+		let resolution = resolveSlash(body, menu.list.commands, menu.list.known, chat.chat.session?.runtime);
 		if (resolution.kind === "unknown" || (resolution.kind === "host" && !menu.list.known)) {
 			const fresh = await chat.loadCommands();
-			resolution = resolveSlash(body, fresh.commands, fresh.known);
+			resolution = resolveSlash(body, fresh.commands, fresh.known, chat.chat.session?.runtime);
 		}
 		if (resolution.kind === "unknown") {
 			store.toast("error", `未知命令 /${resolution.name}，输入 / 查看可用的命令`);

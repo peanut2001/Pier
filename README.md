@@ -54,6 +54,8 @@ bun run test       # Vitest：单元测试 + 基于 faux 模型的端到端测�
 
 CLI 不在 `PATH` 中时，可以用 `PIER_CLAUDE_PATH` / `PIER_CODEX_PATH` 指定路径。工作区的审批策略同样适用于它们：Claude Code 请求许可、Codex 请求审批时，Pier 按策略放行或在桌面端和手机端询问你；Codex 的沙箱按策略设置（「询问」「智能」为工作区可写沙箱，「自动」不使用沙箱）。它们的会话显示在侧边栏中（带「Claude Code」「Codex」标记），也包括在终端里创建的会话。pi 的扩展、技能与 `settings.json` 只作用于 pi 会话。协议上的细节见 [docs/protocol.md](docs/protocol.md) 的「Agent 运行时」一节。
 
+**斜杠命令**：在桌面端或手机端输入 `/`，菜单按当前会话的 Agent 和支持的操作生成。pi 使用 `/new`、`/thinking`、`/name`、`/reload`；Claude Code 使用 `/clear`、`/effort`、`/rename`；Codex 使用 `/new`、`/clear`、`/reasoning`、`/rename`。三个 Agent 都提供支持的 `/model`、`/compact` 和 `/fork`。`/clear` 新建同一个 Agent 的会话，上一个会话保留在列表中。Claude Code SDK 返回的自定义命令会合并到菜单并交给 Claude Code 执行；菜单只展示 Pier 已接入的操作和运行时提供的命令，终端 CLI 专用的界面命令不会作为普通提示词发送给模型。
+
 **可视化配置**：「设置 → Agent 配置」中的「Claude Code」与「Codex」标签页直接编辑它们自己的配置文件（与终端中的 CLI 共用），可以选择全局设置或某个工作区的设置，表单中标出每一项的当前值、继承或默认值，也可以切换到 JSON / TOML 直接编辑整个文件：
 
 - **Claude Code**：`~/.claude/settings.json`、工作区的 `.claude/settings.json`（项目）与 `.claude/settings.local.json`（本地）。包括接口与认证（`ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_API_KEY`，便于使用中转接口）、默认模型与别名对应的模型、思考程度、权限规则（允许 / 询问 / 禁止）、沙箱、MCP 与 Hooks 开关、隐私与自动更新，以及其他环境变量。
