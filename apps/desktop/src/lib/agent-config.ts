@@ -338,6 +338,8 @@ const CODEX_EFFORT = [
 	{ value: "medium", label: "medium" },
 	{ value: "high", label: "high" },
 	{ value: "xhigh", label: "xhigh" },
+	{ value: "max", label: "max" },
+	{ value: "ultra", label: "ultra" },
 ];
 
 export const CODEX_GROUPS: GroupDef[] = [
@@ -369,7 +371,7 @@ export const CODEX_GROUPS: GroupDef[] = [
 			{
 				path: ["model_reasoning_effort"],
 				label: "默认思考程度",
-				description: "推理模型的思考程度；none 与 xhigh 只有部分模型支持。",
+				description: "推理模型的思考程度；可用档位取决于模型，max 与 ultra 需要模型支持。",
 				kind: { type: "enum", options: CODEX_EFFORT, default: "medium" },
 			},
 			{

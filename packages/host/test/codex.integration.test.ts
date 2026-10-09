@@ -65,6 +65,28 @@ describe("Codex runtime", () => {
 		return { rec, state: () => state };
 	}
 
+	it("preserves Ultra in the model catalog and sends it as the native turn effort", async () => {
+		const models = await client.request("model.list", { workspaceId: workspace.id, runtime: "codex" });
+		expect(models.models.find((m) => m.id === "gpt-test")?.thinkingLevels).toEqual([
+			"low",
+			"medium",
+			"high",
+			"max",
+			"ultra",
+		]);
+		expect(models.models.find((m) => m.id === "gpt-mini")?.thinkingLevels).not.toContain("ultra");
+		const { session } = await client.request("session.create", { workspaceId: workspace.id, runtime: "codex" });
+		const { rec } = await open(session);
+		expect(await client.request("thinking.set", { sessionId: session.id, level: "ultra" })).toEqual({ level: "ultra" });
+		await client.request("session.prompt", { sessionId: session.id, text: "hello at Ultra" });
+		await rec.waitForType("agent_settled");
+		const last = await runtime().server().request<Record<string, unknown>>("fake/lastTurn", { threadId: session.id });
+		expect(last).toMatchObject({ effort: "ultra" });
+		expect((await client.request("session.snapshot", { sessionId: session.id })).thinkingLevel).toBe("ultra");
+		await client.request("model.set", { sessionId: session.id, provider: "codex", modelId: "gpt-mini" });
+		expect(await client.request("thinking.set", { sessionId: session.id, level: "ultra" })).toEqual({ level: "low" });
+	});
+
 	it("routes native slash commands to session operations and clears into another Codex session", async () => {
 		const { session } = await client.request("session.create", { workspaceId: workspace.id, runtime: "codex" });
 		const controller = new ChatController(client, session, {

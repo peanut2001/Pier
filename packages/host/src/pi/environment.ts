@@ -212,7 +212,10 @@ export class PiEnvironment {
 			settings.getModelThinkingLevel(model.provider, model.id) ??
 			settings.getDefaultThinkingLevel() ??
 			DEFAULT_THINKING_LEVEL;
-		return { model: toModelInfo(model), thinkingLevel: clampThinkingLevel(model, level) as ThinkingLevel };
+		return {
+			model: toModelInfo(model),
+			thinkingLevel: clampThinkingLevel(model, level === "ultra" ? "max" : level) as ThinkingLevel,
+		};
 	}
 }
 

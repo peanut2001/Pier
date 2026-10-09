@@ -106,7 +106,7 @@ function ThinkingPanel({
 	};
 
 	return (
-		<div className="thinking-panel">
+		<div className="thinking-panel" data-level={levels[index] ?? value}>
 			<div className="thinking-panel-head">
 				<span className="thinking-panel-title">
 					<IconBrain size={14} />
@@ -118,6 +118,7 @@ function ThinkingPanel({
 			</div>
 			<div
 				className={`thinking-slider${drag !== undefined ? " dragging" : ""}`}
+				data-level={levels[index] ?? value}
 				role="slider"
 				tabIndex={0}
 				aria-label="思考程度"
@@ -132,7 +133,10 @@ function ThinkingPanel({
 				onKeyDown={onKeyDown}
 			>
 				<div ref={rail} className="thinking-slider-rail">
-					<div className="thinking-slider-fill" style={{ width: `calc(${percent}% + 24px)` }} />
+					<div className="thinking-slider-fill" style={{ width: `calc(${percent}% + 24px)` }}>
+						<span className="thinking-slider-stars" aria-hidden="true" />
+						<span className="thinking-slider-stars secondary" aria-hidden="true" />
+					</div>
 					{levels.map((level, i) => (
 						<span
 							key={level}

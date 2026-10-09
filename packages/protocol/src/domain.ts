@@ -4,7 +4,7 @@ import { z } from "zod";
 export const ApprovalPolicySchema = z.enum(["ask", "smart", "auto"]);
 export type ApprovalPolicy = z.infer<typeof ApprovalPolicySchema>;
 
-export const ThinkingLevelSchema = z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+export const ThinkingLevelSchema = z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]);
 export type ThinkingLevel = z.infer<typeof ThinkingLevelSchema>;
 
 export const StreamingBehaviorSchema = z.enum(["steer", "followUp"]);

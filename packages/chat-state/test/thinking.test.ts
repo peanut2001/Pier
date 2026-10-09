@@ -30,11 +30,21 @@ describe("thinking levels", () => {
 		expect(clampThinking("high", levels)).toBe("high");
 		expect(clampThinking("off", levels)).toBe("low");
 		expect(clampThinking("max", ["off", "low"])).toBe("low");
+		expect(clampThinking("ultra", levels)).toBe("max");
 		expect(clampThinking("weird", levels)).toBe("low");
+	});
+
+	it("offers Ultra only when the model explicitly supports it", () => {
+		const model: ModelInfo = { ...opus, provider: "codex", thinkingLevels: ["ultra", "high", "max", "low"] };
+		expect(supportedThinkingLevels(model)).toEqual(["low", "high", "max", "ultra"]);
+		expect(clampThinking("ultra", supportedThinkingLevels(model))).toBe("ultra");
+		expect(supportedThinkingLevels(opus)).not.toContain("ultra");
+		expect(supportedThinkingLevels({ ...model, thinkingLevels: undefined })).not.toContain("ultra");
 	});
 
 	it("displays the original thinking level", () => {
 		expect(thinkingLabel("xhigh")).toBe("xhigh");
+		expect(thinkingLabel("ultra")).toBe("ultra");
 		expect(thinkingLabel("custom")).toBe("custom");
 	});
 

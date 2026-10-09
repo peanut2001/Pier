@@ -103,6 +103,7 @@ describe("Codex conversions", () => {
 				model: "gpt-x",
 				displayName: "GPT X",
 				supportedReasoningEfforts: [
+					{ reasoningEffort: "future-effort" },
 					{ reasoningEffort: "low" },
 					{ reasoningEffort: "high" },
 					{ reasoningEffort: "ultra" },
@@ -115,7 +116,7 @@ describe("Codex conversions", () => {
 			name: "GPT X",
 			reasoning: true,
 			input: ["text", "image"],
-			thinkingLevels: ["low", "high"],
+			thinkingLevels: ["low", "high", "ultra"],
 		});
 	});
 

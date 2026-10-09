@@ -36,6 +36,7 @@ export const THINKING_LEVEL_LABELS: Record<ThinkingLevel, string> = {
 	high: "high",
 	xhigh: "xhigh",
 	max: "max",
+	ultra: "ultra",
 };
 
 export const BUILTIN_COMMANDS: readonly SlashCommand[] = [
@@ -238,9 +239,11 @@ export async function loadArgumentOptions(target: SlashTarget, command: string):
 		case "thinking":
 		case "reasoning":
 		case "effort": {
-			// Offer only what the current model supports (every level while it is unknown).
+			// Ultra needs an explicit capability; older catalogs offer only the legacy levels.
 			const model = target.chat.model;
-			const levels = model ? supportedThinkingLevels(model) : (Object.keys(THINKING_LEVEL_LABELS) as ThinkingLevel[]);
+			const levels = model
+				? supportedThinkingLevels(model)
+				: (Object.keys(THINKING_LEVEL_LABELS) as ThinkingLevel[]).filter((level) => level !== "ultra");
 			const current = clampThinking(target.chat.thinkingLevel, levels);
 			return levels.map((level) => ({
 				value: level,
