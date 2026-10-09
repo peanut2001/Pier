@@ -6,6 +6,7 @@ import { POLICY_DESCRIPTION, POLICY_LABEL, relativeTime, sessionTitle } from "..
 import {
 	type ComputerInfo,
 	LOCAL_NODE,
+	type PierStore,
 	useAppState,
 	useCanArchiveSessions,
 	useCanManageWorkspace,
@@ -170,11 +171,9 @@ function AddWorkspaceButton() {
 function SessionBadge({ session }: { session: SessionSummary }) {
 	const store = useStore();
 	useAppState((s) => s.chatsVersion);
-	const live = store.liveChat(session.id)?.chat;
-	const pending = live?.pendingUi.length ?? 0;
-	const state = live?.loaded ? live.runState : session.state;
+	const { running, pending } = sessionActivity(store, session);
 	if (pending) return <span className="badge-dot attention" title={`${pending} 个待处理请求`} />;
-	if (isRunning(state)) {
+	if (running) {
 		return <span className="badge-dot running" title="运行中" />;
 	}
 	return null;
@@ -182,6 +181,82 @@ function SessionBadge({ session }: { session: SessionSummary }) {
 
 function isRunning(state: SessionSummary["state"]): boolean {
 	return state === "streaming" || state === "retrying" || state === "compacting";
+}
+
+function sessionActivity(store: PierStore, session: SessionSummary) {
+	const live = store.liveChat(session.id)?.chat;
+	const state = live?.loaded ? live.runState : session.state;
+	const pending = live?.loaded ? live.pendingUi.length : (session.pendingUi ?? 0);
+	const running = isRunning(state);
+	return { running, pending, active: running || pending > 0 };
+}
+
+function RunningAgents() {
+	const store = useStore();
+	const workspaces = useAppState((s) => s.workspaces);
+	const sessions = useAppState((s) => s.sessions);
+	const nodes = useAppState((s) => s.nodes);
+	const workspaceNodes = useAppState((s) => s.workspaceNodes);
+	const selectedSessionId = useAppState((s) => s.selectedSessionId);
+	useAppState((s) => s.chatsVersion);
+	const [expanded, setExpanded] = useState(true);
+	const agents = workspaces.flatMap((workspace) => {
+		const node = workspaceNodes[workspace.id] ?? LOCAL_NODE;
+		if (nodes[node]?.connection !== "open") return [];
+		return (sessions[workspace.id] ?? []).flatMap((session) => {
+			const activity = sessionActivity(store, session);
+			return activity.active ? [{ session, workspace, node, pending: activity.pending }] : [];
+		});
+	});
+	if (!workspaces.length) return null;
+	return (
+		<section className="running-agents" aria-label="运行中的 Agent">
+			<button
+				type="button"
+				className={`running-agents-toggle${expanded ? " open" : ""}`}
+				onClick={() => setExpanded(!expanded)}
+				aria-expanded={expanded}
+				aria-controls="running-agent-list"
+			>
+				<IconChevronRight size={13} className="running-agents-chevron" />
+				<span className="running-agents-label">运行中的 Agent</span>
+				<span className={`running-count${agents.length ? "" : " idle"}`}>
+					{agents.length ? <span className="badge-dot running" aria-hidden="true" /> : null}
+					{agents.length}
+				</span>
+			</button>
+			<div id="running-agent-list" className="running-agent-list" hidden={!expanded}>
+				{agents.length ? (
+					agents.map(({ session, workspace, node, pending }) => {
+						const runtime = session.runtime ?? DEFAULT_AGENT_RUNTIME;
+						const location = node === LOCAL_NODE ? workspace.name : `${workspace.name} · ${store.nodeName(node)}`;
+						return (
+							<button
+								type="button"
+								key={session.id}
+								className={`running-agent-row${session.id === selectedSessionId ? " selected" : ""}`}
+								onClick={() => store.selectSession(session)}
+								title={`${sessionTitle(session)} · ${location}${pending ? ` · ${pending} 个待处理请求` : ""}`}
+							>
+								<span className="running-agent-text">
+									<span className="running-agent-title">{sessionTitle(session)}</span>
+									<span className="running-agent-location">{location}</span>
+								</span>
+								<span className="running-agent-meta">
+									<span className={`session-agent agent-${runtime}`}>{agentRuntimeLabel(runtime)}</span>
+									<span className={`running-agent-status${pending ? " attention" : ""}`}>
+										{pending ? "待处理" : "运行中"}
+									</span>
+								</span>
+							</button>
+						);
+					})
+				) : (
+					<div className="session-empty">暂无运行中的 Agent</div>
+				)}
+			</div>
+		</section>
+	);
 }
 
 function SessionItem({
@@ -197,8 +272,7 @@ function SessionItem({
 	useAppState((s) => s.chatsVersion);
 	const [confirm, setConfirm] = useState(false);
 	const [busy, setBusy] = useState(false);
-	const live = store.liveChat(session.id)?.chat;
-	const running = isRunning(live?.loaded ? live.runState : session.state);
+	const running = sessionActivity(store, session).active;
 	const archived = !!session.archived;
 	const runtime = session.runtime ?? DEFAULT_AGENT_RUNTIME;
 	return (
@@ -273,6 +347,8 @@ function WorkspaceGroup({ workspace, onSettings }: { workspace: WorkspaceInfo; o
 	const nodeName = store.nodeName(node);
 	const expanded = useAppState((s) => !!s.expanded[workspace.id]);
 	const sessions = useAppState((s) => s.sessions[workspace.id]);
+	useAppState((s) => s.chatsVersion);
+	const runningCount = online ? (sessions?.filter((session) => sessionActivity(store, session).active).length ?? 0) : 0;
 	const selectedSessionId = useAppState((s) => s.selectedSessionId);
 	const selectedWorkspaceId = useAppState((s) => s.selectedWorkspaceId);
 	const newChat = useAppState((s) => !!s.newChat);
@@ -294,6 +370,8 @@ function WorkspaceGroup({ workspace, onSettings }: { workspace: WorkspaceInfo; o
 					className={`chevron-button${expanded ? " open" : ""}`}
 					onClick={() => store.toggleExpanded(workspace.id)}
 					title={expanded ? "收起" : "展开"}
+					aria-label={`${expanded ? "收起" : "展开"}「${workspace.name}」`}
+					aria-expanded={expanded}
 				>
 					<IconChevronRight size={14} />
 				</button>
@@ -318,24 +396,32 @@ function WorkspaceGroup({ workspace, onSettings }: { workspace: WorkspaceInfo; o
 						</span>
 					)}
 				</button>
-				{canArchive && online && sessions?.length ? (
-					<button type="button" className="ghost icon" title="清理会话…" onClick={() => setCleanup(true)}>
-						<IconBroom size={14} />
-					</button>
+				{runningCount ? (
+					<span className="running-count workspace-running-count" title={`${runningCount} 个 Agent 正在运行或等待处理`}>
+						<span className="badge-dot running" aria-hidden="true" />
+						{runningCount}
+					</span>
 				) : null}
-				{canManage && online ? (
-					<button type="button" className="ghost icon" title="工作区设置" onClick={onSettings}>
-						<IconSettings size={14} />
+				<div className="workspace-actions">
+					{canArchive && online && sessions?.length ? (
+						<button type="button" className="ghost icon" title="清理会话…" onClick={() => setCleanup(true)}>
+							<IconBroom size={14} />
+						</button>
+					) : null}
+					{canManage && online ? (
+						<button type="button" className="ghost icon" title="工作区设置" onClick={onSettings}>
+							<IconSettings size={14} />
+						</button>
+					) : null}
+					<button
+						type="button"
+						className="ghost icon"
+						title={`在「${workspace.name}」中新建会话`}
+						onClick={() => store.startNewChat(workspace.id)}
+					>
+						<IconPlus size={15} />
 					</button>
-				) : null}
-				<button
-					type="button"
-					className="ghost icon"
-					title={`在「${workspace.name}」中新建会话`}
-					onClick={() => store.startNewChat(workspace.id)}
-				>
-					<IconPlus size={15} />
-				</button>
+				</div>
 			</div>
 			{expanded ? (
 				<div className="session-list">
@@ -502,6 +588,7 @@ export function Sidebar({ open = true }: { open?: boolean }) {
 					<span>新建会话</span>
 				</button>
 			</div>
+			<RunningAgents />
 			<div className="sidebar-section-title">
 				<span>工作区</span>
 				{online ? <AddWorkspaceButton /> : null}

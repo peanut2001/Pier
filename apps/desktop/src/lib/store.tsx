@@ -45,6 +45,7 @@ import type {
 	ProviderListResult,
 	RemoteAccessStatus,
 	SessionCleanupResult,
+	SessionRunState,
 	SessionSummary,
 	ThinkingLevel,
 	WorkspaceFileContent,
@@ -1048,8 +1049,24 @@ export class PierStore {
 		if (event.type === "workspace.changed") this.scheduleRefresh(`#workspaces:${node}`);
 		else if (event.type === "session.listChanged") this.scheduleRefresh(String(event.workspaceId));
 		else if (event.type === "session.activity") {
+			const workspaceId = String(event.workspaceId);
+			const sessionId = String(event.sessionId);
+			const state = event.state as SessionRunState;
+			const pendingUi = Number(event.pendingUi) || 0;
+			if (this.state.sessions[workspaceId]?.some((session) => session.id === sessionId)) {
+				this.set((s) => ({
+					sessions: {
+						...s.sessions,
+						[workspaceId]: s.sessions[workspaceId]?.map((session) =>
+							session.id === sessionId ? { ...session, state, pendingUi, active: true } : session,
+						),
+					},
+				}));
+			} else {
+				this.scheduleRefresh(workspaceId);
+			}
 			// A run that ends (or pauses for an answer) has likely written files.
-			if (event.state === "idle" || Number(event.pendingUi) > 0) this.bumpFiles(String(event.workspaceId));
+			if (state === "idle" || pendingUi > 0) this.bumpFiles(workspaceId);
 		} else if (event.type === "update.status") {
 			if (node !== LOCAL_NODE) this.onPeerUpdateStatus(node, event.status as AppUpdateStatus);
 		} else if (event.type === "host.notice") {
@@ -1140,7 +1157,7 @@ export class PierStore {
 		if (Object.keys(patch).length) this.set(patch);
 	}
 
-	/** Load a computer's workspaces (the one on screen by default) and their open session lists. */
+	/** Load a computer's workspaces and sessions, including collapsed groups' running agents. */
 	async loadWorkspaces(node = this.state.node): Promise<void> {
 		const client = this.clients.get(node);
 		if (!client) return;
@@ -1150,8 +1167,7 @@ export class PierStore {
 			this.patchNode(node, { workspaces, workspacesLoaded: true });
 			if (node !== LOCAL_NODE) this.saveNodeCache();
 			this.fixSelection();
-			const expanded = this.state.expanded;
-			await Promise.all(workspaces.filter((w) => expanded[w.id]).map((w) => this.refreshSessions(w.id)));
+			await Promise.all(workspaces.map((w) => this.refreshSessions(w.id)));
 			if (this.clients.get(node) !== client) return;
 			const { selectedSessionId, selectedWorkspaceId, sessions } = this.state;
 			if (selectedSessionId && selectedWorkspaceId && workspaces.some((w) => w.id === selectedWorkspaceId)) {
