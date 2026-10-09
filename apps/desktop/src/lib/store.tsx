@@ -493,6 +493,7 @@ export class PierStore {
 	private yunlianFlow: string | undefined;
 	/** The update version already announced with a toast. */
 	private announcedUpdate: string | undefined;
+	private updateRequest = 0;
 	/** Mounted composers, by session, that accept text inserted from elsewhere (the file panel). */
 	private readonly composerInserts = new Map<string, (path: string, directory: boolean) => void>();
 	/** Mounted views sampling the shown computer (`summary`) or every computer (`detail`). */
@@ -2728,13 +2729,24 @@ export class PierStore {
 	}
 
 	async checkForUpdates(): Promise<UpdateStatus> {
+		const request = ++this.updateRequest;
 		try {
 			const status = await this.bridge.updates.check();
-			this.set({ update: status });
-			return status;
+			if (request === this.updateRequest) this.set({ update: status });
+			return this.state.update;
 		} catch (error) {
 			this.toast("error", `检查更新失败：${errorText(error)}`);
 			return this.state.update;
+		}
+	}
+
+	async cancelUpdateCheck(): Promise<void> {
+		const request = ++this.updateRequest;
+		try {
+			const status = await this.bridge.updates.cancelCheck();
+			if (request === this.updateRequest) this.set({ update: status });
+		} catch (error) {
+			this.toast("error", `取消检查失败：${errorText(error)}`);
 		}
 	}
 
@@ -2748,16 +2760,21 @@ export class PierStore {
 	}
 
 	async setUpdateAutoCheck(enabled: boolean): Promise<void> {
+		const request = ++this.updateRequest;
 		try {
-			this.set({ update: await this.bridge.updates.setAutoCheck(enabled) });
+			const status = await this.bridge.updates.setAutoCheck(enabled);
+			if (request === this.updateRequest) this.set({ update: status });
 		} catch (error) {
 			this.toast("error", `保存更新设置失败：${errorText(error)}`);
 		}
 	}
 
 	async setUpdateMirror(prefix: string): Promise<boolean> {
+		const request = ++this.updateRequest;
 		try {
-			this.set({ update: await this.bridge.updates.setMirror(prefix) });
+			const status = await this.bridge.updates.setMirror(prefix);
+			if (request !== this.updateRequest) return true;
+			this.set({ update: status });
 			void this.checkForUpdates();
 			return true;
 		} catch (error) {

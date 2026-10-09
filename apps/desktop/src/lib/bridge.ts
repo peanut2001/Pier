@@ -126,6 +126,7 @@ export interface UpdateBridge {
 	/** The tray menu asks for the update dialog. */
 	onOpen(listener: () => void): () => void;
 	check(): Promise<UpdateStatus>;
+	cancelCheck(): Promise<UpdateStatus>;
 	/** Download, install, and relaunch. Rejects with the reason when it fails. */
 	install(): Promise<void>;
 	setAutoCheck(enabled: boolean): Promise<UpdateStatus>;
@@ -189,6 +190,7 @@ function tauriBridge(): Bridge {
 			onStatus: (listener) => listen<UpdateStatus>("pier://update-status", listener),
 			onOpen: (listener) => listen<null>("pier://update-open", () => listener()),
 			check: async () => (await core).invoke<UpdateStatus>("update_check"),
+			cancelCheck: async () => (await core).invoke<UpdateStatus>("update_cancel_check"),
 			install: async () => (await core).invoke("update_install"),
 			setAutoCheck: async (enabled) => (await core).invoke<UpdateStatus>("update_set_auto_check", { enabled }),
 			setMirror: async (prefix) => (await core).invoke<UpdateStatus>("update_set_mirror", { prefix }),
@@ -332,6 +334,7 @@ const unsupportedUpdates: UpdateBridge = {
 	onStatus: () => () => {},
 	onOpen: () => () => {},
 	check: async () => unsupported,
+	cancelCheck: async () => unsupported,
 	install: async () => {
 		throw new Error("浏览器模式不支持自动更新");
 	},
@@ -349,6 +352,12 @@ function demoUpdates(): UpdateBridge {
 		return status;
 	};
 	const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+	let checkId = 0;
+	let previousState: UpdateState = "idle";
+	const cancelCheck = () => {
+		checkId++;
+		return status.state === "checking" ? set({ state: previousState }) : status;
+	};
 	return {
 		status: async () => status,
 		onStatus: (listener) => {
@@ -357,8 +366,12 @@ function demoUpdates(): UpdateBridge {
 		},
 		onOpen: () => () => {},
 		check: async () => {
+			if (status.state === "checking" || status.state === "downloading" || status.state === "installing") return status;
+			const id = ++checkId;
+			previousState = status.state;
 			set({ state: "checking" });
 			await sleep(800);
+			if (id !== checkId) return status;
 			return set({
 				state: "available",
 				version: "9.9.9",
@@ -369,6 +382,7 @@ function demoUpdates(): UpdateBridge {
 				lastChecked: Date.now(),
 			});
 		},
+		cancelCheck: async () => cancelCheck(),
 		install: async () => {
 			const total = 48 * 1024 * 1024;
 			for (let downloaded = 0; downloaded <= total; downloaded += total / 20) {
@@ -381,8 +395,15 @@ function demoUpdates(): UpdateBridge {
 			set({ state: "error", error });
 			throw new Error(error);
 		},
-		setAutoCheck: async (enabled) => set({ autoCheck: enabled }),
-		setMirror: async (prefix) => set({ mirrorPrefix: normalizeUpdateMirror(prefix) }),
+		setAutoCheck: async (enabled) => {
+			if (!enabled) cancelCheck();
+			return set({ autoCheck: enabled });
+		},
+		setMirror: async (prefix) => {
+			const mirrorPrefix = normalizeUpdateMirror(prefix);
+			cancelCheck();
+			return set({ mirrorPrefix });
+		},
 	};
 }
 

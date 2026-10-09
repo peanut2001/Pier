@@ -94,20 +94,32 @@ function unsupportedReason(): string | undefined {
 	return undefined;
 }
 
-async function fetchManifest(mirrorPrefix: string): Promise<AndroidUpdate> {
-	const controller = new AbortController();
-	const timer = setTimeout(() => controller.abort(), CHECK_TIMEOUT_MS);
+async function fetchManifest(mirrorPrefix: string, controller: AbortController): Promise<AndroidUpdate> {
+	if (controller.signal.aborted) throw new Error("检查已取消");
+	let stop!: (error: Error) => void;
+	const stopped = new Promise<never>((_, reject) => {
+		stop = reject;
+	});
+	const onAbort = () => stop(new Error("检查已取消"));
+	controller.signal.addEventListener("abort", onAbort, { once: true });
+	const timer = setTimeout(() => {
+		// Reject our wait even if the native fetch ignores abort or the response body stalls.
+		stop(new Error("连接超时，请切换更新线路后重试"));
+		controller.abort();
+	}, CHECK_TIMEOUT_MS);
 	try {
-		const response = await fetch(updateDownloadUrl(ANDROID_UPDATE_MANIFEST_URL, mirrorPrefix), {
-			headers: { Accept: "application/json", "Cache-Control": "no-cache" },
-			signal: controller.signal,
-		});
-		if (!response.ok) throw new Error(`HTTP ${response.status}`);
-		return parseAndroidUpdate(await response.json());
-	} catch (error) {
-		throw new Error(isAbort(error) ? "连接超时" : errorText(error));
+		const request = async () => {
+			const response = await fetch(updateDownloadUrl(ANDROID_UPDATE_MANIFEST_URL, mirrorPrefix), {
+				headers: { Accept: "application/json", "Cache-Control": "no-cache" },
+				signal: controller.signal,
+			});
+			if (!response.ok) throw new Error(`HTTP ${response.status}`);
+			return parseAndroidUpdate(await response.json());
+		};
+		return await Promise.race([request(), stopped]);
 	} finally {
 		clearTimeout(timer);
+		controller.signal.removeEventListener("abort", onAbort);
 	}
 }
 
@@ -116,6 +128,7 @@ export class MobileUpdater {
 	private readonly listeners = new Set<() => void>();
 	private initialized = false;
 	private download: AbortController | undefined;
+	private checking: { controller: AbortController; previous: UpdateStatus } | undefined;
 	private savingMirror = false;
 	/** Earliest time (ms) of the next automatic check; 0 until the first one is scheduled. */
 	private nextAutoCheck = 0;
@@ -167,7 +180,9 @@ export class MobileUpdater {
 		this.removeDownloads((version) => compareVersions(version, APP_VERSION) <= 0);
 		if (settings.autoCheck) {
 			this.nextAutoCheck = Date.now() + FIRST_CHECK_DELAY_MS;
-			setTimeout(() => void this.check(true), FIRST_CHECK_DELAY_MS);
+			setTimeout(() => {
+				if (this.status.autoCheck) void this.check(true);
+			}, FIRST_CHECK_DELAY_MS);
 		}
 	}
 
@@ -182,10 +197,13 @@ export class MobileUpdater {
 	async check(auto = false): Promise<void> {
 		if (!this.supported || this.busy) return;
 		const previous = this.status;
+		const request = { controller: new AbortController(), previous };
+		this.checking = request;
 		this.set({ state: "checking", error: undefined });
 		this.nextAutoCheck = Date.now() + CHECK_INTERVAL_MS;
 		try {
-			const update = await fetchManifest(this.status.mirrorPrefix);
+			const update = await fetchManifest(this.status.mirrorPrefix, request.controller);
+			if (this.checking !== request) return;
 			const lastChecked = Date.now();
 			if (compareVersions(update.version, APP_VERSION) <= 0) {
 				this.set({ state: "upToDate", update: undefined, downloaded: 0, total: undefined, lastChecked });
@@ -196,13 +214,26 @@ export class MobileUpdater {
 			this.set({ state: ready ? "ready" : "available", update, downloaded: 0, total: undefined, lastChecked });
 			this.removeDownloads((version) => version !== update.version);
 		} catch (error) {
+			if (this.checking !== request) return;
 			this.nextAutoCheck = Date.now() + RETRY_INTERVAL_MS;
 			if (auto && previous.update) {
 				this.set({ state: previous.state === "ready" ? "ready" : "available" });
 				return;
 			}
 			this.set({ state: "error", error: `检查更新失败：${errorText(error)}` });
+		} finally {
+			if (this.checking === request) this.checking = undefined;
 		}
+	}
+
+	/** Stop waiting immediately; late results from this request cannot change the current state. */
+	cancelCheck(): void {
+		const request = this.checking;
+		if (!request) return;
+		this.checking = undefined;
+		request.controller.abort();
+		const { state, update, error, downloaded, total } = request.previous;
+		this.set({ state, update, error, downloaded, total });
 	}
 
 	/** Download (unless already downloaded) and verify the update, then open the system installer. */
@@ -232,6 +263,7 @@ export class MobileUpdater {
 
 	async setAutoCheck(enabled: boolean): Promise<void> {
 		this.set({ autoCheck: enabled });
+		if (!enabled) this.cancelCheck();
 		await this.saveSettings();
 		if (enabled && this.supported && (this.status.state === "idle" || this.status.state === "error")) {
 			void this.check(true);
@@ -239,12 +271,15 @@ export class MobileUpdater {
 	}
 
 	async setMirror(prefix: string): Promise<void> {
-		if (this.busy) throw new Error("请等待当前更新操作结束后再切换线路");
+		if (this.savingMirror || this.status.state === "downloading" || this.status.state === "installing") {
+			throw new Error("请等待当前更新操作结束后再切换线路");
+		}
 		const mirrorPrefix = normalizeUpdateMirror(prefix);
 		this.savingMirror = true;
 		try {
 			const { autoCheck, skippedVersion } = this.status;
 			await setItem(SETTINGS_KEY, JSON.stringify({ autoCheck, skippedVersion, mirrorPrefix }));
+			this.cancelCheck();
 			this.set({ mirrorPrefix });
 		} finally {
 			this.savingMirror = false;

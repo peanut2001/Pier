@@ -100,6 +100,67 @@ struct Inner {
     pending: Option<Update>,
     tray_item: Option<MenuItem<Wry>>,
     next_auto_check: Instant,
+    next_check_id: u64,
+    checking: Option<CheckOperation>,
+}
+
+struct CheckOperation {
+    id: u64,
+    previous_state: UpdateState,
+    abort: Option<tokio::task::AbortHandle>,
+}
+
+impl Inner {
+    fn cancel_check(&mut self) {
+        if let Some(check) = self.checking.take() {
+            if let Some(abort) = check.abort {
+                abort.abort();
+            }
+            self.status.state = check.previous_state;
+        }
+    }
+
+    fn finish_check(&mut self, id: u64, result: Result<Option<Update>, String>) {
+        if self.checking.as_ref().map(|check| check.id) != Some(id) {
+            return;
+        }
+        self.checking = None;
+        let status = &mut self.status;
+        match result {
+            Ok(Some(update)) => {
+                status.state = UpdateState::Available;
+                status.version = Some(update.version.clone());
+                status.notes = update.body.clone().filter(|notes| !notes.trim().is_empty());
+                status.date = update
+                    .raw_json
+                    .get("pub_date")
+                    .and_then(|value| value.as_str())
+                    .map(str::to_string);
+                status.downloaded = 0;
+                status.total = None;
+                status.error = None;
+                status.last_checked = Some(now_ms());
+                self.pending = Some(update);
+            }
+            Ok(None) => {
+                self.pending = None;
+                status.state = UpdateState::UpToDate;
+                status.version = None;
+                status.notes = None;
+                status.date = None;
+                status.error = None;
+                status.last_checked = Some(now_ms());
+            }
+            Err(error) => {
+                self.pending = None;
+                status.state = UpdateState::Error;
+                status.version = None;
+                status.notes = None;
+                status.date = None;
+                status.error = Some(format!("检查更新失败：{error}"));
+            }
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -158,6 +219,8 @@ impl UpdateManager {
                 pending: None,
                 tray_item: None,
                 next_auto_check: Instant::now() + FIRST_CHECK_DELAY,
+                next_check_id: 0,
+                checking: None,
             })),
         }
     }
@@ -223,6 +286,9 @@ impl UpdateManager {
                 },
             )?;
             inner.status.auto_check = enabled;
+            if !enabled {
+                inner.cancel_check();
+            }
         }
         self.update(|_| {});
         Ok(self.status())
@@ -234,7 +300,7 @@ impl UpdateManager {
             let mut inner = self.lock();
             if matches!(
                 inner.status.state,
-                UpdateState::Checking | UpdateState::Downloading | UpdateState::Installing
+                UpdateState::Downloading | UpdateState::Installing
             ) {
                 return Err("请等待当前更新操作结束后再切换线路".into());
             }
@@ -245,15 +311,22 @@ impl UpdateManager {
                     mirror_prefix: prefix.clone(),
                 },
             )?;
+            inner.cancel_check();
             inner.status.mirror_prefix = prefix;
         }
         self.update(|_| {});
         Ok(self.status())
     }
 
+    pub fn cancel_check(&self) -> UpdateStatus {
+        self.lock().cancel_check();
+        self.update(|_| {});
+        self.status()
+    }
+
     /// Check the release manifest. Concurrent checks and checks during an install are no-ops.
     pub async fn check(&self) -> UpdateStatus {
-        {
+        let id = {
             let mut inner = self.lock();
             match inner.status.state {
                 UpdateState::Unsupported
@@ -262,61 +335,48 @@ impl UpdateManager {
                 | UpdateState::Installing => return inner.status.clone(),
                 _ => {}
             }
+            inner.next_check_id = inner.next_check_id.wrapping_add(1);
+            let id = inner.next_check_id;
+            inner.checking = Some(CheckOperation {
+                id,
+                previous_state: inner.status.state,
+                abort: None,
+            });
             inner.status.state = UpdateState::Checking;
             inner.next_auto_check = Instant::now() + CHECK_INTERVAL;
-        }
+            id
+        };
         self.update(|_| {});
 
         let result = match self.updater() {
-            Ok(updater) => updater.check().await.map_err(|e| e.to_string()),
+            Ok(updater) => {
+                let task = tauri::async_runtime::spawn(async move {
+                    // Bound the whole check, including DNS, redirects and the response body.
+                    tokio::time::timeout(CHECK_TIMEOUT, updater.check())
+                        .await
+                        .map_err(|_| "连接超时，请切换更新线路后重试".to_string())?
+                        .map_err(|e| e.to_string())
+                });
+                {
+                    let mut inner = self.lock();
+                    match inner.checking.as_mut() {
+                        Some(check) if check.id == id => {
+                            check.abort = Some(task.inner().abort_handle())
+                        }
+                        _ => {
+                            task.abort();
+                            return inner.status.clone();
+                        }
+                    }
+                }
+                task.await
+                    .map_err(|e| e.to_string())
+                    .and_then(|result| result)
+            }
             Err(error) => Err(error),
         };
-        let checked_at = now_ms();
-        match result {
-            Ok(Some(update)) => {
-                let (version, notes, date) = (
-                    update.version.clone(),
-                    update.body.clone().filter(|notes| !notes.trim().is_empty()),
-                    update
-                        .raw_json
-                        .get("pub_date")
-                        .and_then(|value| value.as_str())
-                        .map(str::to_string),
-                );
-                self.lock().pending = Some(update);
-                self.update(|status| {
-                    status.state = UpdateState::Available;
-                    status.version = Some(version);
-                    status.notes = notes;
-                    status.date = date;
-                    status.downloaded = 0;
-                    status.total = None;
-                    status.error = None;
-                    status.last_checked = Some(checked_at);
-                });
-            }
-            Ok(None) => {
-                self.lock().pending = None;
-                self.update(|status| {
-                    status.state = UpdateState::UpToDate;
-                    status.version = None;
-                    status.notes = None;
-                    status.date = None;
-                    status.error = None;
-                    status.last_checked = Some(checked_at);
-                });
-            }
-            Err(error) => {
-                self.lock().pending = None;
-                self.update(|status| {
-                    status.state = UpdateState::Error;
-                    status.version = None;
-                    status.notes = None;
-                    status.date = None;
-                    status.error = Some(format!("检查更新失败：{error}"));
-                });
-            }
-        }
+        self.lock().finish_check(id, result);
+        self.update(|_| {});
         self.status()
     }
 
@@ -538,6 +598,11 @@ pub async fn update_check(manager: tauri::State<'_, UpdateManager>) -> Result<Up
 }
 
 #[tauri::command]
+pub fn update_cancel_check(manager: tauri::State<'_, UpdateManager>) -> UpdateStatus {
+    manager.cancel_check()
+}
+
+#[tauri::command]
 pub async fn update_install(manager: tauri::State<'_, UpdateManager>) -> Result<(), String> {
     manager.inner().clone().install().await
 }
@@ -561,6 +626,71 @@ pub fn update_set_mirror(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn checking_inner() -> Inner {
+        Inner {
+            status: UpdateStatus {
+                state: UpdateState::Checking,
+                current_version: "1.0.0".into(),
+                auto_check: false,
+                mirror_prefix: "https://mirror.example/".into(),
+                version: Some("1.2.3".into()),
+                notes: Some("known update".into()),
+                date: None,
+                downloaded: 0,
+                total: None,
+                error: None,
+                last_checked: Some(123),
+                install_needs_auth: false,
+            },
+            pending: None,
+            tray_item: None,
+            next_auto_check: Instant::now(),
+            next_check_id: 1,
+            checking: Some(CheckOperation {
+                id: 1,
+                previous_state: UpdateState::Available,
+                abort: None,
+            }),
+        }
+    }
+
+    #[test]
+    fn cancel_restores_known_update_and_aborts_a_stalled_task() {
+        let mut inner = checking_inner();
+        let task = tauri::async_runtime::spawn(std::future::pending::<()>());
+        inner.checking.as_mut().unwrap().abort = Some(task.inner().abort_handle());
+        inner.cancel_check();
+        assert!(tauri::async_runtime::block_on(task).is_err());
+        assert!(inner.checking.is_none());
+        assert_eq!(inner.status.state, UpdateState::Available);
+        assert_eq!(inner.status.version.as_deref(), Some("1.2.3"));
+        assert_eq!(inner.status.mirror_prefix, "https://mirror.example/");
+        assert!(!inner.status.auto_check);
+        inner.cancel_check();
+        assert_eq!(inner.status.state, UpdateState::Available);
+    }
+
+    #[test]
+    fn canceled_check_results_cannot_overwrite_or_retire_a_new_check() {
+        let mut inner = checking_inner();
+        inner.cancel_check();
+        inner.status.state = UpdateState::Checking;
+        inner.checking = Some(CheckOperation {
+            id: 2,
+            previous_state: UpdateState::Available,
+            abort: None,
+        });
+        inner.finish_check(1, Ok(None));
+        inner.finish_check(1, Err("old connection failed".into()));
+        assert_eq!(inner.status.state, UpdateState::Checking);
+        assert_eq!(inner.status.version.as_deref(), Some("1.2.3"));
+        assert_eq!(inner.checking.as_ref().unwrap().id, 2);
+        inner.finish_check(2, Ok(None));
+        assert_eq!(inner.status.state, UpdateState::UpToDate);
+        assert!(inner.checking.is_none());
+        assert!(inner.status.version.is_none());
+    }
 
     #[test]
     fn old_settings_keep_auto_check_and_default_to_github_direct() {

@@ -327,7 +327,7 @@ function UpdateRouteSettings() {
 	const selected = UPDATE_ROUTES.find((route) => route.prefix === current)?.id ?? "custom";
 	const [prefix, setPrefix] = useState(current);
 	const [editing, setEditing] = useState(false);
-	const busy = update.state === "checking" || update.state === "downloading" || update.state === "installing";
+	const busy = update.state === "downloading" || update.state === "installing";
 
 	useEffect(() => setPrefix(current), [current]);
 
@@ -490,8 +490,12 @@ export function UpdateSettings() {
 				<IconDownload size={14} />
 				{confirm ? "仍然更新" : update.state === "error" ? "重试安装" : "更新并重启"}
 			</button>
-		) : working || update.state === "unsupported" ? null : (
-			<button type="button" disabled={update.state === "checking"} onClick={() => void store.checkForUpdates()}>
+		) : working || update.state === "unsupported" ? null : update.state === "checking" ? (
+			<button type="button" onClick={() => void store.cancelUpdateCheck()}>
+				取消检查
+			</button>
+		) : (
+			<button type="button" onClick={() => void store.checkForUpdates()}>
 				{update.state === "error" ? <IconAlert size={14} /> : <IconRefresh size={14} />}
 				{update.state === "error" ? "重试" : "检查更新"}
 			</button>

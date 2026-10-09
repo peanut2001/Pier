@@ -170,6 +170,7 @@ export function UpdateSettingsCard() {
 	const { update } = status;
 	const supported = status.state !== "unsupported";
 	const busy = status.state === "checking" || status.state === "downloading" || status.state === "installing";
+	const routeBusy = status.state === "downloading" || status.state === "installing";
 	const skipped = update !== undefined && status.skippedVersion === update.version;
 	return (
 		<Card style={styles.card}>
@@ -200,6 +201,7 @@ export function UpdateSettingsCard() {
 						disabled={busy}
 						onPress={() => void updater.check()}
 					/>
+					{status.state === "checking" ? <Button title="取消检查" small onPress={() => updater.cancelCheck()} /> : null}
 					{update && status.state !== "downloading" ? (
 						<Button
 							title={skipped ? "恢复提醒" : "不再提醒此版本"}
@@ -213,7 +215,7 @@ export function UpdateSettingsCard() {
 
 			{supported ? (
 				<>
-					<UpdateRouteSettings status={status} busy={busy} />
+					<UpdateRouteSettings status={status} busy={routeBusy} />
 					<View style={styles.switchRow}>
 						<Text style={[styles.switchLabel, { color: p.text }]}>自动检查更新</Text>
 						<Switch

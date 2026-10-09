@@ -44,6 +44,7 @@ pub fn run() {
             host::host_restart,
             updater::update_status,
             updater::update_check,
+            updater::update_cancel_check,
             updater::update_install,
             updater::update_set_auto_check,
             updater::update_set_mirror,

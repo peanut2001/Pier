@@ -75,7 +75,11 @@ beforeEach(() => {
 	);
 });
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+	vi.clearAllTimers();
+	vi.useRealTimers();
+	vi.unstubAllGlobals();
+});
 
 describe("mobile update routes", () => {
 	it.each(UPDATE_ROUTES.filter((route) => route.prefix))(
@@ -162,21 +166,126 @@ describe("mobile update routes", () => {
 		expect(mock.install).not.toHaveBeenCalled();
 	});
 
-	it("rejects route changes while a check is active", async () => {
+	it.each(["success", "failure"])("switches a stalled check and ignores its late %s", async (result) => {
 		const updater = new MobileUpdater();
 		await updater.init();
-		let finish!: (response: unknown) => void;
-		vi.mocked(fetch).mockImplementationOnce(
-			() =>
-				new Promise((resolve) => {
-					finish = resolve;
-				}) as Promise<Response>,
+		let finish!: () => void;
+		let signal!: AbortSignal;
+		vi.mocked(fetch).mockImplementationOnce((_url, options) => {
+			signal = options?.signal as AbortSignal;
+			return new Promise<Response>((resolve, reject) => {
+				finish = () =>
+					result === "failure"
+						? reject(new Error("old connection failed"))
+						: resolve({ ok: true, json: async () => ({ ...manifest, version: "9.9.9" }) } as Response);
+			});
+		});
+		const checking = updater.check();
+		expect(updater.getStatus().state).toBe("checking");
+		await updater.setMirror("https://mirror.example/");
+		expect(signal.aborted).toBe(true);
+		await checking;
+		await vi.waitFor(() => expect(updater.getStatus().state).toBe("available"));
+		finish();
+		await new Promise<void>((resolve) => setTimeout(resolve, 0));
+		expect(updater.getStatus()).toMatchObject({
+			state: "available",
+			mirrorPrefix: "https://mirror.example/",
+			update: { version: manifest.version },
+		});
+		expect(fetch).toHaveBeenLastCalledWith(`https://mirror.example/${ANDROID_UPDATE_MANIFEST_URL}`, expect.anything());
+	});
+
+	it.each(["connection", "body"])("ends a stalled %s after 30 seconds even when abort is ignored", async (stage) => {
+		vi.useFakeTimers();
+		const updater = new MobileUpdater();
+		await updater.init();
+		const stalled = new Promise<Response>(() => {});
+		vi.mocked(fetch).mockImplementationOnce(() =>
+			stage === "connection"
+				? stalled
+				: Promise.resolve({
+						ok: true,
+						json: () => new Promise(() => {}),
+					} as Response),
 		);
 		const checking = updater.check();
-		await expect(updater.setMirror("https://mirror.example/")).rejects.toThrow("等待");
-		finish({ ok: true, json: async () => manifest });
+		await vi.advanceTimersByTimeAsync(29_999);
+		expect(updater.getStatus().state).toBe("checking");
+		await vi.advanceTimersByTimeAsync(1);
 		await checking;
-		expect(updater.getStatus().mirrorPrefix).toBe("");
+		expect(updater.getStatus()).toMatchObject({ state: "error", error: expect.stringContaining("连接超时") });
+		expect(vi.mocked(fetch).mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+		await updater.check();
+		expect(updater.getStatus().state).toBe("available");
+	});
+
+	it.each([false, true])("cancels promptly and retains a known update (downloaded: %s)", async (downloaded) => {
+		const updater = new MobileUpdater();
+		await updater.init();
+		mock.downloaded = downloaded;
+		await updater.check();
+		const previous = updater.getStatus();
+		vi.mocked(fetch).mockImplementationOnce(() => new Promise(() => {}));
+		const checking = updater.check();
+		updater.cancelCheck();
+		await checking;
+		expect(updater.getStatus()).toEqual(previous);
+		await updater.check();
+		expect(updater.getStatus().state).toBe(downloaded ? "ready" : "available");
+	});
+
+	it("does not let a canceled request retire a subsequent pending check", async () => {
+		const updater = new MobileUpdater();
+		await updater.init();
+		vi.mocked(fetch).mockImplementation(() => new Promise(() => {}));
+		const first = updater.check();
+		updater.cancelCheck();
+		const second = updater.check();
+		await first;
+		expect(updater.getStatus().state).toBe("checking");
+		updater.cancelCheck();
+		await second;
+		expect(updater.getStatus().state).toBe("idle");
+	});
+
+	it("disabling auto-check cancels an active check and retains the preference", async () => {
+		const updater = new MobileUpdater();
+		await updater.init();
+		vi.mocked(fetch).mockImplementationOnce(() => new Promise(() => {}));
+		const checking = updater.check();
+		await updater.setAutoCheck(false);
+		await checking;
+		expect(updater.getStatus()).toMatchObject({ state: "idle", autoCheck: false });
+		expect(JSON.parse(mock.settings).autoCheck).toBe(false);
+	});
+
+	it("disabling auto-check before the startup timer prevents its check", async () => {
+		vi.useFakeTimers();
+		mock.settings = JSON.stringify({ autoCheck: true });
+		const updater = new MobileUpdater();
+		await updater.init();
+		await updater.setAutoCheck(false);
+		await vi.advanceTimersByTimeAsync(4_000);
+		expect(fetch).not.toHaveBeenCalled();
+		expect(updater.getStatus().state).toBe("idle");
+	});
+
+	it("keeps an active check when saving a new route fails", async () => {
+		const updater = new MobileUpdater();
+		await updater.init();
+		let signal!: AbortSignal;
+		vi.mocked(fetch).mockImplementationOnce((_url, options) => {
+			signal = options?.signal as AbortSignal;
+			return new Promise(() => {});
+		});
+		const checking = updater.check();
+		mock.setItem.mockRejectedValueOnce(new Error("storage unavailable"));
+		await expect(updater.setMirror("https://mirror.example/")).rejects.toThrow("storage unavailable");
+		expect(updater.getStatus()).toMatchObject({ state: "checking", mirrorPrefix: "" });
+		expect(signal.aborted).toBe(false);
+		updater.cancelCheck();
+		await checking;
 	});
 
 	it("rejects route changes during a download", async () => {
