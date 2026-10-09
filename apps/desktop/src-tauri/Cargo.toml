@@ -1,6 +1,6 @@
 [package]
 name = "pier-desktop"
-version = "0.2.27"
+version = "0.2.28"
 description = "Pier desktop shell: runs the Pier Host sidecar and hosts the UI"
 edition = "2021"
 rust-version = "1.90"
