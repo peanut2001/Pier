@@ -508,6 +508,7 @@ export function UpdateSettings() {
 					<Logo size={44} />
 					<div className="about-text">
 						<div className="about-name">Pier</div>
+						<div className="muted small">编码 Agent 的跨设备工作台</div>
 						<div className="muted small">
 							版本 v{update.currentVersion}
 							{update.lastChecked && update.state !== "checking"

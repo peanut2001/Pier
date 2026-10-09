@@ -1,8 +1,8 @@
 # Pier
 
-A desktop dock and mobile remote for coding agents.
+A cross-device workbench for coding agents.
 
-Pier 是编码 Agent 在桌面上的停靠点：Agent 常驻在你的电脑上运行，桌面端和手机端都能连上去查看、驱动和审批。内置 [pi](https://github.com/earendil-works/pi)，也能驱动电脑上安装的 [Claude Code](https://code.claude.com) 与 [Codex](https://github.com/openai/codex)：三种 Agent 的会话在同一个工作区中并存，都可以在桌面端和手机端查看、驱动和审批。
+Pier 是编码 Agent 的跨设备工作台：在同一个界面中使用内置的 [pi](https://github.com/earendil-works/pi) 和电脑上安装的 [Claude Code](https://code.claude.com)、[Codex](https://github.com/openai/codex)，统一管理多台电脑上的工作区与会话，并提供文件、Git 和终端操作。Agent 常驻在各自的电脑上运行，你可以从桌面端或手机端查看进度、发送指令和审批操作。
 
 - 桌面端：Tauri 2，内置 Pier Host（Agent 运行时：内置的 pi SDK，以及电脑上安装的 Claude Code、Codex）
 - 手机端：Expo / React Native 原生 App，通过配对后的加密连接驱动桌面 Agent

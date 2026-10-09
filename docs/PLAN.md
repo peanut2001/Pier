@@ -1,6 +1,6 @@
 # Pier 开发计划
 
-> Pier：编码 Agent 的桌面停靠点（Tauri）与手机遥控器（Expo / React Native）。首个 Agent 运行时为 [pi](https://github.com/earendil-works/pi)，Claude Code 与 Codex 已通过 Host 的 Agent 运行时适配层接入。
+> Pier：编码 Agent 的跨设备工作台。通过桌面端（Tauri）与手机端（Expo / React Native）统一管理多台电脑上的工作区与会话，查看进度、发送指令和审批操作；Agent 常驻在各自的电脑上运行。支持内置的 [pi](https://github.com/earendil-works/pi)，以及电脑上安装的 Claude Code 与 Codex。
 >
 > 本文档是项目的总体规划与里程碑，随开发进度持续更新。
 >
