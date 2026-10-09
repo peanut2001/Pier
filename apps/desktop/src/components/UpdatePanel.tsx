@@ -319,6 +319,69 @@ function PeerUpdates() {
 	);
 }
 
+function UpdateRouteSettings() {
+	const store = useStore();
+	const update = useAppState((s) => s.update);
+	const current = update.mirrorPrefix ?? "";
+	const [prefix, setPrefix] = useState(current);
+	const [editing, setEditing] = useState(false);
+	const busy = update.state === "checking" || update.state === "downloading" || update.state === "installing";
+
+	useEffect(() => setPrefix(current), [current]);
+
+	return (
+		<>
+			<SettingRow title="更新线路" description="检查更新和下载安装包都使用所选线路，自动检查也会沿用此设置。">
+				<select
+					aria-label="更新线路"
+					value={editing || current ? "mirror" : "github"}
+					disabled={busy}
+					onChange={(event) => {
+						if (event.target.value === "github") {
+							setEditing(false);
+							void store.setUpdateMirror("");
+						} else {
+							setEditing(true);
+						}
+					}}
+				>
+					<option value="github">GitHub 直连</option>
+					<option value="mirror">自定义加速线路</option>
+				</select>
+			</SettingRow>
+			{editing || current ? (
+				<SettingRow
+					title="加速地址"
+					description="填写支持在地址后附加完整 GitHub 链接的 HTTPS 加速服务，保存后生效并重新检查更新。"
+					stack
+				>
+					<form
+						className="update-route-form"
+						onSubmit={(event) => {
+							event.preventDefault();
+							void store.setUpdateMirror(prefix).then((saved) => {
+								if (saved) setEditing(false);
+							});
+						}}
+					>
+						<input
+							type="url"
+							aria-label="更新加速地址"
+							placeholder="https://mirror.example/"
+							value={prefix}
+							disabled={busy}
+							onChange={(event) => setPrefix(event.target.value)}
+						/>
+						<button type="submit" disabled={busy || !prefix.trim()}>
+							保存并检查
+						</button>
+					</form>
+				</SettingRow>
+			) : null}
+		</>
+	);
+}
+
 /** The “about and updates” settings page. */
 export function UpdateSettings() {
 	const store = useStore();
@@ -446,6 +509,7 @@ export function UpdateSettings() {
 			</SettingsCard>
 			<SettingsGroup title="更新">
 				<SettingsCard>
+					{update.state !== "unsupported" ? <UpdateRouteSettings /> : null}
 					{update.state !== "unsupported" ? (
 						<SettingRow title="自动检查更新" description="启动时及每 6 小时检查一次，发现新版本时提醒你。">
 							<Switch

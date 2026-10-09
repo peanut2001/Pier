@@ -6,6 +6,8 @@
  * running host given by `?url=ws://127.0.0.1:<port>&token=<token>`.
  */
 
+import { normalizeUpdateMirror } from "@pier/client";
+
 export type HostState = "starting" | "ready" | "restarting" | "failed" | "stopped";
 
 export interface HostStatus {
@@ -103,6 +105,8 @@ export interface UpdateStatus {
 	state: UpdateState;
 	currentVersion: string;
 	autoCheck: boolean;
+	/** Empty for GitHub direct; otherwise an HTTPS acceleration prefix. */
+	mirrorPrefix?: string;
 	/** The available (or still pending, after a failed install) update. */
 	version?: string | null;
 	notes?: string | null;
@@ -125,6 +129,7 @@ export interface UpdateBridge {
 	/** Download, install, and relaunch. Rejects with the reason when it fails. */
 	install(): Promise<void>;
 	setAutoCheck(enabled: boolean): Promise<UpdateStatus>;
+	setMirror(prefix: string): Promise<UpdateStatus>;
 }
 
 export const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -186,6 +191,7 @@ function tauriBridge(): Bridge {
 			check: async () => (await core).invoke<UpdateStatus>("update_check"),
 			install: async () => (await core).invoke("update_install"),
 			setAutoCheck: async (enabled) => (await core).invoke<UpdateStatus>("update_set_auto_check", { enabled }),
+			setMirror: async (prefix) => (await core).invoke<UpdateStatus>("update_set_mirror", { prefix }),
 		},
 		terminal: {
 			spawn: async ({ cwd, cols, rows }, handlers) => {
@@ -330,6 +336,7 @@ const unsupportedUpdates: UpdateBridge = {
 		throw new Error("浏览器模式不支持自动更新");
 	},
 	setAutoCheck: async () => unsupported,
+	setMirror: async () => unsupported,
 };
 
 /** `?updates=demo`: a fake update feed for working on the update UI in a browser. */
@@ -375,6 +382,7 @@ function demoUpdates(): UpdateBridge {
 			throw new Error(error);
 		},
 		setAutoCheck: async (enabled) => set({ autoCheck: enabled }),
+		setMirror: async (prefix) => set({ mirrorPrefix: normalizeUpdateMirror(prefix) }),
 	};
 }
 

@@ -2755,6 +2755,17 @@ export class PierStore {
 		}
 	}
 
+	async setUpdateMirror(prefix: string): Promise<boolean> {
+		try {
+			this.set({ update: await this.bridge.updates.setMirror(prefix) });
+			void this.checkForUpdates();
+			return true;
+		} catch (error) {
+			this.toast("error", `保存更新线路失败：${errorText(error)}`);
+			return false;
+		}
+	}
+
 	/**
 	 * Sessions on a computer (this one by default) that are working or waiting for an answer;
 	 * installing an update there stops them.

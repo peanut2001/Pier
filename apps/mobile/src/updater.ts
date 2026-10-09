@@ -1,3 +1,4 @@
+import { normalizeUpdateMirror, updateDownloadUrl } from "@pier/client";
 import { Directory, File, Paths } from "expo-file-system";
 import { startActivityAsync } from "expo-intent-launcher";
 import { useSyncExternalStore } from "react";
@@ -51,6 +52,7 @@ export interface UpdateStatus {
 	/** Why updates are unavailable (state `unsupported`). */
 	unsupportedReason?: string;
 	autoCheck: boolean;
+	mirrorPrefix: string;
 	update?: AndroidUpdate;
 	/** The user chose not to be reminded of this version. */
 	skippedVersion?: string;
@@ -63,6 +65,7 @@ export interface UpdateStatus {
 
 interface Settings {
 	autoCheck: boolean;
+	mirrorPrefix: string;
 	skippedVersion?: string;
 }
 
@@ -91,11 +94,11 @@ function unsupportedReason(): string | undefined {
 	return undefined;
 }
 
-async function fetchManifest(): Promise<AndroidUpdate> {
+async function fetchManifest(mirrorPrefix: string): Promise<AndroidUpdate> {
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), CHECK_TIMEOUT_MS);
 	try {
-		const response = await fetch(ANDROID_UPDATE_MANIFEST_URL, {
+		const response = await fetch(updateDownloadUrl(ANDROID_UPDATE_MANIFEST_URL, mirrorPrefix), {
 			headers: { Accept: "application/json", "Cache-Control": "no-cache" },
 			signal: controller.signal,
 		});
@@ -113,6 +116,7 @@ export class MobileUpdater {
 	private readonly listeners = new Set<() => void>();
 	private initialized = false;
 	private download: AbortController | undefined;
+	private savingMirror = false;
 	/** Earliest time (ms) of the next automatic check; 0 until the first one is scheduled. */
 	private nextAutoCheck = 0;
 
@@ -123,6 +127,7 @@ export class MobileUpdater {
 			currentVersion: APP_VERSION,
 			...(reason ? { unsupportedReason: reason } : {}),
 			autoCheck: true,
+			mirrorPrefix: "",
 			downloaded: 0,
 		};
 	}
@@ -145,7 +150,7 @@ export class MobileUpdater {
 
 	private get busy(): boolean {
 		const { state } = this.status;
-		return state === "checking" || state === "downloading" || state === "installing";
+		return this.savingMirror || state === "checking" || state === "downloading" || state === "installing";
 	}
 
 	/** Load the settings, drop stale downloads, and schedule the first automatic check. */
@@ -155,6 +160,7 @@ export class MobileUpdater {
 		const settings = await this.loadSettings();
 		this.set({
 			autoCheck: settings.autoCheck,
+			mirrorPrefix: settings.mirrorPrefix,
 			...(settings.skippedVersion ? { skippedVersion: settings.skippedVersion } : {}),
 		});
 		if (!this.supported) return;
@@ -179,7 +185,7 @@ export class MobileUpdater {
 		this.set({ state: "checking", error: undefined });
 		this.nextAutoCheck = Date.now() + CHECK_INTERVAL_MS;
 		try {
-			const update = await fetchManifest();
+			const update = await fetchManifest(this.status.mirrorPrefix);
 			const lastChecked = Date.now();
 			if (compareVersions(update.version, APP_VERSION) <= 0) {
 				this.set({ state: "upToDate", update: undefined, downloaded: 0, total: undefined, lastChecked });
@@ -232,6 +238,20 @@ export class MobileUpdater {
 		}
 	}
 
+	async setMirror(prefix: string): Promise<void> {
+		if (this.busy) throw new Error("请等待当前更新操作结束后再切换线路");
+		const mirrorPrefix = normalizeUpdateMirror(prefix);
+		this.savingMirror = true;
+		try {
+			const { autoCheck, skippedVersion } = this.status;
+			await setItem(SETTINGS_KEY, JSON.stringify({ autoCheck, skippedVersion, mirrorPrefix }));
+			this.set({ mirrorPrefix });
+		} finally {
+			this.savingMirror = false;
+		}
+		void this.check();
+	}
+
 	/** Stop reminding about this version (or remind again with `undefined`). */
 	async skip(version: string | undefined): Promise<void> {
 		this.set({ skippedVersion: version });
@@ -247,7 +267,7 @@ export class MobileUpdater {
 			const dir = this.downloadDir();
 			dir.create({ intermediates: true, idempotent: true });
 			this.removeDownloads(() => true);
-			await File.downloadFileAsync(update.url, file, {
+			await File.downloadFileAsync(updateDownloadUrl(update.url, this.status.mirrorPrefix), file, {
 				idempotent: true,
 				signal: controller.signal,
 				onProgress: ({ bytesWritten, totalBytes }) => {
@@ -319,18 +339,25 @@ export class MobileUpdater {
 		try {
 			const raw = await getItem(SETTINGS_KEY);
 			const parsed = raw ? (JSON.parse(raw) as Partial<Settings>) : {};
+			let mirrorPrefix = "";
+			try {
+				if (typeof parsed.mirrorPrefix === "string") mirrorPrefix = normalizeUpdateMirror(parsed.mirrorPrefix);
+			} catch {
+				// A damaged route setting must not reset the user's other update preferences.
+			}
 			return {
 				autoCheck: parsed.autoCheck !== false,
+				mirrorPrefix,
 				...(typeof parsed.skippedVersion === "string" ? { skippedVersion: parsed.skippedVersion } : {}),
 			};
 		} catch {
-			return { autoCheck: true };
+			return { autoCheck: true, mirrorPrefix: "" };
 		}
 	}
 
 	private async saveSettings(): Promise<void> {
-		const { autoCheck, skippedVersion } = this.status;
-		const settings: Settings = { autoCheck, ...(skippedVersion ? { skippedVersion } : {}) };
+		const { autoCheck, mirrorPrefix, skippedVersion } = this.status;
+		const settings: Settings = { autoCheck, mirrorPrefix, ...(skippedVersion ? { skippedVersion } : {}) };
 		await setItem(SETTINGS_KEY, JSON.stringify(settings)).catch(() => undefined);
 	}
 }

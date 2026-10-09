@@ -3,6 +3,7 @@ mod host;
 mod terminal;
 mod transfer;
 mod tray;
+mod update_route;
 mod updater;
 
 use host::HostManager;
@@ -45,6 +46,7 @@ pub fn run() {
             updater::update_check,
             updater::update_install,
             updater::update_set_auto_check,
+            updater::update_set_mirror,
             terminal::terminal_spawn,
             terminal::terminal_write,
             terminal::terminal_resize,

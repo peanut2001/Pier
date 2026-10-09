@@ -27,6 +27,7 @@ use tauri::{AppHandle, Emitter, Manager, Wry};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
 use crate::host::HostManager;
+use crate::update_route::{download_url, normalize_mirror};
 
 pub const STATUS_EVENT: &str = "pier://update-status";
 /// Asks the UI to show the update dialog (from the tray menu).
@@ -62,6 +63,8 @@ pub struct UpdateStatus {
     pub state: UpdateState,
     pub current_version: String,
     pub auto_check: bool,
+    /// Empty for GitHub direct; otherwise an HTTPS acceleration prefix.
+    pub mirror_prefix: String,
     /// The available update.
     pub version: Option<String>,
     pub notes: Option<String>,
@@ -79,11 +82,16 @@ pub struct UpdateStatus {
 #[serde(rename_all = "camelCase")]
 struct Settings {
     auto_check: bool,
+    #[serde(default)]
+    mirror_prefix: String,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { auto_check: true }
+        Self {
+            auto_check: true,
+            mirror_prefix: String::new(),
+        }
     }
 }
 
@@ -133,6 +141,7 @@ impl UpdateManager {
             state,
             current_version: app.package_info().version.to_string(),
             auto_check: settings.auto_check,
+            mirror_prefix: normalize_mirror(&settings.mirror_prefix).unwrap_or_default(),
             version: None,
             notes: None,
             date: None,
@@ -204,13 +213,41 @@ impl UpdateManager {
     }
 
     pub fn set_auto_check(&self, enabled: bool) -> Result<UpdateStatus, String> {
-        save_settings(
-            &self.app,
-            &Settings {
-                auto_check: enabled,
-            },
-        )?;
-        self.update(|status| status.auto_check = enabled);
+        {
+            let mut inner = self.lock();
+            save_settings(
+                &self.app,
+                &Settings {
+                    auto_check: enabled,
+                    mirror_prefix: inner.status.mirror_prefix.clone(),
+                },
+            )?;
+            inner.status.auto_check = enabled;
+        }
+        self.update(|_| {});
+        Ok(self.status())
+    }
+
+    pub fn set_mirror(&self, prefix: &str) -> Result<UpdateStatus, String> {
+        let prefix = normalize_mirror(prefix)?;
+        {
+            let mut inner = self.lock();
+            if matches!(
+                inner.status.state,
+                UpdateState::Checking | UpdateState::Downloading | UpdateState::Installing
+            ) {
+                return Err("请等待当前更新操作结束后再切换线路".into());
+            }
+            save_settings(
+                &self.app,
+                &Settings {
+                    auto_check: inner.status.auto_check,
+                    mirror_prefix: prefix.clone(),
+                },
+            )?;
+            inner.status.mirror_prefix = prefix;
+        }
+        self.update(|_| {});
         Ok(self.status())
     }
 
@@ -333,9 +370,11 @@ impl UpdateManager {
                 }
                 _ => return Err("没有可安装的更新".into()),
             }
-            let Some(update) = inner.pending.clone() else {
+            let Some(mut update) = inner.pending.clone() else {
                 return Err("没有可安装的更新".into());
             };
+            // Keep the pending URL original so changing routes never stacks mirror prefixes.
+            update.download_url = download_url(&update.download_url, &inner.status.mirror_prefix)?;
             inner.status.state = UpdateState::Downloading;
             inner.status.downloaded = 0;
             inner.status.total = None;
@@ -406,12 +445,29 @@ impl UpdateManager {
 
     fn updater(&self) -> Result<tauri_plugin_updater::Updater, String> {
         let mut builder = self.app.updater_builder().timeout(CHECK_TIMEOUT);
-        if let Ok(endpoint) = std::env::var("PIER_UPDATER_ENDPOINT") {
-            let url = endpoint
-                .parse()
-                .map_err(|e| format!("PIER_UPDATER_ENDPOINT 无效：{e}"))?;
-            builder = builder.endpoints(vec![url]).map_err(|e| e.to_string())?;
-        }
+        let endpoints = match std::env::var("PIER_UPDATER_ENDPOINT") {
+            Ok(endpoint) => vec![endpoint
+                .parse::<tauri::Url>()
+                .map_err(|e| format!("PIER_UPDATER_ENDPOINT 无效：{e}"))?],
+            Err(_) => self
+                .app
+                .config()
+                .plugins
+                .0
+                .get("updater")
+                .and_then(|config| config.get("endpoints"))
+                .cloned()
+                .ok_or("未配置更新地址")
+                .and_then(|value| {
+                    serde_json::from_value::<Vec<tauri::Url>>(value).map_err(|_| "更新地址无效")
+                })?,
+        };
+        let mirror = self.status().mirror_prefix;
+        let endpoints = endpoints
+            .iter()
+            .map(|url| download_url(url, &mirror))
+            .collect::<Result<Vec<_>, _>>()?;
+        builder = builder.endpoints(endpoints).map_err(|e| e.to_string())?;
         let host = self.app.state::<HostManager>().inner().clone();
         let app = self.app.clone();
         builder
@@ -492,4 +548,24 @@ pub fn update_set_auto_check(
     enabled: bool,
 ) -> Result<UpdateStatus, String> {
     manager.set_auto_check(enabled)
+}
+
+#[tauri::command]
+pub fn update_set_mirror(
+    manager: tauri::State<'_, UpdateManager>,
+    prefix: String,
+) -> Result<UpdateStatus, String> {
+    manager.set_mirror(&prefix)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn old_settings_keep_auto_check_and_default_to_github_direct() {
+        let settings: Settings = serde_json::from_str(r#"{"autoCheck":false}"#).unwrap();
+        assert!(!settings.auto_check);
+        assert!(settings.mirror_prefix.is_empty());
+    }
 }

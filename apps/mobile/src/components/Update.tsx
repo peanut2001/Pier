@@ -1,11 +1,12 @@
 import { useRouter } from "expo-router";
-import { Pressable, StyleSheet, Switch, Text, View } from "react-native";
+import { useState } from "react";
+import { Alert, Pressable, StyleSheet, Switch, Text, View } from "react-native";
 import { relativeTime } from "../format.ts";
 import { RADIUS, usePalette } from "../theme.ts";
 import { formatBytes } from "../update-manifest.ts";
 import { pendingUpdate, type UpdateStatus, updater, useUpdateStatus } from "../updater.ts";
 import { Markdown } from "./Markdown.tsx";
-import { Button, Card, CardHeader, Icon, Muted } from "./ui.tsx";
+import { Button, Card, CardHeader, Icon, Muted, PromptSheet } from "./ui.tsx";
 
 function ProgressBar({ status }: { status: UpdateStatus }) {
 	const p = usePalette();
@@ -105,6 +106,57 @@ function statusLine(status: UpdateStatus): string {
 	}
 }
 
+function UpdateRouteSettings({ status, busy }: { status: UpdateStatus; busy: boolean }) {
+	const p = usePalette();
+	const [editing, setEditing] = useState(false);
+	const save = async (prefix: string): Promise<boolean> => {
+		try {
+			await updater.setMirror(prefix);
+			return true;
+		} catch (error) {
+			Alert.alert("无法保存更新线路", error instanceof Error ? error.message : String(error));
+			return false;
+		}
+	};
+	return (
+		<View style={styles.route}>
+			<Text style={[styles.switchLabel, { color: p.text }]}>更新线路</Text>
+			<View style={styles.actions}>
+				<Button
+					title="GitHub 直连"
+					small
+					variant={status.mirrorPrefix ? "secondary" : "primary"}
+					disabled={busy || !status.mirrorPrefix}
+					onPress={() => void save("")}
+				/>
+				<Button
+					title="自定义加速线路"
+					small
+					variant={status.mirrorPrefix ? "primary" : "secondary"}
+					disabled={busy}
+					onPress={() => setEditing(true)}
+				/>
+			</View>
+			<Muted>
+				{status.mirrorPrefix ? `当前加速地址：${status.mirrorPrefix}` : "当前线路：GitHub 直连"}
+				{"\n"}检查更新和下载安装包都使用所选线路，自动检查也会沿用此设置。
+			</Muted>
+			{editing ? (
+				<PromptSheet
+					title="更新加速地址"
+					message="填写支持在地址后附加完整 GitHub 链接的 HTTPS 加速服务，保存后生效并重新检查更新。"
+					initialValue={status.mirrorPrefix}
+					placeholder="https://mirror.example/"
+					confirm="保存并检查"
+					mono
+					onSubmit={save}
+					onClose={() => setEditing(false)}
+				/>
+			) : null}
+		</View>
+	);
+}
+
 /** "软件更新" card on the settings screen. */
 export function UpdateSettingsCard() {
 	const p = usePalette();
@@ -155,6 +207,7 @@ export function UpdateSettingsCard() {
 
 			{supported ? (
 				<>
+					<UpdateRouteSettings status={status} busy={busy} />
 					<View style={styles.switchRow}>
 						<Text style={[styles.switchLabel, { color: p.text }]}>自动检查更新</Text>
 						<Switch
@@ -191,4 +244,5 @@ const styles = StyleSheet.create({
 	actions: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
 	switchRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
 	switchLabel: { fontSize: 15, fontWeight: "600" },
+	route: { gap: 8 },
 });
