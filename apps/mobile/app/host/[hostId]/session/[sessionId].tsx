@@ -490,6 +490,7 @@ function ActionsSheet({
 				if (!(await store.archiveSession(session, !archived))) return;
 				onClose();
 				store.toast("info", archived ? "已取消归档" : "已归档");
+				if (!archived) router.dismissTo({ pathname: "/host/[hostId]", params: { hostId } });
 			},
 		});
 	}

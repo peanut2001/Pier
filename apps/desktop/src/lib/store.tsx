@@ -2606,7 +2606,7 @@ export class PierStore {
 		return hostCanArchiveSessions(this.state.nodes[this.nodeOf(workspaceId)]?.hostInfo);
 	}
 
-	/** Archive or unarchive a session; it stays where it is in the list. Resolves to whether it worked. */
+	/** Archive or unarchive a session; archiving the open session returns home. Resolves to whether it worked. */
 	async archiveSession(session: SessionSummary, archived: boolean): Promise<boolean> {
 		const result = await this.callWith(this.clientFor(session.workspaceId), archived ? "归档会话" : "取消归档", (c) =>
 			c.request("session.archive", { workspaceId: session.workspaceId, sessionId: session.id, archived }),
@@ -2614,13 +2614,15 @@ export class PierStore {
 		if (!result) return false;
 		this.set((s) => {
 			const list = s.sessions[session.workspaceId];
-			if (!list) return {};
-			const next = list.map((x) => {
+			const next = list?.map((x) => {
 				if (x.id !== session.id) return x;
 				const { archived: _previous, ...rest } = x;
 				return archived ? { ...rest, archived: true } : rest;
 			});
-			return { sessions: { ...s.sessions, [session.workspaceId]: next } };
+			return {
+				...(next ? { sessions: { ...s.sessions, [session.workspaceId]: next } } : {}),
+				...(archived && s.selectedSessionId === session.id ? { selectedSessionId: undefined } : {}),
+			};
 		});
 		return true;
 	}
