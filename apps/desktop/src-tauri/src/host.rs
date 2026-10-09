@@ -255,6 +255,14 @@ impl HostManager {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        // The host and everything it runs (agents, their `bash` tool) must use the system
+        // libraries and tools, not the AppImage's bundled ones.
+        for (key, value) in crate::appimage_env::child_env() {
+            match value {
+                Some(value) => command.env(key, value),
+                None => command.env_remove(key),
+            };
+        }
         if std::env::var_os("PI_PACKAGE_DIR").is_none() {
             if let Some(assets) = self.pi_assets_dir() {
                 command.env("PI_PACKAGE_DIR", assets);
