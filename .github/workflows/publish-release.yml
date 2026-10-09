@@ -29,7 +29,6 @@ jobs:
     env:
       RELEASE_TAG: ${{ inputs.tag }}
       SOURCE_RUN_ID: ${{ inputs.run_id }}
-      RELEASE_ASSETS_DIR: ${{ runner.temp }}/pier-release-assets
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v5
@@ -68,10 +67,12 @@ jobs:
         with:
           run-id: ${{ inputs.run_id }}
           github-token: ${{ github.token }}
-          path: ${{ env.RELEASE_ASSETS_DIR }}
+          path: ${{ runner.temp }}/pier-release-assets
           merge-multiple: true
 
       - name: Check artifacts, checksums, and release notes
+        env:
+          RELEASE_ASSETS_DIR: ${{ runner.temp }}/pier-release-assets
         run: |
           python3 - <<'PY'
           import hashlib
@@ -106,6 +107,8 @@ jobs:
           PY
 
       - name: Publish release
+        env:
+          RELEASE_ASSETS_DIR: ${{ runner.temp }}/pier-release-assets
         run: |
           prerelease=""
           case "$RELEASE_TAG" in *-*) prerelease="--prerelease" ;; esac

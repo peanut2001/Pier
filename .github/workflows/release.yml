@@ -325,17 +325,17 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    env:
-      RELEASE_ASSETS_DIR: ${{ runner.temp }}/pier-release-assets
     steps:
       - uses: actions/checkout@v5
 
       - uses: actions/download-artifact@v5
         with:
-          path: ${{ env.RELEASE_ASSETS_DIR }}
+          path: ${{ runner.temp }}/pier-release-assets
           merge-multiple: true
 
       - name: Checksums and release notes
+        env:
+          RELEASE_ASSETS_DIR: ${{ runner.temp }}/pier-release-assets
         run: |
           (
             cd "$RELEASE_ASSETS_DIR"
@@ -356,6 +356,7 @@ jobs:
       - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_ASSETS_DIR: ${{ runner.temp }}/pier-release-assets
         run: |
           version="${{ needs.verify.outputs.version }}"
           prerelease=""
