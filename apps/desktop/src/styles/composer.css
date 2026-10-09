@@ -716,6 +716,15 @@
 
 /* ---- model & thinking picker (composer toolbar) ------------------------------------ */
 
+.composer-model-chip,
+.thinking-panel {
+	--thinking-text: var(--accent-text);
+}
+
+:is(.composer-model-chip, .thinking-panel):is([data-level="xhigh"], [data-level="max"], [data-level="ultra"]) {
+	--thinking-text: #8b5cf6;
+}
+
 .composer-model-chip {
 	max-width: 260px;
 }
@@ -729,7 +738,7 @@
 .composer-model-thinking {
 	display: inline-block;
 	flex: none;
-	color: var(--accent-text);
+	color: var(--thinking-text);
 	font-weight: 500;
 	animation: thinking-value-in 0.22s var(--ease);
 }
@@ -807,13 +816,8 @@
 	display: inline-block;
 	font-size: 15px;
 	font-weight: 600;
-	color: var(--accent-text);
+	color: var(--thinking-text);
 	animation: thinking-value-in 0.22s var(--ease);
-}
-
-.thinking-panel[data-level="max"] .thinking-panel-value,
-.thinking-panel[data-level="ultra"] .thinking-panel-value {
-	color: #8b5cf6;
 }
 
 @keyframes thinking-value-in {

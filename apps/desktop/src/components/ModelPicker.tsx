@@ -266,6 +266,7 @@ function ModelMenu({
 			<button
 				type="button"
 				className={`chip composer-model-chip${open ? " open" : ""}`}
+				data-level={level}
 				disabled={disabled}
 				onClick={toggle}
 				title="切换模型与思考程度"
