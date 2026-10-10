@@ -62,7 +62,7 @@ function renderInline(nodes: PhrasingContent[], ctx: Ctx, key: string): ReactNod
 				return (
 					<Text
 						key={k}
-						style={url ? [styles.link, { color: ctx.p.accent }] : undefined}
+						style={url ? [styles.link, { color: ctx.p.accentText }] : undefined}
 						onPress={url ? () => open(url) : undefined}
 						accessibilityRole={url ? "link" : undefined}
 					>
@@ -76,7 +76,7 @@ function renderInline(nodes: PhrasingContent[], ctx: Ctx, key: string): ReactNod
 				return (
 					<Text
 						key={k}
-						style={url ? [styles.link, { color: ctx.p.accent }] : { color: ctx.p.muted }}
+						style={url ? [styles.link, { color: ctx.p.accentText }] : { color: ctx.p.muted }}
 						onPress={url ? () => open(url) : undefined}
 						accessibilityRole={url ? "link" : undefined}
 					>
@@ -86,7 +86,7 @@ function renderInline(nodes: PhrasingContent[], ctx: Ctx, key: string): ReactNod
 			}
 			case "linkReference":
 				return (
-					<Text key={k} style={[styles.link, { color: ctx.p.accent }]}>
+					<Text key={k} style={[styles.link, { color: ctx.p.accentText }]}>
 						{renderInline(node.children, ctx, k)}
 					</Text>
 				);
@@ -94,7 +94,7 @@ function renderInline(nodes: PhrasingContent[], ctx: Ctx, key: string): ReactNod
 				return `[图片${node.alt ? `: ${node.alt}` : ""}]`;
 			case "footnoteReference":
 				return (
-					<Text key={k} style={[styles.footnoteRef, { color: ctx.p.accent }]}>
+					<Text key={k} style={[styles.footnoteRef, { color: ctx.p.accentText }]}>
 						[{node.label ?? node.identifier}]
 					</Text>
 				);
@@ -245,7 +245,7 @@ function renderBlocks(nodes: (RootContent | BlockContent | DefinitionContent)[],
 			case "footnoteDefinition":
 				return (
 					<View key={k} style={styles.footnote}>
-						<Text style={[styles.small, { color: p.accent }]}>[{node.label ?? node.identifier}]</Text>
+						<Text style={[styles.small, { color: p.accentText }]}>[{node.label ?? node.identifier}]</Text>
 						<View style={styles.listBody}>{renderBlocks(node.children, { ...ctx, color: p.muted }, k)}</View>
 					</View>
 				);

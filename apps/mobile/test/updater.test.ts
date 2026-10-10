@@ -11,12 +11,21 @@ const mock = vi.hoisted(() => ({
 	setItem: vi.fn(),
 	download: vi.fn(),
 	install: vi.fn(),
+	appState: { currentState: "active" },
+	prepareNotification: vi.fn(),
+	showNotification: vi.fn(),
+	dismissNotification: vi.fn(),
 }));
 
-vi.mock("react-native", () => ({ Platform: { OS: "android" } }));
+vi.mock("react-native", () => ({ Platform: { OS: "android" }, AppState: mock.appState }));
 vi.mock("../src/store.ts", () => ({ APP_VERSION: "1.0.0" }));
 vi.mock("../src/storage.ts", () => ({ getItem: mock.getItem, setItem: mock.setItem }));
 vi.mock("expo-intent-launcher", () => ({ startActivityAsync: mock.install }));
+vi.mock("../src/update-notification.ts", () => ({
+	prepareUpdateNotification: mock.prepareNotification,
+	showUpdateNotification: mock.showNotification,
+	dismissUpdateNotification: mock.dismissNotification,
+}));
 vi.mock("expo-file-system", () => ({
 	Paths: { cache: "cache" },
 	Directory: class {
@@ -61,6 +70,8 @@ beforeEach(() => {
 	mock.settings = JSON.stringify({ autoCheck: false });
 	mock.downloaded = false;
 	mock.md5 = manifest.md5;
+	mock.appState.currentState = "active";
+	mock.prepareNotification.mockResolvedValue(undefined);
 	mock.getItem.mockImplementation(async () => mock.settings);
 	mock.setItem.mockImplementation(async (_key: string, value: string) => {
 		mock.settings = value;
@@ -305,6 +316,7 @@ describe("mobile update routes", () => {
 		const installing = updater.install();
 		expect(updater.getStatus().state).toBe("downloading");
 		await expect(updater.setMirror("https://mirror.example/")).rejects.toThrow("等待");
+		await vi.waitFor(() => expect(mock.download).toHaveBeenCalledOnce());
 		finish();
 		await installing;
 		expect(mock.install).toHaveBeenCalledOnce();
@@ -332,5 +344,117 @@ describe("mobile update routes", () => {
 		expect(updater.getStatus()).toMatchObject({ autoCheck: false, mirrorPrefix: "", skippedVersion: "1.1.0" });
 		await expect(updater.setMirror("http://mirror.example/")).rejects.toThrow("HTTPS");
 		expect(mock.setItem).not.toHaveBeenCalled();
+	});
+});
+
+describe("mobile update notifications", () => {
+	async function availableUpdater() {
+		const updater = new MobileUpdater();
+		await updater.init();
+		await updater.check();
+		return updater;
+	}
+
+	it("clears stale progress at startup and reports download, verification and installer states", async () => {
+		const updater = await availableUpdater();
+		expect(mock.dismissNotification).toHaveBeenCalledOnce();
+		expect(mock.prepareNotification).not.toHaveBeenCalled();
+		mock.download.mockImplementationOnce(async (_url, _file, options) => {
+			options.onProgress({ bytesWritten: 21, totalBytes: 42 });
+			mock.downloaded = true;
+		});
+		await updater.install();
+		expect(mock.prepareNotification).toHaveBeenCalledOnce();
+		expect(mock.showNotification.mock.calls).toEqual([
+			[manifest.version, "downloading", 0, 42],
+			[manifest.version, "downloading", 21, 42],
+			[manifest.version, "ready"],
+			[manifest.version, "installing"],
+			[manifest.version, "ready"],
+		]);
+	});
+
+	it("uses manifest size when the server omits Content-Length", async () => {
+		const updater = await availableUpdater();
+		mock.download.mockImplementationOnce(async (_url, _file, options) => {
+			options.onProgress({ bytesWritten: 10, totalBytes: -1 });
+			mock.downloaded = true;
+		});
+		await updater.install();
+		expect(mock.showNotification).toHaveBeenCalledWith(manifest.version, "downloading", 10, 42);
+	});
+
+	it("cancels while notification permission is pending without starting a download", async () => {
+		const updater = await availableUpdater();
+		let finish!: () => void;
+		mock.prepareNotification.mockImplementationOnce(
+			() =>
+				new Promise<void>((resolve) => {
+					finish = resolve;
+				}),
+		);
+		const installing = updater.install();
+		updater.cancel();
+		finish();
+		await installing;
+		expect(mock.download).not.toHaveBeenCalled();
+		expect(mock.showNotification).not.toHaveBeenCalled();
+		expect(mock.install).not.toHaveBeenCalled();
+		expect(updater.getStatus().state).toBe("available");
+	});
+
+	it("clears canceled downloads and ignores late progress and completion even if native abort is ignored", async () => {
+		const updater = await availableUpdater();
+		let finish!: () => void;
+		let progress!: () => void;
+		mock.download.mockImplementationOnce(
+			(_url, _file, options) =>
+				new Promise<void>((resolve) => {
+					progress = () => options.onProgress({ bytesWritten: 42, totalBytes: 42 });
+					finish = () => {
+						mock.downloaded = true;
+						resolve();
+					};
+				}),
+		);
+		const installing = updater.install();
+		await vi.waitFor(() => expect(mock.download).toHaveBeenCalledOnce());
+		updater.cancel();
+		expect(mock.dismissNotification).toHaveBeenCalledTimes(2);
+		mock.showNotification.mockClear();
+		progress();
+		finish();
+		await installing;
+		expect(mock.showNotification).not.toHaveBeenCalled();
+		expect(mock.install).not.toHaveBeenCalled();
+		expect(mock.downloaded).toBe(false);
+		expect(updater.getStatus().state).toBe("available");
+	});
+
+	it("keeps a verified background download ready and installs after the user returns", async () => {
+		const updater = await availableUpdater();
+		mock.download.mockImplementationOnce(async () => {
+			mock.downloaded = true;
+			mock.appState.currentState = "background";
+		});
+		await updater.install();
+		expect(updater.getStatus().state).toBe("ready");
+		expect(mock.showNotification).toHaveBeenLastCalledWith(manifest.version, "ready");
+		expect(mock.install).not.toHaveBeenCalled();
+		mock.appState.currentState = "active";
+		await updater.install();
+		expect(mock.download).toHaveBeenCalledOnce();
+		expect(mock.install).toHaveBeenCalledOnce();
+	});
+
+	it.each(["download", "verification", "installer"])("reports %s failures in the notification", async (stage) => {
+		const updater = await availableUpdater();
+		if (stage === "download") mock.download.mockRejectedValueOnce(new Error("network error"));
+		if (stage === "verification") mock.md5 = "0".repeat(32);
+		if (stage === "installer") mock.install.mockRejectedValueOnce(new Error("installer error"));
+		await updater.install();
+		expect(mock.showNotification).toHaveBeenLastCalledWith(manifest.version, "error");
+		expect(updater.getStatus().state).toBe("error");
+		if (stage !== "installer") expect(mock.install).not.toHaveBeenCalled();
 	});
 });

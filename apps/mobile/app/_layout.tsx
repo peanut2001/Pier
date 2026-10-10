@@ -1,19 +1,29 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import * as Font from "expo-font";
-import { Stack } from "expo-router";
+import { Stack, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { useEffect } from "react";
+import * as SystemUI from "expo-system-ui";
+import { useEffect, useState } from "react";
 import { AppState } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ToastHost } from "../src/components/ui.tsx";
 import { MobileStore, StoreContext } from "../src/store.ts";
 import { usePalette } from "../src/theme.ts";
+import { initThemePreference } from "../src/theme-preference.ts";
 import { updater } from "../src/updater.ts";
 
 const store = new MobileStore();
 
 export default function RootLayout() {
 	const p = usePalette();
+	const [themeReady, setThemeReady] = useState(false);
+	const terminal = useSegments().at(-1) === "terminal";
+	useEffect(() => {
+		void initThemePreference().then(() => setThemeReady(true));
+	}, []);
+	useEffect(() => {
+		if (themeReady) void SystemUI.setBackgroundColorAsync(terminal ? "#0d1014" : p.bg).catch(() => {});
+	}, [p.bg, terminal, themeReady]);
 	useEffect(() => {
 		void store.init();
 		void updater.init();
@@ -30,10 +40,11 @@ export default function RootLayout() {
 		});
 		return () => subscription.remove();
 	}, []);
+	if (!themeReady) return null;
 	return (
 		<SafeAreaProvider>
 			<StoreContext.Provider value={store}>
-				<StatusBar style="auto" />
+				<StatusBar style={terminal || p.dark ? "light" : "dark"} />
 				<Stack
 					screenOptions={{
 						headerStyle: { backgroundColor: p.bg },
