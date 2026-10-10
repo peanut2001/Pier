@@ -1763,6 +1763,15 @@ export class PierStore {
 		void this.bridge.restartHost();
 	}
 
+	/** Always controls this computer's shell, regardless of the selected host. */
+	autostartStatus(): Promise<boolean> {
+		return this.bridge.autostart?.status() ?? Promise.reject(new Error("开机自启仅在桌面应用中可用"));
+	}
+
+	setAutostartEnabled(enabled: boolean): Promise<boolean> {
+		return this.bridge.autostart?.setEnabled(enabled) ?? Promise.reject(new Error("开机自启仅在桌面应用中可用"));
+	}
+
 	// ---- toasts ------------------------------------------------------------------------
 
 	toast(level: Toast["level"], message: string): void {

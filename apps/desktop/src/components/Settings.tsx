@@ -44,7 +44,7 @@ import { PiSettings } from "./PiSettingsPanel.tsx";
 import { RemoteSettings } from "./RemotePanel.tsx";
 import { Select } from "./Select.tsx";
 import { useOutsideClick } from "./SessionControls.tsx";
-import { SettingRow, SettingsCard, SettingsGroup } from "./SettingsUi.tsx";
+import { SettingRow, SettingsCard, SettingsGroup, Switch } from "./SettingsUi.tsx";
 import { addWorkspaceBlocker } from "./Sidebar.tsx";
 import { UpdateSettings, updatePending } from "./UpdatePanel.tsx";
 
@@ -113,7 +113,8 @@ const GROUPS: Array<{ title: string; items: SectionDef[] }> = [
 				id: "general",
 				label: "常规",
 				icon: IconSettings,
-				keywords: "host 状态 连接 版本 配置目录 重启 退出 pi 外观 主题 风格 深色 暗黑 浅色 dark light",
+				keywords:
+					"host 状态 连接 版本 配置目录 重启 退出 开机 自启 登录 启动 托盘 autostart pi 外观 主题 风格 深色 暗黑 浅色 dark light",
 			},
 			{
 				id: "models",
@@ -308,6 +309,80 @@ function GeneralSettings() {
 	);
 }
 
+function AutostartSetting() {
+	const store = useStore();
+	const [enabled, setEnabled] = useState<boolean>();
+	const [pending, setPending] = useState(true);
+	const [error, setError] = useState<string>();
+	const request = useRef(0);
+	const readStatus = useCallback(async () => {
+		const id = ++request.current;
+		setPending(true);
+		setError(undefined);
+		try {
+			const value = await store.autostartStatus();
+			if (id === request.current) setEnabled(value);
+		} catch (reason) {
+			if (id === request.current) {
+				setEnabled(undefined);
+				setError(`无法读取开机自启状态：${reason instanceof Error ? reason.message : String(reason)}`);
+			}
+		} finally {
+			if (id === request.current) setPending(false);
+		}
+	}, [store]);
+	useEffect(() => {
+		void readStatus();
+		return () => {
+			request.current++;
+		};
+	}, [readStatus]);
+	const change = async (value: boolean) => {
+		const id = ++request.current;
+		setPending(true);
+		setError(undefined);
+		try {
+			const actual = await store.setAutostartEnabled(value);
+			if (id === request.current) setEnabled(actual);
+		} catch (reason) {
+			if (id === request.current) {
+				setError(`修改开机自启失败：${reason instanceof Error ? reason.message : String(reason)}`);
+			}
+		} finally {
+			if (id === request.current) setPending(false);
+		}
+	};
+	return (
+		<SettingRow
+			title="开机自启"
+			description={
+				<>
+					登录这台电脑时自动启动 Pier 并在托盘运行；默认关闭。
+					{error ? (
+						<div className="error-text" role="alert">
+							{error}
+						</div>
+					) : null}
+				</>
+			}
+		>
+			{pending ? <IconLoader size={14} className="spin" /> : null}
+			{error ? (
+				<button type="button" disabled={pending} onClick={() => void readStatus()}>
+					<IconRefresh size={14} />
+					重新读取
+				</button>
+			) : null}
+			<Switch
+				label="开机自启"
+				checked={enabled ?? false}
+				disabled={pending || enabled === undefined}
+				onChange={(value) => void change(value)}
+			/>
+		</SettingRow>
+	);
+}
+
 function LocalGeneralSettings() {
 	const store = useStore();
 	const host = useAppState((s) => s.host);
@@ -370,6 +445,7 @@ function LocalGeneralSettings() {
 			{tauri ? (
 				<SettingsGroup title="应用">
 					<SettingsCard>
+						<AutostartSetting />
 						<SettingRow
 							title="退出 Pier"
 							description="关闭窗口只会隐藏到托盘，Agent 继续运行；退出会停止 Pier Host 并中断正在运行的任务。"

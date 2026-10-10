@@ -41,8 +41,16 @@ export interface Bridge {
 	saveFile(name: string): Promise<LocalFileSink | null>;
 	quit(): Promise<void>;
 	updates: UpdateBridge;
+	/** System login startup for this desktop app; unavailable in a browser. */
+	autostart?: AutostartBridge;
 	/** Integrated terminals; only the desktop app can run local shells. */
 	terminal?: TerminalBridge;
+}
+
+export interface AutostartBridge {
+	status(): Promise<boolean>;
+	/** Update the system entry and return its actual enabled state. */
+	setEnabled(enabled: boolean): Promise<boolean>;
 }
 
 /** A local file being written by a download. */
@@ -185,6 +193,10 @@ function tauriBridge(): Bridge {
 			};
 		},
 		quit: async () => (await core).invoke("quit_app"),
+		autostart: {
+			status: async () => (await core).invoke<boolean>("autostart_status"),
+			setEnabled: async (enabled) => (await core).invoke<boolean>("autostart_set_enabled", { enabled }),
+		},
 		updates: {
 			status: async () => (await core).invoke<UpdateStatus>("update_status"),
 			onStatus: (listener) => listen<UpdateStatus>("pier://update-status", listener),
