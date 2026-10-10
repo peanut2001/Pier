@@ -1,4 +1,15 @@
-import { cpSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import {
+	cpSync,
+	existsSync,
+	lstatSync,
+	mkdirSync,
+	readFileSync,
+	realpathSync,
+	renameSync,
+	rmSync,
+	statSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
@@ -32,7 +43,7 @@ export interface ExtensionProgress {
 
 export interface ExtensionManagerOptions {
 	agentDir: string;
-	/** Deleted extension files and directories go here. */
+	/** Deleted resource files and directories go here. */
 	trashDir: string;
 	onProgress?: (event: ExtensionProgress) => void;
 	log?: (message: string) => void;
@@ -439,66 +450,78 @@ export class ExtensionManager {
 	}
 
 	/**
-	 * What deleting a top-level extension means: moving its file or directory out of an
-	 * `extensions` directory, or dropping the settings entry that points at it.
+	 * Auto-discovered resources move to trash; exact settings entries are unlinked.
+	 * A declared skill owns its directory, including supporting scripts and assets.
 	 */
 	private deleteTarget(
 		ctx: Context,
 		info: ExtensionResourceInfo,
 		raw: ResolvedResource,
 	): { kind: "trash"; path: string } | { kind: "entry"; entry: string } | undefined {
-		if (info.type !== "extensions" || info.origin !== "top-level") return undefined;
+		if (info.origin !== "top-level") return undefined;
 		if (info.source === "auto") {
-			const root = join(raw.metadata.baseDir ?? this.baseDir(ctx, info.scope), "extensions");
+			const root = join(raw.metadata.baseDir ?? this.baseDir(ctx, info.scope), info.type);
 			if (!isInside(root, info.path)) return undefined;
-			const parts = relative(root, info.path).split(sep);
-			if (parts.length === 1) return { kind: "trash", path: info.path };
-			if (parts.length === 2 && parts[0] && /^index\.[cm]?[jt]s$/.test(parts[1] ?? "")) {
-				return { kind: "trash", path: join(root, parts[0]) };
+			let path = info.path;
+			if (info.type === "extensions") {
+				const parts = relative(root, info.path).split(sep);
+				if (parts.length === 2 && parts[0] && /^index\.[cm]?[jt]s$/.test(parts[1] ?? "")) {
+					path = join(root, parts[0]);
+				} else if (parts.length !== 1) return undefined;
+			} else if (info.type === "skills" && basename(path) === "SKILL.md" && isInside(root, dirname(path))) {
+				path = dirname(path);
 			}
-			return undefined;
+			// Moving a resource symlink is safe, but walking through an ancestor symlink
+			// would remove files from the external tree it points at.
+			for (let parent = dirname(path); ; parent = dirname(parent)) {
+				if (lstatSync(parent).isSymbolicLink()) return undefined;
+				if (parent === root) break;
+			}
+			return { kind: "trash", path };
 		}
 		if (info.source === "local") {
 			const base = this.baseDir(ctx, info.scope);
-			const entries = ((this.scopeSettings(ctx, info.scope).extensions ?? []) as string[]).filter(
+			const entries = ((this.scopeSettings(ctx, info.scope)[info.type] ?? []) as string[]).filter(
 				(e) => !isOverride(e),
 			);
-			const isIndex = /^index\.[cm]?[jt]s$/.test(basename(info.path));
+			const ownsDirectory =
+				(info.type === "extensions" && /^index\.[cm]?[jt]s$/.test(basename(info.path))) ||
+				(info.type === "skills" && basename(info.path) === "SKILL.md");
 			const entry = entries.find((e) => {
 				const resolved = resolve(base, expandHome(e));
-				return samePath(resolved, info.path) || (isIndex && samePath(resolved, dirname(info.path)));
+				return samePath(resolved, info.path) || (ownsDirectory && samePath(resolved, dirname(info.path)));
 			});
 			return entry === undefined ? undefined : { kind: "entry", entry };
 		}
 		return undefined;
 	}
 
-	/** Resolves to the scope of the deleted extension. */
-	delete(path: string, target?: ExtensionTarget): Promise<ExtensionScope> {
+	/** Resolves to the scope of the deleted resource. */
+	delete(path: string, target?: ExtensionTarget, type: ExtensionResourceType = "extensions"): Promise<ExtensionScope> {
 		return this.exclusive(async () => {
 			const ctx = this.context(target);
 			this.assertSettingsReadable(ctx);
-			const { info, raw } = await this.requireResource(ctx, "extensions", path);
+			const { info, raw } = await this.requireResource(ctx, type, path);
 			const action = this.deleteTarget(ctx, info, raw);
 			if (!action) {
 				throw new PierProtocolError(
 					"BAD_REQUEST",
 					info.origin === "package"
-						? `This extension belongs to the package ${info.source}; remove the package or disable the extension`
-						: "This extension comes from a directory listed in settings; disable it instead",
+						? `This resource belongs to the package ${info.source}; remove the package or disable the resource`
+						: "This resource cannot be deleted individually; disable it instead",
 				);
 			}
 			if (action.kind === "trash") {
 				const moved = moveToTrash(action.path, this.options.trashDir);
-				this.options.log?.(`extension moved to trash: ${action.path} -> ${moved}`);
+				this.options.log?.(`${type} resource moved to trash: ${action.path} -> ${moved}`);
 			} else {
 				const base = this.baseDir(ctx, info.scope);
 				const targets = [action.entry, relative(base, info.path)];
-				const current = (this.scopeSettings(ctx, info.scope).extensions ?? []) as string[];
+				const current = (this.scopeSettings(ctx, info.scope)[type] ?? []) as string[];
 				const updated = current.filter(
 					(e) => e !== action.entry && !(isOverride(e) && targets.some((t) => samePattern(patternTarget(e), t))),
 				);
-				this.setTopLevelPaths(ctx, info.scope, "extensions", updated);
+				this.setTopLevelPaths(ctx, info.scope, type, updated);
 				await this.save(ctx);
 			}
 			return info.scope;
@@ -509,7 +532,7 @@ export class ExtensionManager {
 /** Move a file or directory into `trashDir` under a unique name (copying across file systems). */
 function moveToTrash(path: string, trashDir: string): string {
 	mkdirSync(trashDir, { recursive: true, mode: 0o700 });
-	const target = join(trashDir, `${Date.now()}-${basename(path)}`);
+	const target = join(trashDir, `${Date.now()}-${randomUUID()}-${basename(path)}`);
 	try {
 		renameSync(path, target);
 	} catch (error) {

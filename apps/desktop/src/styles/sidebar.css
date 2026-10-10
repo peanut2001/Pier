@@ -1,4 +1,4 @@
-/* Sidebar: brand, new-session button, workspace tree, host status. */
+/* Sidebar: heading, new-session button, workspace tree and update card. */
 
 .sidebar {
 	display: flex;
@@ -12,12 +12,6 @@
 	align-items: center;
 	gap: 10px;
 	padding: 12px 18px;
-}
-
-.brand .logo {
-	box-shadow:
-		0 4px 14px var(--brand-glow),
-		0 0 0 1px rgba(255, 255, 255, 0.08);
 }
 
 .brand-name {
@@ -69,6 +63,128 @@
 	background: var(--bg-active);
 }
 
+.running-agents {
+	flex: none;
+	margin: 0 10px 8px;
+	padding-bottom: 6px;
+	border-bottom: 1px solid var(--border);
+}
+
+.running-agents-toggle {
+	width: 100%;
+	justify-content: flex-start;
+	gap: 6px;
+	padding: 6px 8px;
+	border: none;
+	background: transparent;
+	color: var(--text-muted);
+	font-size: 12px;
+}
+
+.running-agents-chevron {
+	color: var(--text-faint);
+	transition: transform 0.18s var(--ease);
+}
+
+.running-agents-toggle.open .running-agents-chevron {
+	transform: rotate(90deg);
+}
+
+.running-agents-label {
+	flex: 1;
+	text-align: left;
+}
+
+.running-count {
+	display: inline-flex;
+	flex: none;
+	align-items: center;
+	gap: 6px;
+	min-width: 26px;
+	justify-content: center;
+	padding: 1px 7px;
+	border-radius: 999px;
+	background: var(--accent-soft);
+	color: var(--accent-text);
+	font-size: 11px;
+	font-weight: 600;
+	font-variant-numeric: tabular-nums;
+}
+
+.running-count.idle {
+	background: var(--bg-active);
+	color: var(--text-faint);
+}
+
+.workspace-running-count {
+	margin: 0 3px;
+}
+
+.running-agent-list {
+	max-height: min(176px, 30vh);
+	overflow-y: auto;
+	padding-top: 2px;
+}
+
+.running-agent-row {
+	width: 100%;
+	justify-content: flex-start;
+	gap: 8px;
+	margin: 1px 0;
+	padding: 6px 8px;
+	border: none;
+	border-radius: 8px;
+	background: transparent;
+	text-align: left;
+	font-weight: 400;
+}
+
+.running-agent-row.selected {
+	background: var(--bg-active);
+	box-shadow: var(--highlight);
+}
+
+.running-agent-text {
+	display: flex;
+	flex: 1;
+	flex-direction: column;
+	min-width: 0;
+}
+
+.running-agent-title,
+.running-agent-location {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.running-agent-title {
+	font-size: 12.5px;
+	color: var(--text);
+}
+
+.running-agent-location {
+	font-size: 11px;
+	color: var(--text-faint);
+}
+
+.running-agent-meta {
+	display: flex;
+	flex: none;
+	flex-direction: column;
+	align-items: flex-end;
+	gap: 2px;
+}
+
+.running-agent-status {
+	font-size: 10px;
+	color: var(--accent-text);
+}
+
+.running-agent-status.attention {
+	color: var(--warning);
+}
+
 .sidebar-section-title {
 	display: flex;
 	align-items: center;
@@ -91,6 +207,7 @@
 }
 
 .workspace-row {
+	position: relative;
 	display: flex;
 	align-items: center;
 	height: 32px;
@@ -108,15 +225,26 @@
 	box-shadow: var(--highlight);
 }
 
-.workspace-row .ghost.icon {
+.workspace-actions {
+	position: absolute;
+	top: 4px;
+	right: 3px;
+	display: flex;
+	border-radius: 6px;
+	background: var(--bg-app);
 	opacity: 0;
+	pointer-events: none;
+}
+
+.workspace-actions .ghost.icon {
 	width: 24px;
 	height: 24px;
 }
 
-.workspace-row:hover .ghost.icon,
-.workspace-row .ghost.icon:focus-visible {
+.workspace-row:hover .workspace-actions,
+.workspace-actions:has(:focus-visible) {
 	opacity: 1;
+	pointer-events: auto;
 }
 
 .chevron-button {
@@ -386,6 +514,11 @@
 	box-shadow: 0 0 0 3px var(--warning-soft);
 }
 
+.running-count .badge-dot {
+	width: 5px;
+	height: 5px;
+}
+
 .add-first {
 	width: 100%;
 	margin-top: 8px;
@@ -403,16 +536,9 @@
 	background: var(--accent-soft);
 }
 
-.sidebar-footer {
-	display: flex;
-	align-items: center;
-	gap: 4px;
-	padding: 8px 10px 10px;
-}
-
 /* ---- update notice ---------------------------------------------------------------- */
 
-/* A pending update, above the settings entry: one click installs it. */
+/* A pending update in the navigation popover: one click installs it. */
 .sidebar-update {
 	position: relative;
 	display: flex;
@@ -625,7 +751,7 @@ button.sidebar-update-action {
 	color: var(--text-muted);
 }
 
-/* Which agent runs a session that pi does not (Claude Code, Codex). */
+/* Which agent runs each session (PI, Claude Code, Codex, or another runtime). */
 .session-agent {
 	flex-shrink: 0;
 	font-size: 10px;
@@ -635,6 +761,11 @@ button.sidebar-update-action {
 	border-radius: 4px;
 	background: var(--bg-active);
 	color: var(--text-muted);
+}
+
+.session-agent.agent-pi {
+	color: #0d9488;
+	background: color-mix(in srgb, #0d9488 14%, transparent);
 }
 
 .session-agent.agent-claude-code {

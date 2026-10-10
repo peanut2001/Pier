@@ -4,7 +4,7 @@ import { z } from "zod";
 export const ApprovalPolicySchema = z.enum(["ask", "smart", "auto"]);
 export type ApprovalPolicy = z.infer<typeof ApprovalPolicySchema>;
 
-export const ThinkingLevelSchema = z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+export const ThinkingLevelSchema = z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]);
 export type ThinkingLevel = z.infer<typeof ThinkingLevelSchema>;
 
 export const StreamingBehaviorSchema = z.enum(["steer", "followUp"]);
@@ -192,9 +192,9 @@ export interface WorkspaceFilesResult {
 	total?: number;
 }
 
-/** A workspace file read for preview (`workspace.readFile`, 1.7). */
+/** A file read for preview (`workspace.readFile`, 1.7; `workspace.previewFile`, 1.31). */
 export interface WorkspaceFileContent {
-	/** Path relative to the workspace root, normalized and joined with "/". */
+	/** Workspace-relative path, or the requested local path for `workspace.previewFile`. */
 	path: string;
 	/** Size in bytes of the file on disk. */
 	size: number;
@@ -878,7 +878,27 @@ export type NewApiLoginResult =
 
 // ---- 云链API account (1.6) ------------------------------------------------------------
 
-/** The 云链API site the personal center connects to. */
+/**
+ * A line (1.29): one address of the 云链API site. Every line reaches the same site and accounts,
+ * so a login keeps working when the user switches lines.
+ */
+export interface AccountLine {
+	id: string;
+	/** Shown name, e.g. `国内线路`. */
+	name: string;
+	/** The site's address on this line, e.g. `https://api.yunnet.top`. */
+	url: string;
+	/** Who the line suits, e.g. `适合中国大陆网络`. */
+	description?: string;
+}
+
+/** The lines of 云链API (1.29). The first one is the default. */
+export const YUNLIAN_LINES: readonly AccountLine[] = [
+	{ id: "cn", name: "国内线路", url: "https://api.yunnet.top", description: "适合中国大陆网络" },
+	{ id: "global", name: "国际线路", url: "https://api.syixn.com", description: "适合海外网络" },
+];
+
+/** The 云链API site the personal center connects to by default (the domestic line). */
 export const YUNLIAN_SITE_URL = "https://api.yunnet.top";
 
 /** How the site shows amounts of quota (NewAPI `quota_per_unit`, `quota_display_type` and friends). */
@@ -937,6 +957,10 @@ export interface AccountStatus {
 	siteError?: string;
 	/** The saved login, if any. Details and balance come from `account.overview`. */
 	user?: NewApiAccount["user"];
+	/** The lines the host can connect through (1.29); switch with `account.setLine`. */
+	lines?: AccountLine[];
+	/** The id of the line in use (1.29). */
+	line?: string;
 }
 
 export interface AccountOverview {
@@ -1044,7 +1068,7 @@ export interface ExtensionResourceInfo {
 	origin: "package" | "top-level";
 	/** Package source for `package`; `auto` (resource directory) or `local` (settings entry) for `top-level`. */
 	source: string;
-	/** Can be removed with `extension.delete` (top-level extensions only). */
+	/** Can be removed with `extension.delete` (top-level resources; skills/prompts/themes since 1.30). */
 	deletable: boolean;
 }
 
@@ -1159,6 +1183,21 @@ export interface PiSettingsChangeResult {
 /** Agent runtimes whose own configuration files Pier edits (1.23). */
 export const AgentConfigRuntimeSchema = z.enum(["claude-code", "codex"]);
 export type AgentConfigRuntime = z.infer<typeof AgentConfigRuntimeSchema>;
+
+/** A native CLI installation on the Host computer (1.32). Jobs survive client disconnects. */
+export interface AgentInstallationStatus {
+	runtime: AgentConfigRuntime;
+	state: "idle" | "checking" | "downloading" | "verifying" | "installing" | "ready" | "error";
+	version?: string;
+	downloadedBytes?: number;
+	totalBytes?: number;
+	error?: string;
+}
+
+export interface AgentInstallationResult {
+	installation: AgentInstallationStatus;
+	agent: AgentRuntimeInfo;
+}
 
 /**
  * A configuration file of an agent runtime. `user`: in the runtime's configuration directory

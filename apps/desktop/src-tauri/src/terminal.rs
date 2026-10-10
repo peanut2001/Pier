@@ -297,52 +297,10 @@ fn shell_command() -> (CommandBuilder, String) {
 /// Undo what an AppImage runtime injects into the environment, so the shell (and anything
 /// run from it) uses the system libraries and tools rather than the bundled ones.
 fn clean_env(command: &mut CommandBuilder) {
-    let Some(appdir) = std::env::var_os("APPDIR") else {
-        return;
-    };
-    let appdir = appdir.to_string_lossy().into_owned();
-    if appdir.is_empty() {
-        return;
-    }
-    for key in [
-        "APPDIR",
-        "APPIMAGE",
-        "ARGV0",
-        "OWD",
-        "GDK_PIXBUF_MODULE_FILE",
-        "GDK_PIXBUF_MODULEDIR",
-        "GIO_EXTRA_MODULES",
-        "GSETTINGS_SCHEMA_DIR",
-        "GST_PLUGIN_SYSTEM_PATH",
-        "GST_PLUGIN_SYSTEM_PATH_1_0",
-        "GTK_DATA_PREFIX",
-        "GTK_EXE_PREFIX",
-        "GTK_IM_MODULE_FILE",
-        "GTK_PATH",
-        "GTK_THEME",
-        "PYTHONHOME",
-        "PYTHONPATH",
-        "PERLLIB",
-        "QT_PLUGIN_PATH",
-    ] {
-        command.env_remove(key);
-    }
-    for key in [
-        "PATH",
-        "LD_LIBRARY_PATH",
-        "XDG_DATA_DIRS",
-        "XDG_CONFIG_DIRS",
-    ] {
-        let Some(value) = std::env::var_os(key) else {
-            continue;
-        };
-        let kept: Vec<_> = std::env::split_paths(&value)
-            .filter(|path| !path.to_string_lossy().starts_with(&appdir))
-            .collect();
-        if kept.is_empty() {
-            command.env_remove(key);
-        } else if let Ok(joined) = std::env::join_paths(kept) {
-            command.env(key, joined);
+    for (key, value) in crate::appimage_env::child_env() {
+        match value {
+            Some(value) => command.env(key, value),
+            None => command.env_remove(key),
         }
     }
 }

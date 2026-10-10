@@ -1,0 +1,118 @@
+name: Publish existing release artifacts
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to publish
+        required: true
+        type: string
+      run_id:
+        description: Release workflow run whose builds and manifests all succeeded
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: verify existing builds and publish
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+      SOURCE_RUN_ID: ${{ inputs.run_id }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: Verify source run and successful builds
+        run: |
+          [[ "$SOURCE_RUN_ID" =~ ^[0-9]+$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID" > "$RUNNER_TEMP/source-run.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID/jobs?filter=latest&per_page=100" > "$RUNNER_TEMP/source-jobs.json"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+
+          run = json.loads((Path(os.environ['RUNNER_TEMP']) / 'source-run.json').read_text())
+          jobs = json.loads((Path(os.environ['RUNNER_TEMP']) / 'source-jobs.json').read_text())['jobs']
+          version = json.loads(Path('package.json').read_text())['version']
+          assert os.environ['RELEASE_TAG'] == f'v{version}', 'Tag/version mismatch'
+          assert run['event'] == 'push' and run['status'] == 'completed', 'Not a completed tagged release run'
+          assert run['path'] == '.github/workflows/release.yml', 'Not the release workflow'
+          assert run['head_branch'] == os.environ['RELEASE_TAG'], 'Run/tag mismatch'
+          assert run['head_sha'] == subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(), 'Run/commit mismatch'
+          required = {
+              'verify tag · lint · typecheck · test', 'mobile android', 'updater manifest',
+              'desktop linux-x64', 'desktop windows-x64', 'desktop darwin-arm64', 'desktop darwin-x64',
+          }
+          successful = {job['name'] for job in jobs if job['status'] == 'completed' and job['conclusion'] == 'success'}
+          assert required <= successful, f'Builds not successful: {required - successful}'
+          print(f'Verified successful builds for {os.environ["RELEASE_TAG"]} at {run["head_sha"]}')
+          PY
+
+      - uses: actions/download-artifact@v5
+        with:
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/pier-release-assets
+          merge-multiple: true
+
+      - name: Check artifacts, checksums, and release notes
+        env:
+          RELEASE_ASSETS_DIR: ${{ runner.temp }}/pier-release-assets
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ['RELEASE_ASSETS_DIR'])
+          tag = os.environ['RELEASE_TAG']
+          signed = {f'pier-desktop-{tag}-{suffix}' for suffix in [
+              'linux-x64.AppImage', 'linux-x64.deb', 'windows-x64.setup.exe',
+              'darwin-arm64.app.tar.gz', 'darwin-x64.app.tar.gz',
+          ]}
+          expected = signed | {name + '.sig' for name in signed} | {
+              f'pier-desktop-{tag}-darwin-arm64.dmg', f'pier-desktop-{tag}-darwin-x64.dmg',
+              f'pier-mobile-{tag}-android.apk', 'latest.json', 'latest-android.json',
+          }
+          assert {p.name for p in root.iterdir()} == expected, 'Unexpected or missing release artifacts'
+          assert all(p.is_file() and not p.is_symlink() and p.stat().st_size for p in root.iterdir()), 'Invalid artifact'
+          version = json.loads(Path('package.json').read_text())['version']
+          for name in ['latest.json', 'latest-android.json']:
+              assert json.loads((root / name).read_text())['version'] == version, 'Manifest/version mismatch'
+          lines = []
+          for path in sorted(root.iterdir()):
+              with path.open('rb') as file:
+                  lines.append(f'{hashlib.file_digest(file, "sha256").hexdigest()}  {path.name}')
+          (root / 'SHA256SUMS.txt').write_text('\n'.join(lines) + '\n')
+          notes = Path('CHANGELOG.md').read_text().split(f'## {tag} — ', 1)[1].split('\n', 1)[1].split('\n## ', 1)[0].strip()
+          assert notes, 'Missing release notes'
+          Path('notes.md').write_text(notes + '\n')
+          print(f'Prepared {len(expected)} release artifacts, checksums, and notes')
+          PY
+
+      - name: Publish release
+        env:
+          RELEASE_ASSETS_DIR: ${{ runner.temp }}/pier-release-assets
+        run: |
+          prerelease=""
+          case "$RELEASE_TAG" in *-*) prerelease="--prerelease" ;; esac
+          # The existing tag is verified above. Targeting an older commit separately requires workflow-write permission.
+          gh release create "$RELEASE_TAG" "$RELEASE_ASSETS_DIR/"* \
+            --title "Pier $RELEASE_TAG" --notes-file notes.md \
+            --verify-tag $prerelease

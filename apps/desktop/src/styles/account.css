@@ -54,6 +54,12 @@ img.account-logo {
 	color: var(--text);
 }
 
+.account-line-title {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+}
+
 .account-form {
 	display: flex;
 	flex-direction: column;

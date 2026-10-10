@@ -716,8 +716,18 @@
 
 /* ---- model & thinking picker (composer toolbar) ------------------------------------ */
 
+.composer-model-chip,
+.thinking-panel {
+	--thinking-text: #8b5cf6;
+	--thinking-ring: rgba(139, 92, 246, 0.45);
+}
+
 .composer-model-chip {
 	max-width: 260px;
+}
+
+.composer-model-chip:focus-visible {
+	outline-color: var(--thinking-ring);
 }
 
 .composer-model-name {
@@ -729,7 +739,7 @@
 .composer-model-thinking {
 	display: inline-block;
 	flex: none;
-	color: var(--accent-text);
+	color: var(--thinking-text);
 	font-weight: 500;
 	animation: thinking-value-in 0.22s var(--ease);
 }
@@ -807,7 +817,7 @@
 	display: inline-block;
 	font-size: 15px;
 	font-weight: 600;
-	color: var(--accent-text);
+	color: var(--thinking-text);
 	animation: thinking-value-in 0.22s var(--ease);
 }
 
@@ -850,7 +860,7 @@
 }
 
 .thinking-slider:focus-visible {
-	box-shadow: 0 0 0 2px var(--accent-ring);
+	box-shadow: 0 0 0 2px var(--thinking-ring);
 }
 
 .thinking-slider-rail {
@@ -865,8 +875,62 @@
 	bottom: 0;
 	left: -12px;
 	border-radius: 999px;
-	background: var(--accent);
+	overflow: hidden;
+	background: linear-gradient(105deg, #3563e9, #7967ef 45%, #a76dff 72%, #5c6ded);
+	background-size: 220% 100%;
+	animation: thinking-gradient-flow 8s ease-in-out infinite alternate;
 	transition: width 0.3s var(--slider-ease);
+}
+
+.thinking-slider[data-level="ultra"] .thinking-slider-fill {
+	animation-duration: 5s;
+}
+
+@keyframes thinking-gradient-flow {
+	from {
+		background-position: 0% 50%;
+	}
+	to {
+		background-position: 100% 50%;
+	}
+}
+
+.thinking-slider-stars {
+	display: none;
+	position: absolute;
+	inset: -3px -14px;
+	background:
+		radial-gradient(circle at 8% 30%, #fff 0 0.8px, transparent 1.4px),
+		radial-gradient(circle at 19% 70%, #fff 0 1px, transparent 1.6px),
+		radial-gradient(circle at 32% 24%, #fff 0 0.8px, transparent 1.4px),
+		radial-gradient(circle at 47% 66%, #fff 0 1.1px, transparent 1.7px),
+		radial-gradient(circle at 61% 35%, #fff 0 0.8px, transparent 1.4px),
+		radial-gradient(circle at 76% 76%, #fff 0 1px, transparent 1.6px),
+		radial-gradient(circle at 89% 28%, #fff 0 0.8px, transparent 1.4px);
+	pointer-events: none;
+}
+
+.thinking-slider[data-level="max"] .thinking-slider-stars,
+.thinking-slider[data-level="ultra"] .thinking-slider-stars {
+	display: block;
+	animation: thinking-stars-drift 3.6s ease-in-out infinite alternate;
+}
+
+.thinking-slider .thinking-slider-stars.secondary {
+	background-position: 12px 7px;
+	animation-delay: -1.8s;
+	animation-direction: alternate-reverse;
+}
+
+@keyframes thinking-stars-drift {
+	from {
+		opacity: 0.35;
+		transform: translate(-5px, 1px);
+	}
+	to {
+		opacity: 0.9;
+		transform: translate(5px, -1px);
+	}
 }
 
 .thinking-slider-stop {
@@ -903,6 +967,13 @@
 		left 0.3s var(--slider-ease),
 		transform 0.16s var(--ease),
 		box-shadow 0.16s var(--ease);
+}
+
+.thinking-slider[data-level="ultra"] .thinking-slider-thumb {
+	box-shadow:
+		0 1px 4px rgba(0, 0, 0, 0.18),
+		0 0 0 1px rgba(139, 92, 246, 0.16),
+		0 0 16px -3px rgba(139, 92, 246, 0.55);
 }
 
 .thinking-slider.dragging .thinking-slider-fill,

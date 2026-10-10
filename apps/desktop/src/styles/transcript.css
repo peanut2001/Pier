@@ -313,6 +313,39 @@
 	border-bottom-color: var(--accent-text);
 }
 
+.markdown-image {
+	display: inline-block;
+	max-width: 100%;
+	padding: 0;
+	margin: 6px 0;
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	background: var(--bg);
+	overflow: hidden;
+	vertical-align: middle;
+}
+
+button.markdown-image {
+	cursor: zoom-in;
+}
+
+.markdown-image img {
+	display: block;
+	max-width: 100%;
+	max-height: 480px;
+	object-fit: contain;
+}
+
+.markdown-image-placeholder {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	padding: 12px 16px;
+	color: var(--text-muted);
+	font-size: 12px;
+	text-align: left;
+}
+
 .markdown hr {
 	border: none;
 	border-top: 1px solid var(--border);

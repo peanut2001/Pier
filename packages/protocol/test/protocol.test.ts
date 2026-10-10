@@ -100,6 +100,15 @@ describe("method params", () => {
 		expect(MethodParamsSchemas["workspace.list"].safeParse(undefined).success).toBe(true);
 		expect(MethodParamsSchemas["host.info"].safeParse({}).success).toBe(true);
 	});
+
+	it("accepts resource types for deletion and keeps extension-only clients compatible", () => {
+		const schema = MethodParamsSchemas["extension.delete"];
+		expect(schema.safeParse({ path: "/extensions/demo.js" }).success).toBe(true);
+		for (const type of ["extensions", "skills", "prompts", "themes"]) {
+			expect(schema.safeParse({ type, path: "/resource", workspaceId: "w" }).success).toBe(true);
+		}
+		expect(schema.safeParse({ type: "packages", path: "/resource" }).success).toBe(false);
+	});
 });
 
 describe("PierProtocolError", () => {

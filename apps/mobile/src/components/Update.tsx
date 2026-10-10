@@ -1,11 +1,13 @@
+import { UPDATE_ROUTES } from "@pier/client";
 import { useRouter } from "expo-router";
-import { Pressable, StyleSheet, Switch, Text, View } from "react-native";
+import { useState } from "react";
+import { Alert, Pressable, StyleSheet, Switch, Text, View } from "react-native";
 import { relativeTime } from "../format.ts";
 import { RADIUS, usePalette } from "../theme.ts";
 import { formatBytes } from "../update-manifest.ts";
 import { pendingUpdate, type UpdateStatus, updater, useUpdateStatus } from "../updater.ts";
 import { Markdown } from "./Markdown.tsx";
-import { Button, Card, CardHeader, Icon, Muted } from "./ui.tsx";
+import { Button, Card, CardHeader, Icon, Muted, PromptSheet } from "./ui.tsx";
 
 function ProgressBar({ status }: { status: UpdateStatus }) {
 	const p = usePalette();
@@ -105,6 +107,62 @@ function statusLine(status: UpdateStatus): string {
 	}
 }
 
+function UpdateRouteSettings({ status, busy }: { status: UpdateStatus; busy: boolean }) {
+	const p = usePalette();
+	const selected = UPDATE_ROUTES.find((route) => route.prefix === status.mirrorPrefix);
+	const [editing, setEditing] = useState(false);
+	const save = async (prefix: string): Promise<boolean> => {
+		try {
+			await updater.setMirror(prefix);
+			return true;
+		} catch (error) {
+			Alert.alert("无法保存更新线路", error instanceof Error ? error.message : String(error));
+			return false;
+		}
+	};
+	return (
+		<View style={styles.route}>
+			<Text style={[styles.switchLabel, { color: p.text }]}>更新线路</Text>
+			<View style={styles.actions}>
+				{UPDATE_ROUTES.map((route) => (
+					<Button
+						key={route.id}
+						title={route.label}
+						small
+						variant={selected?.id === route.id ? "primary" : "secondary"}
+						disabled={busy || selected?.id === route.id}
+						onPress={() => void save(route.prefix)}
+					/>
+				))}
+				<Button
+					title="自定义加速线路"
+					small
+					variant={selected ? "secondary" : "primary"}
+					disabled={busy}
+					onPress={() => setEditing(true)}
+				/>
+			</View>
+			<Muted>
+				当前线路：{selected?.label ?? "自定义加速线路"}
+				{status.mirrorPrefix ? `\n加速地址：${status.mirrorPrefix}` : ""}
+				{"\n"}检查更新和下载安装包都使用所选线路，自动检查也会沿用此设置。
+			</Muted>
+			{editing ? (
+				<PromptSheet
+					title="更新加速地址"
+					message="填写支持在地址后附加完整 GitHub 链接的 HTTPS 加速服务，保存后生效并重新检查更新。"
+					initialValue={status.mirrorPrefix}
+					placeholder="https://mirror.example/"
+					confirm="保存并检查"
+					mono
+					onSubmit={save}
+					onClose={() => setEditing(false)}
+				/>
+			) : null}
+		</View>
+	);
+}
+
 /** "软件更新" card on the settings screen. */
 export function UpdateSettingsCard() {
 	const p = usePalette();
@@ -112,6 +170,7 @@ export function UpdateSettingsCard() {
 	const { update } = status;
 	const supported = status.state !== "unsupported";
 	const busy = status.state === "checking" || status.state === "downloading" || status.state === "installing";
+	const routeBusy = status.state === "downloading" || status.state === "installing";
 	const skipped = update !== undefined && status.skippedVersion === update.version;
 	return (
 		<Card style={styles.card}>
@@ -142,6 +201,7 @@ export function UpdateSettingsCard() {
 						disabled={busy}
 						onPress={() => void updater.check()}
 					/>
+					{status.state === "checking" ? <Button title="取消检查" small onPress={() => updater.cancelCheck()} /> : null}
 					{update && status.state !== "downloading" ? (
 						<Button
 							title={skipped ? "恢复提醒" : "不再提醒此版本"}
@@ -155,6 +215,7 @@ export function UpdateSettingsCard() {
 
 			{supported ? (
 				<>
+					<UpdateRouteSettings status={status} busy={routeBusy} />
 					<View style={styles.switchRow}>
 						<Text style={[styles.switchLabel, { color: p.text }]}>自动检查更新</Text>
 						<Switch
@@ -166,7 +227,9 @@ export function UpdateSettingsCard() {
 					</View>
 					<Muted>
 						启动时和每隔几小时检查 GitHub 上的最新正式版。安装包下载后先核对大小与校验值，再交给系统安装；Android
-						会校验签名，只接受 Pier 官方签名的安装包。首次更新时系统会要求允许 Pier 安装应用。更新不会清除已配对的电脑。
+						会校验签名，只接受 Pier
+						官方签名的安装包。允许通知后，通知栏会显示下载进度，点击通知可返回这里；后台下载完成后请回到 Pier
+						点击安装。首次更新时系统会要求允许 Pier 安装应用。更新不会清除已配对的电脑。
 					</Muted>
 				</>
 			) : null}
@@ -191,4 +254,5 @@ const styles = StyleSheet.create({
 	actions: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
 	switchRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
 	switchLabel: { fontSize: 15, fontWeight: "600" },
+	route: { gap: 8 },
 });

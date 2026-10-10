@@ -256,9 +256,9 @@ export const IconLink = make(
 	<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />,
 );
 
-/** App logo: the bundled favicon (blue→teal pier mark). */
+/** Shared vector brand mark, kept crisp at sidebar and welcome-screen sizes. */
 export function Logo({ size = 28 }: { size?: number }) {
-	return <img className="logo" src="/favicon.png" width={size} height={size} alt="" draggable={false} />;
+	return <img className="logo" src="/logo.svg" width={size} height={size} alt="" draggable={false} />;
 }
 export const IconUser = make(
 	<>

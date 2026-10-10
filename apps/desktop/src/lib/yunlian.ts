@@ -5,6 +5,7 @@ import {
 	type CustomProviderApi,
 	type NewApiModel,
 	type ProviderInfo,
+	YUNLIAN_LINES,
 	YUNLIAN_SITE_URL,
 } from "@pier/protocol";
 
@@ -12,6 +13,8 @@ import {
 export const YUNLIAN_ID = "yunlian";
 export const YUNLIAN_NAME = "云链API";
 export const YUNLIAN_SITE = YUNLIAN_SITE_URL;
+/** Hosts of every line of 云链API (`api.yunnet.top`, `api.syixn.com`). */
+const YUNLIAN_HOSTS = new Set(YUNLIAN_LINES.map((line) => new URL(line.url).host.toLowerCase()));
 /** Prefix of the providers the personal center configures, one per group. */
 const GROUP_PREFIX = `${YUNLIAN_ID}-`;
 
@@ -33,7 +36,18 @@ function hostOf(url: string): string | undefined {
 export function isYunlianProvider(provider: Pick<ProviderInfo, "id" | "custom">): boolean {
 	if (provider.id === YUNLIAN_ID || provider.id.startsWith(GROUP_PREFIX)) return true;
 	const url = provider.custom?.baseUrl;
-	return url !== undefined && hostOf(url) === hostOf(YUNLIAN_SITE);
+	const host = url === undefined ? undefined : hostOf(url);
+	return host !== undefined && YUNLIAN_HOSTS.has(host);
+}
+
+/**
+ * Every address of the site at `siteUrl`: all lines when it is one of 云链API's, which reach the
+ * same site and accept the same keys. `siteUrl` comes first.
+ */
+export function siteAddresses(siteUrl: string): string[] {
+	const host = hostOf(siteUrl);
+	if (host === undefined || !YUNLIAN_HOSTS.has(host)) return [siteUrl];
+	return [siteUrl, ...YUNLIAN_LINES.map((line) => line.url).filter((url) => hostOf(url) !== host)];
 }
 
 /** The group a personal-center provider was configured for, if it is one. */
@@ -179,8 +193,11 @@ export function relayProvider(
 		);
 	}
 	const limited = resolved.slice(0, MAX_MODELS);
-	// A Base URL other than the one derived for the provider's API was set by hand.
-	const custom = existing !== undefined && !sameUrl(existing.baseUrl, newApiBaseUrl(target.siteUrl, existing.api));
+	// A Base URL other than the one derived for the provider's API was set by hand. One derived
+	// from another line of the site moves to `target.siteUrl`.
+	const custom =
+		existing !== undefined &&
+		!siteAddresses(target.siteUrl).some((site) => sameUrl(existing.baseUrl, newApiBaseUrl(site, existing.api)));
 	const api = custom
 		? existing.api
 		: mainApi(
@@ -196,13 +213,36 @@ export function relayProvider(
 	};
 }
 
-/** The browser sign-in entry (`yunlian`) for the approved token's models. */
+/** The browser sign-in entry (`yunlian`) for the approved token's models, on the line at `siteUrl`. */
 export function yunlianProvider(
 	models: ReadonlyArray<NewApiModel>,
 	existing?: CustomProvider,
 	modelsError?: string,
+	siteUrl: string = YUNLIAN_SITE,
 ): CustomProvider {
-	return relayProvider({ id: YUNLIAN_ID, name: YUNLIAN_NAME, siteUrl: YUNLIAN_SITE }, models, existing, modelsError);
+	return relayProvider({ id: YUNLIAN_ID, name: YUNLIAN_NAME, siteUrl }, models, existing, modelsError);
+}
+
+/**
+ * The 云链API providers to move to the line at `siteUrl`: those whose Base URL was derived from
+ * another line (ones changed by hand are left alone), with the Base URL of the new line.
+ */
+export function movedToLine(
+	providers: ReadonlyArray<Pick<ProviderInfo, "id" | "custom">>,
+	siteUrl: string,
+): CustomProvider[] {
+	const moved: CustomProvider[] = [];
+	for (const provider of providers) {
+		const custom = provider.custom;
+		if (!custom || !isYunlianProvider(provider)) continue;
+		const target = newApiBaseUrl(siteUrl, custom.api);
+		if (sameUrl(custom.baseUrl, target)) continue;
+		const derived = siteAddresses(siteUrl).some((site) => sameUrl(custom.baseUrl, newApiBaseUrl(site, custom.api)));
+		if (!derived) continue;
+		const { hasConfiguredKey: _key, ...rest } = custom as CustomProvider & { hasConfiguredKey?: boolean };
+		moved.push({ ...rest, baseUrl: target });
+	}
+	return moved;
 }
 
 /** An amount of quota the way the site shows it (`$1.23`, `¥8.61`, or raw tokens). */

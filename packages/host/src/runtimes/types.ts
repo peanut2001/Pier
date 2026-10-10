@@ -37,7 +37,7 @@ export interface AgentRuntime {
 	readonly name: string;
 	readonly capabilities: AgentRuntimeCapabilities;
 	/** Availability, version and capabilities. May probe the CLI (cached). */
-	info(): Promise<AgentRuntimeInfo>;
+	info(refresh?: boolean): Promise<AgentRuntimeInfo>;
 	/** Sessions stored for the workspace. Unavailable runtimes return none. */
 	listSessions(workspace: WorkspaceInfo): Promise<StoredSession[]>;
 	create(options: ManagedSessionOptions): Promise<ManagedSession>;
@@ -60,5 +60,7 @@ export interface AgentRuntime {
 	newSessionDefaults(cwd: string): Promise<{ model?: ModelInfo; thinkingLevel: ThinkingLevel }>;
 	/** The runtime's own configuration files changed (1.23): drop what was read from them. */
 	configChanged?(): void;
+	/** A verified native CLI was installed (1.32): refresh cached version and catalogs. */
+	installationChanged?(): void;
 	dispose(): Promise<void>;
 }

@@ -3,10 +3,11 @@ import Constants from "expo-constants";
 import * as Device from "expo-device";
 import { useEffect, useState } from "react";
 import { Platform, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { AppearanceSettings } from "../src/components/AppearanceSettings.tsx";
 import { UpdateSettingsCard } from "../src/components/Update.tsx";
 import { Button, Card, CardHeader, Muted, Screen } from "../src/components/ui.tsx";
 import { APP_VERSION, useMobileState, useStore } from "../src/store.ts";
-import { MONO, RADIUS, usePalette } from "../src/theme.ts";
+import { MONO, PAGE, RADIUS, usePalette } from "../src/theme.ts";
 
 function engine(): string {
 	const hermes = (globalThis as { HermesInternal?: { getRuntimeProperties?: () => Record<string, string> } })
@@ -44,8 +45,9 @@ export default function Settings() {
 	};
 
 	return (
-		<Screen>
+		<Screen safeBottom>
 			<ScrollView contentContainerStyle={styles.content}>
+				<AppearanceSettings />
 				<Card style={styles.card}>
 					<CardHeader
 						icon="phone-portrait-outline"
@@ -57,9 +59,12 @@ export default function Settings() {
 						onChangeText={setName}
 						maxLength={100}
 						style={[styles.input, { color: p.text, borderColor: p.border, backgroundColor: p.bg }]}
+						selectionColor={p.accent}
+						accessibilityLabel="设备名称"
 					/>
 					<Button
 						title="保存名称"
+						variant="primary"
 						small
 						disabled={!name.trim() || name.trim() === deviceName}
 						onPress={() => void store.setDeviceName(name)}
@@ -96,9 +101,9 @@ export default function Settings() {
 				<Card style={styles.card}>
 					<CardHeader icon="information-circle-outline" title="关于" />
 					<Muted>
-						Pier Mobile {APP_VERSION}（{Constants.expoConfig?.version ?? "?"}）。手机只是遥控器：Agent
-						始终运行在你的电脑上， 模型与凭据保存在电脑的 pi 配置中。连接使用 Noise
-						协议端到端加密，只有配对过的设备能连接。
+						Pier Mobile {APP_VERSION}（{Constants.expoConfig?.version ?? "?"}）。编码 Agent 的跨设备工作台。
+						从手机连接多台电脑，查看和驱动 pi、Claude Code 与 Codex 的会话。Agent 始终运行在电脑上，模型与凭据使用各自的
+						Agent 配置。远程连接采用端到端加密，只有配对过的设备能连接。
 					</Muted>
 				</Card>
 			</ScrollView>
@@ -107,7 +112,7 @@ export default function Settings() {
 }
 
 const styles = StyleSheet.create({
-	content: { padding: 16, paddingBottom: 40, gap: 14 },
+	content: { ...PAGE, padding: 16, paddingBottom: 40, gap: 14 },
 	card: { gap: 12 },
 	input: { borderWidth: 1, borderRadius: RADIUS.md, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15 },
 	mono: { fontFamily: MONO, fontSize: 16, letterSpacing: 1 },

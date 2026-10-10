@@ -1,8 +1,9 @@
 import type { WorkspaceFileContent } from "@pier/protocol";
 import { type KeyboardEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatBytes, languageForPath, relativeTime } from "../lib/format.ts";
+import { filePreviewAuthorizationPath, filePreviewError } from "../lib/markdown-files.ts";
 import { isSensitiveFile } from "../lib/sensitive-files.ts";
-import { useAppState, useCanManageWorkspace, useStore } from "../lib/store.tsx";
+import { hostAuthorizesFilePreviews, LOCAL_NODE, useAppState, useCanManageWorkspace, useStore } from "../lib/store.tsx";
 import {
 	IconAlert,
 	IconFile,
@@ -12,7 +13,7 @@ import {
 	IconRefresh,
 	IconShieldAlert,
 } from "./Icons.tsx";
-import { CopyButton, Markdown } from "./Markdown.tsx";
+import { CopyButton, Markdown, MarkdownFiles } from "./Markdown.tsx";
 import { Modal } from "./Modal.tsx";
 import { Highlighted } from "./ToolCard.tsx";
 
@@ -142,16 +143,19 @@ export function FileViewer({
 	path,
 	onClose,
 	onInsert,
+	fromMarkdown = false,
 }: {
 	workspaceId: string;
 	path: string;
 	onClose: () => void;
 	onInsert?: (() => void) | undefined;
+	fromMarkdown?: boolean;
 }) {
 	const store = useStore();
 	const [confirmed, setConfirmed] = useState(() => !isSensitiveFile(path));
 	const [file, setFile] = useState<WorkspaceFileContent>();
-	const [error, setError] = useState<string>();
+	const [error, setError] = useState<unknown>();
+	const [authorizationPrompt, setAuthorizationPrompt] = useState(false);
 	const [loading, setLoading] = useState(false);
 	const [rendered, setRendered] = useState(true);
 	/** The text being edited; undefined while previewing. */
@@ -162,29 +166,46 @@ export function FileViewer({
 	const [closePrompt, setClosePrompt] = useState(false);
 	const request = useRef(0);
 
-	const load = useCallback(async () => {
-		const id = ++request.current;
-		setLoading(true);
-		setError(undefined);
-		try {
-			const result = await store.readFile(workspaceId, path);
-			if (request.current === id) setFile(result);
-		} catch (e) {
-			if (request.current === id) setError(errorText(e));
-		} finally {
-			if (request.current === id) setLoading(false);
-		}
-	}, [store, workspaceId, path]);
+	const load = useCallback(
+		async (authorizedPath?: string) => {
+			const id = ++request.current;
+			setLoading(true);
+			setError(undefined);
+			setFile(undefined);
+			setAuthorizationPrompt(false);
+			try {
+				const result = await (authorizedPath
+					? store.authorizeFilePreview(workspaceId, path, authorizedPath)
+					: fromMarkdown
+						? store.previewFile(workspaceId, path)
+						: store.readFile(workspaceId, path));
+				if (request.current === id) setFile(result);
+			} catch (e) {
+				if (request.current === id) setError(e);
+			} finally {
+				if (request.current === id) setLoading(false);
+			}
+		},
+		[store, workspaceId, path, fromMarkdown],
+	);
 
 	useEffect(() => {
 		if (confirmed) void load();
+		return () => {
+			++request.current;
+		};
 	}, [confirmed, load]);
+
+	const previewNode = useAppState((s) => s.workspaceNodes[workspaceId] || s.node);
+	const previewHost = useAppState((s) => s.nodes[previewNode]?.hostInfo);
+	const authorizationPath = fromMarkdown ? filePreviewAuthorizationPath(error) : undefined;
+	const canAuthorize = !!authorizationPath && hostAuthorizesFilePreviews(previewHost, previewNode !== LOCAL_NODE);
 
 	const name = path.split("/").pop() ?? path;
 	const isMarkdown = MARKDOWN.test(path) && file?.kind === "text";
 	// Paired computers on protocol 1.10+ accept edits; older ones are read-only from here.
 	const local = useCanManageWorkspace(workspaceId);
-	const editable = local && file?.kind === "text" && !file.truncated;
+	const editable = !fromMarkdown && local && file?.kind === "text" && !file.truncated;
 	const editing = draft !== undefined && !!file;
 	const original = useMemo(() => toLf(file?.text ?? ""), [file?.text]);
 	const dirty = editing && draft !== original;
@@ -241,16 +262,48 @@ export function FileViewer({
 				</button>
 			</div>
 		);
-	} else if (error) {
+	} else if (authorizationPrompt && canAuthorize && authorizationPath) {
+		body = (
+			<div className="file-viewer-notice warning file-viewer-authorization">
+				<IconShieldAlert size={22} />
+				<div>
+					<strong>授权读取工作区外的文件？</strong>
+					<p>将读取并显示「{store.nodeName(previewNode)}」上的以下文件：</p>
+					<p className="file-viewer-authorization-path">{authorizationPath}</p>
+					<p>仅授权这次只读预览。刷新或重新打开文件时需要再次确认。</p>
+					{isSensitiveFile(authorizationPath) ? <p>该文件可能包含私钥或凭据，请确认后再显示。</p> : null}
+					<div className="file-viewer-confirm-actions">
+						<button type="button" className="subtle" onClick={() => setAuthorizationPrompt(false)}>
+							取消
+						</button>
+						<button type="button" className="primary" onClick={() => void load(authorizationPath)}>
+							仅授权这次预览
+						</button>
+					</div>
+				</div>
+			</div>
+		);
+	} else if (error !== undefined) {
 		body = (
 			<div className="file-viewer-notice error">
 				<IconAlert size={20} />
 				<div>
 					<strong>无法打开文件</strong>
-					<p>{error}</p>
+					<p>{fromMarkdown ? filePreviewError(error, previewHost?.platform) : errorText(error)}</p>
+					{authorizationPath && !canAuthorize ? (
+						<p>
+							{previewNode === LOCAL_NODE
+								? "请更新 Pier 后授权预览，或将文件放到当前工作区。"
+								: "请更新文件所在电脑的 Pier 以支持远程授权，或将文件放到当前工作区。"}
+						</p>
+					) : null}
 				</div>
-				<button type="button" className="subtle" onClick={() => void load()}>
-					重试
+				<button
+					type="button"
+					className={canAuthorize ? "primary" : "subtle"}
+					onClick={() => (canAuthorize ? setAuthorizationPrompt(true) : void load())}
+				>
+					{canAuthorize ? "授权并打开" : "重试"}
 				</button>
 			</div>
 		);
@@ -328,7 +381,12 @@ export function FileViewer({
 				) : null}
 				{isMarkdown && rendered ? (
 					<div className="file-viewer-markdown">
-						<Markdown text={file.text ?? ""} />
+						<MarkdownFiles
+							workspaceId={workspaceId}
+							basePath={path.replace(/\\/g, "/").split("/").slice(0, -1).join("/")}
+						>
+							<Markdown text={file.text ?? ""} />
+						</MarkdownFiles>
 					</div>
 				) : (
 					<TextView file={file} />
@@ -435,12 +493,13 @@ export function FilePreview() {
 	const preview = useAppState((s) => s.filePreview);
 	const known = useAppState((s) => !!preview && s.workspaces.some((w) => w.id === preview.workspaceId));
 	if (!preview || !known) return null;
-	const { workspaceId, path, composerKey } = preview;
+	const { workspaceId, path, composerKey, fromMarkdown } = preview;
 	return (
 		<FileViewer
-			key={`${workspaceId}:${path}`}
+			key={`${workspaceId}:${path}:${fromMarkdown ?? false}`}
 			workspaceId={workspaceId}
 			path={path}
+			fromMarkdown={fromMarkdown}
 			onClose={() => store.closeFilePreview()}
 			onInsert={composerKey ? () => store.insertFileIntoComposer(composerKey, path) : undefined}
 		/>

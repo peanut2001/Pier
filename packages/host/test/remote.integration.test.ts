@@ -122,6 +122,24 @@ describe("remote access", () => {
 		});
 	}
 
+	it("previews a host screenshot through the encrypted paired connection", async () => {
+		const path = join(t.root, "screen.png");
+		const data = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a7l8AAAAASUVORK5CYII=";
+		writeFileSync(path, Buffer.from(data, "base64"));
+		const phone = phoneClient(await pair());
+		try {
+			await phone.connect();
+			expect(await phone.request("workspace.previewFile", { workspaceId: workspace.id, path })).toMatchObject({
+				path,
+				kind: "image",
+				mimeType: "image/png",
+				data,
+			});
+		} finally {
+			phone.close();
+		}
+	});
+
 	it("reports status and a pairing code that points at the listener", async () => {
 		const status = await desktop.request("remote.status");
 		expect(status).toMatchObject({ enabled: true, running: true, pairingActive: false, mdns: false });

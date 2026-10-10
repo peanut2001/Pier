@@ -1,4 +1,5 @@
 import { Platform, useColorScheme } from "react-native";
+import { useThemePreference } from "./theme-preference.ts";
 
 export interface Palette {
 	/** Whether this is the dark palette, for colors derived on the fly. */
@@ -11,7 +12,9 @@ export interface Palette {
 	muted: string;
 	faint: string;
 	accent: string;
+	accentText: string;
 	accentSoft: string;
+	accentRing: string;
 	onAccent: string;
 	danger: string;
 	dangerSoft: string;
@@ -30,25 +33,27 @@ export interface Palette {
 
 const dark: Palette = {
 	dark: true,
-	bg: "#0a0c0f",
-	card: "#14171c",
-	elevated: "#1d2127",
-	border: "#262b33",
-	text: "#eef0f3",
-	muted: "#9aa2ae",
-	faint: "#626a77",
-	accent: "#3ccfc0",
-	accentSoft: "rgba(60,207,192,0.14)",
-	onAccent: "#04201d",
-	danger: "#f26b6b",
-	dangerSoft: "rgba(242,107,107,0.14)",
-	warning: "#eab54f",
-	warningSoft: "rgba(234,181,79,0.14)",
-	ok: "#46c35d",
-	okSoft: "rgba(70,195,93,0.14)",
-	code: "#0d1014",
-	codeText: "#cdd3db",
-	userBubble: "#173b37",
+	bg: "#08090c",
+	card: "#0f1014",
+	elevated: "#15161b",
+	border: "rgba(255,255,255,0.11)",
+	text: "#ededf0",
+	muted: "#9a9ca8",
+	faint: "#62646f",
+	accent: "#2ab5aa",
+	accentText: "#5fd6cb",
+	accentSoft: "rgba(42,181,170,0.13)",
+	accentRing: "rgba(42,181,170,0.45)",
+	onAccent: "#071f1c",
+	danger: "#f06464",
+	dangerSoft: "rgba(240,100,100,0.12)",
+	warning: "#e9b44c",
+	warningSoft: "rgba(233,180,76,0.12)",
+	ok: "#3fb96f",
+	okSoft: "rgba(63,185,111,0.13)",
+	code: "#0a0b0e",
+	codeText: "#d9dce3",
+	userBubble: "#1d2027",
 	add: "#7ee2a8",
 	del: "#ff9b94",
 	scrim: "rgba(0,0,0,0.6)",
@@ -56,37 +61,47 @@ const dark: Palette = {
 
 const light: Palette = {
 	dark: false,
-	bg: "#f3f5f8",
+	bg: "#eef0f4",
 	card: "#ffffff",
-	elevated: "#edf0f4",
-	border: "#e2e6ec",
-	text: "#10141a",
-	muted: "#5d6672",
-	faint: "#99a1ad",
-	accent: "#0f8a7e",
-	accentSoft: "rgba(15,138,126,0.10)",
+	elevated: "#f7f8fa",
+	border: "rgba(15,23,42,0.13)",
+	text: "#13161c",
+	muted: "#5a6170",
+	faint: "#9aa0ac",
+	accent: "#11968c",
+	accentText: "#0d7f77",
+	accentSoft: "rgba(17,150,140,0.10)",
+	accentRing: "rgba(17,150,140,0.4)",
 	onAccent: "#ffffff",
-	danger: "#d63d3d",
-	dangerSoft: "rgba(214,61,61,0.09)",
-	warning: "#b7741a",
-	warningSoft: "rgba(214,145,40,0.13)",
-	ok: "#21a14a",
-	okSoft: "rgba(33,161,74,0.11)",
-	code: "#f2f4f7",
-	codeText: "#24292f",
-	userBubble: "#dff2ef",
-	add: "#1a7f37",
-	del: "#cf222e",
+	danger: "#d93b3b",
+	dangerSoft: "rgba(217,59,59,0.08)",
+	warning: "#b7791f",
+	warningSoft: "rgba(214,158,46,0.12)",
+	ok: "#1f9d55",
+	okSoft: "rgba(31,157,85,0.10)",
+	code: "#0f1116",
+	codeText: "#d9dce3",
+	userBubble: "#f0f2f6",
+	add: "#7ee2a8",
+	del: "#ff9b94",
 	scrim: "rgba(10,14,20,0.42)",
 };
 
 export function usePalette(): Palette {
-	return useColorScheme() === "light" ? light : dark;
+	const preference = useThemePreference();
+	const system = useColorScheme();
+	return (preference === "system" ? system : preference) === "light" ? light : dark;
 }
 
 export const MONO = Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" });
 
-export const RADIUS = { sm: 8, md: 12, lg: 18, xl: 26, pill: 999 } as const;
+export const RADIUS = { sm: 7, md: 11, lg: 16, xl: 22, pill: 999 } as const;
+
+/** Keep list and settings content readable on tablets and the web preview. */
+export const PAGE = { width: "100%", maxWidth: 800, alignSelf: "center" } as const;
+
+/** Thinking-level labels use the same purple as the desktop, in both palettes. */
+export const THINKING_COLOR = "#8b5cf6";
 
 /** Soft, layered card elevation (React Native's `boxShadow` works on every platform). */
 export const SHADOW: object = { boxShadow: "0 1px 2px rgba(16,24,40,0.04), 0 6px 20px rgba(16,24,40,0.06)" };

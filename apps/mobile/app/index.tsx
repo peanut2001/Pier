@@ -19,7 +19,7 @@ import {
 import { relativeTime } from "../src/format.ts";
 import type { PairedHost } from "../src/hosts.ts";
 import { useMobileState, useStore } from "../src/store.ts";
-import { MONO, RADIUS, SHADOW, usePalette } from "../src/theme.ts";
+import { MONO, PAGE, RADIUS, SHADOW, usePalette } from "../src/theme.ts";
 
 function HostMenu({ host, onClose }: { host: PairedHost; onClose: () => void }) {
 	const store = useStore();
@@ -97,7 +97,7 @@ function HostRow({ host }: { host: PairedHost }) {
 					pressed && styles.pressed,
 				]}
 			>
-				<Avatar name={host.hostName} size={50} icon="desktop-outline">
+				<Avatar name={host.hostName} size={46} icon="desktop-outline" tone="accent">
 					<View style={styles.avatarDot}>
 						<StatusDot color={dot} size={14} ring={p.card} />
 					</View>
@@ -153,12 +153,12 @@ function EmptyHosts() {
 				</View>
 			</View>
 			<Title style={[styles.center, styles.emptyTitle]}>连接你的电脑</Title>
-			<Muted style={styles.center}>手机是遥控器，Agent 始终运行在你的电脑上。</Muted>
+			<Muted style={styles.center}>从手机查看进度、发送指令和审批操作，Agent 持续在电脑上运行。</Muted>
 			<View style={[styles.steps, { backgroundColor: p.card, borderColor: p.border }]}>
 				{STEPS.map((step, index) => (
 					<View key={step.text} style={styles.step}>
 						<View style={[styles.stepIndex, { backgroundColor: p.accentSoft }]}>
-							<Text style={[styles.stepIndexText, { color: p.accent }]}>{index + 1}</Text>
+							<Text style={[styles.stepIndexText, { color: p.accentText }]}>{index + 1}</Text>
 						</View>
 						<Text style={[styles.stepText, { color: p.text }]}>{step.text}</Text>
 						<Icon name={step.icon} size={18} color={p.faint} />
@@ -178,7 +178,7 @@ export default function Home() {
 	const ready = useMobileState((s) => s.ready);
 	const hosts = useMobileState((s) => s.hosts);
 	return (
-		<Screen>
+		<Screen safeBottom>
 			<Stack.Screen
 				options={{
 					headerRight: () => (
@@ -187,7 +187,7 @@ export default function Home() {
 				}}
 			/>
 			{!ready ? (
-				<ActivityIndicator style={styles.loading} color={p.accent} />
+				<ActivityIndicator style={styles.loading} color={p.accentText} />
 			) : (
 				<FlatList
 					data={hosts}
@@ -199,7 +199,7 @@ export default function Home() {
 							<LargeTitle
 								eyebrow="PIER"
 								title="我的电脑"
-								subtitle={hosts.length ? `${hosts.length} 台已配对 · 长按管理` : "随时随地驱动电脑上的编码 Agent"}
+								subtitle={hosts.length ? `${hosts.length} 台已配对 · 长按管理` : "编码 Agent 的跨设备工作台"}
 							/>
 							<UpdateBanner />
 						</View>
@@ -214,12 +214,12 @@ export default function Home() {
 								onPress={() => router.push("/pair")}
 								style={({ pressed }) => [
 									styles.addCard,
-									{ borderColor: p.border },
+									{ borderColor: p.accentRing, backgroundColor: p.accentSoft },
 									pressed && { backgroundColor: p.elevated },
 								]}
 							>
 								<View style={[styles.addIcon, { backgroundColor: p.accentSoft }]}>
-									<Icon name="add" size={20} color={p.accent} />
+									<Icon name="add" size={20} color={p.accentText} />
 								</View>
 								<View style={styles.flex}>
 									<Text style={[styles.addTitle, { color: p.text }]}>添加电脑</Text>
@@ -247,7 +247,7 @@ export default function Home() {
 const styles = StyleSheet.create({
 	flex: { flex: 1 },
 	loading: { marginTop: 48 },
-	list: { paddingHorizontal: 16, paddingBottom: 40, gap: 12, flexGrow: 1 },
+	list: { ...PAGE, paddingHorizontal: 16, paddingBottom: 40, gap: 12, flexGrow: 1 },
 	header: { gap: 14, marginBottom: 2 },
 	pressed: { opacity: 0.85, transform: [{ scale: 0.985 }] },
 	hostCard: {

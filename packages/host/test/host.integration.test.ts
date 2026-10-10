@@ -402,6 +402,9 @@ describe("sessions end to end", () => {
 		expect(level).toBe("high");
 		const snapshot = await client.request("session.snapshot", { sessionId: session.id });
 		expect(snapshot).toMatchObject({ thinkingLevel: "high", session: { name: "My session" }, model: { id: "faux-1" } });
+		const clamped = await client.request("thinking.set", { sessionId: session.id, level: "ultra" });
+		expect(clamped.level).not.toBe("ultra");
+		expect(snapshot.model?.thinkingLevels).toContain(clamped.level);
 	});
 
 	it("forks a session before a user message", async () => {

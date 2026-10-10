@@ -23,7 +23,7 @@ import {
 } from "../../../src/components/ui.tsx";
 import { isBusy, RUN_STATE_LABEL, relativeTime, sessionTitle, shortPath } from "../../../src/format.ts";
 import { useMobileState, useStore } from "../../../src/store.ts";
-import { MONO, RADIUS, usePalette } from "../../../src/theme.ts";
+import { MONO, PAGE, RADIUS, usePalette } from "../../../src/theme.ts";
 
 const SESSIONS_PER_WORKSPACE = 15;
 
@@ -75,7 +75,7 @@ function ConnectionCard({ hostId }: { hostId: string }) {
 				) : reconnecting ? (
 					<StatusDot color={p.warning} size={8} />
 				) : (
-					<ActivityIndicator size="small" color={p.accent} />
+					<ActivityIndicator size="small" color={p.accentText} />
 				)}
 				<View style={styles.flex}>
 					<Text style={[styles.connectionTitle, { color: open ? p.text : reconnecting ? p.warning : p.text }]}>
@@ -99,7 +99,7 @@ function ConnectionCard({ hostId }: { hostId: string }) {
 					onPress={openAddresses}
 					style={({ pressed }) => [styles.hintRow, { backgroundColor: p.elevated }, pressed && styles.pressed]}
 				>
-					<Icon name="swap-horizontal" size={16} color={p.accent} />
+					<Icon name="swap-horizontal" size={16} color={p.accentText} />
 					<Text style={[styles.hintText, { color: p.muted }]}>电脑的 IP 变了？修改地址即可，不用重新配对</Text>
 					<Icon name="chevron-forward" size={16} color={p.faint} />
 				</Pressable>
@@ -132,7 +132,7 @@ function ToolsCard({ hostId }: { hostId: string }) {
 						onPress={() => openTerminal()}
 						style={({ pressed }) => [styles.tool, { backgroundColor: p.elevated }, pressed && styles.pressed]}
 					>
-						<Icon name="terminal-outline" size={18} color={p.accent} />
+						<Icon name="terminal-outline" size={18} color={p.accentText} />
 						<Text style={[styles.toolText, { color: p.text }]}>终端</Text>
 					</Pressable>
 				) : null}
@@ -143,7 +143,7 @@ function ToolsCard({ hostId }: { hostId: string }) {
 						onPress={() => router.push({ pathname: "/host/[hostId]/extensions", params: { hostId } })}
 						style={({ pressed }) => [styles.tool, { backgroundColor: p.elevated }, pressed && styles.pressed]}
 					>
-						<Icon name="extension-puzzle-outline" size={18} color={p.accent} />
+						<Icon name="extension-puzzle-outline" size={18} color={p.accentText} />
 						<Text style={[styles.toolText, { color: p.text }]}>pi 扩展</Text>
 					</Pressable>
 				) : null}
@@ -241,7 +241,7 @@ function SessionRow({
 	const p = usePalette();
 	const pending = session.pendingUi ?? 0;
 	const busy = isBusy(session.state);
-	const runtime = session.runtime && session.runtime !== "pi" ? agentRuntimeLabel(session.runtime) : undefined;
+	const runtime = agentRuntimeLabel(session.runtime);
 	return (
 		<Pressable
 			testID={`session-${session.id}`}
@@ -259,7 +259,7 @@ function SessionRow({
 		>
 			<View style={[styles.separator, first && styles.separatorFull, { backgroundColor: p.border }]} />
 			<View style={styles.indicator}>
-				{pending ? <StatusDot color={p.warning} size={8} /> : busy ? <PulseDot color={p.accent} size={8} /> : null}
+				{pending ? <StatusDot color={p.warning} size={8} /> : busy ? <PulseDot color={p.accentText} size={8} /> : null}
 			</View>
 			<View style={styles.sessionMain}>
 				<Text style={[styles.sessionTitle, { color: session.archived ? p.muted : p.text }]} numberOfLines={2}>
@@ -269,22 +269,21 @@ function SessionRow({
 					{session.archived ? (
 						<Text style={[styles.badge, { color: p.muted, backgroundColor: p.elevated }]}>已归档</Text>
 					) : null}
-					{runtime ? (
-						<Text style={[styles.badge, { color: p.accent, backgroundColor: p.accentSoft }]}>{runtime}</Text>
+					<Text style={[styles.badge, { color: p.accentText, backgroundColor: p.accentSoft }]}>{runtime}</Text>
+					{pending ? (
+						<Pill text={`待批准 ${pending}`} tone="warning" icon="hand-left-outline" />
+					) : busy ? (
+						<Pill text={RUN_STATE_LABEL[session.state]} tone="accent" />
 					) : null}
+				</View>
+				<View style={styles.metaRow}>
 					<Icon name="time-outline" size={12} color={p.faint} />
 					<Text style={[styles.sessionMeta, { color: p.faint }]}>{relativeTime(session.modifiedAt)}</Text>
 					<Icon name="chatbubble-outline" size={11.5} color={p.faint} style={styles.metaGap} />
 					<Text style={[styles.sessionMeta, { color: p.faint }]}>{session.messageCount}</Text>
 				</View>
 			</View>
-			{pending ? (
-				<Pill text={`待批准 ${pending}`} tone="warning" icon="hand-left-outline" />
-			) : busy ? (
-				<Pill text={RUN_STATE_LABEL[session.state]} tone="accent" />
-			) : (
-				<Icon name="chevron-forward" size={17} color={p.faint} />
-			)}
+			<Icon name="chevron-forward" size={17} color={p.faint} />
 		</Pressable>
 	);
 }
@@ -369,7 +368,7 @@ export default function HostScreen() {
 	const canBrowseFiles = online && store.canBrowseFiles();
 
 	return (
-		<Screen>
+		<Screen safeBottom>
 			<Stack.Screen
 				options={{
 					title: host?.hostName ?? "电脑",
@@ -411,7 +410,7 @@ export default function HostScreen() {
 						{view.connection === "open" && view.workspaces && !view.workspaces.length ? (
 							<Card style={styles.emptyWorkspaces}>
 								<View style={[styles.emptyIcon, { backgroundColor: p.accentSoft }]}>
-									<Icon name="folder-open-outline" size={30} color={p.accent} />
+									<Icon name="folder-open-outline" size={30} color={p.accentText} />
 								</View>
 								<Text style={[styles.emptyTitle, { color: p.text }]}>还没有工作区</Text>
 								<Muted style={styles.centerText}>
@@ -442,43 +441,48 @@ export default function HostScreen() {
 							onPress={() => openWorkspace(section.workspace.id)}
 							style={({ pressed }) => [styles.sectionInfo, pressed && styles.pressed]}
 						>
-							<Avatar name={section.workspace.name} size={42} icon="folder-open" />
+							<Avatar name={section.workspace.name} size={36} icon="folder-open" tone="accent" />
 							<View style={styles.flex}>
 								<View style={styles.nameRow}>
 									<Text style={[styles.workspaceName, { color: p.text }]} numberOfLines={1}>
 										{section.workspace.name}
 									</Text>
-									{section.running ? <PulseDot color={p.accent} size={7} /> : null}
+									{section.running ? <PulseDot color={p.accentText} size={7} /> : null}
 								</View>
 								<Text style={[styles.path, { color: p.faint }]} numberOfLines={1} ellipsizeMode="head">
 									{shortPath(section.workspace.path)}
 								</Text>
 							</View>
 						</Pressable>
-						{canBrowseFiles ? (
+						<View style={styles.workspaceActions}>
+							<Text style={[styles.workspaceCount, { color: p.muted }]}>
+								{section.total} 个会话{section.running ? ` · ${section.running} 运行中` : ""}
+							</Text>
+							{canBrowseFiles ? (
+								<IconButton
+									icon="folder-outline"
+									label={`浏览文件：${section.workspace.name}`}
+									size={44}
+									testID={`files-${section.workspace.id}`}
+									onPress={() => openFiles(section.workspace.id)}
+								/>
+							) : null}
 							<IconButton
-								icon="folder-outline"
-								label={`浏览文件：${section.workspace.name}`}
-								size={36}
-								testID={`files-${section.workspace.id}`}
-								onPress={() => openFiles(section.workspace.id)}
+								icon="options-outline"
+								label={`工作区设置：${section.workspace.name}`}
+								size={44}
+								onPress={() => openWorkspace(section.workspace.id)}
 							/>
-						) : null}
-						<IconButton
-							icon="options-outline"
-							label={`工作区设置：${section.workspace.name}`}
-							size={36}
-							onPress={() => openWorkspace(section.workspace.id)}
-						/>
-						<IconButton
-							icon="add"
-							label={`在 ${section.workspace.name} 中新建会话`}
-							tone="accent"
-							size={36}
-							disabled={view.connection !== "open"}
-							testID={`new-session-${section.workspace.id}`}
-							onPress={() => void newSession(section.workspace)}
-						/>
+							<Button
+								icon="add"
+								title="新建会话"
+								variant="primary"
+								small
+								disabled={view.connection !== "open"}
+								testID={`new-session-${section.workspace.id}`}
+								onPress={() => void newSession(section.workspace)}
+							/>
+						</View>
 					</View>
 				)}
 				renderItem={({ item, index }) => (
@@ -491,15 +495,15 @@ export default function HostScreen() {
 								style={({ pressed }) => [styles.footerRow, { borderColor: p.border }, pressed && styles.pressed]}
 								onPress={() => setLimits({ ...limits, [section.workspace.id]: section.limit + SESSIONS_PER_WORKSPACE })}
 							>
-								<Text style={[styles.footerText, { color: p.accent }]}>
+								<Text style={[styles.footerText, { color: p.accentText }]}>
 									显示更多（还有 {section.total - section.limit} 个）
 								</Text>
-								<Icon name="chevron-down" size={15} color={p.accent} />
+								<Icon name="chevron-down" size={15} color={p.accentText} />
 							</Pressable>
 						) : section.total === 0 ? (
 							<View style={[styles.none, { borderColor: p.border }]}>
 								<Icon name={section.archived ? "archive-outline" : "chatbubbles-outline"} size={22} color={p.faint} />
-								<Muted>{section.archived ? "会话都已归档" : "还没有会话，点右上角的 + 开始"}</Muted>
+								<Muted>{section.archived ? "会话都已归档" : "还没有会话，点「新建会话」开始"}</Muted>
 							</View>
 						) : null}
 						{section.archived ? (
@@ -535,7 +539,7 @@ const styles = StyleSheet.create({
 	flex: { flex: 1 },
 	centerText: { textAlign: "center" },
 	stretch: { alignSelf: "stretch", marginTop: 6 },
-	list: { paddingHorizontal: 16, paddingTop: 4, paddingBottom: 48 },
+	list: { ...PAGE, paddingHorizontal: 16, paddingTop: 4, paddingBottom: 48 },
 	header: { gap: 10, marginBottom: 6 },
 	banner: { gap: 12 },
 	connection: { gap: 10, paddingVertical: 12, paddingHorizontal: 14 },
@@ -587,9 +591,7 @@ const styles = StyleSheet.create({
 	},
 	emptyTitle: { fontSize: 18, fontWeight: "700" },
 	sectionHeader: {
-		flexDirection: "row",
-		alignItems: "center",
-		gap: 6,
+		gap: 10,
 		marginTop: 14,
 		paddingLeft: 14,
 		paddingRight: 10,
@@ -600,6 +602,8 @@ const styles = StyleSheet.create({
 		borderBottomWidth: 0,
 	},
 	sectionInfo: { flex: 1, flexDirection: "row", alignItems: "center", gap: 12 },
+	workspaceActions: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 4 },
+	workspaceCount: { flex: 1, fontSize: 12, marginRight: 4 },
 	nameRow: { flexDirection: "row", alignItems: "center", gap: 8 },
 	workspaceName: { fontSize: 16.5, fontWeight: "700", flexShrink: 1 },
 	path: { fontSize: 11.5, fontFamily: MONO, marginTop: 3 },
@@ -619,7 +623,7 @@ const styles = StyleSheet.create({
 	indicator: { width: 8, alignItems: "center", alignSelf: "flex-start", marginTop: 8 },
 	sessionMain: { flex: 1, gap: 6 },
 	sessionTitle: { fontSize: 15, lineHeight: 21, fontWeight: "500" },
-	metaRow: { flexDirection: "row", alignItems: "center", gap: 4 },
+	metaRow: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 4 },
 	metaGap: { marginLeft: 8 },
 	sessionMeta: { fontSize: 12 },
 	badge: {

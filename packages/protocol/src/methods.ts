@@ -9,6 +9,7 @@ import {
 	type AgentConfigResult,
 	AgentConfigRuntimeSchema,
 	AgentConfigScopeSchema,
+	type AgentInstallationResult,
 	type AgentRuntimeInfo,
 	ApprovalPolicySchema,
 	type AppUpdateStatus,
@@ -72,6 +73,7 @@ import {
 	type WorkspacePathDeleteResult,
 	type WorkspaceUploadStart,
 } from "./domain.ts";
+import { type ScheduledTask, ScheduledTaskInputSchema, type ScheduledTaskRun } from "./scheduled-tasks.ts";
 
 const Id = z.string().min(1).max(256);
 /** Repository-relative paths for `git.*` (1.28). */
@@ -109,6 +111,15 @@ export const ClientInfoSchema = z.object({
  * Params schema for every method. Methods not listed here are unknown to the protocol.
  */
 export const MethodParamsSchemas = {
+	"task.list": z.object({}).optional(),
+	"task.create": ScheduledTaskInputSchema,
+	"task.update": z.object({ taskId: Id, task: ScheduledTaskInputSchema }),
+	"task.setStatus": z.object({ taskId: Id, status: z.enum(["active", "paused"]) }),
+	"task.delete": z.object({ taskId: Id }),
+	"task.run": z.object({ taskId: Id }),
+	"task.stop": z.object({ taskId: Id }),
+	"task.runs": z.object({ taskId: Id.optional() }).optional(),
+	"task.readRun": z.object({ runId: Id }),
 	"host.hello": z.object({
 		protocolVersion: z.string(),
 		client: ClientInfoSchema,
@@ -154,6 +165,19 @@ export const MethodParamsSchemas = {
 	"workspace.files": z.object({ workspaceId: Id, path: z.string().max(4096).optional() }),
 	/** Read one workspace file for preview (1.7). `path` is relative to the workspace root. */
 	"workspace.readFile": z.object({ workspaceId: Id, path: z.string().min(1).max(4096) }),
+	/** Preview a Markdown file reference in the workspace or an absolute path in host temp directories (1.31). */
+	"workspace.previewFile": z.object({ workspaceId: Id, path: z.string().min(1).max(4096) }),
+	/**
+	 * Read one file after explicit user confirmation (local since 1.33, paired devices since 1.35).
+	 * `expectedRealPath` is the resolved
+	 * path shown in previewFile's OUTSIDE_ALLOWED_ROOTS error; changing targets requires a new
+	 * confirmation. Grants no lasting access.
+	 */
+	"workspace.authorizeFilePreview": z.object({
+		workspaceId: Id,
+		path: z.string().min(1).max(4096),
+		expectedRealPath: z.string().min(1).max(4096),
+	}),
 	/**
 	 * Overwrite an existing workspace file with UTF-8 text (1.8). With `expectedModifiedAt`
 	 * (the `modifiedAt` the client read), fails with `CONFLICT` if the file changed since.
@@ -278,6 +302,10 @@ export const MethodParamsSchemas = {
 
 	/** Agent runtimes the host knows and whether they can run sessions (1.22). */
 	"runtime.list": z.object({}).optional(),
+	/** Native CLI installation and progress on the Host computer (1.32). */
+	"runtime.installStatus": z.object({ runtime: AgentConfigRuntimeSchema, refresh: z.boolean().optional() }),
+	/** Starts an asynchronous install/update of the latest official native CLI. */
+	"runtime.install": z.object({ runtime: AgentConfigRuntimeSchema }),
 
 	"session.list": z.object({ workspaceId: Id }),
 	/** `runtime` (1.22) picks the agent runtime; the default is `pi`. */
@@ -451,6 +479,11 @@ export const MethodParamsSchemas = {
 	 * directory, so it survives restarts) and never hands its credentials or token keys to clients.
 	 */
 	"account.status": z.object({}).optional(),
+	/**
+	 * Switch the line (1.29), one of `AccountStatus.lines`. The saved login moves along (every line
+	 * reaches the same site); a sign-in waiting for its two-factor code is dropped.
+	 */
+	"account.setLine": z.object({ line: z.string().trim().min(1).max(50) }),
 	"account.login": z.union([
 		z.object({ username: z.string().trim().min(1).max(200), password: z.string().min(1).max(1000) }),
 		z.object({ accessToken: z.string().trim().min(1).max(2000), userId: z.number().int().positive().optional() }),
@@ -521,10 +554,15 @@ export const MethodParamsSchemas = {
 		workspaceId: Id.optional(),
 	}),
 	/**
-	 * Delete a top-level extension: a file or directory in an `extensions` directory moves to
-	 * Pier's trash; a settings path entry is removed from settings (the files stay).
+	 * Delete a top-level resource: an auto-discovered file or skill/extension directory moves
+	 * to Pier's trash; a settings path entry is removed from settings (the files stay).
+	 * `type` (1.30) defaults to extensions for older clients.
 	 */
-	"extension.delete": z.object({ path: z.string().min(1).max(4096), workspaceId: Id.optional() }),
+	"extension.delete": z.object({
+		type: ExtensionResourceTypeSchema.optional(),
+		path: z.string().min(1).max(4096),
+		workspaceId: Id.optional(),
+	}),
 	/**
 	 * Search the pi package gallery (https://pi.dev/packages, 1.20) from the host's computer,
 	 * falling back to the npm registry. `page` starts at 1. Install a result with `extension.install`.
@@ -735,6 +773,15 @@ export interface SubscribeResult {
 }
 
 export interface MethodResults {
+	"task.list": { tasks: ScheduledTask[] };
+	"task.create": { task: ScheduledTask };
+	"task.update": { task: ScheduledTask };
+	"task.setStatus": { task: ScheduledTask };
+	"task.delete": { deleted: boolean };
+	"task.run": { run: ScheduledTaskRun };
+	"task.stop": { stopped: boolean };
+	"task.runs": { runs: ScheduledTaskRun[] };
+	"task.readRun": { run: ScheduledTaskRun };
 	"host.hello": HelloResult;
 	"host.info": HostInfo;
 	"host.listDirectories": HostDirectoryListing;
@@ -749,6 +796,8 @@ export interface MethodResults {
 	"workspace.setPolicy": { workspace: WorkspaceInfo };
 	"workspace.files": WorkspaceFilesResult;
 	"workspace.readFile": WorkspaceFileContent;
+	"workspace.previewFile": WorkspaceFileContent;
+	"workspace.authorizeFilePreview": WorkspaceFileContent;
 	"workspace.writeFile": WorkspaceFileWriteResult;
 	"workspace.deletePath": WorkspacePathDeleteResult;
 	"workspace.readBytes": WorkspaceFileBytes;
@@ -773,6 +822,8 @@ export interface MethodResults {
 	"git.stash": GitCommandResult;
 	"git.init": GitCommandResult;
 	"runtime.list": { runtimes: AgentRuntimeInfo[] };
+	"runtime.installStatus": AgentInstallationResult;
+	"runtime.install": AgentInstallationResult;
 	"session.list": { sessions: SessionSummary[] };
 	"session.create": { session: SessionSummary };
 	"session.open": { session: SessionSummary };
@@ -825,6 +876,7 @@ export interface MethodResults {
 	"newapi.authorizeWait": NewApiAuthorizeResult;
 	"newapi.authorizeCancel": { cancelled: boolean };
 	"account.status": AccountStatus;
+	"account.setLine": AccountStatus;
 	"account.login": AccountLoginResult;
 	"account.verify": AccountLoginResult;
 	"account.authorizeStart": AccountAuthorizeStart;

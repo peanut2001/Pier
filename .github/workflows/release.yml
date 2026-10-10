@@ -330,15 +330,18 @@ jobs:
 
       - uses: actions/download-artifact@v5
         with:
-          path: assets
+          path: ${{ runner.temp }}/pier-release-assets
           merge-multiple: true
 
       - name: Checksums and release notes
+        env:
+          RELEASE_ASSETS_DIR: ${{ runner.temp }}/pier-release-assets
         run: |
-          cd assets
-          sha256sum * > SHA256SUMS.txt
-          cat SHA256SUMS.txt
-          cd ..
+          (
+            cd "$RELEASE_ASSETS_DIR"
+            sha256sum * > SHA256SUMS.txt
+          )
+          cat "$RELEASE_ASSETS_DIR/SHA256SUMS.txt"
           # The CHANGELOG section for this version becomes the release notes.
           awk -v heading="## ${GITHUB_REF_NAME}" '
             index($0, heading) == 1 { found = 1; next }
@@ -353,11 +356,12 @@ jobs:
       - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_ASSETS_DIR: ${{ runner.temp }}/pier-release-assets
         run: |
           version="${{ needs.verify.outputs.version }}"
           prerelease=""
           case "$version" in *-*) prerelease="--prerelease" ;; esac
-          gh release create "${GITHUB_REF_NAME}" assets/* \
+          gh release create "${GITHUB_REF_NAME}" "$RELEASE_ASSETS_DIR/"* \
             --title "Pier ${GITHUB_REF_NAME}" \
             --notes-file notes.md \
             --verify-tag $prerelease

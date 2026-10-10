@@ -1,6 +1,7 @@
 import type { Dirent } from "node:fs";
 import { lstat, open, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
-import { extname, isAbsolute, join, relative, sep } from "node:path";
+import { tmpdir } from "node:os";
+import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
 	PierProtocolError,
 	type WorkspaceFileBytes,
@@ -189,8 +190,11 @@ const UTF8_BOM = Buffer.from([0xef, 0xbb, 0xbf]);
 export function fsError(error: unknown, relPath: string): never {
 	const code = (error as NodeJS.ErrnoException).code;
 	if (code === "ENOENT" || code === "ENOTDIR") throw new PierProtocolError("NOT_FOUND", `No such file: ${relPath}`);
-	if (code === "EACCES" || code === "EPERM" || code === "EROFS" || code === "EBUSY")
-		throw new PierProtocolError("FORBIDDEN", `Permission denied: ${relPath}`);
+	if (code === "EACCES" || code === "EPERM")
+		throw new PierProtocolError("FORBIDDEN", `Permission denied: ${relPath}`, {
+			reason: "FILESYSTEM_PERMISSION_DENIED",
+		});
+	if (code === "EROFS" || code === "EBUSY") throw new PierProtocolError("FORBIDDEN", `Permission denied: ${relPath}`);
 	if (code === "EISDIR") throw new PierProtocolError("BAD_REQUEST", `Not a file: ${relPath}`);
 	throw error;
 }
@@ -322,11 +326,67 @@ export async function readWorkspaceFile(workspaceRoot: string, path: string): Pr
 	if (!relPath) throw new PierProtocolError("BAD_REQUEST", "Not a file: .");
 	const root = await workspaceRealRoot(workspaceRoot);
 	const real = await resolveInside(root, relPath, "file");
+	return readPreviewFile(real, relPath);
+}
+
+/**
+ * Preview a file referenced in Markdown. Relative paths stay in the workspace; absolute
+ * paths may also point into the host's temporary directories (where agents save screenshots).
+ * This does not relax the workspace's write, download or directory-listing operations.
+ */
+export async function previewWorkspaceFile(workspaceRoot: string, path: string): Promise<WorkspaceFileContent> {
+	const { root, real } = await resolvePreviewPath(workspaceRoot, path);
+	if (!isInside(root, real)) {
+		const directories = process.platform === "win32" ? [tmpdir()] : [tmpdir(), "/tmp", "/var/tmp"];
+		const temporaryRoots = await Promise.all(directories.map((dir) => realpath(dir).catch(() => undefined)));
+		if (!isAbsolute(path) || !temporaryRoots.some((dir) => dir && isInside(dir, real))) {
+			throw new PierProtocolError("FORBIDDEN", "Preview path is outside the workspace and temporary directories", {
+				reason: "OUTSIDE_ALLOWED_ROOTS",
+				resolvedPath: real,
+			});
+		}
+	}
+	return readPreviewFile(real, path);
+}
+
+/** One bounded read of the exact target confirmed by the user; stores no permission. */
+export async function authorizeWorkspaceFilePreview(
+	workspaceRoot: string,
+	path: string,
+	expectedRealPath: string,
+): Promise<WorkspaceFileContent> {
+	const { real } = await resolvePreviewPath(workspaceRoot, path);
+	if (real !== expectedRealPath) {
+		throw new PierProtocolError("CONFLICT", "Preview target changed; confirm the current path again", {
+			reason: "PREVIEW_TARGET_CHANGED",
+		});
+	}
+	return readPreviewFile(real, path);
+}
+
+async function resolvePreviewPath(workspaceRoot: string, path: string): Promise<{ root: string; real: string }> {
+	if (!path || path.includes("\0") || path.startsWith("//") || path.startsWith("\\\\")) {
+		throw new PierProtocolError("BAD_REQUEST", "Invalid preview path");
+	}
+	if (!isAbsolute(path) && /^[a-zA-Z][\w+.-]*:/.test(path)) {
+		throw new PierProtocolError("BAD_REQUEST", "Preview path must be a local file path");
+	}
+	const root = await workspaceRealRoot(workspaceRoot);
+	let real: string;
+	try {
+		real = await realpath(resolve(root, path));
+	} catch (error) {
+		fsError(error, path);
+	}
+	return { root, real };
+}
+
+async function readPreviewFile(real: string, relPath: string): Promise<WorkspaceFileContent> {
 	let info: Awaited<ReturnType<typeof stat>>;
 	try {
 		info = await stat(real);
-	} catch {
-		throw new PierProtocolError("NOT_FOUND", `No such file: ${relPath}`);
+	} catch (error) {
+		fsError(error, relPath);
 	}
 	if (!info.isFile()) throw new PierProtocolError("BAD_REQUEST", `Not a file: ${relPath}`);
 	const base = { path: relPath, size: info.size, modifiedAt: info.mtime.toISOString() };

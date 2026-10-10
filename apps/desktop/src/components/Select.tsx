@@ -130,6 +130,7 @@ function SelectMenu<T extends string | number>({
 	onPick(value: T): void;
 }) {
 	const ref = useRef<HTMLDivElement>(null);
+	const triggerPosition = useRef<{ left: number; top: number } | undefined>(undefined);
 	const [placed, setPlaced] = useState<Placement>();
 	const onCloseRef = useRef(onClose);
 	onCloseRef.current = onClose;
@@ -140,6 +141,7 @@ function SelectMenu<T extends string | number>({
 		const trigger = anchor.current;
 		if (!menu || !trigger) return;
 		const rect = trigger.getBoundingClientRect();
+		triggerPosition.current = { left: rect.left, top: rect.top };
 		const below = window.innerHeight - rect.bottom - GAP - MARGIN;
 		const above = rect.top - GAP - MARGIN;
 		const up = menu.scrollHeight > below && above > below;
@@ -170,6 +172,11 @@ function SelectMenu<T extends string | number>({
 			if (ref.current?.contains(target)) return;
 			// Only scrolling a container of the trigger moves it away from the menu.
 			if (anchor.current && !target.contains?.(anchor.current)) return;
+			// A focus/scroll-into-view just before opening can dispatch its scroll event later.
+			// Keep the menu if it was already placed at the trigger's current position.
+			const rect = anchor.current?.getBoundingClientRect();
+			const previous = triggerPosition.current;
+			if (rect && previous && Math.abs(rect.left - previous.left) < 1 && Math.abs(rect.top - previous.top) < 1) return;
 			onCloseRef.current(false);
 		};
 		const dismiss = () => onCloseRef.current(false);

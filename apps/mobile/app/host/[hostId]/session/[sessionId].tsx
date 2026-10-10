@@ -5,7 +5,6 @@ import {
 	isRole,
 	sessionUsage,
 	supportedThinkingLevels,
-	thinkingLabel,
 	userText,
 } from "@pier/chat-state";
 import type { ApprovalPolicy, ForkPoint, ModelInfo, SessionSummary } from "@pier/protocol";
@@ -490,6 +489,7 @@ function ActionsSheet({
 				if (!(await store.archiveSession(session, !archived))) return;
 				onClose();
 				store.toast("info", archived ? "已取消归档" : "已归档");
+				if (!archived) router.dismissTo({ pathname: "/host/[hostId]", params: { hostId } });
 			},
 		});
 	}
@@ -607,13 +607,8 @@ export default function SessionScreen() {
 		: "会话";
 	const running = !!state && isBusy(state.runState);
 	const statusColor = revoked ? p.danger : connection !== "open" ? p.warning : running ? p.accent : p.ok;
-	const modelLabel = state?.model
-		? `${state.model.name}${
-				supportedThinkingLevels(state.model).length > 1
-					? ` · ${thinkingLabel(clampThinking(state.thinkingLevel, supportedThinkingLevels(state.model)))}`
-					: ""
-			}`
-		: undefined;
+	const levels = supportedThinkingLevels(state?.model);
+	const thinkingLevel = state && levels.length > 1 ? clampThinking(state.thinkingLevel, levels) : undefined;
 	const context = state ? contextShare(state) : undefined;
 	const router = useRouter();
 
@@ -725,7 +720,8 @@ export default function SessionScreen() {
 						<Composer
 							chat={chat}
 							runState={state.runState}
-							{...(modelLabel ? { model: modelLabel } : {})}
+							model={state.model?.name}
+							thinkingLevel={thinkingLevel}
 							onModelPress={() => setSheet("model")}
 						/>
 					</View>
@@ -799,10 +795,11 @@ const styles = StyleSheet.create({
 	flex: { flex: 1 },
 	statusBar: {
 		flexDirection: "row",
+		flexWrap: "wrap",
 		alignItems: "center",
 		gap: 8,
 		paddingHorizontal: 14,
-		paddingBottom: 8,
+		paddingVertical: 8,
 		borderBottomWidth: StyleSheet.hairlineWidth,
 	},
 	chip: {

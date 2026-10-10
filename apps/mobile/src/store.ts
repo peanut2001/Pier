@@ -46,7 +46,7 @@ import {
 import { RemoteTerminal } from "./terminal.ts";
 import { peerConnectionFactory } from "./webrtc.ts";
 
-export const APP_VERSION = "0.2.24";
+export const APP_VERSION = "0.2.33";
 
 /** Live session subscriptions kept for quick back-and-forth navigation. */
 const MAX_LIVE_CHATS = 4;
@@ -1153,8 +1153,12 @@ export class MobileStore {
 		);
 	}
 
-	async deleteExtension(path: string, workspaceId?: string): Promise<void> {
-		await this.requireClient().request("extension.delete", { path, ...(workspaceId ? { workspaceId } : {}) });
+	async deleteExtension(resource: ExtensionResourceInfo, workspaceId?: string): Promise<void> {
+		await this.requireClient().request("extension.delete", {
+			type: resource.type,
+			path: resource.path,
+			...(workspaceId ? { workspaceId } : {}),
+		});
 	}
 }
 

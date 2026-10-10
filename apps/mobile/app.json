@@ -3,7 +3,7 @@
 		"name": "Pier",
 		"slug": "pier",
 		"scheme": "pier",
-		"version": "0.2.24",
+		"version": "0.2.33",
 		"orientation": "portrait",
 		"icon": "./assets/icon.png",
 		"userInterfaceStyle": "automatic",
@@ -13,19 +13,21 @@
 			"infoPlist": {
 				"NSLocalNetworkUsageDescription": "Pier 需要访问局域网，以连接你电脑上运行的 Pier。",
 				"NSBonjourServices": ["_pier._tcp"],
-				"NSAppTransportSecurity": { "NSAllowsLocalNetworking": true }
+				"NSAppTransportSecurity": {
+					"NSAllowsLocalNetworking": true
+				}
 			}
 		},
 		"android": {
 			"package": "com.yiranxiaohui.pier",
 			"adaptiveIcon": {
-				"backgroundColor": "#111317",
+				"backgroundColor": "#183047",
 				"foregroundImage": "./assets/android-icon-foreground.png",
 				"backgroundImage": "./assets/android-icon-background.png",
 				"monochromeImage": "./assets/android-icon-monochrome.png"
 			},
 			"predictiveBackGestureEnabled": false,
-			"permissions": ["android.permission.REQUEST_INSTALL_PACKAGES"]
+			"permissions": ["android.permission.REQUEST_INSTALL_PACKAGES", "android.permission.POST_NOTIFICATIONS"]
 		},
 		"web": {
 			"favicon": "./assets/favicon.png",
@@ -34,10 +36,18 @@
 		"plugins": [
 			"expo-router",
 			"expo-status-bar",
-			["expo-secure-store", { "faceIDPermission": false }],
+			[
+				"expo-secure-store",
+				{
+					"faceIDPermission": false
+				}
+			],
 			[
 				"expo-camera",
-				{ "cameraPermission": "Pier 需要使用相机扫描电脑上显示的配对二维码。", "recordAudioAndroid": false }
+				{
+					"cameraPermission": "Pier 需要使用相机扫描电脑上显示的配对二维码。",
+					"recordAudioAndroid": false
+				}
 			],
 			[
 				"expo-image-picker",
@@ -55,7 +65,19 @@
 					}
 				}
 			],
-			"./plugins/withAndroidRelease"
+			"./plugins/withAndroidRelease",
+			[
+				"expo-splash-screen",
+				{
+					"image": "./assets/splash-icon.png",
+					"imageWidth": 96,
+					"resizeMode": "contain",
+					"backgroundColor": "#f3f5f8",
+					"dark": {
+						"backgroundColor": "#0a0c0f"
+					}
+				}
+			]
 		],
 		"experiments": {
 			"typedRoutes": false

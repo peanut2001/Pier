@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import {
 	type AccountAuthorizeStart,
+	type AccountLine,
 	type AccountLoginResult,
 	type AccountOverview,
 	type AccountSite,
@@ -47,7 +48,9 @@ function errorText(error: unknown): string {
 
 interface SavedAccount {
 	version: 1;
-	session: SavedNewApiSession;
+	/** The chosen line (1.29), when it is not the default one. */
+	line?: string;
+	session?: SavedNewApiSession;
 }
 
 /** Sign-in and account settings the site publishes in `/api/status`. */
@@ -84,17 +87,22 @@ export function accountSite(origin: string, status: Json): AccountSite {
 }
 
 export interface AccountManagerOptions {
-	/** The site, e.g. `https://api.yunnet.top`. */
-	site: string;
-	/** Where the login is saved. */
+	/**
+	 * The lines the site is reached through (at least one), e.g. `https://api.yunnet.top` and
+	 * `https://api.syixn.com`. Every line must lead to the same site, since the login moves along
+	 * when the user switches. The first one is the default.
+	 */
+	lines: ReadonlyArray<AccountLine>;
+	/** Where the login and the chosen line are saved. */
 	file: string;
 	log?: (message: string) => void;
 }
 
 export class AccountManager {
-	private readonly origin: string;
+	private readonly lines: AccountLine[];
+	private line: AccountLine;
+	private origin: string;
 	private session: NewApiSession | undefined;
-	private loaded = false;
 	/** A password login waiting for its two-factor code. */
 	private pending: string | undefined;
 	private status: { at: number; value: Json } | undefined;
@@ -103,25 +111,37 @@ export class AccountManager {
 		private readonly newapi: NewApiManager,
 		private readonly options: AccountManagerOptions,
 	) {
-		this.origin = normalizeNewApiUrl(options.site);
+		this.lines = options.lines.map((line) => ({ ...line, url: normalizeNewApiUrl(line.url) }));
+		const first = this.lines[0];
+		if (!first) throw new Error("AccountManager needs at least one line");
+		this.line = first;
+		this.origin = first.url;
+		this.load();
 	}
 
 	// ---- persistence ---------------------------------------------------------------------
 
-	private current(): NewApiSession | undefined {
-		if (!this.loaded) {
-			this.loaded = true;
-			try {
-				if (existsSync(this.options.file)) {
-					const saved = JSON.parse(readFileSync(this.options.file, "utf8")) as Partial<SavedAccount>;
-					if (saved.version === 1 && saved.session?.origin === this.origin) {
-						this.adopt(this.newapi.restore(saved.session));
-					}
-				}
-			} catch (error) {
-				this.options.log?.(`Could not read the saved 云链API login: ${errorText(error)}`);
+	/** Read the saved line and login. */
+	private load(): void {
+		try {
+			if (!existsSync(this.options.file)) return;
+			const saved = JSON.parse(readFileSync(this.options.file, "utf8")) as Partial<SavedAccount>;
+			if (saved.version !== 1) return;
+			const line = this.lines.find((l) => l.id === saved.line);
+			if (line) {
+				this.line = line;
+				this.origin = line.url;
 			}
+			// A login saved on another line of the site moves to the chosen one.
+			if (saved.session && this.lines.some((l) => l.url === saved.session?.origin)) {
+				this.adopt(this.newapi.restore({ ...saved.session, origin: this.origin }));
+			}
+		} catch (error) {
+			this.options.log?.(`Could not read the saved 云链API login: ${errorText(error)}`);
 		}
+	}
+
+	private current(): NewApiSession | undefined {
 		return this.session;
 	}
 
@@ -134,11 +154,16 @@ export class AccountManager {
 
 	private persist(): void {
 		const session = this.session;
-		if (!session) {
+		const line = this.line === this.lines[0] ? undefined : this.line.id;
+		if (!session && !line) {
 			rmSync(this.options.file, { force: true });
 			return;
 		}
-		const saved: SavedAccount = { version: 1, session: this.newapi.save(session) };
+		const saved: SavedAccount = {
+			version: 1,
+			...(line ? { line } : {}),
+			...(session ? { session: this.newapi.save(session) } : {}),
+		};
 		try {
 			writePrivateFile(this.options.file, `${JSON.stringify(saved, null, 2)}\n`);
 		} catch (error) {
@@ -180,11 +205,30 @@ export class AccountManager {
 		const session = this.current();
 		const user = session?.user;
 		const signedIn = session ? { user: user ?? { username: "用户" } } : {};
+		const lines = { lines: this.lines.map((line) => ({ ...line })), line: this.line.id };
 		try {
-			return { site: accountSite(this.origin, await this.siteStatus()), ...signedIn };
+			return { site: accountSite(this.origin, await this.siteStatus()), ...signedIn, ...lines };
 		} catch (error) {
-			return { siteError: errorText(error), ...signedIn };
+			return { siteError: errorText(error), ...signedIn, ...lines };
 		}
+	}
+
+	/**
+	 * Connect through another line. The saved login moves along, since every line reaches the same
+	 * site; a password login waiting for its two-factor code is dropped.
+	 */
+	async setLine(id: string): Promise<AccountStatus> {
+		const line = this.lines.find((l) => l.id === id);
+		if (!line) throw new PierProtocolError("BAD_REQUEST", `没有这条线路：${id}`);
+		if (line !== this.line) {
+			this.dropPending();
+			this.line = line;
+			this.origin = line.url;
+			this.status = undefined;
+			if (this.session) this.newapi.move(this.session, this.origin);
+			this.persist();
+		}
+		return this.getStatus();
 	}
 
 	// ---- sign-in -------------------------------------------------------------------------
@@ -202,8 +246,10 @@ export class AccountManager {
 		}
 		this.pending = undefined;
 		const previous = this.session;
-		this.adopt(this.newapi.detach(owner, result.sessionId));
-		this.loaded = true;
+		const session = this.newapi.detach(owner, result.sessionId);
+		// Started on a line the user has switched away from since.
+		if (session.origin !== this.origin) this.newapi.move(session, this.origin);
+		this.adopt(session);
 		this.persist();
 		if (previous) void this.newapi.signOut(previous);
 		return { status: "ok", overview: await this.overview() };

@@ -1,12 +1,12 @@
-import { type ChatController, resolveSlash, runBuiltin, type SlashActions } from "@pier/chat-state";
-import type { ImageInput } from "@pier/protocol";
+import { type ChatController, resolveSlash, runBuiltin, type SlashActions, thinkingLabel } from "@pier/chat-state";
+import type { ImageInput, ThinkingLevel } from "@pier/protocol";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import { useState } from "react";
 import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { isBusy } from "../format.ts";
 import { useStore } from "../store.ts";
-import { FLOAT_SHADOW, RADIUS, usePalette } from "../theme.ts";
+import { FLOAT_SHADOW, PAGE, RADIUS, THINKING_COLOR, usePalette } from "../theme.ts";
 import { type SlashEntry, SlashMenu, useSlashMenu } from "./SlashMenu.tsx";
 import { Icon, IconButton } from "./ui.tsx";
 
@@ -16,12 +16,14 @@ export function Composer({
 	chat,
 	runState,
 	model,
+	thinkingLevel,
 	onModelPress,
 }: {
 	chat: ChatController;
 	runState: string;
-	/** Current model (and thinking level), shown as a chip in the toolbar. */
+	/** Current model, shown as a chip in the toolbar. */
 	model?: string;
+	thinkingLevel?: ThinkingLevel;
 	onModelPress?: () => void;
 }) {
 	const store = useStore();
@@ -50,7 +52,7 @@ export function Composer({
 		return true;
 	};
 	const actions: SlashActions = {
-		newSession: async () => openSession(await store.createSession(chat.workspaceId)),
+		newSession: async () => openSession(await store.createSession(chat.workspaceId, chat.chat.session?.runtime)),
 		fork: async (entryId) => openSession(await store.forkSession(chat.sessionId, entryId)),
 		notify: (level, message) => store.toast(level === "error" ? "error" : "info", message),
 	};
@@ -77,10 +79,10 @@ export function Composer({
 	const send = async (mode: "auto" | "steer" | "followUp", override?: string) => {
 		const body = (override ?? text).trim();
 		if (sending || (!body && !images.length)) return;
-		let resolution = resolveSlash(body, menu.list.commands, menu.list.known);
+		let resolution = resolveSlash(body, menu.list.commands, menu.list.known, chat.chat.session?.runtime);
 		if (resolution.kind === "unknown" || (resolution.kind === "host" && !menu.list.known)) {
 			const fresh = await chat.loadCommands();
-			resolution = resolveSlash(body, fresh.commands, fresh.known);
+			resolution = resolveSlash(body, fresh.commands, fresh.known, chat.chat.session?.runtime);
 		}
 		if (resolution.kind === "unknown") {
 			store.toast("error", `未知命令 /${resolution.name}，输入 / 查看可用的命令`);
@@ -141,13 +143,15 @@ export function Composer({
 					multiline
 					placeholder={busy ? "引导 Agent，或排队下一条…" : "给 Agent 发消息，输入 / 使用命令"}
 					placeholderTextColor={p.faint}
+					selectionColor={p.accent}
+					accessibilityLabel="消息输入框"
 					style={[styles.input, { color: p.text }]}
 				/>
 				<View style={styles.toolbar}>
 					<IconButton
 						icon="image-outline"
 						label="添加图片"
-						size={34}
+						size={44}
 						tone="elevated"
 						onPress={() => void pickImages()}
 					/>
@@ -156,12 +160,22 @@ export function Composer({
 							onPress={onModelPress}
 							accessibilityRole="button"
 							accessibilityLabel="切换模型"
-							style={({ pressed }) => [styles.modelChip, { backgroundColor: pressed ? p.border : p.elevated }]}
+							style={({ pressed }) => [
+								styles.modelChip,
+								{ backgroundColor: p.accentSoft, borderColor: p.accentRing },
+								pressed && styles.pressed,
+							]}
 						>
-							<Icon name="sparkles-outline" size={13} color={p.accent} />
-							<Text style={[styles.modelText, { color: p.text }]} numberOfLines={1}>
+							<Icon name="sparkles-outline" size={13} color={p.accentText} />
+							<Text style={[styles.modelText, { color: p.accentText }]} numberOfLines={1}>
 								{model}
 							</Text>
+							{thinkingLevel ? (
+								<Text style={[styles.thinkingText, { color: THINKING_COLOR }]} numberOfLines={1}>
+									<Text style={{ color: p.faint }}>· </Text>
+									{thinkingLabel(thinkingLevel)}
+								</Text>
+							) : null}
 							<Icon name="chevron-down" size={13} color={p.faint} />
 						</Pressable>
 					) : (
@@ -198,7 +212,7 @@ export function Composer({
 					<Icon name="flash-outline" size={13} color={p.muted} />
 					<Text style={[styles.hint, { color: p.muted }]}>运行中：发送即引导</Text>
 					<Pressable hitSlop={6} onPress={() => void send("followUp")}>
-						<Text style={[styles.link, { color: p.accent }]}>排队到结束后</Text>
+						<Text style={[styles.link, { color: p.accentText }]}>排队到结束后</Text>
 					</Pressable>
 					<Pressable hitSlop={6} onPress={() => void chat.abort()}>
 						<Text style={[styles.link, { color: p.danger }]}>中止</Text>
@@ -211,10 +225,10 @@ export function Composer({
 
 const styles = StyleSheet.create({
 	flex: { flex: 1 },
-	root: { paddingHorizontal: 10, paddingTop: 6, paddingBottom: 8, gap: 6 },
-	box: { borderRadius: 24, borderWidth: 1, paddingTop: 4, paddingBottom: 8, paddingHorizontal: 8 },
+	root: { ...PAGE, paddingHorizontal: 12, paddingTop: 6, paddingBottom: 8, gap: 6 },
+	box: { borderRadius: RADIUS.lg, borderWidth: 1, paddingTop: 4, paddingBottom: 8, paddingHorizontal: 8 },
 	input: {
-		minHeight: 40,
+		minHeight: 56,
 		maxHeight: 150,
 		paddingHorizontal: 8,
 		paddingTop: 10,
@@ -229,15 +243,23 @@ const styles = StyleSheet.create({
 		alignItems: "center",
 		alignSelf: "center",
 		gap: 5,
-		height: 34,
+		minHeight: 44,
 		paddingHorizontal: 11,
 		borderRadius: RADIUS.pill,
-		maxWidth: 240,
+		borderWidth: StyleSheet.hairlineWidth,
 	},
 	modelText: { fontSize: 13, fontWeight: "600", flexShrink: 1 },
-	send: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center", marginLeft: "auto" },
+	thinkingText: { fontSize: 13, fontWeight: "500", flexShrink: 0 },
+	send: {
+		width: 44,
+		height: 44,
+		borderRadius: RADIUS.md,
+		alignItems: "center",
+		justifyContent: "center",
+		marginLeft: "auto",
+	},
 	pressed: { opacity: 0.75 },
-	modes: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12 },
+	modes: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 6, paddingHorizontal: 12 },
 	hint: { fontSize: 12, flex: 1 },
 	link: { fontSize: 13, fontWeight: "600", marginLeft: 8 },
 	images: { maxHeight: 80, marginTop: 4 },

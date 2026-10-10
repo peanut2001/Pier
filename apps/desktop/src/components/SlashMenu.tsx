@@ -68,9 +68,14 @@ export function useSlashMenu(controller: ChatController, text: string): SlashMen
 	const [active, setActive] = useState(0);
 	const [args, setArgs] = useState<{ command: string; options?: SlashOption[]; error?: string }>();
 	const slashing = text.startsWith("/");
+	const sessionId = controller.sessionId;
+	const runtime = controller.chat.session?.runtime;
+	const capabilities = controller.chat.capabilities;
 
 	// Refresh the host's commands every time the menu opens (extensions may add commands).
+	// biome-ignore lint/correctness/useExhaustiveDependencies: session metadata can change on the same controller.
 	useEffect(() => {
+		setList(controller.commands);
 		if (!slashing) return;
 		let alive = true;
 		void controller.loadCommands().then((next) => {
@@ -79,7 +84,7 @@ export function useSlashMenu(controller: ChatController, text: string): SlashMen
 		return () => {
 			alive = false;
 		};
-	}, [slashing, controller]);
+	}, [slashing, controller, sessionId, runtime, capabilities]);
 
 	const state = dismissedFor === text ? undefined : slashMenu(text, list.commands);
 	const argCommand = state?.kind === "arguments" ? state.command : undefined;

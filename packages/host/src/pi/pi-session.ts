@@ -373,7 +373,8 @@ export class PiManagedSession extends ManagedSession {
 
 	setThinking(level: ThinkingLevel, persist: boolean): string {
 		this.assertWritable();
-		this.runtime.session.setThinkingLevel(level, { persist });
+		// pi has no Ultra mode; its SDK clamps the highest supported effort to the model.
+		this.runtime.session.setThinkingLevel(level === "ultra" ? "max" : level, { persist });
 		this.guard.record();
 		return this.runtime.session.thinkingLevel;
 	}

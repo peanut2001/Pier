@@ -2,7 +2,16 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildTranscript, type ChatState, initialChatState, reduceChat } from "@pier/chat-state";
+import {
+	buildTranscript,
+	ChatController,
+	type ChatState,
+	initialChatState,
+	reduceChat,
+	resolveSlash,
+	runBuiltin,
+	type SlashActions,
+} from "@pier/chat-state";
 import type { PierClient } from "@pier/client";
 import type { SessionSummary, WorkspaceInfo } from "@pier/protocol";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -55,6 +64,82 @@ describe("Codex runtime", () => {
 		await rec.waitForType("session.snapshot");
 		return { rec, state: () => state };
 	}
+
+	it("preserves Ultra in the model catalog and sends it as the native turn effort", async () => {
+		const models = await client.request("model.list", { workspaceId: workspace.id, runtime: "codex" });
+		expect(models.models.find((m) => m.id === "gpt-test")?.thinkingLevels).toEqual([
+			"low",
+			"medium",
+			"high",
+			"max",
+			"ultra",
+		]);
+		expect(models.models.find((m) => m.id === "gpt-mini")?.thinkingLevels).not.toContain("ultra");
+		const { session } = await client.request("session.create", { workspaceId: workspace.id, runtime: "codex" });
+		const { rec } = await open(session);
+		expect(await client.request("thinking.set", { sessionId: session.id, level: "ultra" })).toEqual({ level: "ultra" });
+		await client.request("session.prompt", { sessionId: session.id, text: "hello at Ultra" });
+		await rec.waitForType("agent_settled");
+		const last = await runtime().server().request<Record<string, unknown>>("fake/lastTurn", { threadId: session.id });
+		expect(last).toMatchObject({ effort: "ultra" });
+		expect((await client.request("session.snapshot", { sessionId: session.id })).thinkingLevel).toBe("ultra");
+		await client.request("model.set", { sessionId: session.id, provider: "codex", modelId: "gpt-mini" });
+		expect(await client.request("thinking.set", { sessionId: session.id, level: "ultra" })).toEqual({ level: "low" });
+	});
+
+	it("routes native slash commands to session operations and clears into another Codex session", async () => {
+		const { session } = await client.request("session.create", { workspaceId: workspace.id, runtime: "codex" });
+		const controller = new ChatController(client, session, {
+			onChange() {},
+			onReplaced() {},
+			onSettled() {},
+			onError(message) {
+				throw new Error(message);
+			},
+		});
+		await controller.start();
+		const list = await controller.loadCommands();
+		let created = session;
+		const actions: SlashActions = {
+			newSession: async () => {
+				created = (
+					await client.request("session.create", {
+						workspaceId: workspace.id,
+						runtime: controller.chat.session?.runtime,
+					})
+				).session;
+				return true;
+			},
+			fork: () => false,
+			notify() {},
+		};
+		for (const text of ["/rename Codex native", "/reasoning high", "/clear"]) {
+			const command = resolveSlash(text, list.commands, list.known);
+			expect(command.kind).toBe("builtin");
+			if (command.kind !== "builtin") throw new Error("Expected a native command");
+			expect(await runBuiltin(controller, command.name, command.args, actions)).toEqual({ kind: "done" });
+		}
+		expect(created.id).not.toBe(session.id);
+		expect(created.runtime).toBe("codex");
+		const previous = await client.request("session.snapshot", { sessionId: session.id });
+		expect(previous.session.name).toBe("Codex native");
+		expect(previous.thinkingLevel).toBe("high");
+		expect(previous.messages).toEqual([]);
+		await controller.dispose();
+	});
+
+	it("keeps existing sessions usable across an installation and switches servers after they close", async () => {
+		const { session } = await client.request("session.create", { workspaceId: workspace.id, runtime: "codex" });
+		const before = runtime().server();
+		const { rec } = await open(session);
+		runtime().installationChanged();
+		expect(runtime().server()).toBe(before);
+		await client.request("session.prompt", { sessionId: session.id, text: "hello" });
+		await rec.waitForType("agent_settled");
+		expect(rec.text()).toBe("Reply to hello");
+		await client.request("session.close", { sessionId: session.id });
+		expect(runtime().server()).not.toBe(before);
+	});
 
 	it("runs a turn with an approval and stores the thread", async () => {
 		const { runtimes } = await client.request("runtime.list", {});

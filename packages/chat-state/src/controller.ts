@@ -1,8 +1,15 @@
 import type { PierClient, Subscription } from "@pier/client";
-import type { EventFrame, ImageInput, SessionSummary, ThinkingLevel, UiResponse } from "@pier/protocol";
+import type {
+	EventFrame,
+	ImageInput,
+	SessionCommandInfo,
+	SessionSummary,
+	ThinkingLevel,
+	UiResponse,
+} from "@pier/protocol";
 import { knownMessages } from "@pier/protocol";
 import { applySnapshot, type ChatState, clearResync, dismissNotice, initialChatState, reduceChat } from "./reducer.ts";
-import { BUILTIN_COMMANDS, builtinCommands, mergeCommands, type SlashCommand } from "./slash.ts";
+import { mergeCommands, type SlashCommand } from "./slash.ts";
 
 /** Slash commands of a session, and whether the host could list its own (older hosts cannot). */
 export interface CommandList {
@@ -33,7 +40,8 @@ export class ChatController {
 	private readonly listeners = new Set<() => void>();
 	private sub: Subscription | undefined;
 	private disposed = false;
-	private commandList: CommandList = { commands: [...BUILTIN_COMMANDS], known: false };
+	private hostCommands: SessionCommandInfo[] = [];
+	private commandsKnown = false;
 	private commandsLoading: Promise<CommandList> | undefined;
 	readonly workspaceId: string;
 
@@ -96,7 +104,9 @@ export class ChatController {
 		let chat = reduceChat(this.view.chat, frame);
 		if (chat === this.view.chat) return;
 		if (frame.event.type === "session.replaced") {
-			this.commandList = { commands: [...BUILTIN_COMMANDS], known: false };
+			this.hostCommands = [];
+			this.commandsKnown = false;
+			this.commandsLoading = undefined;
 			this.hooks.onReplaced(previousId, frame.event.session as SessionSummary);
 		}
 		if (chat.needsResync) {
@@ -162,7 +172,10 @@ export class ChatController {
 
 	/** Last known slash commands (built-ins until `loadCommands` finished). */
 	get commands(): CommandList {
-		return this.commandList;
+		return {
+			commands: mergeCommands(this.hostCommands, this.chat.capabilities, this.chat.session?.runtime),
+			known: this.commandsKnown,
+		};
 	}
 
 	/** Fetch the host's slash commands for this session. Never rejects. */
@@ -171,17 +184,17 @@ export class ChatController {
 		const sessionId = this.sessionId;
 		const loading = this.client
 			.request("session.commands", { sessionId })
-			.then(
-				(result): CommandList => ({
-					commands: mergeCommands(result.commands, this.chat.capabilities),
-					known: true,
-				}),
-			)
-			.catch((): CommandList => ({ commands: builtinCommands(this.chat.capabilities), known: false }))
-			.then((list) => {
-				if (this.sessionId === sessionId) this.commandList = list;
-				return list;
+			.then((result) => {
+				if (this.sessionId !== sessionId) return;
+				this.hostCommands = result.commands;
+				this.commandsKnown = true;
 			})
+			.catch(() => {
+				if (this.sessionId !== sessionId) return;
+				this.hostCommands = [];
+				this.commandsKnown = false;
+			})
+			.then(() => this.commands)
 			.finally(() => {
 				if (this.commandsLoading === loading) this.commandsLoading = undefined;
 			});

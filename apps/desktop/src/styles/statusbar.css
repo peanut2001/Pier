@@ -7,16 +7,24 @@
 	background: var(--bg-app);
 }
 
-.window > .app {
+.window-body {
+	display: grid;
+	grid-template-columns: 52px minmax(0, 1fr);
 	flex: 1;
+	min-width: 0;
+	min-height: 0;
+}
+
+.window-body > .app {
+	min-width: 0;
 	min-height: 0;
 	height: auto;
 	background: none;
 }
 
 /* The status bar provides the gap below the panels. */
-.window > .app .main,
-.window > .app .files-panel {
+.window-body > .app .main,
+.window-body > .app .files-panel {
 	margin-bottom: 0;
 }
 

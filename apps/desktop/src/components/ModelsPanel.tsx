@@ -43,7 +43,6 @@ import { SettingRow, SettingsCard, SettingsGroup } from "./SettingsUi.tsx";
 const POPULAR = [
 	"anthropic",
 	"openai",
-	"openai-codex",
 	"google",
 	"github-copilot",
 	"openrouter",

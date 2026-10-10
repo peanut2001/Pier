@@ -8,11 +8,14 @@ import { Welcome, WorkspaceHome } from "./components/Home.tsx";
 import { HostBanner } from "./components/HostPanels.tsx";
 import { IconAlert, IconInfo, IconMessage, IconX } from "./components/Icons.tsx";
 import { AuthDialog, YunlianDialog } from "./components/ModelsPanel.tsx";
+import { NavigationRail } from "./components/NavigationRail.tsx";
 import { NewChatView } from "./components/NewChat.tsx";
 import { AddPeerDialog, PairingRequestDialog } from "./components/RemotePanel.tsx";
+import { ScheduledTasksPage } from "./components/ScheduledTasks.tsx";
 import { SessionView } from "./components/SessionView.tsx";
 import { SettingsPage } from "./components/Settings.tsx";
 import { Sidebar, SidebarToggle } from "./components/Sidebar.tsx";
+import { SidebarResizeHandle } from "./components/SidebarResizeHandle.tsx";
 import { StatusBar } from "./components/StatusBar.tsx";
 import { TerminalPanel } from "./components/TerminalPanel.tsx";
 import { TitleBar } from "./components/TitleBar.tsx";
@@ -108,10 +111,12 @@ function RightPanel({ workspace, composerKey }: { workspace?: WorkspaceInfo; com
 export function App() {
 	const store = useStore();
 	const settings = useAppState((s) => s.settings);
+	const scheduled = useAppState((s) => s.scheduledTasksOpen);
 	const filesPanel = useAppState((s) => s.filesPanel);
 	const filesPanelWidth = useAppState((s) => s.filesPanelWidth);
 	const hasWorkspace = useAppState((s) => s.workspaces.length > 0);
 	const sidebar = useAppState((s) => s.sidebar);
+	const sidebarWidth = useAppState((s) => s.sidebarWidth);
 	// Terminals run on the computer of the workspace they were opened for; the panel shows them all.
 	const terminalOpen = useTerminals((s) => s.open);
 	const hasTerminals = useTerminals((s) => s.tabs.length > 0);
@@ -136,7 +141,7 @@ export function App() {
 	// Ctrl/⌘+Shift+E and Ctrl/⌘+Shift+G show (or hide) the file and source control views, as in editors; Ctrl/⌘+B the sidebar;
 	// Ctrl+` the terminal (Ctrl on macOS too, as in editors: ⌘+` cycles windows there).
 	useEffect(() => {
-		if (settings) return;
+		if (settings || scheduled) return;
 		const onKey = (e: KeyboardEvent) => {
 			if (e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && e.key === "`") {
 				if (!hasTerminals && !canOpenTerminal) return;
@@ -159,37 +164,43 @@ export function App() {
 		};
 		window.addEventListener("keydown", onKey);
 		return () => window.removeEventListener("keydown", onKey);
-	}, [store, settings, screenWorkspace, hasTerminals, canOpenTerminal]);
+	}, [store, settings, scheduled, screenWorkspace, hasTerminals, canOpenTerminal]);
 
 	return (
 		<div className="window">
 			<TitleBar />
-			{settings ? (
-				<SettingsPage section={settings} />
-			) : (
-				<div
-					className={`app with-files-shell${sidebar ? "" : " no-sidebar"}`}
-					style={{ gridTemplateColumns: columns.join(" ") }}
-				>
-					<div className={`sidebar-shell${sidebar ? "" : " collapsed"}`} inert={!sidebar}>
-						<Sidebar open={sidebar} />
-					</div>
-					<main className="main">
-						<HostBanner scope="node" onShowLogs={() => store.openSettings("logs")} />
-						<div className="main-body">
-							<Main />
-						</div>
-						{terminalOpen ? <TerminalPanel {...(screenWorkspace ? { workspace: screenWorkspace } : {})} /> : null}
-					</main>
+			<div className="window-body">
+				<NavigationRail />
+				{scheduled ? (
+					<ScheduledTasksPage />
+				) : settings ? (
+					<SettingsPage section={settings} />
+				) : (
 					<div
-						className={`files-shell${showFiles ? "" : " collapsed"}`}
-						style={{ "--files-width": `${filesPanelWidth}px` } as CSSProperties}
-						inert={!showFiles}
+						className={`app with-files-shell${sidebar ? "" : " no-sidebar"}`}
+						style={{ gridTemplateColumns: columns.join(" "), "--sidebar-width": `${sidebarWidth}px` } as CSSProperties}
 					>
-						{showFiles || filesMounted ? <RightPanel {...screen} /> : null}
+						<div className={`sidebar-shell${sidebar ? "" : " collapsed"}`} inert={!sidebar}>
+							<Sidebar open={sidebar} />
+							{sidebar ? <SidebarResizeHandle /> : null}
+						</div>
+						<main className="main">
+							<HostBanner scope="node" onShowLogs={() => store.openSettings("logs")} />
+							<div className="main-body">
+								<Main />
+							</div>
+							{terminalOpen ? <TerminalPanel {...(screenWorkspace ? { workspace: screenWorkspace } : {})} /> : null}
+						</main>
+						<div
+							className={`files-shell${showFiles ? "" : " collapsed"}`}
+							style={{ "--files-width": `${filesPanelWidth}px` } as CSSProperties}
+							inert={!showFiles}
+						>
+							{showFiles || filesMounted ? <RightPanel {...screen} /> : null}
+						</div>
 					</div>
-				</div>
-			)}
+				)}
+			</div>
 			<StatusBar />
 			{settings ? null : <FilePreview />}
 			<Toasts />
