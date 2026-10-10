@@ -1,8 +1,17 @@
 import { thinkingLabel } from "@pier/chat-state";
 import type { ThinkingLevel } from "@pier/protocol";
 import { useEffect, useRef, useState } from "react";
-import { Animated, Easing, type GestureResponderEvent, PanResponder, StyleSheet, Text, View } from "react-native";
-import { usePalette } from "../theme.ts";
+import {
+	Animated,
+	Easing,
+	type GestureResponderEvent,
+	PanResponder,
+	Platform,
+	StyleSheet,
+	Text,
+	View,
+} from "react-native";
+import { THINKING_COLOR, usePalette } from "../theme.ts";
 import { Icon } from "./ui.tsx";
 
 /** Height of the track, which doubles as the fill (a progress bar with one stop per level). */
@@ -16,6 +25,7 @@ const DRAG_SLOP = 3;
 /** The desktop's long ease-out, so the thumb glides onto a stop and settles softly. */
 const GLIDE = Easing.bezier(0.22, 1, 0.36, 1);
 const EASE = Easing.bezier(0.2, 0.8, 0.2, 1);
+const FILL_GRADIENT = "linear-gradient(105deg, #3563e9, #7967ef 45%, #a76dff 72%, #5c6ded)";
 
 /**
  * The thinking-level slider, the same as the desktop's: a pill-shaped track with one stop per
@@ -168,7 +178,7 @@ export function ThinkingSlider({
 					style={[
 						styles.value,
 						{
-							color: p.accent,
+							color: THINKING_COLOR,
 							opacity: labelIn,
 							transform: [{ translateY: labelIn.interpolate({ inputRange: [0, 1], outputRange: [5, 0] }) }],
 						},
@@ -188,7 +198,7 @@ export function ThinkingSlider({
 				{...responder.panHandlers}
 			>
 				<View style={[styles.track, { backgroundColor: trackColor }]} pointerEvents="none">
-					<Animated.View style={[styles.fill, { backgroundColor: p.accent, width: fill }]} />
+					<Animated.View style={[styles.fill, { width: fill }]} />
 					<View
 						ref={rail}
 						style={styles.rail}
@@ -235,7 +245,19 @@ const styles = StyleSheet.create({
 	// A taller touch target around the track.
 	touch: { paddingVertical: 8 },
 	track: { height: TRACK, borderRadius: TRACK / 2, paddingHorizontal: PAD },
-	fill: { position: "absolute", top: 0, bottom: 0, left: 0, borderRadius: TRACK / 2 },
+	fill: {
+		position: "absolute",
+		top: 0,
+		bottom: 0,
+		left: 0,
+		borderRadius: TRACK / 2,
+		backgroundColor: "#7967ef",
+		// React Native and React Native Web expose gradients under different style names.
+		...Platform.select({
+			web: { backgroundImage: FILL_GRADIENT },
+			default: { experimental_backgroundImage: FILL_GRADIENT },
+		}),
+	},
 	rail: { flex: 1 },
 	dot: { position: "absolute", top: (TRACK - DOT) / 2, width: DOT, height: DOT, borderRadius: DOT / 2 },
 	thumb: {

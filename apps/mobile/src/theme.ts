@@ -88,6 +88,9 @@ export const MONO = Platform.select({ ios: "Menlo", android: "monospace", defaul
 
 export const RADIUS = { sm: 8, md: 12, lg: 18, xl: 26, pill: 999 } as const;
 
+/** Thinking-level labels use the same purple as the desktop, in both palettes. */
+export const THINKING_COLOR = "#8b5cf6";
+
 /** Soft, layered card elevation (React Native's `boxShadow` works on every platform). */
 export const SHADOW: object = { boxShadow: "0 1px 2px rgba(16,24,40,0.04), 0 6px 20px rgba(16,24,40,0.06)" };
 

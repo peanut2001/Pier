@@ -1,12 +1,12 @@
-import { type ChatController, resolveSlash, runBuiltin, type SlashActions } from "@pier/chat-state";
-import type { ImageInput } from "@pier/protocol";
+import { type ChatController, resolveSlash, runBuiltin, type SlashActions, thinkingLabel } from "@pier/chat-state";
+import type { ImageInput, ThinkingLevel } from "@pier/protocol";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import { useState } from "react";
 import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { isBusy } from "../format.ts";
 import { useStore } from "../store.ts";
-import { FLOAT_SHADOW, RADIUS, usePalette } from "../theme.ts";
+import { FLOAT_SHADOW, RADIUS, THINKING_COLOR, usePalette } from "../theme.ts";
 import { type SlashEntry, SlashMenu, useSlashMenu } from "./SlashMenu.tsx";
 import { Icon, IconButton } from "./ui.tsx";
 
@@ -16,12 +16,14 @@ export function Composer({
 	chat,
 	runState,
 	model,
+	thinkingLevel,
 	onModelPress,
 }: {
 	chat: ChatController;
 	runState: string;
-	/** Current model (and thinking level), shown as a chip in the toolbar. */
+	/** Current model, shown as a chip in the toolbar. */
 	model?: string;
+	thinkingLevel?: ThinkingLevel;
 	onModelPress?: () => void;
 }) {
 	const store = useStore();
@@ -162,6 +164,12 @@ export function Composer({
 							<Text style={[styles.modelText, { color: p.text }]} numberOfLines={1}>
 								{model}
 							</Text>
+							{thinkingLevel ? (
+								<Text style={[styles.thinkingText, { color: THINKING_COLOR }]} numberOfLines={1}>
+									<Text style={{ color: p.faint }}>· </Text>
+									{thinkingLabel(thinkingLevel)}
+								</Text>
+							) : null}
 							<Icon name="chevron-down" size={13} color={p.faint} />
 						</Pressable>
 					) : (
@@ -235,6 +243,7 @@ const styles = StyleSheet.create({
 		maxWidth: 240,
 	},
 	modelText: { fontSize: 13, fontWeight: "600", flexShrink: 1 },
+	thinkingText: { fontSize: 13, fontWeight: "500", flexShrink: 0 },
 	send: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center", marginLeft: "auto" },
 	pressed: { opacity: 0.75 },
 	modes: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12 },

@@ -5,7 +5,6 @@ import {
 	isRole,
 	sessionUsage,
 	supportedThinkingLevels,
-	thinkingLabel,
 	userText,
 } from "@pier/chat-state";
 import type { ApprovalPolicy, ForkPoint, ModelInfo, SessionSummary } from "@pier/protocol";
@@ -608,13 +607,8 @@ export default function SessionScreen() {
 		: "会话";
 	const running = !!state && isBusy(state.runState);
 	const statusColor = revoked ? p.danger : connection !== "open" ? p.warning : running ? p.accent : p.ok;
-	const modelLabel = state?.model
-		? `${state.model.name}${
-				supportedThinkingLevels(state.model).length > 1
-					? ` · ${thinkingLabel(clampThinking(state.thinkingLevel, supportedThinkingLevels(state.model)))}`
-					: ""
-			}`
-		: undefined;
+	const levels = supportedThinkingLevels(state?.model);
+	const thinkingLevel = state && levels.length > 1 ? clampThinking(state.thinkingLevel, levels) : undefined;
 	const context = state ? contextShare(state) : undefined;
 	const router = useRouter();
 
@@ -726,7 +720,8 @@ export default function SessionScreen() {
 						<Composer
 							chat={chat}
 							runState={state.runState}
-							{...(modelLabel ? { model: modelLabel } : {})}
+							model={state.model?.name}
+							thinkingLevel={thinkingLevel}
 							onModelPress={() => setSheet("model")}
 						/>
 					</View>
