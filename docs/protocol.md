@@ -1,4 +1,4 @@
-# Pier 协议 v1.32
+# Pier 协议 v1.36
 
 > 实现：`packages/protocol`（zod schema + TS 类型，Host 与所有客户端共享）。
 > 本文档描述线上格式与语义；字段的权威定义以 `packages/protocol/src` 为准。
@@ -432,6 +432,28 @@ Host 保存已配对的电脑于 `~/.pier/peers.json`（0600），每次经代�
 | `device.list` 🔒 | – | `{ devices: DeviceInfo[] }`：`{ id, name, platform?, model?, appVersion?, fingerprint, pairedAt, lastSeenAt?, connected, route? }`；`route`（1.26）为在线设备的连接方式：`lan`（直连监听端口）、`relay`（经中继）、`p2p`（经中继建立的点对点路径） |
 | `device.rename` 🔒 | `{ deviceId, name }` | `{ device }` |
 | `device.revoke` 🔒 | `{ deviceId }` | `{ revoked }`；该设备的连接立即以 4403 断开 |
+
+### 定时任务（1.36）
+
+`task.*` 由工作区所在 Host 执行，对本地和已配对客户端开放。`ScheduledTaskInput` 包含 `name`、`prompt`、`workspaceId`、`runtime`（默认 `pi`）、`schedule`、可选 `model: { provider, modelId }` 和 `thinkingLevel`。计划支持 `{ kind: "once", at: ISO UTC }`、`{ kind: "interval", minutes }`、`{ kind: "daily", time: "HH:mm", timeZone }`、`{ kind: "weekly", time, timeZone, days: number[] }`；时区为 IANA 名称，星期日为 0。单次时间必须在未来，间隔为 1–525600 分钟。
+
+| 方法 | 参数 | 结果 |
+|---|---|---|
+| `task.list` | – | `{ tasks: ScheduledTask[] }` |
+| `task.create` | `ScheduledTaskInput` | `{ task }` |
+| `task.update` | `{ taskId, task: ScheduledTaskInput }` | `{ task }`；运行中拒绝编辑 |
+| `task.setStatus` | `{ taskId, status: "active" \| "paused" }` | `{ task }`；恢复时重新计算下一次，暂停不终止当前运行 |
+| `task.delete` | `{ taskId }` | `{ deleted }`；运行中拒绝删除；删除记录并保留会话 |
+| `task.run` | `{ taskId }` | `{ run: ScheduledTaskRun }`；立即执行，不改变计划；同一任务运行中返回 `CONFLICT` |
+| `task.stop` | `{ taskId }` | `{ stopped }`；仅停止本次运行，保留后续计划 |
+| `task.runs` | `{ taskId? }?` | `{ runs: ScheduledTaskRun[] }`，最新在前 |
+| `task.readRun` | `{ runId }` | `{ run }`；标记已读 |
+
+`ScheduledTask` 在输入字段之外包含 `id`、`status: "active" | "paused" | "completed"`、`nextRunAt: string | null`、`createdAt`、`updatedAt`。`ScheduledTaskRun` 包含 `id`、`taskId`、`taskName`、`workspaceId`、`runtime`、`trigger: "schedule" | "manual"`、`status: "running" | "waiting" | "succeeded" | "failed" | "interrupted"`、`startedAt`、`read`，以及可选的 `finishedAt`、`sessionId`、`summary`（最多 4000 字符）、`error`。`sessionId` 可通过 `session.open` 打开完整会话。
+
+Host 每秒检查计划。恢复后只补执行一个错过的周期；任务正在执行时跳过重复周期，最多同时运行 4 个任务。每次在原工作区目录创建独立会话，沿用工作区审批策略；UI 请求显示为 `waiting`，由正常 `ui.respond` 回答。未结束的运行在重启后标记为 `interrupted`，不会重放。移除工作区会暂停相关任务。最多 100 个任务，每个任务保留最近 50 次运行，持久化到权限 0600 的 `scheduled-tasks.json`。
+
+任务、运行记录或已读状态变化时，Host 向所有客户端发送 `{ type: "task.changed" }`，客户端重新读取任务与记录；旧版 Host 不支持这些方法，客户端需检查协议 1.36。
 
 ## 4. 事件
 

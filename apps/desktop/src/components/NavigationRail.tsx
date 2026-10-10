@@ -3,6 +3,7 @@ import { type SettingsSection, useAppState, useStore } from "../lib/store.tsx";
 import { useHostStatus } from "./HostPanels.tsx";
 import {
 	IconBot,
+	IconClock,
 	IconDownload,
 	IconHome,
 	IconLoader,
@@ -33,6 +34,8 @@ const SHORTCUTS: Array<{
 export function NavigationRail() {
 	const store = useStore();
 	const settings = useAppState((s) => s.settings);
+	const scheduled = useAppState((s) => s.scheduledTasksOpen);
+	const unread = useAppState((s) => Object.values(s.taskData).some((data) => data.runs.some((run) => !run.read)));
 	const sidebar = useAppState((s) => s.sidebar);
 	const noModels = useAppState((s) => s.localProviders?.availableCount === 0);
 	const update = useAppState((s) => s.update);
@@ -59,19 +62,30 @@ export function NavigationRail() {
 			<div className="navigation-links">
 				<button
 					type="button"
-					className={`navigation-button${settings ? "" : " selected"}`}
+					className={`navigation-button${settings || scheduled ? "" : " selected"}`}
 					aria-label="工作区与会话"
-					aria-current={settings ? undefined : "page"}
-					aria-expanded={!settings && sidebar}
-					title={`工作区与会话 · ${!settings && sidebar ? "收起" : "展开"}列表（${SIDEBAR_SHORTCUT}）`}
+					aria-current={settings || scheduled ? undefined : "page"}
+					aria-expanded={!settings && !scheduled && sidebar}
+					title={`工作区与会话 · ${!settings && !scheduled && sidebar ? "收起" : "展开"}列表（${SIDEBAR_SHORTCUT}）`}
 					onClick={() => {
-						if (settings) {
+						if (settings || scheduled) {
 							store.closeSettings();
 							store.toggleSidebar(true);
 						} else store.toggleSidebar();
 					}}
 				>
 					<IconHome size={20} />
+				</button>
+				<button
+					type="button"
+					className={`navigation-button${scheduled ? " selected" : ""}`}
+					aria-label="定时任务"
+					aria-current={scheduled ? "page" : undefined}
+					title="定时任务"
+					onClick={() => store.openScheduledTasks()}
+				>
+					<IconClock size={20} />
+					{unread ? <span className="navigation-badge" /> : null}
 				</button>
 				<div className="navigation-divider" />
 				{SHORTCUTS.map((item) => {

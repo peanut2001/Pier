@@ -44,6 +44,8 @@ import type {
 	ProviderInfo,
 	ProviderListResult,
 	RemoteAccessStatus,
+	ScheduledTask,
+	ScheduledTaskRun,
 	SessionCleanupResult,
 	SessionRunState,
 	SessionSummary,
@@ -121,6 +123,10 @@ export function hostTransfersFiles(info: HostInfo | undefined): boolean {
 /** Whether a host offers Git source control for workspaces (`git.*`, 1.28). */
 export function hostSupportsGit(info: HostInfo | undefined): boolean {
 	return hostSpeaks(info, 28);
+}
+
+export function hostSupportsScheduledTasks(info: HostInfo | undefined): boolean {
+	return hostSpeaks(info, 36);
 }
 
 /** Whether a host supports one-time preview authorization locally (1.33) or remotely (1.35). */
@@ -252,6 +258,8 @@ export interface ExtensionProgressState {
 }
 
 export interface AppState {
+	scheduledTasksOpen: boolean;
+	taskData: Record<string, { tasks: ScheduledTask[]; runs: ScheduledTaskRun[]; error?: string }>;
 	host: HostStatus;
 	/**
 	 * Every computer whose workspaces the sidebar lists: this one (`LOCAL_NODE`) and each paired
@@ -498,6 +506,7 @@ export class PierStore {
 	private readonly autoSend = new Set<string>();
 	private nextToastId = 1;
 	private readonly refreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
+	private readonly taskLoadSeq = new Map<string, number>();
 	/** Sign-in events that arrived before `provider.login` answered with their flow id. */
 	private authBacklog: EventFrame[] = [];
 	private openedAuthUrls = new Set<string>();
@@ -559,6 +568,8 @@ export class PierStore {
 			}
 		})();
 		const state: AppState = {
+			scheduledTasksOpen: false,
+			taskData: {},
 			host: { state: "starting", restarts: 0, generation: 0 },
 			nodes,
 			node,
@@ -852,6 +863,7 @@ export class PierStore {
 						}
 					: {}),
 				peerUpdates: Object.fromEntries(Object.entries(s.peerUpdates).filter(([id]) => id !== node)),
+				taskData: Object.fromEntries(Object.entries(s.taskData).filter(([id]) => id !== node)),
 			};
 		});
 		this.saveNodeCache();
@@ -1058,6 +1070,7 @@ export class PierStore {
 	private onNodeEvent(node: string, frame: EventFrame): void {
 		const event = frame.event;
 		if (event.type === "workspace.changed") this.scheduleRefresh(`#workspaces:${node}`);
+		else if (event.type === "task.changed") this.scheduleRefresh(`#tasks:${node}`);
 		else if (event.type === "session.listChanged") this.scheduleRefresh(String(event.workspaceId));
 		else if (event.type === "session.activity") {
 			const workspaceId = String(event.workspaceId);
@@ -1178,6 +1191,7 @@ export class PierStore {
 			this.patchNode(node, { workspaces, workspacesLoaded: true });
 			if (node !== LOCAL_NODE) this.saveNodeCache();
 			this.fixSelection();
+			void this.loadTasks(node);
 			await Promise.all(workspaces.map((w) => this.refreshSessions(w.id)));
 			if (this.clients.get(node) !== client) return;
 			const { selectedSessionId, selectedWorkspaceId, sessions } = this.state;
@@ -1202,6 +1216,7 @@ export class PierStore {
 				else if (key.startsWith(PROVIDERS_KEY)) void this.loadProviders(key.slice(PROVIDERS_KEY.length));
 				else if (key === PEERS_KEY) void this.loadPeers();
 				else if (key.startsWith("#workspaces:")) void this.loadWorkspaces(key.slice("#workspaces:".length));
+				else if (key.startsWith("#tasks:")) void this.loadTasks(key.slice("#tasks:".length));
 				else void this.refreshSessions(key);
 			}, 150),
 		);
@@ -2514,6 +2529,7 @@ export class PierStore {
 
 	selectSession(session: SessionSummary): void {
 		this.set((s) => ({
+			scheduledTasksOpen: false,
 			selectedWorkspaceId: session.workspaceId,
 			selectedSessionId: session.id,
 			newChat: undefined,
@@ -2735,12 +2751,67 @@ export class PierStore {
 	openSettings(section: SettingsSection = "general", node?: string): void {
 		if (section === "about" && this.state.update.version) this.announcedUpdate = this.state.update.version;
 		if (node !== undefined) this.setSettingsNode(node);
-		this.set({ settings: section });
+		this.set({ settings: section, scheduledTasksOpen: false });
 		if (section === "models" || section === "account") void this.loadProviders();
 	}
 
 	closeSettings(): void {
-		this.set({ settings: undefined });
+		this.set({ settings: undefined, scheduledTasksOpen: false });
+	}
+
+	openScheduledTasks(): void {
+		this.set({ settings: undefined, scheduledTasksOpen: true, filePreview: undefined });
+		for (const node of this.clients.keys()) void this.loadTasks(node);
+	}
+
+	async loadTasks(node: string): Promise<void> {
+		const client = this.openClient(node);
+		if (!client || !hostSupportsScheduledTasks(client.host)) return;
+		const seq = (this.taskLoadSeq.get(node) ?? 0) + 1;
+		this.taskLoadSeq.set(node, seq);
+		try {
+			const [{ tasks }, { runs }] = await Promise.all([client.request("task.list"), client.request("task.runs")]);
+			if (this.clients.get(node) === client && this.taskLoadSeq.get(node) === seq)
+				this.set((s) => ({ taskData: { ...s.taskData, [node]: { tasks, runs } } }));
+		} catch (error) {
+			if (this.clients.get(node) === client && this.taskLoadSeq.get(node) === seq)
+				this.set((s) => ({
+					taskData: {
+						...s.taskData,
+						[node]: {
+							tasks: s.taskData[node]?.tasks ?? [],
+							runs: s.taskData[node]?.runs ?? [],
+							error: errorText(error),
+						},
+					},
+				}));
+		}
+	}
+
+	async requestTask<M extends Extract<MethodName, `task.${string}`>>(
+		node: string,
+		method: M,
+		params: MethodParams<M>,
+	): Promise<MethodResult<M>> {
+		const client = this.openClient(node);
+		if (!client || this.state.nodes[node]?.connection !== "open") throw new Error(`${this.nodeName(node)} 未连接`);
+		if (!hostSupportsScheduledTasks(client.host)) throw new Error("请先更新这台电脑上的 Pier，以使用定时任务");
+		const result = await client.request(method, params);
+		await this.loadTasks(node);
+		return result;
+	}
+
+	async openTaskRun(node: string, run: ScheduledTaskRun): Promise<void> {
+		if (!run.sessionId) throw new Error("本次运行尚未创建会话");
+		const client = this.openClient(node);
+		if (!client || this.state.nodes[node]?.connection !== "open") throw new Error(`${this.nodeName(node)} 未连接`);
+		const { session } = await client.request("session.open", {
+			workspaceId: run.workspaceId,
+			sessionId: run.sessionId,
+		});
+		await this.requestTask(node, "task.readRun", { runId: run.id });
+		this.upsertSession(session);
+		this.selectSession(session);
 	}
 
 	/**

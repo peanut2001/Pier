@@ -83,6 +83,7 @@ export type PierSessionEvent =
 
 /** Host-scoped events (no `sessionId`, no `seq`). */
 export type PierHostEvent =
+	| { type: "task.changed" }
 	| { type: "host.notice"; level: "info" | "warning" | "error"; message: string; sessionId?: string }
 	| { type: "workspace.changed" }
 	| { type: "session.listChanged"; workspaceId: string }

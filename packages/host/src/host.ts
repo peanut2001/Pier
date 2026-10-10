@@ -67,6 +67,7 @@ import { PiSettingsFiles } from "./pi/settings-files.ts";
 import { RemoteAccess, type RemoteAccessOptions } from "./remote/remote-access.ts";
 import { AgentConfigFiles } from "./runtimes/agent-config.ts";
 import { AgentInstaller, type AgentInstallerOptions } from "./runtimes/installation.ts";
+import { ScheduledTasks } from "./scheduled-tasks.ts";
 import { SessionArchiveStore } from "./session-archive.ts";
 import { SessionPool } from "./session-pool.ts";
 import type { AppShell, ShellMethod } from "./shell.ts";
@@ -136,6 +137,13 @@ export interface PierHostOptions {
 
 /** Remote methods recorded in the audit log. */
 const AUDITED_METHODS = new Set<MethodName>([
+	"task.create",
+	"task.update",
+	"task.setStatus",
+	"task.delete",
+	"task.run",
+	"task.stop",
+	"task.readRun",
 	"session.create",
 	"session.open",
 	"session.close",
@@ -204,6 +212,16 @@ const AUDITED_METHODS = new Set<MethodName>([
 
 function auditDetail(method: MethodName, params: Record<string, unknown>): Record<string, unknown> | undefined {
 	switch (method) {
+		case "task.create":
+			return { workspaceId: params.workspaceId, runtime: params.runtime };
+		case "task.update":
+		case "task.setStatus":
+		case "task.delete":
+		case "task.run":
+		case "task.stop":
+			return { taskId: params.taskId };
+		case "task.readRun":
+			return { runId: params.runId };
 		case "runtime.install":
 			return { runtime: params.runtime };
 		case "session.prompt":
@@ -370,6 +388,7 @@ export class PierHost implements RequestHandler {
 	readonly config: ConfigStore;
 	readonly env: PiEnvironment;
 	readonly pool: SessionPool;
+	readonly tasks: ScheduledTasks;
 	readonly remote: RemoteAccess;
 	readonly providers: ProviderManager;
 	readonly newapi: NewApiManager;
@@ -428,6 +447,7 @@ export class PierHost implements RequestHandler {
 			...(options.sweepIntervalMs === undefined ? {} : { sweepIntervalMs: options.sweepIntervalMs }),
 			onSessionReplaced: (session) => this.broadcast({ type: "session.listChanged", workspaceId: session.workspaceId }),
 			onSessionActivity: (session) => {
+				this.tasks?.activity(session);
 				const summary = session.summary();
 				this.broadcast({
 					type: "session.activity",
@@ -438,9 +458,18 @@ export class PierHost implements RequestHandler {
 				});
 			},
 			onSessionClosed: (session) => {
+				this.tasks?.sessionClosed(session);
 				for (const connection of this.connections) connection.subscriptions.delete(session);
 				this.broadcast({ type: "session.listChanged", workspaceId: session.workspaceId });
 			},
+		});
+		this.tasks = new ScheduledTasks({
+			file: join(this.pierDir, "scheduled-tasks.json"),
+			pool: this.pool,
+			workspace: (id) => this.requireWorkspace(id),
+			log,
+			onChanged: () => this.broadcast({ type: "task.changed" }),
+			onSessionCreated: (workspaceId) => this.broadcast({ type: "session.listChanged", workspaceId }),
 		});
 		this.extensions = new ExtensionManager({
 			agentDir: env.agentDir,
@@ -519,6 +548,7 @@ export class PierHost implements RequestHandler {
 		await host.providers.fillCapabilities().catch(() => 0);
 		host.pool.startSweeper();
 		await host.remote.apply();
+		host.tasks.start();
 		return host;
 	}
 
@@ -772,6 +802,15 @@ export class PierHost implements RequestHandler {
 
 	private createHandlers(): Handlers {
 		return {
+			"task.list": () => ({ tasks: this.tasks.list() }),
+			"task.create": (_ctx, params) => ({ task: this.tasks.create(params) }),
+			"task.update": (_ctx, params) => ({ task: this.tasks.update(params.taskId, params.task) }),
+			"task.setStatus": (_ctx, params) => ({ task: this.tasks.setStatus(params.taskId, params.status) }),
+			"task.delete": (_ctx, params) => ({ deleted: this.tasks.delete(params.taskId) }),
+			"task.run": (_ctx, params) => ({ run: this.tasks.run(params.taskId) }),
+			"task.stop": async (_ctx, params) => ({ stopped: await this.tasks.stop(params.taskId) }),
+			"task.runs": (_ctx, params) => ({ runs: this.tasks.runs(params?.taskId) }),
+			"task.readRun": (_ctx, params) => ({ run: this.tasks.readRun(params.runId) }),
 			"host.hello": (ctx, params) => {
 				if (!isProtocolCompatible(params.protocolVersion)) {
 					throw new PierProtocolError(
@@ -837,6 +876,7 @@ export class PierHost implements RequestHandler {
 				return { workspace };
 			},
 			"workspace.remove": async (_ctx, params) => {
+				this.tasks.removeWorkspace(params.workspaceId);
 				for (const session of this.pool.all()) {
 					if (session.workspaceId === params.workspaceId) await this.pool.close(session.id, true);
 				}
@@ -1035,7 +1075,9 @@ export class PierHost implements RequestHandler {
 				queue: await this.pool.require(params.sessionId).followUp(params.text, params.images),
 			}),
 			"session.abort": async (_ctx, params) => {
-				await this.pool.require(params.sessionId).abort();
+				const session = this.pool.require(params.sessionId);
+				this.tasks.sessionAborting(session);
+				await session.abort();
 				return { aborted: true as const };
 			},
 			"session.compact": (_ctx, params) => this.pool.require(params.sessionId).compact(params.instructions),
@@ -1295,6 +1337,7 @@ export class PierHost implements RequestHandler {
 		if (this.shuttingDown) return;
 		this.shuttingDown = true;
 		this.offShellStatus?.();
+		await this.tasks.shutdown();
 		this.broadcast({ type: "host.notice", level: "warning", message: "Pier host is shutting down" });
 		this.providers.shutdown();
 		this.account.shutdown();

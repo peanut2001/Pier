@@ -11,6 +11,7 @@ import { AuthDialog, YunlianDialog } from "./components/ModelsPanel.tsx";
 import { NavigationRail } from "./components/NavigationRail.tsx";
 import { NewChatView } from "./components/NewChat.tsx";
 import { AddPeerDialog, PairingRequestDialog } from "./components/RemotePanel.tsx";
+import { ScheduledTasksPage } from "./components/ScheduledTasks.tsx";
 import { SessionView } from "./components/SessionView.tsx";
 import { SettingsPage } from "./components/Settings.tsx";
 import { Sidebar, SidebarToggle } from "./components/Sidebar.tsx";
@@ -110,6 +111,7 @@ function RightPanel({ workspace, composerKey }: { workspace?: WorkspaceInfo; com
 export function App() {
 	const store = useStore();
 	const settings = useAppState((s) => s.settings);
+	const scheduled = useAppState((s) => s.scheduledTasksOpen);
 	const filesPanel = useAppState((s) => s.filesPanel);
 	const filesPanelWidth = useAppState((s) => s.filesPanelWidth);
 	const hasWorkspace = useAppState((s) => s.workspaces.length > 0);
@@ -139,7 +141,7 @@ export function App() {
 	// Ctrl/⌘+Shift+E and Ctrl/⌘+Shift+G show (or hide) the file and source control views, as in editors; Ctrl/⌘+B the sidebar;
 	// Ctrl+` the terminal (Ctrl on macOS too, as in editors: ⌘+` cycles windows there).
 	useEffect(() => {
-		if (settings) return;
+		if (settings || scheduled) return;
 		const onKey = (e: KeyboardEvent) => {
 			if (e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && e.key === "`") {
 				if (!hasTerminals && !canOpenTerminal) return;
@@ -162,14 +164,16 @@ export function App() {
 		};
 		window.addEventListener("keydown", onKey);
 		return () => window.removeEventListener("keydown", onKey);
-	}, [store, settings, screenWorkspace, hasTerminals, canOpenTerminal]);
+	}, [store, settings, scheduled, screenWorkspace, hasTerminals, canOpenTerminal]);
 
 	return (
 		<div className="window">
 			<TitleBar />
 			<div className="window-body">
 				<NavigationRail />
-				{settings ? (
+				{scheduled ? (
+					<ScheduledTasksPage />
+				) : settings ? (
 					<SettingsPage section={settings} />
 				) : (
 					<div

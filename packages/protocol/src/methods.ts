@@ -73,6 +73,7 @@ import {
 	type WorkspacePathDeleteResult,
 	type WorkspaceUploadStart,
 } from "./domain.ts";
+import { type ScheduledTask, ScheduledTaskInputSchema, type ScheduledTaskRun } from "./scheduled-tasks.ts";
 
 const Id = z.string().min(1).max(256);
 /** Repository-relative paths for `git.*` (1.28). */
@@ -110,6 +111,15 @@ export const ClientInfoSchema = z.object({
  * Params schema for every method. Methods not listed here are unknown to the protocol.
  */
 export const MethodParamsSchemas = {
+	"task.list": z.object({}).optional(),
+	"task.create": ScheduledTaskInputSchema,
+	"task.update": z.object({ taskId: Id, task: ScheduledTaskInputSchema }),
+	"task.setStatus": z.object({ taskId: Id, status: z.enum(["active", "paused"]) }),
+	"task.delete": z.object({ taskId: Id }),
+	"task.run": z.object({ taskId: Id }),
+	"task.stop": z.object({ taskId: Id }),
+	"task.runs": z.object({ taskId: Id.optional() }).optional(),
+	"task.readRun": z.object({ runId: Id }),
 	"host.hello": z.object({
 		protocolVersion: z.string(),
 		client: ClientInfoSchema,
@@ -763,6 +773,15 @@ export interface SubscribeResult {
 }
 
 export interface MethodResults {
+	"task.list": { tasks: ScheduledTask[] };
+	"task.create": { task: ScheduledTask };
+	"task.update": { task: ScheduledTask };
+	"task.setStatus": { task: ScheduledTask };
+	"task.delete": { deleted: boolean };
+	"task.run": { run: ScheduledTaskRun };
+	"task.stop": { stopped: boolean };
+	"task.runs": { runs: ScheduledTaskRun[] };
+	"task.readRun": { run: ScheduledTaskRun };
 	"host.hello": HelloResult;
 	"host.info": HostInfo;
 	"host.listDirectories": HostDirectoryListing;
