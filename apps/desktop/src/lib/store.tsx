@@ -44,7 +44,10 @@ import type {
 	ProviderInfo,
 	ProviderListResult,
 	RemoteAccessStatus,
+	ScheduledTask,
+	ScheduledTaskRun,
 	SessionCleanupResult,
+	SessionRunState,
 	SessionSummary,
 	ThinkingLevel,
 	WorkspaceFileContent,
@@ -59,9 +62,9 @@ import type { Bridge, HostStatus, LocalFileSink, UpdateStatus } from "./bridge.t
 import { fileToken } from "./composer-text.ts";
 import { newSessionDefaultsFromSettings } from "./new-session-defaults.ts";
 import { remotePageBlocker } from "./settings-target.ts";
-import { isYunlianProvider, YUNLIAN_SITE, yunlianGroupOf, yunlianProvider } from "./yunlian.ts";
+import { isYunlianProvider, movedToLine, YUNLIAN_SITE, yunlianGroupOf, yunlianProvider } from "./yunlian.ts";
 
-export const APP_VERSION = "0.2.23";
+export const APP_VERSION = "0.2.33";
 
 /** Node id of this computer; any other node is a paired computer's host id. */
 export const LOCAL_NODE = "local";
@@ -120,6 +123,15 @@ export function hostTransfersFiles(info: HostInfo | undefined): boolean {
 /** Whether a host offers Git source control for workspaces (`git.*`, 1.28). */
 export function hostSupportsGit(info: HostInfo | undefined): boolean {
 	return hostSpeaks(info, 28);
+}
+
+export function hostSupportsScheduledTasks(info: HostInfo | undefined): boolean {
+	return hostSpeaks(info, 36);
+}
+
+/** Whether a host supports one-time preview authorization locally (1.33) or remotely (1.35). */
+export function hostAuthorizesFilePreviews(info: HostInfo | undefined, remote = false): boolean {
+	return hostSpeaks(info, remote ? 35 : 33);
 }
 
 /** Whether a host runs agents other than pi (`runtime.list`, `session.create` with `runtime`, 1.22). */
@@ -246,6 +258,8 @@ export interface ExtensionProgressState {
 }
 
 export interface AppState {
+	scheduledTasksOpen: boolean;
+	taskData: Record<string, { tasks: ScheduledTask[]; runs: ScheduledTaskRun[]; error?: string }>;
 	host: HostStatus;
 	/**
 	 * Every computer whose workspaces the sidebar lists: this one (`LOCAL_NODE`) and each paired
@@ -327,6 +341,8 @@ export interface AppState {
 	settings?: SettingsSection;
 	/** The left-hand sidebar (workspaces and sessions) is shown. */
 	sidebar: boolean;
+	/** Width of the left-hand sidebar in pixels. */
+	sidebarWidth: number;
 	/** The right-hand workspace file panel is shown. */
 	filesPanel: boolean;
 	/** Width of the file panel in pixels. */
@@ -339,7 +355,7 @@ export interface AppState {
 	 * The workspace file shown in the preview dialog. `composerKey` is the composer that the
 	 * dialog's "insert" button targets, when there is one.
 	 */
-	filePreview?: { workspaceId: string; path: string; composerKey?: string } | undefined;
+	filePreview?: { workspaceId: string; path: string; composerKey?: string; fromMarkdown?: boolean } | undefined;
 	/** Bumped when pi extension or package settings changed, so the extensions page reloads. */
 	extensionsVersion: number;
 	/** Bumped when a pi settings file may have changed, so the pi settings page reloads. */
@@ -402,9 +418,17 @@ const FILES_PANEL_KEY = "pier.filesPanel";
 /** The views of the right-hand panel. */
 export type RightPanelTab = "files" | "git";
 const SIDEBAR_KEY = "pier.sidebar";
+export const SIDEBAR_MIN_WIDTH = 180;
+export const SIDEBAR_MAX_WIDTH = 480;
+export const SIDEBAR_DEFAULT_WIDTH = 228;
 export const FILES_PANEL_MIN_WIDTH = 220;
 export const FILES_PANEL_MAX_WIDTH = 560;
 export const FILES_PANEL_DEFAULT_WIDTH = 280;
+
+function clampSidebarWidth(width: number): number {
+	if (!Number.isFinite(width)) return SIDEBAR_DEFAULT_WIDTH;
+	return Math.round(Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, width)));
+}
 
 function clampPanelWidth(width: number): number {
 	if (!Number.isFinite(width)) return FILES_PANEL_DEFAULT_WIDTH;
@@ -482,6 +506,7 @@ export class PierStore {
 	private readonly autoSend = new Set<string>();
 	private nextToastId = 1;
 	private readonly refreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
+	private readonly taskLoadSeq = new Map<string, number>();
 	/** Sign-in events that arrived before `provider.login` answered with their flow id. */
 	private authBacklog: EventFrame[] = [];
 	private openedAuthUrls = new Set<string>();
@@ -493,6 +518,7 @@ export class PierStore {
 	private yunlianFlow: string | undefined;
 	/** The update version already announced with a toast. */
 	private announcedUpdate: string | undefined;
+	private updateRequest = 0;
 	/** Mounted composers, by session, that accept text inserted from elsewhere (the file panel). */
 	private readonly composerInserts = new Map<string, (path: string, directory: boolean) => void>();
 	/** Mounted views sampling the shown computer (`summary`) or every computer (`detail`). */
@@ -536,12 +562,14 @@ export class PierStore {
 		})();
 		const sidebar = (() => {
 			try {
-				return JSON.parse(localStorage.getItem(SIDEBAR_KEY) ?? "{}") as { open?: boolean };
+				return JSON.parse(localStorage.getItem(SIDEBAR_KEY) ?? "{}") as { open?: boolean; width?: number };
 			} catch {
 				return {};
 			}
 		})();
 		const state: AppState = {
+			scheduledTasksOpen: false,
+			taskData: {},
 			host: { state: "starting", restarts: 0, generation: 0 },
 			nodes,
 			node,
@@ -566,6 +594,7 @@ export class PierStore {
 			settingsSyncing: false,
 			update: { state: "idle", currentVersion: APP_VERSION, autoCheck: true, downloaded: 0 },
 			sidebar: sidebar.open !== false,
+			sidebarWidth: clampSidebarWidth(sidebar.width ?? SIDEBAR_DEFAULT_WIDTH),
 			filesPanel: panel.open === true,
 			filesPanelWidth: clampPanelWidth(panel.width ?? FILES_PANEL_DEFAULT_WIDTH),
 			rightPanelTab: panel.tab === "git" ? "git" : "files",
@@ -619,8 +648,8 @@ export class PierStore {
 				} satisfies SavedSelection),
 			);
 		}
-		if ("sidebar" in next) {
-			localStorage.setItem(SIDEBAR_KEY, JSON.stringify({ open: this.state.sidebar }));
+		if ("sidebar" in next || "sidebarWidth" in next) {
+			localStorage.setItem(SIDEBAR_KEY, JSON.stringify({ open: this.state.sidebar, width: this.state.sidebarWidth }));
 		}
 		if ("filesPanel" in next || "filesPanelWidth" in next || "rightPanelTab" in next) {
 			localStorage.setItem(
@@ -834,6 +863,7 @@ export class PierStore {
 						}
 					: {}),
 				peerUpdates: Object.fromEntries(Object.entries(s.peerUpdates).filter(([id]) => id !== node)),
+				taskData: Object.fromEntries(Object.entries(s.taskData).filter(([id]) => id !== node)),
 			};
 		});
 		this.saveNodeCache();
@@ -1040,10 +1070,27 @@ export class PierStore {
 	private onNodeEvent(node: string, frame: EventFrame): void {
 		const event = frame.event;
 		if (event.type === "workspace.changed") this.scheduleRefresh(`#workspaces:${node}`);
+		else if (event.type === "task.changed") this.scheduleRefresh(`#tasks:${node}`);
 		else if (event.type === "session.listChanged") this.scheduleRefresh(String(event.workspaceId));
 		else if (event.type === "session.activity") {
+			const workspaceId = String(event.workspaceId);
+			const sessionId = String(event.sessionId);
+			const state = event.state as SessionRunState;
+			const pendingUi = Number(event.pendingUi) || 0;
+			if (this.state.sessions[workspaceId]?.some((session) => session.id === sessionId)) {
+				this.set((s) => ({
+					sessions: {
+						...s.sessions,
+						[workspaceId]: s.sessions[workspaceId]?.map((session) =>
+							session.id === sessionId ? { ...session, state, pendingUi, active: true } : session,
+						),
+					},
+				}));
+			} else {
+				this.scheduleRefresh(workspaceId);
+			}
 			// A run that ends (or pauses for an answer) has likely written files.
-			if (event.state === "idle" || Number(event.pendingUi) > 0) this.bumpFiles(String(event.workspaceId));
+			if (state === "idle" || pendingUi > 0) this.bumpFiles(workspaceId);
 		} else if (event.type === "update.status") {
 			if (node !== LOCAL_NODE) this.onPeerUpdateStatus(node, event.status as AppUpdateStatus);
 		} else if (event.type === "host.notice") {
@@ -1068,6 +1115,9 @@ export class PierStore {
 			if (managed || node === LOCAL_NODE) this.scheduleRefresh(`${PROVIDERS_KEY}${node}`);
 			// Setting the default model writes the user settings.
 			if (managed) this.set((s) => ({ piSettingsVersion: s.piSettingsVersion + 1 }));
+		} else if (event.type === "runtime.changed") {
+			// New-chat pickers may target a different computer than the settings page.
+			this.set((s) => ({ agentConfigVersion: s.agentConfigVersion + 1 }));
 		} else if (!managed) {
 			return;
 		} else if (event.type === "extension.changed") {
@@ -1131,7 +1181,7 @@ export class PierStore {
 		if (Object.keys(patch).length) this.set(patch);
 	}
 
-	/** Load a computer's workspaces (the one on screen by default) and their open session lists. */
+	/** Load a computer's workspaces and sessions, including collapsed groups' running agents. */
 	async loadWorkspaces(node = this.state.node): Promise<void> {
 		const client = this.clients.get(node);
 		if (!client) return;
@@ -1141,8 +1191,8 @@ export class PierStore {
 			this.patchNode(node, { workspaces, workspacesLoaded: true });
 			if (node !== LOCAL_NODE) this.saveNodeCache();
 			this.fixSelection();
-			const expanded = this.state.expanded;
-			await Promise.all(workspaces.filter((w) => expanded[w.id]).map((w) => this.refreshSessions(w.id)));
+			void this.loadTasks(node);
+			await Promise.all(workspaces.map((w) => this.refreshSessions(w.id)));
 			if (this.clients.get(node) !== client) return;
 			const { selectedSessionId, selectedWorkspaceId, sessions } = this.state;
 			if (selectedSessionId && selectedWorkspaceId && workspaces.some((w) => w.id === selectedWorkspaceId)) {
@@ -1166,6 +1216,7 @@ export class PierStore {
 				else if (key.startsWith(PROVIDERS_KEY)) void this.loadProviders(key.slice(PROVIDERS_KEY.length));
 				else if (key === PEERS_KEY) void this.loadPeers();
 				else if (key.startsWith("#workspaces:")) void this.loadWorkspaces(key.slice("#workspaces:".length));
+				else if (key.startsWith("#tasks:")) void this.loadTasks(key.slice("#tasks:".length));
 				else void this.refreshSessions(key);
 			}, 150),
 		);
@@ -1609,7 +1660,10 @@ export class PierStore {
 		const current = () => seq === this.yunlianSeq;
 		this.set({ yunlian: {} });
 		try {
-			const started = await client.request("newapi.authorizeStart", { baseUrl: YUNLIAN_SITE }, { timeoutMs: 45_000 });
+			// The line this computer's personal center uses (protocol 1.29), else the default one.
+			const account = await client.request("account.status", {}).catch(() => undefined);
+			const siteUrl = account?.lines?.find((line) => line.id === account.line)?.url ?? YUNLIAN_SITE;
+			const started = await client.request("newapi.authorizeStart", { baseUrl: siteUrl }, { timeoutMs: 45_000 });
 			if (!current()) {
 				// Closed while starting: stop the orphaned authorization.
 				void client.request("newapi.authorizeCancel", { flowId: started.flowId }).catch(() => undefined);
@@ -1629,7 +1683,7 @@ export class PierStore {
 			const existing = this.state.localProviders?.providers.find(
 				(p) => p.custom && isYunlianProvider(p) && yunlianGroupOf(p) === undefined,
 			)?.custom;
-			const provider = yunlianProvider(result.models, existing, result.modelsError);
+			const provider = yunlianProvider(result.models, existing, result.modelsError, siteUrl);
 			await this.saveCustomProvider(provider, { apiKeyRef: result.keyRef }, !existing, LOCAL_NODE);
 			if (current()) this.set({ yunlian: undefined });
 		} catch (error) {
@@ -1676,6 +1730,22 @@ export class PierStore {
 		);
 	}
 
+	/**
+	 * Move the 云链API providers of the computer the settings screen manages to the line at
+	 * `siteUrl` (their keys stay). Providers whose Base URL was changed by hand are left alone.
+	 * Resolves to the number of providers moved.
+	 */
+	async moveYunlianProviders(siteUrl: string): Promise<number> {
+		const node = this.state.settingsNode;
+		const client = this.openClient(node);
+		if (!client) return 0;
+		const { providers } = await client.request("provider.list");
+		const moved = movedToLine(providers, siteUrl);
+		for (const provider of moved) await client.request("provider.saveCustom", { provider, create: false });
+		if (moved.length) await this.loadProviders(node);
+		return moved.length;
+	}
+
 	/** Close the 云链API sign-in, abandoning a pending authorization. */
 	cancelYunlian(): void {
 		this.yunlianSeq++;
@@ -1690,7 +1760,11 @@ export class PierStore {
 		const client = this.clients.get(node);
 		// An offline computer's lists load once it is connected again.
 		if (!client || this.state.nodes[node]?.connection !== "open") return;
-		const current = () => this.clients.get(node) === client;
+		// A removed workspace can still get a late refresh (closing its sessions announces list
+		// changes); its list is gone, so there is nothing to load or report.
+		const known = () => workspaceId in this.state.workspaceNodes;
+		if (!known()) return;
+		const current = () => this.clients.get(node) === client && known();
 		try {
 			const { sessions } = await client.request("session.list", { workspaceId });
 			if (!current()) return;
@@ -1702,6 +1776,15 @@ export class PierStore {
 
 	restartHost(): void {
 		void this.bridge.restartHost();
+	}
+
+	/** Always controls this computer's shell, regardless of the selected host. */
+	autostartStatus(): Promise<boolean> {
+		return this.bridge.autostart?.status() ?? Promise.reject(new Error("开机自启仅在桌面应用中可用"));
+	}
+
+	setAutostartEnabled(enabled: boolean): Promise<boolean> {
+		return this.bridge.autostart?.setEnabled(enabled) ?? Promise.reject(new Error("开机自启仅在桌面应用中可用"));
 	}
 
 	// ---- toasts ------------------------------------------------------------------------
@@ -1804,6 +1887,21 @@ export class PierStore {
 	}
 
 	// ---- Claude Code and Codex configuration files ----------------------------------------
+
+	async getAgentInstallation(
+		runtime: AgentConfigRuntime,
+		refresh = false,
+	): Promise<MethodResult<"runtime.installStatus">> {
+		const client = this.settingsClient;
+		if (!client) throw this.settingsOffline();
+		return client.request("runtime.installStatus", { runtime, ...(refresh ? { refresh } : {}) });
+	}
+
+	async installAgent(runtime: AgentConfigRuntime): Promise<MethodResult<"runtime.install">> {
+		const client = this.settingsClient;
+		if (!client) throw this.settingsOffline();
+		return client.request("runtime.install", { runtime });
+	}
 
 	/** Read a runtime's user file, plus a workspace's files; rejects with the host's error. */
 	async getAgentConfig(runtime: AgentConfigRuntime, workspaceId?: string): Promise<AgentConfigResult> {
@@ -1966,7 +2064,12 @@ export class PierStore {
 		const result = await this.extensionOperation(
 			"删除",
 			resource.source === "auto" ? `已删除 ${resource.name}（已移到 Pier 回收站）` : `已从配置中移除 ${resource.name}`,
-			(c) => c.request("extension.delete", { path: resource.path, ...(workspaceId ? { workspaceId } : {}) }),
+			(c) =>
+				c.request("extension.delete", {
+					type: resource.type,
+					path: resource.path,
+					...(workspaceId ? { workspaceId } : {}),
+				}),
 		);
 		return result?.deleted ?? false;
 	}
@@ -1990,6 +2093,11 @@ export class PierStore {
 
 	toggleSidebar(open = !this.state.sidebar): void {
 		if (open !== this.state.sidebar) this.set({ sidebar: open });
+	}
+
+	setSidebarWidth(width: number): void {
+		const sidebarWidth = clampSidebarWidth(width);
+		if (sidebarWidth !== this.state.sidebarWidth) this.set({ sidebarWidth });
 	}
 
 	toggleFilesPanel(open = !this.state.filesPanel): void {
@@ -2043,6 +2151,28 @@ export class PierStore {
 		const client = this.clientFor(workspaceId);
 		if (!client) throw new Error("尚未连接到 Pier Host");
 		return client.request("workspace.readFile", { workspaceId, path });
+	}
+
+	/** Read a Markdown reference on the computer that owns the conversation. */
+	async previewFile(workspaceId: string, path: string): Promise<WorkspaceFileContent> {
+		const client = this.clientFor(workspaceId);
+		if (!client) throw new Error("尚未连接到 Pier Host");
+		return client.request("workspace.previewFile", { workspaceId, path });
+	}
+
+	/** Read just the file the user confirmed, on its owning computer, without saving an allowance. */
+	async authorizeFilePreview(
+		workspaceId: string,
+		path: string,
+		expectedRealPath: string,
+	): Promise<WorkspaceFileContent> {
+		const node = this.nodeOf(workspaceId);
+		if (!hostAuthorizesFilePreviews(this.state.nodes[node]?.hostInfo, node !== LOCAL_NODE)) {
+			throw new Error("文件所在电脑的 Pier 不支持本次预览授权，请更新它的 Pier");
+		}
+		const client = this.clientFor(workspaceId);
+		if (!client) throw new Error("尚未连接到 Pier Host");
+		return client.request("workspace.authorizeFilePreview", { workspaceId, path, expectedRealPath });
 	}
 
 	/**
@@ -2111,6 +2241,10 @@ export class PierStore {
 		this.set({ filePreview: { workspaceId, path, ...(composerKey ? { composerKey } : {}) } });
 	}
 
+	openMarkdownFilePreview(workspaceId: string, path: string): void {
+		this.set({ filePreview: { workspaceId, path, fromMarkdown: true } });
+	}
+
 	closeFilePreview(): void {
 		if (this.state.filePreview) this.set({ filePreview: undefined });
 	}
@@ -2174,7 +2308,25 @@ export class PierStore {
 		if (this.state.selectedWorkspaceId === workspaceId) {
 			this.set({ selectedWorkspaceId: undefined, selectedSessionId: undefined });
 		}
+		this.forgetWorkspace(node, workspaceId);
 		await this.loadWorkspaces(node);
+	}
+
+	/** Drop a removed workspace and its session list right away, cancelling any pending refresh. */
+	private forgetWorkspace(node: string, workspaceId: string): void {
+		clearTimeout(this.refreshTimers.get(workspaceId));
+		this.refreshTimers.delete(workspaceId);
+		const workspaces = this.state.nodes[node]?.workspaces ?? [];
+		if (workspaces.some((w) => w.id === workspaceId)) {
+			this.patchNode(node, { workspaces: workspaces.filter((w) => w.id !== workspaceId) });
+			if (node !== LOCAL_NODE) this.saveNodeCache();
+		}
+		if (workspaceId in this.state.sessions) {
+			this.set((s) => {
+				const { [workspaceId]: _removed, ...sessions } = s.sessions;
+				return { sessions };
+			});
+		}
 	}
 
 	async setPolicy(workspaceId: string, policy: ApprovalPolicy): Promise<void> {
@@ -2377,6 +2529,7 @@ export class PierStore {
 
 	selectSession(session: SessionSummary): void {
 		this.set((s) => ({
+			scheduledTasksOpen: false,
 			selectedWorkspaceId: session.workspaceId,
 			selectedSessionId: session.id,
 			newChat: undefined,
@@ -2493,7 +2646,7 @@ export class PierStore {
 		return hostCanArchiveSessions(this.state.nodes[this.nodeOf(workspaceId)]?.hostInfo);
 	}
 
-	/** Archive or unarchive a session; it stays where it is in the list. Resolves to whether it worked. */
+	/** Archive or unarchive a session; archiving the open session returns home. Resolves to whether it worked. */
 	async archiveSession(session: SessionSummary, archived: boolean): Promise<boolean> {
 		const result = await this.callWith(this.clientFor(session.workspaceId), archived ? "归档会话" : "取消归档", (c) =>
 			c.request("session.archive", { workspaceId: session.workspaceId, sessionId: session.id, archived }),
@@ -2501,13 +2654,15 @@ export class PierStore {
 		if (!result) return false;
 		this.set((s) => {
 			const list = s.sessions[session.workspaceId];
-			if (!list) return {};
-			const next = list.map((x) => {
+			const next = list?.map((x) => {
 				if (x.id !== session.id) return x;
 				const { archived: _previous, ...rest } = x;
 				return archived ? { ...rest, archived: true } : rest;
 			});
-			return { sessions: { ...s.sessions, [session.workspaceId]: next } };
+			return {
+				...(next ? { sessions: { ...s.sessions, [session.workspaceId]: next } } : {}),
+				...(archived && s.selectedSessionId === session.id ? { selectedSessionId: undefined } : {}),
+			};
 		});
 		return true;
 	}
@@ -2583,13 +2738,11 @@ export class PierStore {
 			status.state === "available" &&
 			status.version &&
 			status.version !== this.announcedUpdate &&
-			this.state.settings !== "about" &&
-			// An open sidebar shows its own update notice.
-			!this.state.sidebar;
+			this.state.settings !== "about";
 		this.set({ update: status });
 		if (announce && status.version) {
 			this.announcedUpdate = status.version;
-			this.toast("info", `Pier v${status.version} 已发布，可在侧边栏左下角或“设置 → 关于与更新”中安装`);
+			this.toast("info", `Pier v${status.version} 已发布，可在左下角的更新入口或“设置 → 关于与更新”中安装`);
 		}
 	}
 
@@ -2598,12 +2751,67 @@ export class PierStore {
 	openSettings(section: SettingsSection = "general", node?: string): void {
 		if (section === "about" && this.state.update.version) this.announcedUpdate = this.state.update.version;
 		if (node !== undefined) this.setSettingsNode(node);
-		this.set({ settings: section });
+		this.set({ settings: section, scheduledTasksOpen: false });
 		if (section === "models" || section === "account") void this.loadProviders();
 	}
 
 	closeSettings(): void {
-		this.set({ settings: undefined });
+		this.set({ settings: undefined, scheduledTasksOpen: false });
+	}
+
+	openScheduledTasks(): void {
+		this.set({ settings: undefined, scheduledTasksOpen: true, filePreview: undefined });
+		for (const node of this.clients.keys()) void this.loadTasks(node);
+	}
+
+	async loadTasks(node: string): Promise<void> {
+		const client = this.openClient(node);
+		if (!client || !hostSupportsScheduledTasks(client.host)) return;
+		const seq = (this.taskLoadSeq.get(node) ?? 0) + 1;
+		this.taskLoadSeq.set(node, seq);
+		try {
+			const [{ tasks }, { runs }] = await Promise.all([client.request("task.list"), client.request("task.runs")]);
+			if (this.clients.get(node) === client && this.taskLoadSeq.get(node) === seq)
+				this.set((s) => ({ taskData: { ...s.taskData, [node]: { tasks, runs } } }));
+		} catch (error) {
+			if (this.clients.get(node) === client && this.taskLoadSeq.get(node) === seq)
+				this.set((s) => ({
+					taskData: {
+						...s.taskData,
+						[node]: {
+							tasks: s.taskData[node]?.tasks ?? [],
+							runs: s.taskData[node]?.runs ?? [],
+							error: errorText(error),
+						},
+					},
+				}));
+		}
+	}
+
+	async requestTask<M extends Extract<MethodName, `task.${string}`>>(
+		node: string,
+		method: M,
+		params: MethodParams<M>,
+	): Promise<MethodResult<M>> {
+		const client = this.openClient(node);
+		if (!client || this.state.nodes[node]?.connection !== "open") throw new Error(`${this.nodeName(node)} 未连接`);
+		if (!hostSupportsScheduledTasks(client.host)) throw new Error("请先更新这台电脑上的 Pier，以使用定时任务");
+		const result = await client.request(method, params);
+		await this.loadTasks(node);
+		return result;
+	}
+
+	async openTaskRun(node: string, run: ScheduledTaskRun): Promise<void> {
+		if (!run.sessionId) throw new Error("本次运行尚未创建会话");
+		const client = this.openClient(node);
+		if (!client || this.state.nodes[node]?.connection !== "open") throw new Error(`${this.nodeName(node)} 未连接`);
+		const { session } = await client.request("session.open", {
+			workspaceId: run.workspaceId,
+			sessionId: run.sessionId,
+		});
+		await this.requestTask(node, "task.readRun", { runId: run.id });
+		this.upsertSession(session);
+		this.selectSession(session);
 	}
 
 	/**
@@ -2671,13 +2879,24 @@ export class PierStore {
 	}
 
 	async checkForUpdates(): Promise<UpdateStatus> {
+		const request = ++this.updateRequest;
 		try {
 			const status = await this.bridge.updates.check();
-			this.set({ update: status });
-			return status;
+			if (request === this.updateRequest) this.set({ update: status });
+			return this.state.update;
 		} catch (error) {
 			this.toast("error", `检查更新失败：${errorText(error)}`);
 			return this.state.update;
+		}
+	}
+
+	async cancelUpdateCheck(): Promise<void> {
+		const request = ++this.updateRequest;
+		try {
+			const status = await this.bridge.updates.cancelCheck();
+			if (request === this.updateRequest) this.set({ update: status });
+		} catch (error) {
+			this.toast("error", `取消检查失败：${errorText(error)}`);
 		}
 	}
 
@@ -2691,10 +2910,26 @@ export class PierStore {
 	}
 
 	async setUpdateAutoCheck(enabled: boolean): Promise<void> {
+		const request = ++this.updateRequest;
 		try {
-			this.set({ update: await this.bridge.updates.setAutoCheck(enabled) });
+			const status = await this.bridge.updates.setAutoCheck(enabled);
+			if (request === this.updateRequest) this.set({ update: status });
 		} catch (error) {
 			this.toast("error", `保存更新设置失败：${errorText(error)}`);
+		}
+	}
+
+	async setUpdateMirror(prefix: string): Promise<boolean> {
+		const request = ++this.updateRequest;
+		try {
+			const status = await this.bridge.updates.setMirror(prefix);
+			if (request !== this.updateRequest) return true;
+			this.set({ update: status });
+			void this.checkForUpdates();
+			return true;
+		} catch (error) {
+			this.toast("error", `保存更新线路失败：${errorText(error)}`);
+			return false;
 		}
 	}
 

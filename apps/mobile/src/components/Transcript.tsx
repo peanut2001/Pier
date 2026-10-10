@@ -89,7 +89,8 @@ function DiffView({ diff }: { diff: string }) {
 export const ToolCard = memo(function ToolCard({ block }: { block: ToolBlock }) {
 	const p = usePalette();
 	const { call, status } = block;
-	const [open, setOpen] = useState(status === "running" || status === "error");
+	const [openOverride, setOpen] = useState<boolean | undefined>(undefined);
+	const open = openOverride ?? (status === "running" || status === "error");
 	const summary = summarizeToolCall(call.name, call.arguments);
 	const result = block.result ?? block.execution?.result;
 	const output = toolOutputText(result ?? block.execution?.partialResult);

@@ -1,8 +1,9 @@
 import { timingSafeEqual } from "node:crypto";
 import { existsSync, mkdirSync, realpathSync, statSync } from "node:fs";
 import { platform } from "node:os";
-import { basename, isAbsolute, resolve } from "node:path";
+import { basename, isAbsolute, join, resolve } from "node:path";
 import {
+	type AccountLine,
 	type AgentConfigRuntime,
 	type AgentConfigScope,
 	type AppUpdateStatus,
@@ -25,7 +26,7 @@ import {
 	parseClientFrame,
 	type ResponseFrame,
 	type WorkspaceInfo,
-	YUNLIAN_SITE_URL,
+	YUNLIAN_LINES,
 } from "@pier/protocol";
 import { ClaudeCodeRuntime, type ClaudeCodeRuntimeOptions, claudeConfigDir } from "./claude/claude-runtime.ts";
 import { CodexRuntime, type CodexRuntimeOptions, codexHome } from "./codex/codex-runtime.ts";
@@ -65,20 +66,24 @@ import { ProviderManager } from "./pi/providers.ts";
 import { PiSettingsFiles } from "./pi/settings-files.ts";
 import { RemoteAccess, type RemoteAccessOptions } from "./remote/remote-access.ts";
 import { AgentConfigFiles } from "./runtimes/agent-config.ts";
+import { AgentInstaller, type AgentInstallerOptions } from "./runtimes/installation.ts";
+import { ScheduledTasks } from "./scheduled-tasks.ts";
 import { SessionArchiveStore } from "./session-archive.ts";
 import { SessionPool } from "./session-pool.ts";
 import type { AppShell, ShellMethod } from "./shell.ts";
 import { HostTerminals } from "./terminals.ts";
 import {
+	authorizeWorkspaceFilePreview,
 	deleteWorkspacePath,
 	listWorkspaceDirectory,
+	previewWorkspaceFile,
 	readWorkspaceBytes,
 	readWorkspaceFile,
 	writeWorkspaceFile,
 } from "./workspace-files.ts";
 import { WorkspaceUploads } from "./workspace-uploads.ts";
 
-export const PIER_HOST_VERSION = "0.2.23";
+export const PIER_HOST_VERSION = "0.2.33";
 
 /** How Pier introduces itself to NewAPI sites (their login sessions list shows the system). */
 function pierUserAgent(): string {
@@ -105,8 +110,10 @@ export interface PierHostOptions {
 	peers?: PeerManagerOptions;
 	/** Diagnostic log sink (stderr in the sidecar). */
 	log?: (message: string) => void;
-	/** Site of the personal center (tests). Defaults to 云链API. */
+	/** Site of the personal center (tests). Defaults to 云链API and its lines. */
 	accountSite?: string;
+	/** Lines of the personal center's site (tests); win over `accountSite`. */
+	accountLines?: AccountLine[];
 	/** Where `extension.search` looks (tests). Defaults to pi.dev with the npm registry as fallback. */
 	packageCatalog?: PackageCatalogOptions;
 	/** The desktop app the host runs in (its updater and terminals), when there is one. */
@@ -124,10 +131,19 @@ export interface PierHostOptions {
 	 * the runtimes' own (`CLAUDE_CONFIG_DIR` / `CODEX_HOME`, else `~/.claude` / `~/.codex`).
 	 */
 	agentConfigDirs?: Partial<Record<AgentConfigRuntime, string>>;
+	/** Installer dependencies for tests; production always downloads official native releases. */
+	agentInstaller?: Pick<AgentInstallerOptions, "fetch" | "probe" | "homeDirectory" | "configurePath">;
 }
 
 /** Remote methods recorded in the audit log. */
 const AUDITED_METHODS = new Set<MethodName>([
+	"task.create",
+	"task.update",
+	"task.setStatus",
+	"task.delete",
+	"task.run",
+	"task.stop",
+	"task.readRun",
 	"session.create",
 	"session.open",
 	"session.close",
@@ -149,6 +165,7 @@ const AUDITED_METHODS = new Set<MethodName>([
 	"workspace.add",
 	"workspace.remove",
 	"workspace.setPolicy",
+	"workspace.authorizeFilePreview",
 	"workspace.writeFile",
 	"workspace.deletePath",
 	"workspace.uploadStart",
@@ -160,6 +177,7 @@ const AUDITED_METHODS = new Set<MethodName>([
 	"provider.removeCustom",
 	"newapi.useToken",
 	"newapi.authorizeStart",
+	"account.setLine",
 	"account.authorizeStart",
 	"account.login",
 	"account.register",
@@ -171,6 +189,7 @@ const AUDITED_METHODS = new Set<MethodName>([
 	"extension.setEnabled",
 	"extension.delete",
 	"update.install",
+	"runtime.install",
 	"settings.update",
 	"settings.write",
 	"agentConfig.update",
@@ -193,6 +212,18 @@ const AUDITED_METHODS = new Set<MethodName>([
 
 function auditDetail(method: MethodName, params: Record<string, unknown>): Record<string, unknown> | undefined {
 	switch (method) {
+		case "task.create":
+			return { workspaceId: params.workspaceId, runtime: params.runtime };
+		case "task.update":
+		case "task.setStatus":
+		case "task.delete":
+		case "task.run":
+		case "task.stop":
+			return { taskId: params.taskId };
+		case "task.readRun":
+			return { runId: params.runId };
+		case "runtime.install":
+			return { runtime: params.runtime };
 		case "session.prompt":
 		case "session.steer":
 		case "session.followUp":
@@ -237,6 +268,8 @@ function auditDetail(method: MethodName, params: Record<string, unknown>): Recor
 			};
 		case "workspace.deletePath":
 			return { workspaceId: params.workspaceId, path: params.path };
+		case "workspace.authorizeFilePreview":
+			return { workspaceId: params.workspaceId, path: params.path, expectedRealPath: params.expectedRealPath };
 		case "workspace.uploadStart":
 			return {
 				workspaceId: params.workspaceId,
@@ -265,7 +298,7 @@ function auditDetail(method: MethodName, params: Record<string, unknown>): Recor
 		case "extension.setEnabled":
 			return { type: params.type, path: params.path, enabled: params.enabled };
 		case "extension.delete":
-			return { path: params.path };
+			return { type: params.type ?? "extensions", path: params.path };
 		case "settings.update":
 			return {
 				scope: params.scope,
@@ -355,6 +388,7 @@ export class PierHost implements RequestHandler {
 	readonly config: ConfigStore;
 	readonly env: PiEnvironment;
 	readonly pool: SessionPool;
+	readonly tasks: ScheduledTasks;
 	readonly remote: RemoteAccess;
 	readonly providers: ProviderManager;
 	readonly newapi: NewApiManager;
@@ -364,6 +398,7 @@ export class PierHost implements RequestHandler {
 	readonly packageCatalog: PackageCatalog;
 	readonly settings: PiSettingsFiles;
 	readonly agentConfig: AgentConfigFiles;
+	readonly agentInstaller: AgentInstaller;
 	readonly peers: PeerManager;
 	private readonly log: (message: string) => void;
 	private readonly connections = new Set<Connection>();
@@ -389,11 +424,17 @@ export class PierHost implements RequestHandler {
 		const log = options.log ?? (() => {});
 		this.log = log;
 		const agents = options.agents ?? {};
+		const managedDirectory = join(this.pierDir, "agents");
+		const installationHome = options.agentInstaller?.homeDirectory;
 		this.pool = new SessionPool({
 			runtimes: [
 				new PiRuntime(env),
-				...(agents.claudeCode === false ? [] : [new ClaudeCodeRuntime({ log, ...agents.claudeCode })]),
-				...(agents.codex === false ? [] : [new CodexRuntime({ log, ...agents.codex })]),
+				...(agents.claudeCode === false
+					? []
+					: [new ClaudeCodeRuntime({ log, managedDirectory, installationHome, ...agents.claudeCode })]),
+				...(agents.codex === false
+					? []
+					: [new CodexRuntime({ log, managedDirectory, installationHome, ...agents.codex })]),
 			],
 			log,
 			config: this.config,
@@ -406,6 +447,7 @@ export class PierHost implements RequestHandler {
 			...(options.sweepIntervalMs === undefined ? {} : { sweepIntervalMs: options.sweepIntervalMs }),
 			onSessionReplaced: (session) => this.broadcast({ type: "session.listChanged", workspaceId: session.workspaceId }),
 			onSessionActivity: (session) => {
+				this.tasks?.activity(session);
 				const summary = session.summary();
 				this.broadcast({
 					type: "session.activity",
@@ -416,15 +458,31 @@ export class PierHost implements RequestHandler {
 				});
 			},
 			onSessionClosed: (session) => {
+				this.tasks?.sessionClosed(session);
 				for (const connection of this.connections) connection.subscriptions.delete(session);
 				this.broadcast({ type: "session.listChanged", workspaceId: session.workspaceId });
 			},
+		});
+		this.tasks = new ScheduledTasks({
+			file: join(this.pierDir, "scheduled-tasks.json"),
+			pool: this.pool,
+			workspace: (id) => this.requireWorkspace(id),
+			log,
+			onChanged: () => this.broadcast({ type: "task.changed" }),
+			onSessionCreated: (workspaceId) => this.broadcast({ type: "session.listChanged", workspaceId }),
 		});
 		this.extensions = new ExtensionManager({
 			agentDir: env.agentDir,
 			trashDir: extensionTrashDir(this.pierDir),
 			onProgress: (progress) => this.broadcast({ type: "extension.progress", ...progress }),
 			log,
+		});
+		this.agentInstaller = new AgentInstaller(managedDirectory, {
+			...options.agentInstaller,
+			onInstalled: (runtime) => {
+				this.pool.runtime(runtime).installationChanged?.();
+				this.broadcast({ type: "runtime.changed", runtime });
+			},
 		});
 		this.packageCatalog = new PackageCatalog({ userAgent: pierUserAgent(), log, ...options.packageCatalog });
 		this.settings = new PiSettingsFiles(env.agentDir);
@@ -444,7 +502,9 @@ export class PierHost implements RequestHandler {
 		});
 		this.newapi = new NewApiManager({ log, userAgent: pierUserAgent() });
 		this.account = new AccountManager(this.newapi, {
-			site: options.accountSite ?? YUNLIAN_SITE_URL,
+			lines:
+				options.accountLines ??
+				(options.accountSite ? [{ id: "custom", name: "自定义站点", url: options.accountSite }] : YUNLIAN_LINES),
 			file: accountPath(this.pierDir),
 			log,
 		});
@@ -488,6 +548,7 @@ export class PierHost implements RequestHandler {
 		await host.providers.fillCapabilities().catch(() => 0);
 		host.pool.startSweeper();
 		await host.remote.apply();
+		host.tasks.start();
 		return host;
 	}
 
@@ -741,6 +802,15 @@ export class PierHost implements RequestHandler {
 
 	private createHandlers(): Handlers {
 		return {
+			"task.list": () => ({ tasks: this.tasks.list() }),
+			"task.create": (_ctx, params) => ({ task: this.tasks.create(params) }),
+			"task.update": (_ctx, params) => ({ task: this.tasks.update(params.taskId, params.task) }),
+			"task.setStatus": (_ctx, params) => ({ task: this.tasks.setStatus(params.taskId, params.status) }),
+			"task.delete": (_ctx, params) => ({ deleted: this.tasks.delete(params.taskId) }),
+			"task.run": (_ctx, params) => ({ run: this.tasks.run(params.taskId) }),
+			"task.stop": async (_ctx, params) => ({ stopped: await this.tasks.stop(params.taskId) }),
+			"task.runs": (_ctx, params) => ({ runs: this.tasks.runs(params?.taskId) }),
+			"task.readRun": (_ctx, params) => ({ run: this.tasks.readRun(params.runId) }),
 			"host.hello": (ctx, params) => {
 				if (!isProtocolCompatible(params.protocolVersion)) {
 					throw new PierProtocolError(
@@ -806,6 +876,7 @@ export class PierHost implements RequestHandler {
 				return { workspace };
 			},
 			"workspace.remove": async (_ctx, params) => {
+				this.tasks.removeWorkspace(params.workspaceId);
 				for (const session of this.pool.all()) {
 					if (session.workspaceId === params.workspaceId) await this.pool.close(session.id, true);
 				}
@@ -824,6 +895,14 @@ export class PierHost implements RequestHandler {
 				listWorkspaceDirectory(this.requireWorkspace(params.workspaceId).path, params.path),
 			"workspace.readFile": (_ctx, params) =>
 				readWorkspaceFile(this.requireWorkspace(params.workspaceId).path, params.path),
+			"workspace.previewFile": (_ctx, params) =>
+				previewWorkspaceFile(this.requireWorkspace(params.workspaceId).path, params.path),
+			"workspace.authorizeFilePreview": (_ctx, params) =>
+				authorizeWorkspaceFilePreview(
+					this.requireWorkspace(params.workspaceId).path,
+					params.path,
+					params.expectedRealPath,
+				),
 			"workspace.writeFile": (_ctx, params) =>
 				writeWorkspaceFile(
 					this.requireWorkspace(params.workspaceId).path,
@@ -892,6 +971,29 @@ export class PierHost implements RequestHandler {
 				sessions: await this.pool.list(this.requireWorkspace(params.workspaceId)),
 			}),
 			"runtime.list": async () => ({ runtimes: await this.pool.runtimeInfos() }),
+			"runtime.installStatus": async (_ctx, params) => ({
+				installation: this.agentInstaller.status(params.runtime),
+				agent: await this.pool.runtime(params.runtime).info(params.refresh),
+			}),
+			"runtime.install": async (ctx, params) => {
+				const agent = this.pool.runtime(params.runtime);
+				const override = params.runtime === "codex" ? "PIER_CODEX_PATH" : "PIER_CLAUDE_PATH";
+				if (process.env[override])
+					throw new PierProtocolError(
+						"CONFLICT",
+						`当前使用 ${override} 指定的程序，请先移除此环境变量再使用 Pier 安装`,
+					);
+				// Publication retains the old command if Windows prevents replacing an executable in use.
+				const installation = this.agentInstaller.start(params.runtime);
+				const device = ctx.connection.device;
+				if (device)
+					this.broadcastLocal({
+						type: "host.notice",
+						level: "info",
+						message: `${device.name} 正在远程安装或更新 ${agent.name}`,
+					});
+				return { installation, agent: await agent.info() };
+			},
 			"session.create": async (_ctx, params) => {
 				const session = await this.pool.create(this.requireWorkspace(params.workspaceId), params.name, params.runtime);
 				this.broadcast({ type: "session.listChanged", workspaceId: params.workspaceId });
@@ -973,7 +1075,9 @@ export class PierHost implements RequestHandler {
 				queue: await this.pool.require(params.sessionId).followUp(params.text, params.images),
 			}),
 			"session.abort": async (_ctx, params) => {
-				await this.pool.require(params.sessionId).abort();
+				const session = this.pool.require(params.sessionId);
+				this.tasks.sessionAborting(session);
+				await session.abort();
 				return { aborted: true as const };
 			},
 			"session.compact": (_ctx, params) => this.pool.require(params.sessionId).compact(params.instructions),
@@ -1053,6 +1157,7 @@ export class PierHost implements RequestHandler {
 			"newapi.authorizeStart": (ctx, params) => this.newapi.authorizeStart(ctx.connection.connectionId, params.baseUrl),
 			"newapi.authorizeWait": (ctx, params) => this.newapi.authorizeWait(ctx.connection.connectionId, params.flowId),
 			"account.status": () => this.account.getStatus(),
+			"account.setLine": (_ctx, params) => this.account.setLine(params.line),
 			"account.login": (_ctx, params) => this.account.login(params),
 			"account.verify": (_ctx, params) => this.account.verify(params.code),
 			"account.authorizeStart": (ctx, params) =>
@@ -1111,7 +1216,7 @@ export class PierHost implements RequestHandler {
 			},
 			"extension.delete": async (_ctx, params) => {
 				const target = this.extensionTarget(params.workspaceId);
-				const scope = await this.extensions.delete(params.path, target);
+				const scope = await this.extensions.delete(params.path, target, params.type);
 				return {
 					deleted: true,
 					reload: await this.applyExtensionChange(scope === "project" ? target?.id : undefined),
@@ -1232,6 +1337,7 @@ export class PierHost implements RequestHandler {
 		if (this.shuttingDown) return;
 		this.shuttingDown = true;
 		this.offShellStatus?.();
+		await this.tasks.shutdown();
 		this.broadcast({ type: "host.notice", level: "warning", message: "Pier host is shutting down" });
 		this.providers.shutdown();
 		this.account.shutdown();
@@ -1239,6 +1345,7 @@ export class PierHost implements RequestHandler {
 		this.loopback.closeAll();
 		this.peers.shutdown();
 		this.terminals.shutdown();
+		await this.agentInstaller.shutdown();
 		await this.uploads.shutdown();
 		await this.remote.shutdown();
 		await this.pool.disposeAll();

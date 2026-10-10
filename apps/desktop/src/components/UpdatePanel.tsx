@@ -1,3 +1,4 @@
+import { UPDATE_ROUTES } from "@pier/client";
 import type { AppUpdateStatus, PeerInfo } from "@pier/protocol";
 import { type ReactNode, useEffect, useState } from "react";
 import type { UpdateStatus } from "../lib/bridge.ts";
@@ -35,7 +36,7 @@ function downloadPercent(update: UpdateStatus): number | undefined {
 }
 
 /**
- * The update notice at the bottom of the sidebar: shows that a new version is out, its
+ * The update card in the navigation rail: shows that a new version is out, its
  * download / install progress, and a one-click install, so nobody has to look for it in the
  * settings. Renders nothing while no update is pending.
  */
@@ -319,6 +320,76 @@ function PeerUpdates() {
 	);
 }
 
+function UpdateRouteSettings() {
+	const store = useStore();
+	const update = useAppState((s) => s.update);
+	const current = update.mirrorPrefix ?? "";
+	const selected = UPDATE_ROUTES.find((route) => route.prefix === current)?.id ?? "custom";
+	const [prefix, setPrefix] = useState(current);
+	const [editing, setEditing] = useState(false);
+	const busy = update.state === "downloading" || update.state === "installing";
+
+	useEffect(() => setPrefix(current), [current]);
+
+	return (
+		<>
+			<SettingRow title="更新线路" description="检查更新和下载安装包都使用所选线路，自动检查也会沿用此设置。">
+				<select
+					aria-label="更新线路"
+					value={editing ? "custom" : selected}
+					disabled={busy}
+					onChange={(event) => {
+						if (event.target.value === "custom") {
+							setEditing(true);
+						} else {
+							const route = UPDATE_ROUTES.find((route) => route.id === event.target.value);
+							if (!route) return;
+							setEditing(false);
+							void store.setUpdateMirror(route.prefix);
+						}
+					}}
+				>
+					{UPDATE_ROUTES.map((route) => (
+						<option key={route.id} value={route.id}>
+							{route.prefix ? `${route.label}（${new URL(route.prefix).hostname}）` : route.label}
+						</option>
+					))}
+					<option value="custom">自定义加速线路</option>
+				</select>
+			</SettingRow>
+			{editing || selected === "custom" ? (
+				<SettingRow
+					title="加速地址"
+					description="填写支持在地址后附加完整 GitHub 链接的 HTTPS 加速服务，保存后生效并重新检查更新。"
+					stack
+				>
+					<form
+						className="update-route-form"
+						onSubmit={(event) => {
+							event.preventDefault();
+							void store.setUpdateMirror(prefix).then((saved) => {
+								if (saved) setEditing(false);
+							});
+						}}
+					>
+						<input
+							type="url"
+							aria-label="更新加速地址"
+							placeholder="https://mirror.example/"
+							value={prefix}
+							disabled={busy}
+							onChange={(event) => setPrefix(event.target.value)}
+						/>
+						<button type="submit" disabled={busy || !prefix.trim()}>
+							保存并检查
+						</button>
+					</form>
+				</SettingRow>
+			) : null}
+		</>
+	);
+}
+
 /** The “about and updates” settings page. */
 export function UpdateSettings() {
 	const store = useStore();
@@ -419,8 +490,12 @@ export function UpdateSettings() {
 				<IconDownload size={14} />
 				{confirm ? "仍然更新" : update.state === "error" ? "重试安装" : "更新并重启"}
 			</button>
-		) : working || update.state === "unsupported" ? null : (
-			<button type="button" disabled={update.state === "checking"} onClick={() => void store.checkForUpdates()}>
+		) : working || update.state === "unsupported" ? null : update.state === "checking" ? (
+			<button type="button" onClick={() => void store.cancelUpdateCheck()}>
+				取消检查
+			</button>
+		) : (
+			<button type="button" onClick={() => void store.checkForUpdates()}>
 				{update.state === "error" ? <IconAlert size={14} /> : <IconRefresh size={14} />}
 				{update.state === "error" ? "重试" : "检查更新"}
 			</button>
@@ -433,6 +508,7 @@ export function UpdateSettings() {
 					<Logo size={44} />
 					<div className="about-text">
 						<div className="about-name">Pier</div>
+						<div className="muted small">编码 Agent 的跨设备工作台</div>
 						<div className="muted small">
 							版本 v{update.currentVersion}
 							{update.lastChecked && update.state !== "checking"
@@ -446,6 +522,7 @@ export function UpdateSettings() {
 			</SettingsCard>
 			<SettingsGroup title="更新">
 				<SettingsCard>
+					{update.state !== "unsupported" ? <UpdateRouteSettings /> : null}
 					{update.state !== "unsupported" ? (
 						<SettingRow title="自动检查更新" description="启动时及每 6 小时检查一次，发现新版本时提醒你。">
 							<Switch

@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>Pier</title>
+  <desc>An airy P with a mint terminal prompt, a gentle forward lean, and a rising connection ending in a small device node.</desc>
+  <defs>
+    <linearGradient id="surface" x1="96" y1="0" x2="912" y2="1024" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#294775"/>
+      <stop offset=".55" stop-color="#183047"/>
+      <stop offset="1" stop-color="#12444a"/>
+    </linearGradient>
+    <radialGradient id="tide" cx="940" cy="970" r="830" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2bbcac" stop-opacity=".13"/>
+      <stop offset="1" stop-color="#2bbcac" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="ink" x1="356" y1="270" x2="670" y2="720" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#dcf4f7"/>
+    </linearGradient>
+    <linearGradient id="signal" x1="424" y1="390" x2="630" y2="751" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#a2f4e6"/>
+      <stop offset="1" stop-color="#4edcc5"/>
+    </linearGradient>
+  </defs>
+  <g id="background">
+    <path fill="url(#surface)" d="M0 0h1024v1024H0z"/>
+    <path fill="url(#tide)" d="M0 0h1024v1024H0z"/>
+  </g>
+  <g id="mark" transform="translate(512 512) skewX(-5) translate(-512 -512)" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M338 713c74 47 156 51 224 18" stroke="url(#signal)" stroke-width="28"/>
+    <path d="M338 751V315q0-23 23-23h162c113 0 185 61 185 159s-66 160-175 160H338" stroke="url(#ink)" stroke-width="70"/>
+    <path d="m449 401 65 50-65 50" stroke="url(#signal)" stroke-width="34"/>
+    <circle cx="608" cy="703" r="30" fill="url(#signal)"/>
+  </g>
+</svg>

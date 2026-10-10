@@ -96,6 +96,7 @@ export function Composer({
 
 	const actions: SlashActions = {
 		newSession: () => {
+			store.setNewChatRuntime(controller.workspaceId, chat.session?.runtime ?? "pi");
 			store.startNewChat(controller.workspaceId);
 			return true;
 		},
@@ -110,11 +111,11 @@ export function Composer({
 		const previous = { ...draft, text: override ?? draft.text };
 		const cleared = { text: "", images: [] };
 
-		let resolution = resolveSlash(text, menu.list.commands, menu.list.known);
+		let resolution = resolveSlash(text, menu.list.commands, menu.list.known, controller.chat.session?.runtime);
 		if (resolution.kind === "unknown" || (resolution.kind === "host" && !menu.list.known)) {
 			// The list may be stale (or still loading) right after typing.
 			const fresh = await controller.loadCommands();
-			resolution = resolveSlash(text, fresh.commands, fresh.known);
+			resolution = resolveSlash(text, fresh.commands, fresh.known, controller.chat.session?.runtime);
 		}
 		if (resolution.kind === "unknown") {
 			store.toast("error", `未知命令 /${resolution.name}，输入 / 查看可用的命令`);

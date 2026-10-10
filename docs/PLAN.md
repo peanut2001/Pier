@@ -1,6 +1,6 @@
 # Pier 开发计划
 
-> Pier：编码 Agent 的桌面停靠点（Tauri）与手机遥控器（Expo / React Native）。首个 Agent 运行时为 [pi](https://github.com/earendil-works/pi)，Claude Code 与 Codex 已通过 Host 的 Agent 运行时适配层接入。
+> Pier：编码 Agent 的跨设备工作台。通过桌面端（Tauri）与手机端（Expo / React Native）统一管理多台电脑上的工作区与会话，查看进度、发送指令和审批操作；Agent 常驻在各自的电脑上运行。支持内置的 [pi](https://github.com/earendil-works/pi)，以及电脑上安装的 Claude Code 与 Codex。
 >
 > 本文档是项目的总体规划与里程碑，随开发进度持续更新。
 >
@@ -231,9 +231,10 @@ Pier/
 ### M2 桌面端 MVP
 
 - [x] Tauri 应用骨架、sidecar 生命周期管理（启动、就绪、崩溃重启、日志、优雅退出）、托盘、单实例。
+- [x] 开机自启：本机常规设置中启用 / 停用 Windows、macOS、Linux 的登录启动项，默认关闭；自启时在托盘运行，手动打开仍显示窗口。
 - [x] `packages/chat-state` reducer；聊天视图、会话列表、工作区管理、审批对话框、模型切换。
 - [ ] macOS / Windows 真机验证安装包（sidecar 路径、资源目录、Origin）。
-- 未纳入 M2、留到后续：开机自启、桌面通知（M4）、会话搜索（M4）。自动更新已提前完成（见 M6）。
+- 未纳入 M2、留到后续：桌面通知（M4）、会话搜索（M4）。自动更新已提前完成（见 M6）。
 - 验收：不打开终端即可在桌面端完成日常 pi 编码任务；关闭窗口后 Agent 继续运行。
 
 ### M3 手机端 MVP（局域网）

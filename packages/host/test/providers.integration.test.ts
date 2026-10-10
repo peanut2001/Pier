@@ -519,9 +519,12 @@ describe("provider configuration", () => {
 		await expect(t.client.request("provider.login", { providerId: "nope", method: "api_key" })).rejects.toMatchObject({
 			code: "NOT_FOUND",
 		});
-		await expect(t.client.request("provider.login", { providerId: "openai", method: "oauth" })).rejects.toMatchObject({
-			code: "BAD_REQUEST",
-		});
+		// DeepSeek has no account sign-in (OpenAI does since pi 0.99: Sign in with ChatGPT).
+		await expect(t.client.request("provider.login", { providerId: "deepseek", method: "oauth" })).rejects.toMatchObject(
+			{
+				code: "BAD_REQUEST",
+			},
+		);
 	});
 });
 

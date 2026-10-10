@@ -718,7 +718,7 @@ export class CodexSession extends ManagedSession {
 		const levels = this.currentModel()?.thinkingLevels ?? ["off", "minimal", "low", "medium", "high", "xhigh"];
 		let next = level;
 		if (!levels.includes(next)) {
-			const order: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+			const order: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
 			const wanted = order.indexOf(level);
 			next = levels.reduce((best, l) =>
 				Math.abs(order.indexOf(l) - wanted) < Math.abs(order.indexOf(best) - wanted) ? l : best,

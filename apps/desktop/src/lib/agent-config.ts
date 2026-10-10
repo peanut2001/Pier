@@ -23,11 +23,11 @@ function env(name: string, def: Omit<FieldDef, "path">): FieldDef {
 }
 
 const CLAUDE_EFFORT = [
-	{ value: "low", label: "低" },
-	{ value: "medium", label: "中" },
-	{ value: "high", label: "高" },
-	{ value: "xhigh", label: "很高" },
-	{ value: "max", label: "最高" },
+	{ value: "low", label: "low" },
+	{ value: "medium", label: "medium" },
+	{ value: "high", label: "high" },
+	{ value: "xhigh", label: "xhigh" },
+	{ value: "max", label: "max" },
 ];
 
 const CLAUDE_API_FIELDS: FieldDef[] = [
@@ -332,12 +332,14 @@ export const CLAUDE_ENV_GROUP: GroupDef = {
 // ---- Codex -------------------------------------------------------------------------------
 
 const CODEX_EFFORT = [
-	{ value: "none", label: "不思考" },
-	{ value: "minimal", label: "极少" },
-	{ value: "low", label: "低" },
-	{ value: "medium", label: "中" },
-	{ value: "high", label: "高" },
-	{ value: "xhigh", label: "很高" },
+	{ value: "none", label: "none" },
+	{ value: "minimal", label: "minimal" },
+	{ value: "low", label: "low" },
+	{ value: "medium", label: "medium" },
+	{ value: "high", label: "high" },
+	{ value: "xhigh", label: "xhigh" },
+	{ value: "max", label: "max" },
+	{ value: "ultra", label: "ultra" },
 ];
 
 export const CODEX_GROUPS: GroupDef[] = [
@@ -369,7 +371,7 @@ export const CODEX_GROUPS: GroupDef[] = [
 			{
 				path: ["model_reasoning_effort"],
 				label: "默认思考程度",
-				description: "推理模型的思考程度；「不思考」与「很高」只有部分模型支持。",
+				description: "推理模型的思考程度；可用档位取决于模型，max 与 ultra 需要模型支持。",
 				kind: { type: "enum", options: CODEX_EFFORT, default: "medium" },
 			},
 			{

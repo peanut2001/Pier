@@ -1,6 +1,6 @@
 {
 	"name": "@pier/client",
-	"version": "0.2.23",
+	"version": "0.2.33",
 	"private": true,
 	"type": "module",
 	"exports": {

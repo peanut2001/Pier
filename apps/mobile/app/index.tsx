@@ -153,7 +153,7 @@ function EmptyHosts() {
 				</View>
 			</View>
 			<Title style={[styles.center, styles.emptyTitle]}>连接你的电脑</Title>
-			<Muted style={styles.center}>手机是遥控器，Agent 始终运行在你的电脑上。</Muted>
+			<Muted style={styles.center}>从手机查看进度、发送指令和审批操作，Agent 持续在电脑上运行。</Muted>
 			<View style={[styles.steps, { backgroundColor: p.card, borderColor: p.border }]}>
 				{STEPS.map((step, index) => (
 					<View key={step.text} style={styles.step}>
@@ -199,7 +199,7 @@ export default function Home() {
 							<LargeTitle
 								eyebrow="PIER"
 								title="我的电脑"
-								subtitle={hosts.length ? `${hosts.length} 台已配对 · 长按管理` : "随时随地驱动电脑上的编码 Agent"}
+								subtitle={hosts.length ? `${hosts.length} 台已配对 · 长按管理` : "编码 Agent 的跨设备工作台"}
 							/>
 							<UpdateBanner />
 						</View>

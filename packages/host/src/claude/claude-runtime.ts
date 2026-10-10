@@ -14,6 +14,7 @@ import {
 import type { ManagedSession, ManagedSessionOptions } from "../managed-session.ts";
 import { findExecutable, probeVersion } from "../runtimes/executable.ts";
 import { InputQueue } from "../runtimes/input-queue.ts";
+import { AgentInstaller } from "../runtimes/installation.ts";
 import type { UserMessage } from "../runtimes/live-transcript.ts";
 import { userContentText } from "../runtimes/live-transcript.ts";
 import type { AgentRuntime, ForkResult, StoredSession } from "../runtimes/types.ts";
@@ -27,6 +28,8 @@ import {
 import { CLAUDE_PROVIDER, convertTranscript } from "./convert.ts";
 
 export interface ClaudeCodeRuntimeOptions {
+	installationHome?: string;
+	managedDirectory?: string;
 	/** `claude` executable. Defaults to `PIER_CLAUDE_PATH`, then `claude` on `PATH`. */
 	executable?: string;
 	/** Claude Code's configuration directory. Defaults to `CLAUDE_CONFIG_DIR` or `~/.claude`. */
@@ -118,7 +121,13 @@ export class ClaudeCodeRuntime implements AgentRuntime {
 
 	executable(): string | undefined {
 		if (this.options.executable) return this.options.executable;
-		return findExecutable("claude", process.env.PIER_CLAUDE_PATH);
+		return findExecutable(
+			"claude",
+			process.env.PIER_CLAUDE_PATH,
+			this.options.managedDirectory
+				? AgentInstaller.executable(this.options.managedDirectory, this.id, this.options.installationHome)
+				: undefined,
+		);
 	}
 
 	private get configDir(): string {
@@ -133,6 +142,12 @@ export class ClaudeCodeRuntime implements AgentRuntime {
 	/** A settings file changed (model, environment): read the models and commands again. */
 	configChanged(): void {
 		if (!this.options.catalog) this.catalog = undefined;
+	}
+
+	installationChanged(): void {
+		this.versionFor = undefined;
+		this.versionPromise = undefined;
+		this.configChanged();
 	}
 
 	sdk(): Promise<ClaudeSdk> {
@@ -157,18 +172,18 @@ export class ClaudeCodeRuntime implements AgentRuntime {
 		return direct;
 	}
 
-	async info(): Promise<AgentRuntimeInfo> {
+	async info(refresh = false): Promise<AgentRuntimeInfo> {
 		const executable = this.executable();
 		if (!executable) {
 			return {
 				id: this.id,
 				name: this.name,
 				available: false,
-				reason: "Claude Code (`claude`) was not found. Install it and sign in, or set PIER_CLAUDE_PATH.",
+				reason: "未找到 Claude Code，请在「设置 → Agent 配置 → Claude Code」安装并登录，或设置 PIER_CLAUDE_PATH。",
 				capabilities: this.capabilities,
 			};
 		}
-		if (this.versionFor !== executable) {
+		if (refresh || this.versionFor !== executable) {
 			this.versionFor = executable;
 			this.versionPromise = probeVersion(executable);
 		}

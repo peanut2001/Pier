@@ -248,6 +248,10 @@ button.select.open .select-chevron {
 
 .dropdown-menu.select-menu {
 	position: fixed;
+	/* Placed by inline top or bottom only; drop .dropdown-menu's `top: calc(100% + 6px)`, which
+	   would otherwise pin an upward menu below the window with no height. */
+	top: auto;
+	bottom: auto;
 	z-index: 60;
 	min-width: 0;
 	max-width: min(420px, calc(100vw - 12px));
@@ -405,11 +409,12 @@ code {
 /* ---- app layout ------------------------------------------------------------------ */
 
 .app {
+	--sidebar-width: 228px;
 	--sidebar-duration: 0.3s;
 	--sidebar-ease: cubic-bezier(0.4, 0, 0.2, 1);
 	display: grid;
 	/* The main window sets its own columns inline; this default is the settings screen's. */
-	grid-template-columns: 264px minmax(0, 1fr);
+	grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
 	height: 100%;
 	background: var(--bg-app);
 }
@@ -432,8 +437,9 @@ code {
  * strip as the main panel's left gap. The sidebar itself slides and fades out meanwhile.
  */
 .sidebar-shell {
+	position: relative;
 	display: flex;
-	width: 264px;
+	width: var(--sidebar-width);
 	min-width: 0;
 	min-height: 0;
 	overflow: hidden;
@@ -444,9 +450,37 @@ code {
 	width: 8px;
 }
 
+/* Width changes follow the pointer immediately while dragging. */
+body.resizing-sidebar .sidebar-shell {
+	transition: none;
+}
+
+.sidebar-resize {
+	position: absolute;
+	top: 8px;
+	bottom: 8px;
+	right: 0;
+	width: 6px;
+	cursor: col-resize;
+	touch-action: none;
+	z-index: 3;
+	border-radius: 3px;
+}
+
+.sidebar-resize:hover,
+.sidebar-resize:focus-visible,
+body.resizing-sidebar .sidebar-resize {
+	background: var(--accent-ring);
+}
+
+body.resizing-sidebar {
+	cursor: col-resize;
+	user-select: none;
+}
+
 .sidebar-shell > .sidebar {
 	flex: none;
-	width: 264px;
+	width: var(--sidebar-width);
 	/* `transform: none` when open so fixed-position dialogs inside are not contained. */
 	transform: none;
 	transition:

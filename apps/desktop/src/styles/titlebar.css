@@ -65,8 +65,8 @@ button.titlebar-button:focus-visible {
 	outline: none;
 }
 
-:root.custom-titlebar .window > .app .main,
-:root.custom-titlebar .window > .app .files-panel {
+:root.custom-titlebar .window-body > .app .main,
+:root.custom-titlebar .window-body > .app .files-panel {
 	margin-top: 0;
 }
 

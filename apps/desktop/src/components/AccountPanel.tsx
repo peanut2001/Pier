@@ -1,10 +1,12 @@
 import type {
+	AccountLine,
 	AccountLoginResult,
 	AccountOverview,
 	AccountSite,
 	AccountStatus,
 	AgentConfigResult,
 	NewApiGroup,
+	NewApiModel,
 	NewApiToken,
 	ProviderInfo,
 } from "@pier/protocol";
@@ -20,6 +22,7 @@ import {
 	codexRelayState,
 	type RelayGroup,
 	relayModels,
+	tokenRelayModels,
 } from "../lib/agent-relay.ts";
 import { forwardCallbacks } from "../lib/browser-login.ts";
 import { hostSpeaksMinor } from "../lib/settings-target.ts";
@@ -81,7 +84,7 @@ function SiteHeader({ site }: { site: AccountSite }) {
 			<div className="provider-main">
 				<div className="account-hero-title">{site.name}</div>
 				<div className="muted small">
-					Pier 的模型服务由{site.name}提供。登录后可以查看余额，并把各分组的令牌一键配置为本地服务商。
+					Pier 的模型服务由{site.name}提供。登录后可以查看余额，并把各分组的令牌一键配置到 pi、Claude Code 或 Codex。
 				</div>
 			</div>
 		</div>
@@ -688,37 +691,129 @@ function userPath(config: AgentConfigResult | undefined, fallback: string): stri
 	return config?.files.find((f) => f.scope === "user")?.path ?? fallback;
 }
 
-type TakeToken = () => Promise<{ keyRef: string }>;
+/** The chosen token's key reference and the models it lists (`account.useToken`). */
+interface TakenToken {
+	keyRef: string;
+	models: NewApiModel[];
+	modelsError?: string | undefined;
+}
+
+type TakeToken = () => Promise<TakenToken>;
+
+/** `group` with the token's models when its own are not known yet (the group is not added to pi). */
+function withTokenModels(group: RelayGroup, used: TakenToken): RelayGroup {
+	if (group.models.length) return group;
+	const models = tokenRelayModels(used.models);
+	if (!models.length) {
+		throw new Error(
+			used.modelsError ? `无法获取${group.name}的模型列表：${used.modelsError}` : `${group.name} 没有返回可用的模型`,
+		);
+	}
+	return { ...group, models };
+}
 
 function NotInstalled({ config }: { config: AgentConfigResult | undefined }) {
 	return config && !config.available ? <span className="mini-tag">未安装</span> : null;
 }
 
+function InUse({ label = "正在使用" }: { label?: string }) {
+	return (
+		<span className="mini-tag ok">
+			<IconCheck size={11} />
+			{label}
+		</span>
+	);
+}
+
+/** Add the group as a provider of the built-in pi, with every model the token can use. */
+function PiRelayRow({
+	entry,
+	overview,
+	provider,
+	takeToken,
+}: {
+	entry: GroupEntry;
+	overview: AccountOverview;
+	provider: ProviderInfo | undefined;
+	takeToken: TakeToken;
+}) {
+	const store = useStore();
+	const { busy, error, run } = useAction();
+	const name = provider?.name ?? `${overview.site.name} · ${entry.name}`;
+
+	const write = () =>
+		void run(async () => {
+			const used = await takeToken();
+			const target = { id: yunlianGroupId(entry.name), name, siteUrl: overview.site.url };
+			const next = relayProvider(target, used.models, provider?.custom, used.modelsError);
+			await store.saveCustomProvider(next, { apiKeyRef: used.keyRef }, !provider?.custom);
+			store.toast("info", `已把 pi 接入${entry.name}，可以在「模型与服务商」中查看和编辑`);
+		});
+
+	return (
+		<>
+			<div className="provider-row account-agent-row">
+				<div className="provider-main">
+					<div className="provider-name">
+						pi
+						{provider ? <InUse label="已添加" /> : null}
+					</div>
+					<div className="muted small">
+						{provider
+							? `已添加为服务商「${provider.name}」· ${provider.availableCount || provider.modelCount} 个模型；更新会重新读取令牌可用的模型。`
+							: `读取令牌可用的全部模型，添加为 Pier 内置 pi 的服务商「${name}」，可以在「模型与服务商」中查看和编辑。`}
+					</div>
+				</div>
+				<div className="row-actions">
+					<button type="button" className={provider ? "" : "primary"} disabled={busy} onClick={write}>
+						{busy ? <IconLoader size={13} className="spin" /> : null}
+						{provider ? "更新" : "接入"}
+					</button>
+				</div>
+			</div>
+			{error ? (
+				<div className="account-group-error">
+					<ErrorBanner error={error} />
+				</div>
+			) : null}
+		</>
+	);
+}
+
 /** Write a group's endpoint, token and models into Claude Code's user settings. */
 function ClaudeRelayRow({
 	group,
+	loaded,
 	config,
 	takeToken,
 }: {
 	group: RelayGroup;
+	/** The group's models are known (otherwise they are read from the token when writing). */
+	loaded: boolean;
 	config: AgentConfigResult | undefined;
 	takeToken: TakeToken;
 }) {
 	const store = useStore();
 	const models = claudeModels(group);
 	const state = claudeRelayState(userSettings(config), group);
-	const [model, setModel] = useState(state.group && state.model && models.includes(state.model) ? state.model : "");
+	const inUse = loaded && state.group;
+	const [model, setModel] = useState(inUse && state.model && models.includes(state.model) ? state.model : "");
 	const { busy, error, run } = useAction();
 	const aliases = CLAUDE_FAMILIES.flatMap((family) => {
 		const id = claudeFamilyModel(models, family);
 		return id ? [`${family} → ${id}`] : [];
 	});
 	const path = userPath(config, "~/.claude/settings.json");
+	const unusable = loaded && !models.length;
 
 	const write = () =>
 		void run(async () => {
-			const { keyRef } = await takeToken();
-			await store.updateAgentUserConfig("claude-code", claudeRelayChanges(group, keyRef, model || undefined));
+			const used = await takeToken();
+			const target = withTokenModels(group, used);
+			const usable = claudeModels(target);
+			if (!usable.length) throw new Error("这个分组没有通过 Anthropic 接口提供的模型，Claude Code 无法使用。");
+			const chosen = model && usable.includes(model) ? model : undefined;
+			await store.updateAgentUserConfig("claude-code", claudeRelayChanges(target, used.keyRef, chosen));
 			store.toast("info", `已把 Claude Code 接入${group.name}，新建的会话生效`);
 		});
 
@@ -728,18 +823,13 @@ function ClaudeRelayRow({
 				<div className="provider-main">
 					<div className="provider-name">
 						Claude Code
-						{state.group ? (
-							<span className="mini-tag ok">
-								<IconCheck size={11} />
-								正在使用
-							</span>
-						) : null}
+						{inUse ? <InUse /> : null}
 						<NotInstalled config={config} />
 					</div>
 					<div className="muted small">
-						{models.length
-							? `写入 ${path} 的 API 地址与令牌${aliases.length ? `，别名 ${aliases.join("、")}` : ""}；会移除其中的 ANTHROPIC_API_KEY 与 apiKeyHelper。`
-							: "这个分组没有通过 Anthropic 接口提供的模型，Claude Code 无法使用。"}
+						{unusable
+							? "这个分组没有通过 Anthropic 接口提供的模型，Claude Code 无法使用。"
+							: `写入 ${path} 的 API 地址与令牌${aliases.length ? `，别名 ${aliases.join("、")}` : loaded ? "" : "，按分组的模型设置别名"}；会移除其中的 ANTHROPIC_API_KEY 与 apiKeyHelper。`}
 					</div>
 				</div>
 				<div className="row-actions">
@@ -751,14 +841,9 @@ function ClaudeRelayRow({
 						onChange={setModel}
 						options={[{ value: "", label: "默认模型：按别名" }, ...models.map((id) => ({ value: id, label: id }))]}
 					/>
-					<button
-						type="button"
-						className={state.group ? "" : "primary"}
-						disabled={busy || !models.length}
-						onClick={write}
-					>
+					<button type="button" className={inUse ? "" : "primary"} disabled={busy || unusable} onClick={write}>
 						{busy ? <IconLoader size={13} className="spin" /> : null}
-						{state.group ? "更新" : "接入"}
+						{inUse ? "更新" : "接入"}
 					</button>
 				</div>
 			</div>
@@ -774,10 +859,13 @@ function ClaudeRelayRow({
 /** Add the group as a Codex provider with the token and make it Codex's current one. */
 function CodexRelayRow({
 	group,
+	loaded,
 	config,
 	takeToken,
 }: {
 	group: RelayGroup;
+	/** The group's models are known (otherwise they are read from the token when writing). */
+	loaded: boolean;
 	config: AgentConfigResult | undefined;
 	takeToken: TakeToken;
 }) {
@@ -792,13 +880,17 @@ function CodexRelayRow({
 	const { busy, error, run } = useAction();
 	const chosen = models.find((m) => m.id === model) ?? models[0];
 	const path = userPath(config, "~/.codex/config.toml");
+	const unusable = loaded && !models.length;
 
 	const write = () =>
 		void run(async () => {
-			if (!chosen) return;
-			const { keyRef } = await takeToken();
-			await store.updateAgentUserConfig("codex", codexRelayChanges(group, keyRef, chosen.id));
-			store.toast("info", `已把 Codex 接入${group.name}（${chosen.id}），新建的会话生效`);
+			const used = await takeToken();
+			const target = withTokenModels(group, used);
+			const list = codexModels(target);
+			const pick = list.find((m) => m.id === model) ?? list[0];
+			if (!pick) throw new Error(`${group.name} 没有返回可用的模型`);
+			await store.updateAgentUserConfig("codex", codexRelayChanges(target, used.keyRef, pick.id));
+			store.toast("info", `已把 Codex 接入${group.name}（${pick.id}），新建的会话生效`);
 		});
 
 	return (
@@ -807,12 +899,7 @@ function CodexRelayRow({
 				<div className="provider-main">
 					<div className="provider-name">
 						Codex
-						{state.current ? (
-							<span className="mini-tag ok">
-								<IconCheck size={11} />
-								正在使用
-							</span>
-						) : null}
+						{state.current ? <InUse /> : null}
 						<NotInstalled config={config} />
 					</div>
 					<div className="muted small">
@@ -828,9 +915,13 @@ function CodexRelayRow({
 						disabled={busy || !models.length}
 						title="默认模型"
 						onChange={setModel}
-						options={models.map((m) => ({ value: m.id, label: m.id }))}
+						options={
+							models.length
+								? models.map((m) => ({ value: m.id, label: m.id }))
+								: [{ value: "", label: "默认模型：自动选择" }]
+						}
 					/>
-					<button type="button" className={state.current ? "" : "primary"} disabled={busy || !chosen} onClick={write}>
+					<button type="button" className={state.current ? "" : "primary"} disabled={busy || unusable} onClick={write}>
 						{busy ? <IconLoader size={13} className="spin" /> : null}
 						{state.current ? "更新" : "接入"}
 					</button>
@@ -845,39 +936,80 @@ function CodexRelayRow({
 	);
 }
 
+/** Where a group is configured: pi's provider, Claude Code's and Codex's user configuration. */
+interface GroupTargets {
+	provider?: ProviderInfo | undefined;
+	relay: RelayGroup;
+	/** The relay's models are known: from pi's provider or read from a token. */
+	loaded: boolean;
+	claude: boolean;
+	codex: boolean;
+	/** Codex has a provider entry for the group (even when it is not the current one). */
+	codexDefined: boolean;
+}
+
+function groupTargets(
+	entry: GroupEntry,
+	overview: AccountOverview,
+	provider: ProviderInfo | undefined,
+	agents: AgentConfigs | undefined,
+	fetched?: RelayGroup["models"],
+): GroupTargets {
+	const models = provider?.custom ? relayModels(provider.custom) : fetched;
+	const relay: RelayGroup = {
+		id: provider?.id ?? yunlianGroupId(entry.name),
+		name: provider?.name ?? `${overview.site.name} · ${entry.name}`,
+		siteUrl: overview.site.url,
+		models: models ?? [],
+	};
+	const loaded = models !== undefined;
+	const codex = agents ? codexRelayState(userSettings(agents.codex), relay) : undefined;
+	return {
+		provider,
+		relay,
+		loaded,
+		claude: loaded && agents ? claudeRelayState(userSettings(agents.claude), relay).group : false,
+		codex: codex?.current ?? false,
+		codexDefined: codex?.defined ?? false,
+	};
+}
+
 function GroupRow({
 	entry,
 	overview,
 	provider,
 	agents,
+	fresh,
 	onTokens,
 	onRemove,
 }: {
 	entry: GroupEntry;
 	overview: AccountOverview;
-	/** The local provider configured for this group, if any. */
+	/** The pi provider configured for this group, if any. */
 	provider?: ProviderInfo | undefined;
 	/** Claude Code's and Codex's configuration, when the host can point them at the group. */
 	agents?: AgentConfigs | undefined;
+	/** Just added: open the choice of where to configure it. */
+	fresh?: boolean;
 	onTokens: (tokens: NewApiToken[]) => void;
-	/** Drop a group that was picked but not configured yet. */
+	/** Drop a group that is not configured anywhere. */
 	onRemove?: (() => void) | undefined;
 }) {
 	const store = useStore();
 	const usable = entry.tokens.filter((t) => t.status === 1);
 	const [choice, setChoice] = useState<number | "new">(usable[0]?.id ?? "new");
-	const [agentsOpen, setAgentsOpen] = useState(false);
-	const { busy, error, run } = useAction();
+	const [open, setOpen] = useState(fresh === true);
+	// Models read from a token, for Claude Code and Codex while the group is not added to pi.
+	const [fetched, setFetched] = useState<RelayGroup["models"] | undefined>();
+	const [fetchError, setFetchError] = useState<string | undefined>();
+	const fetching = useRef(false);
 	const selected = choice === "new" || usable.some((t) => t.id === choice) ? choice : (usable[0]?.id ?? "new");
 	const ratio = ratioText(entry.ratio);
-	const relay: RelayGroup | undefined = provider?.custom
-		? { id: provider.id, name: provider.name, siteUrl: overview.site.url, models: relayModels(provider.custom) }
-		: undefined;
-	const claudeInUse = relay && agents ? claudeRelayState(userSettings(agents.claude), relay).group : false;
-	const codexInUse = relay && agents ? codexRelayState(userSettings(agents.codex), relay).current : false;
+	const targets = groupTargets(entry, overview, provider, agents, fetched);
+	const configured = provider !== undefined || targets.claude || targets.codexDefined;
 
 	/** A key reference for the chosen token, creating the token first when asked to. */
-	const takeToken = async () => {
+	const takeToken = async (): Promise<TakenToken> => {
 		let tokenId: number;
 		if (selected === "new") {
 			const created = await store.account("account.createToken", { name: tokenName(entry.name), group: entry.name });
@@ -885,20 +1017,30 @@ function GroupRow({
 			tokenId = created.tokenId;
 			setChoice(tokenId);
 		} else tokenId = selected;
-		return store.account("account.useToken", { tokenId });
+		const used = await store.account("account.useToken", { tokenId });
+		const models = tokenRelayModels(used.models);
+		if (models.length) setFetched(models);
+		return used;
 	};
 
-	const configure = () =>
-		void run(async () => {
-			const used = await takeToken();
-			const target = {
-				id: yunlianGroupId(entry.name),
-				name: `${overview.site.name} · ${entry.name}`,
-				siteUrl: overview.site.url,
-			};
-			const next = relayProvider(target, used.models, provider?.custom, used.modelsError);
-			await store.saveCustomProvider(next, { apiKeyRef: used.keyRef }, !provider?.custom);
-		});
+	// Claude Code and Codex need the group's models: read them from an existing token (a new one
+	// is created only when the user configures something).
+	const needModels = open && agents !== undefined && !targets.loaded && selected !== "new" && !fetchError;
+	useEffect(() => {
+		if (!needModels || fetching.current || typeof selected !== "number") return;
+		fetching.current = true;
+		void store
+			.account("account.useToken", { tokenId: selected })
+			.then((used) => {
+				const models = tokenRelayModels(used.models);
+				if (models.length) setFetched(models);
+				else setFetchError(used.modelsError ?? "这个令牌没有返回可用的模型");
+			})
+			.catch((e: unknown) => setFetchError(errorText(e)))
+			.finally(() => {
+				fetching.current = false;
+			});
+	}, [store, needModels, selected]);
 
 	return (
 		<div className="account-group">
@@ -908,14 +1050,10 @@ function GroupRow({
 						{entry.name}
 						{ratio ? <span className="mini-tag">{ratio}</span> : null}
 						{entry.name === (overview.user.group || "default") ? <span className="mini-tag">我的分组</span> : null}
-						{provider ? (
-							<span className="mini-tag ok">
-								<IconCheck size={11} />
-								已配置
-							</span>
-						) : null}
-						{claudeInUse ? <span className="mini-tag accent">Claude Code</span> : null}
-						{codexInUse ? <span className="mini-tag accent">Codex</span> : null}
+						{configured ? <InUse label="已配置" /> : null}
+						{provider ? <span className="mini-tag accent">pi</span> : null}
+						{targets.claude ? <span className="mini-tag accent">Claude Code</span> : null}
+						{targets.codex ? <span className="mini-tag accent">Codex</span> : null}
 					</div>
 					<div className="muted small">
 						{[
@@ -932,8 +1070,10 @@ function GroupRow({
 					<Select<number | "new">
 						className="setting-select compact account-token-select"
 						value={selected}
-						disabled={busy}
-						onChange={setChoice}
+						onChange={(value) => {
+							setChoice(value);
+							setFetchError(undefined);
+						}}
 						options={[
 							...usable.map((token) => ({
 								value: token.id,
@@ -942,46 +1082,100 @@ function GroupRow({
 							{ value: "new", label: "新建令牌" },
 						]}
 					/>
-					<button type="button" className={provider ? "" : "primary"} disabled={busy} onClick={configure}>
-						{busy ? <IconLoader size={13} className="spin" /> : null}
-						{provider ? "更新本地配置" : "配置到本地"}
+					<button
+						type="button"
+						className={["account-agents-toggle", open ? "open" : "", configured || open ? "" : "primary"]
+							.filter(Boolean)
+							.join(" ")}
+						title={agents ? "选择把这个分组配置到 pi、Claude Code 或 Codex" : "把这个分组配置到 pi"}
+						aria-expanded={open}
+						onClick={() => setOpen((v) => !v)}
+					>
+						{agents ? "配置到 pi / Claude Code / Codex" : "配置到 pi"}
+						<IconChevronDown size={12} className="account-agents-chevron" />
 					</button>
-					{relay && agents ? (
-						<button
-							type="button"
-							className={agentsOpen ? "account-agents-toggle open" : "account-agents-toggle"}
-							title="把这个分组的令牌写入 Claude Code / Codex 的配置"
-							aria-expanded={agentsOpen}
-							onClick={() => setAgentsOpen((v) => !v)}
-						>
-							Claude Code / Codex
-							<IconChevronDown size={12} className="account-agents-chevron" />
-						</button>
-					) : null}
-					{!provider && onRemove ? (
-						<button type="button" className="ghost icon" title="不添加这个分组" disabled={busy} onClick={onRemove}>
+					{!configured && onRemove ? (
+						<button type="button" className="ghost icon" title="不添加这个分组" onClick={onRemove}>
 							<IconX size={13} />
 						</button>
 					) : null}
 				</div>
 			</div>
-			{error ? (
-				<div className="account-group-error">
-					<ErrorBanner error={error} />
-				</div>
-			) : null}
-			{relay && agents && agentsOpen ? (
+			{open ? (
 				<div className="account-agents">
-					<ClaudeRelayRow group={relay} config={agents.claude} takeToken={takeToken} />
-					<CodexRelayRow group={relay} config={agents.codex} takeToken={takeToken} />
+					<PiRelayRow entry={entry} overview={overview} provider={provider} takeToken={takeToken} />
+					{agents ? (
+						<>
+							<ClaudeRelayRow
+								key={`claude-${targets.loaded}`}
+								group={targets.relay}
+								loaded={targets.loaded}
+								config={agents.claude}
+								takeToken={takeToken}
+							/>
+							<CodexRelayRow
+								key={`codex-${targets.loaded}`}
+								group={targets.relay}
+								loaded={targets.loaded}
+								config={agents.codex}
+								takeToken={takeToken}
+							/>
+						</>
+					) : null}
 					<p className="muted small">
-						使用上方选择的令牌，密钥由 Pier Host 直接写入配置文件（与终端中的 claude / codex 共用）。之后可以在「Agent
-						配置」中查看和修改。
+						{needModels ? (
+							<>
+								<IconLoader size={12} className="spin" /> 正在读取这个分组的模型…{" "}
+							</>
+						) : fetchError ? (
+							`读取模型失败：${fetchError}。接入时会再读取一次。`
+						) : null}
+						使用上方选择的令牌，密钥由 Pier Host 直接写入配置（Claude Code / Codex 的配置文件与终端中的 claude / codex
+						共用）。之后可以在「模型与服务商」与「Agent 配置」中查看和修改。
 					</p>
 				</div>
 			) : null}
 		</div>
 	);
+}
+
+/** `localStorage[ADDED_GROUPS_KEY]`: groups added to the list, by computer and site. */
+const ADDED_GROUPS_KEY = "pier.accountGroups";
+
+function readAddedGroups(): Record<string, string[]> {
+	try {
+		const value: unknown = JSON.parse(localStorage.getItem(ADDED_GROUPS_KEY) ?? "{}");
+		return typeof value === "object" && value !== null ? (value as Record<string, string[]>) : {};
+	} catch {
+		return {};
+	}
+}
+
+/**
+ * The groups the user added to the list on a computer, kept across restarts: a group pointed only
+ * at Claude Code cannot be told from Claude Code's settings without the group's models.
+ */
+function useAddedGroups(node: string, site: string) {
+	const key = `${node}\n${site}`;
+	const [all, setAll] = useState(readAddedGroups);
+	const list = all[key] ?? [];
+	const update = useCallback(
+		(change: (list: string[]) => string[]) =>
+			setAll((current) => {
+				const stored = { ...readAddedGroups(), ...current };
+				const next = [...new Set(change(stored[key] ?? []))];
+				if (next.length) stored[key] = next;
+				else delete stored[key];
+				try {
+					localStorage.setItem(ADDED_GROUPS_KEY, JSON.stringify(stored));
+				} catch {
+					// Not persisted; the list still works for this visit.
+				}
+				return stored;
+			}),
+		[key],
+	);
+	return [list, update] as const;
 }
 
 function Dashboard({
@@ -1005,12 +1199,17 @@ function Dashboard({
 	const { site, user } = overview;
 	const entries = useMemo(() => groupEntries(overview), [overview]);
 	const byId = new Map(providers?.providers.map((p) => [p.id, p]));
-	// Only groups already configured locally are listed; others are added one at a time.
-	const [picked, setPicked] = useState<string[]>([]);
+	// Groups configured somewhere are listed, and the ones the user added; others are added one at a time.
+	const node = useAppState((s) => s.settingsNode);
+	const [picked, setPicked] = useAddedGroups(node, site.name);
+	const [fresh, setFresh] = useState<string[]>([]);
 	const [picking, setPicking] = useState(false);
 	const groupNames = entries.map((e) => e.name);
 	const providerOf = (entry: GroupEntry) => findYunlianGroupProvider(byId, entry.name, groupNames, site.name);
-	const isConfigured = (entry: GroupEntry) => providerOf(entry) !== undefined;
+	const isConfigured = (entry: GroupEntry) => {
+		const targets = groupTargets(entry, overview, providerOf(entry), agents);
+		return targets.provider !== undefined || targets.claude || targets.codexDefined;
+	};
 	const shown = entries.filter((e) => isConfigured(e) || picked.includes(e.name));
 	const addable = entries.filter((e) => !e.unavailable && !isConfigured(e) && !picked.includes(e.name));
 	const [pick, setPick] = useState("");
@@ -1018,6 +1217,7 @@ function Dashboard({
 	const addPicked = () => {
 		if (!pickValue) return;
 		setPicked((list) => [...list, pickValue]);
+		setFresh((list) => [...list, pickValue]);
 		setPicking(false);
 	};
 	const quota = (value: number) => formatQuota(value, site.quota);
@@ -1116,9 +1316,9 @@ function Dashboard({
 				}
 			>
 				<p className="muted small settings-note">
-					这里只列出已配置到本地的分组。点「添加分组」选择要使用的分组，再选择它的令牌（或新建令牌）后点「配置到本地」，Pier
-					会读取这个令牌可用的全部模型，添加为服务商「{site.name} · 分组名」，可以在「模型与服务商」中查看和编辑。
-					{agents ? "配置后点「Claude Code / Codex」，可以把同一个分组接入 Claude Code 与 Codex。" : null}
+					这里列出已添加和已配置的分组。点「添加分组」选择要使用的分组，再选择它的令牌（或新建令牌），然后选择配置到哪个
+					Agent： pi（添加为服务商「{site.name} · 分组名」，可以在「模型与服务商」中查看和编辑）
+					{agents ? "、Claude Code 或 Codex（写入它们的用户配置文件），同一个分组可以同时接入多个。" : "。"}
 				</p>
 				<div className="provider-list">
 					{picking && addable.length ? (
@@ -1126,7 +1326,7 @@ function Dashboard({
 							<div className="provider-row">
 								<div className="provider-main">
 									<div className="provider-name">添加分组</div>
-									<div className="muted small">选择一个分组加入列表，然后为它配置令牌。</div>
+									<div className="muted small">选择一个分组加入列表，然后选择令牌和要配置的 Agent。</div>
 								</div>
 								<div className="row-actions">
 									<Select
@@ -1155,15 +1355,14 @@ function Dashboard({
 							overview={overview}
 							provider={providerOf(entry)}
 							agents={agents}
+							fresh={fresh.includes(entry.name)}
 							onTokens={onTokens}
 							onRemove={() => setPicked((list) => list.filter((name) => name !== entry.name))}
 						/>
 					))}
 					{!shown.length && !picking ? (
 						<div className="provider-row muted small">
-							{entries.length
-								? "还没有配置到本地的分组，点右上角「添加分组」选择要使用的分组。"
-								: "这个账号还没有可用的分组。"}
+							{entries.length ? "还没有添加分组，点右上角「添加分组」选择要使用的分组。" : "这个账号还没有可用的分组。"}
 						</div>
 					) : null}
 				</div>
@@ -1175,6 +1374,71 @@ function Dashboard({
 	);
 }
 
+// ---- line ------------------------------------------------------------------------------
+
+/**
+ * The line the host reaches 云链API through (protocol 1.29): the domestic and the international
+ * address of the same site. Shown only when the host offers more than one.
+ */
+function LineSettings({
+	lines,
+	line,
+	busy,
+	signedIn,
+	onChange,
+}: {
+	lines: AccountLine[];
+	line: string | undefined;
+	busy: boolean;
+	signedIn: boolean;
+	onChange: (line: AccountLine) => void;
+}) {
+	const target = useSettingsTarget();
+	const current = lines.find((l) => l.id === line) ?? lines[0];
+	if (lines.length < 2 || !current) return null;
+	return (
+		<SettingsGroup>
+			<SettingsCard>
+				<SettingRow
+					title={
+						<span className="account-line-title">
+							线路
+							{busy ? <IconLoader size={13} className="spin" /> : null}
+						</span>
+					}
+					description={
+						<>
+							当前使用{current.name}（<span className="mono">{new URL(current.url).host}</span>）
+							{current.description ? `，${current.description}` : ""}。
+							{signedIn ? "切换后登录状态保留，" : "请选择网络更顺畅的线路再登录，"}
+							已配置到本地的云链API服务商会一起改用新线路。
+							{target.local ? "" : `线路保存在 ${target.name} 上的 Pier 中。`}
+						</>
+					}
+				>
+					<div className="segmented" title="线路">
+						{lines.map((l) => (
+							<button
+								type="button"
+								key={l.id}
+								aria-pressed={l.id === current.id}
+								className={l.id === current.id ? "active" : undefined}
+								title={new URL(l.url).host}
+								disabled={busy}
+								onClick={() => {
+									if (l.id !== current.id) onChange(l);
+								}}
+							>
+								{l.name}
+							</button>
+						))}
+					</div>
+				</SettingRow>
+			</SettingsCard>
+		</SettingsGroup>
+	);
+}
+
 // ---- page ------------------------------------------------------------------------------
 
 /** The “个人中心” settings page. */
@@ -1183,6 +1447,7 @@ export function AccountSettings() {
 	const [status, setStatus] = useState<AccountStatus | undefined>();
 	const [overview, setOverview] = useState<AccountOverview | undefined>();
 	const [loading, setLoading] = useState(true);
+	const [switching, setSwitching] = useState(false);
 	const [error, setError] = useState<string | undefined>();
 
 	const load = useCallback(async () => {
@@ -1223,6 +1488,41 @@ export function AccountSettings() {
 		store.toast("info", `已登录 ${result.overview.site.name}：${result.overview.user.username}`);
 	};
 
+	const switchLine = async (line: AccountLine) => {
+		setSwitching(true);
+		setError(undefined);
+		try {
+			const next = await store.account("account.setLine", { line: line.id });
+			setStatus(next);
+			if (!next.user) setOverview(undefined);
+			// The 云链API providers of the computer follow the line.
+			let moved = 0;
+			let moveError: string | undefined;
+			try {
+				moved = await store.moveYunlianProviders(line.url);
+			} catch (e) {
+				moveError = `本地服务商没有改用新线路：${errorText(e)}`;
+			}
+			store.toast("info", `已切换到${line.name}${moved ? `，${moved} 个本地服务商已改用新线路` : ""}`);
+			await load();
+			if (moveError) setError(moveError);
+		} catch (e) {
+			setError(errorText(e));
+		} finally {
+			setSwitching(false);
+		}
+	};
+
+	const lines = status?.lines?.length ? (
+		<LineSettings
+			lines={status.lines}
+			line={status.line}
+			busy={switching}
+			signedIn={Boolean(status.user)}
+			onChange={(line) => void switchLine(line)}
+		/>
+	) : null;
+
 	const logout = async () => {
 		try {
 			await store.account("account.logout", {});
@@ -1248,6 +1548,7 @@ export function AccountSettings() {
 		return (
 			<>
 				<ErrorBanner error={error} />
+				{lines}
 				<Dashboard
 					overview={overview}
 					loading={loading}
@@ -1259,19 +1560,32 @@ export function AccountSettings() {
 		);
 	}
 	if (status.user) {
-		return loading ? (
-			<p className="muted account-loading">
-				<IconLoader size={14} className="spin" /> 正在读取账户信息…
-			</p>
-		) : (
-			<LoadError error={error} onRetry={() => void load()} onLogout={() => void logout()} />
+		return (
+			<>
+				{lines}
+				{loading ? (
+					<p className="muted account-loading">
+						<IconLoader size={14} className="spin" /> 正在读取账户信息…
+					</p>
+				) : (
+					<LoadError error={error} onRetry={() => void load()} onLogout={() => void logout()} />
+				)}
+			</>
 		);
 	}
-	if (!status.site) return <LoadError error={status.siteError ?? error} onRetry={() => void load()} />;
+	if (!status.site) {
+		return (
+			<>
+				{lines}
+				<LoadError error={status.siteError ?? error} onRetry={() => void load()} />
+			</>
+		);
+	}
 	return (
 		<>
 			<ErrorBanner error={error} />
-			<SignIn site={status.site} onDone={signedIn} />
+			{lines}
+			<SignIn key={status.line} site={status.site} onDone={signedIn} />
 		</>
 	);
 }

@@ -55,6 +55,7 @@ const EFFORT_TO_LEVEL: Record<string, ThinkingLevel> = {
 	high: "high",
 	xhigh: "xhigh",
 	max: "max",
+	ultra: "ultra",
 };
 
 export function effortToLevel(effort: unknown): ThinkingLevel | undefined {
@@ -71,7 +72,7 @@ export function toModelInfo(model: Json): ModelInfo {
 				.map((e) => effortToLevel(e.reasoningEffort))
 				.filter((l): l is ThinkingLevel => l !== undefined)
 		: [];
-	const order: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+	const order: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
 	const levels = order.filter((l) => efforts.includes(l));
 	const input = Array.isArray(model.inputModalities) ? (model.inputModalities as string[]) : ["text"];
 	return {

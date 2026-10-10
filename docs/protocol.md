@@ -1,4 +1,4 @@
-# Pier 协议 v1.28
+# Pier 协议 v1.36
 
 > 实现：`packages/protocol`（zod schema + TS 类型，Host 与所有客户端共享）。
 > 本文档描述线上格式与语义；字段的权威定义以 `packages/protocol/src` 为准。
@@ -60,7 +60,7 @@
 
 ```jsonc
 { "type": "req", "id": "h", "method": "host.hello", "params": {
-  "protocolVersion": "1.28",
+  "protocolVersion": "1.30",
   "client": { "name": "pier-desktop", "version": "0.1.0", "platform": "darwin" },
   "token": "<本地 token>",       // 本地连接必填；远程连接由加密通道认证，不需要
   "coalesceMs": 50               // 可选：合并流式增量的窗口（0–1000ms，默认 0）
@@ -137,6 +137,10 @@ sidecar 的 stdio 协议：桌面端用 `--shell-terminals` 启动 Host，声明
 | `workspace.uploadFinish` | `{ uploadId }` | `{ path, size, modifiedAt }`；把收齐的上传移动到目标路径（1.21）。未收齐时 `BAD_REQUEST`（`data.received`），上传保留可继续；目标在上传期间变成目录，或未给 `overwrite` 而目标已出现时 `CONFLICT`，上传被丢弃。远程调用写入审计日志 |
 | `workspace.uploadCancel` | `{ uploadId }` | `{ cancelled }`；取消上传并删除已收到的数据（1.21）。上传不存在或属于其他连接时 `cancelled: false` |
 
+`workspace.previewFile`（1.31）：参数 `{ workspaceId, path }`，返回 `WorkspaceFileContent`，用于聊天和 Markdown 中的图片、文件链接。相对路径以工作区根目录为基准，允许 `.` / `..`，但解析符号链接后必须仍在工作区内；绝对路径必须位于工作区或 Host 的系统临时目录（`os.tmpdir()`，Unix 另含 `/tmp`、`/var/tmp`）中。`file://`、URL 编码和行号后缀由客户端转成文件路径。目录及特殊文件返回 `BAD_REQUEST`，越界返回 `FORBIDDEN`，不存在返回 `NOT_FOUND`；图片、文本大小限制与 `workspace.readFile` 相同。该只读方法可经已认证的远程连接调用，不改变 `workspace.readFile` 及所有写入、下载方法的路径规则。
+
+`workspace.authorizeFilePreview`（本机 1.33，已配对设备 1.35）：参数 `{ workspaceId, path, expectedRealPath }`，返回 `WorkspaceFileContent`。当预览返回 `FORBIDDEN` 且 `data.reason` 为 `OUTSIDE_ALLOWED_ROOTS` 时，客户端显示文件所在电脑与 `data.resolvedPath`，由用户确认后将该实际路径作为 `expectedRealPath` 传入。Host 重新解析文件路径，若与确认路径不一致则返回 `CONFLICT`（`PREVIEW_TARGET_CHANGED`）；否则按相同类型与大小限制只读取这一次。不会保存文件或目录授权，刷新及重新打开须重新确认，系统读取权限错误不能用此方法绕过。远程调用写入审计日志，仅记录工作区、请求路径与确认的实际路径，不记录文件内容。
+
 ### Git 源代码管理（1.28）
 
 Host 用它所在电脑上的 `git` 命令行（`PATH` 中的，或环境变量 `PIER_GIT` 指定的绝对路径）管理工作区所在的 Git 仓库，供桌面端右侧面板的「源代码管理」使用。仓库是工作区所在的工作树（工作区可以是仓库的子目录，此时操作整个仓库）；以下 `path` / `paths` 都是相对**仓库根目录**的路径（`/` 分隔，绝对路径或含 `..` 时 `BAD_REQUEST`），按字面匹配（`GIT_LITERAL_PATHSPECS`），不作为通配符。Git 以参数数组直接运行（不经过 shell），在仓库根目录中执行，不继承 `GIT_DIR` 等指向其他仓库的环境变量，并且没有终端：`GIT_TERMINAL_PROMPT=0`，类 Unix 系统上在新会话中运行，凭据或主机密钥需要交互输入时直接失败而不是等待（凭据助手、SSH agent 照常可用）。改变仓库的命令在同一仓库上依次执行。Git 返回非零退出码时为 `CONFLICT`，`message` 为 Git 的输出（去掉 `hint:` 行），`data.exitCode` 为退出码；运行超时（本地命令 60 秒，`commit` 与网络命令 5 分钟）时 `CONFLICT`。工作区不在仓库中时除 `git.status` / `git.init` 外返回 `NOT_FOUND`，没有安装 Git 时返回 `UNSUPPORTED`。对已配对设备开放，远程调用改变仓库的方法写入审计日志（只记录路径数量、分支名，不记录提交信息）。
@@ -166,7 +170,11 @@ Host 用它所在电脑上的 `git` 命令行（`PATH` 中的，或环境变量 
 
 | 方法 | 参数 | 结果 |
 |---|---|---|
-| `runtime.list` | `{}` | `{ runtimes: AgentRuntimeInfo[] }`；`AgentRuntimeInfo = { id, name, available, reason?, version?, executable?, capabilities }`。`available` 表示能新建会话（CLI 已安装；登录状态在使用时才检查），不可用时 `reason` 说明原因。CLI 的位置可以用环境变量 `PIER_CLAUDE_PATH` / `PIER_CODEX_PATH` 指定，否则在 `PATH` 与常见安装目录中查找 |
+| `runtime.list` | `{}` | `{ runtimes: AgentRuntimeInfo[] }`；`AgentRuntimeInfo = { id, name, available, reason?, version?, executable?, capabilities }`。`available` 表示能新建会话（CLI 已安装；登录状态在使用时才检查），不可用时 `reason` 说明原因。CLI 依次从 `PIER_CLAUDE_PATH` / `PIER_CODEX_PATH`、用户级公共安装（旧版 Pier 独立安装作为兼容回退）、`PATH` 与常见安装目录中查找 |
+| `runtime.installStatus`（1.32） | `{ runtime: "claude-code" \| "codex", refresh?: boolean }` | `{ installation: AgentInstallationStatus, agent: AgentRuntimeInfo }`；`refresh: true` 重新运行版本探测，其余请求使用缓存 |
+| `runtime.install`（1.32） | `{ runtime: "claude-code" \| "codex" }` | 同上；异步启动官方最新原生 CLI 的安装或更新，立即返回。不能指定下载地址、路径或命令；同一运行时已有安装任务时返回 `CONFLICT`，显式路径覆盖存在时也返回 `CONFLICT` |
+
+`AgentInstallationStatus = { runtime, state: "idle" | "checking" | "downloading" | "verifying" | "installing" | "ready" | "error", version?, downloadedBytes?, totalBytes?, error? }`。客户端通过 `runtime.installStatus` 轮询进度，连接断开不影响任务；Host 退出会取消安装并清理暂存文件。仅支持 x64 / arm64 的 Windows、macOS、Linux。Claude Code 使用官方原生二进制和平台清单，Codex 使用官方完整原生发行包（含辅助程序），两者都校验 SHA-256 并运行 `--version` 验证后才更新用户级公共命令（`~/.local/bin`），并配置用户 `PATH`；外部终端重新打开后与 Pier 共用安装。程序按版本保存在 `~/.local/share/claude/versions` / `~/.local/share/codex/versions`。失败时恢复旧命令，配置、凭据与会话目录保留；Windows 程序被占用时提示关闭相关会话后重试。旧版 Pier 独立安装在下次更新时迁移，已经是最新版也会迁移；公共安装已经是最新版时检查 `PATH` 后返回 `ready`。成功安装广播 `{ type: "runtime.changed", runtime }`，客户端应刷新 Agent 列表；该事件不含凭据。已打开的 Codex 会话保留原来的 app-server 进程，全部关闭后才切换到新版。这两个方法向已配对设备开放，远程 `runtime.install` 记录运行时名称到审计日志。
 
 `capabilities: AgentRuntimeCapabilities = { steer, followUp, compact, fork, rename, setModel, thinking, reload, images, piExtensions }`：客户端据此隐藏会失败的操作。不支持的方法返回 `UNSUPPORTED`（例如 Claude Code / Codex 会话的 `session.reload`）。`piExtensions` 为 `false` 的运行时不加载 pi 的扩展、技能、提示词模板与 `settings.json`，扩展或设置变更后 Host 也不会重新加载这些会话。
 
@@ -282,11 +290,12 @@ pi 终端界面自带的命令（`/model`、`/compact`、`/new`、`/fork`、`/na
 
 ### 个人中心（1.6）
 
-桌面端「设置 → 个人中心」直连云链API（`https://api.yunnet.top`，协议里的 `YUNLIAN_SITE_URL`；测试时可以用 `PierHostOptions.accountSite` 或 `faux-host --account-site` 换成其他 NewAPI 站点）。与连接绑定的 `newapi.*` 不同，这里的登录属于 Host：所有连接共用，并保存在 Pier 目录的 `account.json`（仅当前用户可读），重启后仍然有效。密码登录只保存站点发放的刷新 Cookie（`new_api_refresh`，站点每次刷新都会轮换，登录 30 天后需要重新登录），不保存密码和 15 分钟有效的访问令牌；Host 在访问令牌过期前或被拒绝时用 `POST /api/user/auth/refresh` 自动换新。用系统访问令牌登录时保存该令牌。站点拒绝刷新（已退出、被吊销或账号安全信息改变）时，Host 删除保存的登录，之后的调用返回「请先登录」。1.9 及以前所有方法仅限本地连接，1.10 起对已配对设备开放。
+桌面端「设置 → 个人中心」直连云链API（默认 `https://api.yunnet.top`，协议里的 `YUNLIAN_SITE_URL`；测试时可以用 `PierHostOptions.accountSite` / `accountLines` 或 `faux-host --account-site` 换成其他 NewAPI 站点）。与连接绑定的 `newapi.*` 不同，这里的登录属于 Host：所有连接共用，并保存在 Pier 目录的 `account.json`（仅当前用户可读），重启后仍然有效。密码登录只保存站点发放的刷新 Cookie（`new_api_refresh`，站点每次刷新都会轮换，登录 30 天后需要重新登录），不保存密码和 15 分钟有效的访问令牌；Host 在访问令牌过期前或被拒绝时用 `POST /api/user/auth/refresh` 自动换新。用系统访问令牌登录时保存该令牌。站点拒绝刷新（已退出、被吊销或账号安全信息改变）时，Host 删除保存的登录，之后的调用返回「请先登录」。1.9 及以前所有方法仅限本地连接，1.10 起对已配对设备开放。
 
 | 方法 | 参数 | 结果 |
 |---|---|---|
-| `account.status` | — | `{ site?, siteError?, user? }`；`site = AccountSite = { name, url, version?, logo?, registerEnabled, emailVerification, passwordLogin, browserLogin, turnstile, oauth: string[], quota: { perUnit, type, usdRate?, customSymbol?, customRate? } }`（来自站点的 `/api/status`，`type` 为 `USD`、`CNY`、`CUSTOM` 或 `TOKENS`）；`user` 为保存的登录，没有登录时省略 |
+| `account.status` | — | `{ site?, siteError?, user?, lines?, line? }`；`lines`（1.29）为可选的线路 `AccountLine = { id, name, url, description? }`，`line` 为当前线路的 `id`，`site` 来自当前线路；`site = AccountSite = { name, url, version?, logo?, registerEnabled, emailVerification, passwordLogin, browserLogin, turnstile, oauth: string[], quota: { perUnit, type, usdRate?, customSymbol?, customRate? } }`（来自站点的 `/api/status`，`type` 为 `USD`、`CNY`、`CUSTOM` 或 `TOKENS`）；`user` 为保存的登录，没有登录时省略 |
+| `account.setLine` | `{ line }` | `AccountStatus`（1.29）；切换线路并保存，见下文「线路」。未知线路 `BAD_REQUEST` |
 | `account.login` | `{ username, password }` 或 `{ accessToken, userId? }` | `AccountLoginResult`：`{ status: "ok", overview }` 或需要两步验证时 `{ status: "verify", methods }`。站点开启 Turnstile 时密码登录返回 `BAD_REQUEST` |
 | `account.verify` | `{ code }` | `AccountLoginResult`；提交两步验证码（或备用码） |
 | `account.authorizeStart` | `{ redirectUri? }`（`redirectUri` 1.28） | `{ flowId, authorizeUrl, expiresAt }`（1.16）；见下文「浏览器登录」。站点不支持或 `redirectUri` 不是 `http://127.0.0.1:<端口>/callback` 时 `BAD_REQUEST` |
@@ -299,6 +308,19 @@ pi 终端界面自带的命令（`/model`、`/compact`、`/new`、`/fork`、`/na
 | `account.createToken` | `{ name, group? }` | `{ tokenId, tokens }`；在分组中新建无限额度、永不过期、不限模型的令牌 |
 | `account.useToken` | `{ tokenId }` | `{ keyRef, models, modelsError? }`；与 `newapi.useToken` 相同，`keyRef` 属于调用的连接 |
 | `account.logout` | — | `{ loggedOut }`；退出站点上的会话（不会吊销用户自己的访问令牌）并删除 `account.json` |
+
+#### 线路（1.29）
+
+同一个云链API站点有两个入口，用户可以选择网络更顺畅的一条（`@pier/protocol` 的 `YUNLIAN_LINES`）：
+
+| `id` | 名称 | 地址 |
+|---|---|---|
+| `cn` | 国内线路（默认） | `https://api.yunnet.top` |
+| `global` | 国际线路 | `https://api.syixn.com` |
+
+两条线路是同一个站点、同一套账号，因此 `account.setLine` 只改变 Host 访问站点的地址：已保存的登录随之改用新线路（刷新 Cookie 与访问令牌照常可用），站点信息缓存失效；等待两步验证码的密码登录被丢弃。切换前发起、之后才完成的浏览器登录也保存到当前线路。所选线路与登录一起保存在 `account.json` 的 `line` 字段（默认线路不写），退出登录后保留；旧版本 Host 读到其他线路的登录时当作未登录。使用 `accountSite` 的 Host 只有一条线路 `custom`。
+
+桌面端在个人中心顶部显示线路选择（Host 返回多条线路时），切换后把那台电脑上 Base URL 由云链API线路派生的服务商（`yunlian`、`yunlian-<分组>` 以及指向任一线路的自定义服务商）一并改为新线路的地址（密钥不变，手动改过 Base URL 的不动）；之后把分组配置到 pi、Claude Code 或 Codex 也使用当前线路。「模型与服务商」中的「云链API」浏览器授权使用本机个人中心的线路。
 
 #### 浏览器登录（1.16）
 
@@ -340,7 +362,7 @@ pi 终端界面自带的命令（`/model`、`/compact`、`/new`、`/fork`、`/na
 | `extension.update` | `{ source?, workspaceId? }` | `{ reload }`；更新一个包，省略 `source` 时更新全部（`pi update --extensions`）。固定版本的 npm 包与固定 ref 的 git 包只会校准到配置的版本。没有匹配的包时 `NOT_FOUND` |
 | `extension.checkUpdates` | `{ workspaceId? }` | `{ updates: { source, name, kind: "npm"\|"git", scope }[] }`；列出有新版本的未固定包（需要网络） |
 | `extension.setEnabled` | `{ type, path, enabled, workspaceId? }` | `{ resource, reload }`；在资源所属范围的 settings 中启用 / 停用一个已列出的资源（与 `pi config` 相同）：独立资源在 `extensions` / `skills` / `prompts` / `themes` 数组中写入 `+路径` / `-路径`，包内资源写入该包条目的筛选。`path` 与 `type` 必须与 `extension.list` 的某一项一致，否则 `NOT_FOUND` |
-| `extension.delete` | `{ path, workspaceId? }` | `{ deleted: true, reload }`；删除一个独立扩展（`deletable: true`）：扩展目录中的文件或带 `index.ts` 的目录移到 Pier 回收站（`~/.pier/trash/extensions`），settings 中列出的路径只从 settings 移除（文件保留）。包内扩展或通过目录条目加载的扩展返回 `BAD_REQUEST`（改为移除包或停用） |
+| `extension.delete` | `{ type?, path, workspaceId? }` | `{ deleted: true, reload }`；删除一个独立资源（`deletable: true`）。`type`（1.30）为 `extensions`、`skills`、`prompts` 或 `themes`，省略时默认为 `extensions`，兼容旧客户端。自动发现的文件移到 Pier 回收站（`~/.pier/trash/extensions`）；带 `index.ts` 的扩展目录、带 `SKILL.md` 的技能目录整体移入，保留脚本和资源。支持 `~/.agents/skills`、项目及祖先目录的 `.agents/skills`。settings 中明确列出的资源文件或单个技能/扩展目录只从 settings 移除（文件保留）。包内资源、通过集合目录条目加载的资源、需穿过父级符号链接才能删除的资源返回 `BAD_REQUEST`（改为移除包或停用）；单个技能目录本身是符号链接时只移动链接，保留目标。删除全局共享技能会影响其他读取同一目录的工具 |
 | `extension.search` | `{ query?, type?: "extension"\|"skill"\|"theme"\|"prompt", sort?: "downloads"\|"recent"\|"name"("downloads"), page?(1) }` | `ExtensionCatalogResult = { origin: "pi.dev"\|"npm", packages, total, page, pageSize, hasMore, notice? }`（1.20）；在 Host 所在电脑上搜索 pi 官方扩展仓库 [pi.dev/packages](https://pi.dev/packages)（发布到 npm、带 `pi-package` 关键词的包），每页 50 个。`packages: ExtensionCatalogPackage[] = { name, source, description?, version?, author?, types, monthlyDownloads?, publishedAt?, npmUrl, repositoryUrl?, galleryUrl? }`，`source`（`npm:<包名>`）可直接传给 `extension.install`；`types` 为空表示仓库没有标注类型。仓库无法访问时改用 npm registry 搜索（`keywords:pi-package`），此时 `origin: "npm"`、`notice` 说明原因，`type` 与 `sort` 不生效。结果在 Host 中缓存 5 分钟；只读，不写审计日志。两者都无法访问时返回 `INTERNAL` |
 
 settings 文件无法解析时，修改类方法返回 `CONFLICT`，避免覆盖用户的文件。
@@ -410,6 +432,28 @@ Host 保存已配对的电脑于 `~/.pier/peers.json`（0600），每次经代�
 | `device.list` 🔒 | – | `{ devices: DeviceInfo[] }`：`{ id, name, platform?, model?, appVersion?, fingerprint, pairedAt, lastSeenAt?, connected, route? }`；`route`（1.26）为在线设备的连接方式：`lan`（直连监听端口）、`relay`（经中继）、`p2p`（经中继建立的点对点路径） |
 | `device.rename` 🔒 | `{ deviceId, name }` | `{ device }` |
 | `device.revoke` 🔒 | `{ deviceId }` | `{ revoked }`；该设备的连接立即以 4403 断开 |
+
+### 定时任务（1.36）
+
+`task.*` 由工作区所在 Host 执行，对本地和已配对客户端开放。`ScheduledTaskInput` 包含 `name`、`prompt`、`workspaceId`、`runtime`（默认 `pi`）、`schedule`、可选 `model: { provider, modelId }` 和 `thinkingLevel`。计划支持 `{ kind: "once", at: ISO UTC }`、`{ kind: "interval", minutes }`、`{ kind: "daily", time: "HH:mm", timeZone }`、`{ kind: "weekly", time, timeZone, days: number[] }`；时区为 IANA 名称，星期日为 0。单次时间必须在未来，间隔为 1–525600 分钟。
+
+| 方法 | 参数 | 结果 |
+|---|---|---|
+| `task.list` | – | `{ tasks: ScheduledTask[] }` |
+| `task.create` | `ScheduledTaskInput` | `{ task }` |
+| `task.update` | `{ taskId, task: ScheduledTaskInput }` | `{ task }`；运行中拒绝编辑 |
+| `task.setStatus` | `{ taskId, status: "active" \| "paused" }` | `{ task }`；恢复时重新计算下一次，暂停不终止当前运行 |
+| `task.delete` | `{ taskId }` | `{ deleted }`；运行中拒绝删除；删除记录并保留会话 |
+| `task.run` | `{ taskId }` | `{ run: ScheduledTaskRun }`；立即执行，不改变计划；同一任务运行中返回 `CONFLICT` |
+| `task.stop` | `{ taskId }` | `{ stopped }`；仅停止本次运行，保留后续计划 |
+| `task.runs` | `{ taskId? }?` | `{ runs: ScheduledTaskRun[] }`，最新在前 |
+| `task.readRun` | `{ runId }` | `{ run }`；标记已读 |
+
+`ScheduledTask` 在输入字段之外包含 `id`、`status: "active" | "paused" | "completed"`、`nextRunAt: string | null`、`createdAt`、`updatedAt`。`ScheduledTaskRun` 包含 `id`、`taskId`、`taskName`、`workspaceId`、`runtime`、`trigger: "schedule" | "manual"`、`status: "running" | "waiting" | "succeeded" | "failed" | "interrupted"`、`startedAt`、`read`，以及可选的 `finishedAt`、`sessionId`、`summary`（最多 4000 字符）、`error`。`sessionId` 可通过 `session.open` 打开完整会话。
+
+Host 每秒检查计划。恢复后只补执行一个错过的周期；任务正在执行时跳过重复周期，最多同时运行 4 个任务。每次在原工作区目录创建独立会话，沿用工作区审批策略；UI 请求显示为 `waiting`，由正常 `ui.respond` 回答。未结束的运行在重启后标记为 `interrupted`，不会重放。移除工作区会暂停相关任务。最多 100 个任务，每个任务保留最近 50 次运行，持久化到权限 0600 的 `scheduled-tasks.json`。
+
+任务、运行记录或已读状态变化时，Host 向所有客户端发送 `{ type: "task.changed" }`，客户端重新读取任务与记录；旧版 Host 不支持这些方法，客户端需检查协议 1.36。
 
 ## 4. 事件
 
@@ -522,7 +566,7 @@ Claude Code 与 Codex 会话（1.22）发出同样形态的事件与 `AgentMessa
 
 `SessionSummary.runtime`（1.22）是会话的 Agent 运行时；旧版 Host 不返回该字段，视为 `pi`。
 
-`ModelInfo = { provider, id, name, reasoning, input: string[], contextWindow?, thinkingLevels? }`。`thinkingLevels`（1.19）是模型支持的思考等级，从低到高（`off`、`minimal`、`low`、`medium`、`high`，模型支持时还有 `xhigh`、`max`），不支持推理的模型为 `["off"]`；`thinking.set` 会把不支持的等级钳制到其中之一。
+`ModelInfo = { provider, id, name, reasoning, input: string[], contextWindow?, thinkingLevels? }`。`thinkingLevels`（1.19）是模型支持的思考等级，从低到高（`off`、`minimal`、`low`、`medium`、`high`，模型支持时还有 `xhigh`、`max`、`ultra`），不支持推理的模型为 `["off"]`；`thinking.set` 会把不支持的等级钳制到其中之一。`ultra` 自协议 1.34 起支持，只在运行时明确报告模型支持它时显示，并作为原生等级传给运行时。
 
 ## 6. UI 请求与审批
 

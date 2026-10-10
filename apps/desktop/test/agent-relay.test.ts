@@ -9,6 +9,7 @@ import {
 	codexRelayState,
 	type RelayGroup,
 	relayModels,
+	tokenRelayModels,
 } from "../src/lib/agent-relay.ts";
 
 const group: RelayGroup = {
@@ -81,6 +82,10 @@ describe("pointing Claude Code at a group", () => {
 			claudeRelayState({ model: "gpt-5", env: { ANTHROPIC_BASE_URL: "https://api.example.com" } }, group).group,
 		).toBe(false);
 		expect(claudeRelayState(undefined, group)).toEqual({ site: false, group: false });
+
+		// 云链API is the same site on every line.
+		const yunlian = { ...group, siteUrl: "https://api.syixn.com" };
+		expect(claudeRelayState({ env: { ANTHROPIC_BASE_URL: "https://api.yunnet.top/" } }, yunlian).site).toBe(true);
 	});
 });
 
@@ -110,5 +115,25 @@ describe("pointing Codex at a group", () => {
 		const settings = { model_provider: group.id, model: "gpt-5", model_providers: { [group.id]: { name: "x" } } };
 		expect(codexRelayState(settings, group)).toEqual({ current: true, defined: true, model: "gpt-5" });
 		expect(codexRelayState({ model_provider: "openai" }, group)).toEqual({ current: false, defined: false });
+	});
+});
+
+describe("a group not added to pi", () => {
+	it("takes the token's models, with Chat Completions where the site gave no API", () => {
+		const models = tokenRelayModels([
+			{ id: "claude-sonnet-4-5", api: "anthropic-messages" },
+			{ id: " gpt-5 " },
+			{ id: "gpt-5" },
+			{ id: "" },
+			{ id: "gpt-5-codex", api: "openai-responses" },
+		]);
+		expect(models).toEqual([
+			{ id: "claude-sonnet-4-5", api: "anthropic-messages" },
+			{ id: "gpt-5", api: "openai-completions" },
+			{ id: "gpt-5-codex", api: "openai-responses" },
+		]);
+		const fresh = { ...group, models };
+		expect(claudeModels(fresh)).toEqual(["claude-sonnet-4-5"]);
+		expect(codexModels(fresh)[0]).toEqual({ id: "gpt-5-codex", suited: true });
 	});
 });

@@ -119,3 +119,14 @@
 .peer-update-warning {
 	color: var(--warning);
 }
+.update-route-form {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	width: 100%;
+}
+
+.update-route-form input {
+	flex: 1;
+	min-width: 180px;
+}

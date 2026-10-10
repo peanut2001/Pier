@@ -870,6 +870,14 @@ export class NewApiManager {
 		if (session.renew) session.renew.onChange = onChange;
 	}
 
+	/**
+	 * Reach the site of a login through another address of the same site (a line of the personal
+	 * center). The login itself does not change.
+	 */
+	move(session: NewApiSession, origin: string): void {
+		session.origin = normalizeNewApiUrl(origin);
+	}
+
 	/** The raw `/api/user/self` of a login (balance, group, email, ...). */
 	async self(session: NewApiSession): Promise<Json> {
 		const data = await this.ok(session, "GET", "/api/user/self");

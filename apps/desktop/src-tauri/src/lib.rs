@@ -1,7 +1,10 @@
+mod appimage_env;
+mod autostart;
 mod host;
 mod terminal;
 mod transfer;
 mod tray;
+mod update_route;
 mod updater;
 
 use host::HostManager;
@@ -9,6 +12,8 @@ use tauri::{AppHandle, Manager, RunEvent, WindowEvent};
 use terminal::TerminalManager;
 use transfer::DownloadManager;
 use updater::UpdateManager;
+
+pub use appimage_env::drop_stale_entries as drop_stale_appimage_env;
 
 pub(crate) fn show_main_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
@@ -26,22 +31,42 @@ fn quit_app(app: AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let app = tauri::Builder::default()
+    let mut context = tauri::generate_context!();
+    if autostart::is_background_launch(std::env::args_os()) {
+        if let Some(window) = context
+            .config_mut()
+            .app
+            .windows
+            .iter_mut()
+            .find(|window| window.label == "main")
+        {
+            window.visible = false;
+            window.focus = false;
+        }
+    }
+    let builder = tauri::Builder::default()
         // Must be registered first: a second launch focuses the running instance instead.
-        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            show_main_window(app);
-        }))
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            if !autostart::is_background_launch(argv) {
+                show_main_window(app);
+            }
+        }));
+    let app = autostart::configure(builder)
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
+            autostart::autostart_status,
+            autostart::autostart_set_enabled,
             host::host_status,
             host::host_logs,
             host::host_restart,
             updater::update_status,
             updater::update_check,
+            updater::update_cancel_check,
             updater::update_install,
             updater::update_set_auto_check,
+            updater::update_set_mirror,
             terminal::terminal_spawn,
             terminal::terminal_write,
             terminal::terminal_resize,
@@ -75,7 +100,7 @@ pub fn run() {
                 }
             }
         })
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("failed to build the Pier desktop app");
 
     app.run(|app, event| match event {

@@ -30,10 +30,11 @@ function isExecutable(path: string): boolean {
 
 /**
  * Find a CLI: the path in `override` (an environment variable's value) when set, otherwise the
- * first `name` on `PATH` or in common install directories.
+ * shared user-level command (or a legacy Pier installation), then `name` on `PATH` or in common install directories.
  */
-export function findExecutable(name: string, override?: string): string | undefined {
+export function findExecutable(name: string, override?: string, managed?: string): string | undefined {
 	if (override) return isAbsolute(override) && isExecutable(override) ? override : undefined;
+	if (managed && isExecutable(managed)) return managed;
 	const names =
 		process.platform === "win32" ? [`${name}.exe`, `${name}.cmd`, `${name}.bat`, `${name}.ps1`, name] : [name];
 	const dirs = [...(process.env.PATH ?? "").split(delimiter).filter(Boolean), ...extraDirectories()];
@@ -49,19 +50,24 @@ export function findExecutable(name: string, override?: string): string | undefi
 /** Run `<executable> --version` and return the first version-looking token of its output. */
 export function probeVersion(executable: string, timeoutMs = 10_000): Promise<string | undefined> {
 	return new Promise((resolve) => {
-		execFile(
-			executable,
-			["--version"],
-			{
-				timeout: timeoutMs,
-				windowsHide: true,
-				shell: process.platform === "win32" && /\.(cmd|bat)$/i.test(executable),
-			},
-			(error, stdout) => {
-				if (error) return resolve(undefined);
-				const match = /\d+\.\d+\.\d+[\w.+-]*/.exec(String(stdout));
-				resolve(match ? match[0] : String(stdout).trim().split(/\s+/)[0] || undefined);
-			},
-		);
+		try {
+			execFile(
+				executable,
+				["--version"],
+				{
+					timeout: timeoutMs,
+					windowsHide: true,
+					shell: process.platform === "win32" && /\.(cmd|bat)$/i.test(executable),
+				},
+				(error, stdout) => {
+					if (error) return resolve(undefined);
+					const match = /\d+\.\d+\.\d+[\w.+-]*/.exec(String(stdout));
+					resolve(match ? match[0] : String(stdout).trim().split(/\s+/)[0] || undefined);
+				},
+			);
+		} catch {
+			// Invalid native executables can throw before the callback on macOS and Windows.
+			resolve(undefined);
+		}
 	});
 }

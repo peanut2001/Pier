@@ -1,6 +1,6 @@
 [package]
 name = "pier-desktop"
-version = "0.2.23"
+version = "0.2.33"
 description = "Pier desktop shell: runs the Pier Host sidecar and hosts the UI"
 edition = "2021"
 rust-version = "1.90"
@@ -19,10 +19,17 @@ tauri-plugin-dialog = "2.8"
 tauri-plugin-opener = "2.6"
 tauri-plugin-single-instance = "2.5"
 tauri-plugin-updater = "2.13"
+tokio = { version = "1", features = ["time"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 portable-pty = "0.9.0"
 base64 = "0.22"
+
+[target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
+tauri-plugin-autostart = "2.6"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+winreg = "0.10"
 
 [profile.release]
 codegen-units = 1
