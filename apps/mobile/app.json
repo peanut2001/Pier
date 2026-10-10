@@ -27,7 +27,7 @@
 				"monochromeImage": "./assets/android-icon-monochrome.png"
 			},
 			"predictiveBackGestureEnabled": false,
-			"permissions": ["android.permission.REQUEST_INSTALL_PACKAGES"]
+			"permissions": ["android.permission.REQUEST_INSTALL_PACKAGES", "android.permission.POST_NOTIFICATIONS"]
 		},
 		"web": {
 			"favicon": "./assets/favicon.png",

@@ -2,7 +2,7 @@ import { normalizeUpdateMirror, updateDownloadUrl } from "@pier/client";
 import { Directory, File, Paths } from "expo-file-system";
 import { startActivityAsync } from "expo-intent-launcher";
 import { useSyncExternalStore } from "react";
-import { Platform } from "react-native";
+import { AppState, Platform } from "react-native";
 import { getItem, setItem } from "./storage.ts";
 import { APP_VERSION } from "./store.ts";
 import {
@@ -13,6 +13,7 @@ import {
 	compareVersions,
 	parseAndroidUpdate,
 } from "./update-manifest.ts";
+import { dismissUpdateNotification, prepareUpdateNotification, showUpdateNotification } from "./update-notification.ts";
 
 /**
  * In-app updates for the Android app (the APK attached to GitHub releases).
@@ -177,6 +178,7 @@ export class MobileUpdater {
 			...(settings.skippedVersion ? { skippedVersion: settings.skippedVersion } : {}),
 		});
 		if (!this.supported) return;
+		dismissUpdateNotification();
 		this.removeDownloads((version) => compareVersions(version, APP_VERSION) <= 0);
 		if (settings.autoCheck) {
 			this.nextAutoCheck = Date.now() + FIRST_CHECK_DELAY_MS;
@@ -206,11 +208,13 @@ export class MobileUpdater {
 			if (this.checking !== request) return;
 			const lastChecked = Date.now();
 			if (compareVersions(update.version, APP_VERSION) <= 0) {
+				dismissUpdateNotification();
 				this.set({ state: "upToDate", update: undefined, downloaded: 0, total: undefined, lastChecked });
 				this.removeDownloads(() => true);
 				return;
 			}
 			const ready = this.verified(update);
+			if (previous.update && previous.update.version !== update.version) dismissUpdateNotification();
 			this.set({ state: ready ? "ready" : "available", update, downloaded: 0, total: undefined, lastChecked });
 			this.removeDownloads((version) => version !== update.version);
 		} catch (error) {
@@ -242,7 +246,11 @@ export class MobileUpdater {
 		if (!update || this.busy) return;
 		const file = this.apkFile(update.version);
 		if (!this.verified(update) && !(await this.fetchApk(update, file))) return;
+		// Android restricts background activity launches. Keep the verified APK and notification
+		// ready so the user can return to Pier and explicitly start installation.
+		if (AppState.currentState !== "active") return;
 		this.set({ state: "installing", error: undefined });
+		showUpdateNotification(update.version, "installing");
 		try {
 			await startActivityAsync("android.intent.action.VIEW", {
 				data: file.contentUri,
@@ -251,14 +259,17 @@ export class MobileUpdater {
 			});
 			// Back from the installer without being replaced: cancelled or failed; allow a retry.
 			this.set({ state: "ready" });
+			showUpdateNotification(update.version, "ready");
 		} catch (error) {
 			this.set({ state: "error", error: `无法打开系统安装程序：${errorText(error)}` });
+			showUpdateNotification(update.version, "error");
 		}
 	}
 
 	/** Stop a running download. */
 	cancel(): void {
 		this.download?.abort();
+		dismissUpdateNotification();
 	}
 
 	async setAutoCheck(enabled: boolean): Promise<void> {
@@ -302,27 +313,36 @@ export class MobileUpdater {
 			const dir = this.downloadDir();
 			dir.create({ intermediates: true, idempotent: true });
 			this.removeDownloads(() => true);
+			await prepareUpdateNotification();
+			if (controller.signal.aborted) throw new Error("下载已取消");
+			showUpdateNotification(update.version, "downloading", 0, update.size);
 			await File.downloadFileAsync(updateDownloadUrl(update.url, this.status.mirrorPrefix), file, {
 				idempotent: true,
 				signal: controller.signal,
 				onProgress: ({ bytesWritten, totalBytes }) => {
+					if (controller.signal.aborted) return;
 					const now = Date.now();
 					if (now - lastProgress < PROGRESS_INTERVAL_MS) return;
 					lastProgress = now;
 					this.set({ downloaded: bytesWritten, total: totalBytes > 0 ? totalBytes : update.size });
+					showUpdateNotification(update.version, "downloading", bytesWritten, this.status.total);
 				},
 			});
+			if (controller.signal.aborted) throw new Error("下载已取消");
 			if (!this.verified(update)) {
 				throw new Error(`安装包校验失败（大小 ${file.size} 字节，应为 ${update.size} 字节），请重试`);
 			}
 			this.set({ state: "ready", downloaded: update.size, total: update.size });
+			showUpdateNotification(update.version, "ready");
 			return true;
 		} catch (error) {
 			this.deleteQuietly(file);
 			if (isAbort(error) || controller.signal.aborted) {
 				this.set({ state: "available", downloaded: 0, total: undefined });
+				dismissUpdateNotification();
 			} else {
 				this.set({ state: "error", error: `下载更新失败：${errorText(error)}` });
+				showUpdateNotification(update.version, "error");
 			}
 			return false;
 		} finally {
