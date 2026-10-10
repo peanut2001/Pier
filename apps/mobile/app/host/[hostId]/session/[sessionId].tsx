@@ -795,10 +795,11 @@ const styles = StyleSheet.create({
 	flex: { flex: 1 },
 	statusBar: {
 		flexDirection: "row",
+		flexWrap: "wrap",
 		alignItems: "center",
 		gap: 8,
 		paddingHorizontal: 14,
-		paddingBottom: 8,
+		paddingVertical: 8,
 		borderBottomWidth: StyleSheet.hairlineWidth,
 	},
 	chip: {

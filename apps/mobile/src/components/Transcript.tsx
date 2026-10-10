@@ -13,7 +13,7 @@ import {
 import { memo, useMemo, useState } from "react";
 import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { isBusy, truncate } from "../format.ts";
-import { MONO, type Palette, RADIUS, usePalette } from "../theme.ts";
+import { MONO, PAGE, type Palette, RADIUS, usePalette } from "../theme.ts";
 import { Markdown } from "./Markdown.tsx";
 import { Icon, type IconName } from "./ui.tsx";
 
@@ -110,7 +110,7 @@ export const ToolCard = memo(function ToolCard({ block }: { block: ToolBlock }) 
 				accessibilityLabel={`${TOOL_LABEL[call.name] ?? call.name}：${STATUS_LABEL[status]}`}
 			>
 				<View style={[styles.toolIcon, { backgroundColor: p.accentSoft }]}>
-					<Icon name={TOOL_ICON[call.name] ?? "construct-outline"} size={14} color={p.accent} />
+					<Icon name={TOOL_ICON[call.name] ?? "construct-outline"} size={14} color={p.accentText} />
 				</View>
 				<View style={styles.toolMain}>
 					<Text style={[styles.toolName, { color: p.muted }]}>{TOOL_LABEL[call.name] ?? call.name}</Text>
@@ -119,7 +119,7 @@ export const ToolCard = memo(function ToolCard({ block }: { block: ToolBlock }) 
 					</Text>
 				</View>
 				{status === "running" || status === "generating" ? (
-					<ActivityIndicator size="small" color={p.accent} />
+					<ActivityIndicator size="small" color={p.accentText} />
 				) : STATUS_ICON[status] ? (
 					<Icon name={STATUS_ICON[status] ?? "ellipse-outline"} size={18} color={statusColor(p, status)} />
 				) : (
@@ -237,7 +237,7 @@ const TranscriptRow = memo(function TranscriptRow({ item }: { item: TranscriptIt
 				<View style={[styles.tool, { borderColor: p.border, backgroundColor: p.card }]}>
 					<View style={styles.toolHeader}>
 						<View style={[styles.toolIcon, { backgroundColor: p.accentSoft }]}>
-							<Icon name="terminal-outline" size={14} color={p.accent} />
+							<Icon name="terminal-outline" size={14} color={p.accentText} />
 						</View>
 						<Text style={[styles.toolSummary, styles.flex, { color: p.text }]}>$ {item.message.command}</Text>
 					</View>
@@ -280,8 +280,8 @@ export function Transcript({ chat }: { chat: ChatState }) {
 			))}
 			{waiting ? (
 				<View style={[styles.waiting, { backgroundColor: p.accentSoft }]}>
-					<ActivityIndicator size="small" color={p.accent} />
-					<Text style={[styles.waitingText, { color: p.accent }]}>
+					<ActivityIndicator size="small" color={p.accentText} />
+					<Text style={[styles.waitingText, { color: p.accentText }]}>
 						{chat.runState === "compacting" ? "正在压缩上下文…" : "Agent 工作中…"}
 					</Text>
 				</View>
@@ -299,12 +299,12 @@ export function Transcript({ chat }: { chat: ChatState }) {
 }
 
 const styles = StyleSheet.create({
-	transcript: { gap: 16, paddingHorizontal: 16, paddingTop: 14, paddingBottom: 24 },
+	transcript: { ...PAGE, gap: 16, paddingHorizontal: 16, paddingTop: 14, paddingBottom: 24 },
 	flex: { flex: 1 },
 	user: {
 		alignSelf: "flex-end",
 		maxWidth: "86%",
-		borderRadius: 22,
+		borderRadius: RADIUS.lg,
 		borderBottomRightRadius: 6,
 		paddingHorizontal: 15,
 		paddingVertical: 10,

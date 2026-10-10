@@ -56,13 +56,13 @@ function variantStyle(p: Palette, variant: Variant): { box: ViewStyle; color: st
 		case "primary":
 			return { box: { backgroundColor: p.accent }, color: p.onAccent };
 		case "tonal":
-			return { box: { backgroundColor: p.accentSoft }, color: p.accent };
+			return { box: { backgroundColor: p.accentSoft }, color: p.accentText };
 		case "danger":
 			return { box: { backgroundColor: p.dangerSoft }, color: p.danger };
 		case "destructive":
 			return { box: { backgroundColor: p.danger }, color: "#fff" };
 		case "ghost":
-			return { box: { backgroundColor: "transparent" }, color: p.accent };
+			return { box: { backgroundColor: "transparent" }, color: p.accentText };
 		case "outline":
 			return {
 				box: { backgroundColor: p.card, borderWidth: StyleSheet.hairlineWidth, borderColor: p.border },
@@ -148,7 +148,7 @@ export function IconButton({
 		plain: ["transparent", p.text],
 		elevated: [p.elevated, p.text],
 		accent: [p.accent, p.onAccent],
-		tonal: [p.accentSoft, p.accent],
+		tonal: [p.accentSoft, p.accentText],
 		danger: [p.dangerSoft, p.danger],
 	}[tone] as [string, string];
 	return (
@@ -238,7 +238,7 @@ export function CardHeader({
 }) {
 	const p = usePalette();
 	const [bg, fg] = {
-		accent: [p.accentSoft, p.accent],
+		accent: [p.accentSoft, p.accentText],
 		warning: [p.warningSoft, p.warning],
 		danger: [p.dangerSoft, p.danger],
 		muted: [p.elevated, p.muted],
@@ -329,7 +329,7 @@ export function Avatar({
 	const letter = Array.from(name.trim())[0]?.toUpperCase() ?? "?";
 	const colors =
 		tone === "accent"
-			? { bg: p.accentSoft, fg: p.accent }
+			? { bg: p.accentSoft, fg: p.accentText }
 			: tone === "muted"
 				? { bg: p.elevated, fg: p.muted }
 				: tileColors(p, name);
@@ -371,7 +371,7 @@ export function Pill({
 	const p = usePalette();
 	const colors = {
 		muted: [p.elevated, p.muted],
-		accent: [p.accentSoft, p.accent],
+		accent: [p.accentSoft, p.accentText],
 		warning: [p.warningSoft, p.warning],
 		danger: [p.dangerSoft, p.danger],
 		ok: [p.okSoft, p.ok],
@@ -684,7 +684,7 @@ export function LargeTitle({ title, eyebrow, subtitle }: { title: string; eyebro
 	const p = usePalette();
 	return (
 		<View style={styles.largeTitle}>
-			{eyebrow ? <Text style={[styles.eyebrow, { color: p.accent }]}>{eyebrow}</Text> : null}
+			{eyebrow ? <Text style={[styles.eyebrow, { color: p.accentText }]}>{eyebrow}</Text> : null}
 			<Text style={[styles.largeTitleText, { color: p.text }]}>{title}</Text>
 			{subtitle ? <Text style={[styles.largeTitleSubtitle, { color: p.muted }]}>{subtitle}</Text> : null}
 		</View>
@@ -697,9 +697,23 @@ export function SectionLabel({ children, style }: { children: ReactNode; style?:
 	return <Text style={[styles.sectionLabel, { color: p.muted }, style]}>{children}</Text>;
 }
 
-export function Screen({ children, style }: { children: ReactNode; style?: StyleProp<ViewStyle> }) {
+export function Screen({
+	children,
+	style,
+	safeBottom = false,
+}: {
+	children: ReactNode;
+	style?: StyleProp<ViewStyle>;
+	/** Reserve the home indicator / navigation bar on pages without their own keyboard insets. */
+	safeBottom?: boolean;
+}) {
 	const p = usePalette();
-	return <View style={[styles.screen, { backgroundColor: p.bg }, style]}>{children}</View>;
+	const insets = useSafeAreaInsets();
+	return (
+		<View style={[styles.screen, { backgroundColor: p.bg, paddingBottom: safeBottom ? insets.bottom : 0 }, style]}>
+			{children}
+		</View>
+	);
 }
 
 /** Transient message at the top of the screen. */
@@ -730,13 +744,13 @@ const styles = StyleSheet.create({
 	button: {
 		minHeight: 48,
 		paddingHorizontal: 20,
-		borderRadius: 14,
+		borderRadius: RADIUS.md,
 		alignItems: "center",
 		justifyContent: "center",
 		flexDirection: "row",
 		gap: 7,
 	},
-	buttonSmall: { minHeight: 36, paddingHorizontal: 14, borderRadius: RADIUS.pill, gap: 5 },
+	buttonSmall: { minHeight: 44, paddingHorizontal: 14, borderRadius: RADIUS.md, gap: 5 },
 	buttonText: { fontSize: 15.5, fontWeight: "600", flexShrink: 1 },
 	buttonTextSmall: { fontSize: 14 },
 	disabled: { opacity: 0.4 },
@@ -753,7 +767,7 @@ const styles = StyleSheet.create({
 	headerActionText: { fontSize: 14, fontWeight: "600" },
 	card: { borderRadius: RADIUS.lg, borderWidth: StyleSheet.hairlineWidth, padding: 16 },
 	cardHeader: { flexDirection: "row", alignItems: "center", gap: 12 },
-	cardHeaderIcon: { width: 38, height: 38, borderRadius: 12, alignItems: "center", justifyContent: "center" },
+	cardHeaderIcon: { width: 38, height: 38, borderRadius: RADIUS.md, alignItems: "center", justifyContent: "center" },
 	cardHeaderTitle: { fontSize: 16.5, fontWeight: "700" },
 	cardHeaderSubtitle: { fontSize: 13, lineHeight: 18, marginTop: 1 },
 	pill: {
@@ -770,7 +784,7 @@ const styles = StyleSheet.create({
 	title: { fontSize: 17, fontWeight: "700" },
 	largeTitle: { gap: 4, paddingHorizontal: 4, paddingTop: 4, paddingBottom: 6 },
 	eyebrow: { fontSize: 12.5, fontWeight: "700", letterSpacing: 1.6 },
-	largeTitleText: { fontSize: 30, lineHeight: 38, fontWeight: "800", letterSpacing: -0.4 },
+	largeTitleText: { fontSize: 27, lineHeight: 34, fontWeight: "700", letterSpacing: -0.4 },
 	largeTitleSubtitle: { fontSize: 14, lineHeight: 20 },
 	sectionLabel: { fontSize: 13, fontWeight: "600", letterSpacing: 0.3, marginLeft: 4 },
 	toast: {
