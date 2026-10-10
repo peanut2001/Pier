@@ -718,15 +718,16 @@
 
 .composer-model-chip,
 .thinking-panel {
-	--thinking-text: var(--accent-text);
-}
-
-:is(.composer-model-chip, .thinking-panel):is([data-level="xhigh"], [data-level="max"], [data-level="ultra"]) {
 	--thinking-text: #8b5cf6;
+	--thinking-ring: rgba(139, 92, 246, 0.45);
 }
 
 .composer-model-chip {
 	max-width: 260px;
+}
+
+.composer-model-chip:focus-visible {
+	outline-color: var(--thinking-ring);
 }
 
 .composer-model-name {
@@ -859,7 +860,7 @@
 }
 
 .thinking-slider:focus-visible {
-	box-shadow: 0 0 0 2px var(--accent-ring);
+	box-shadow: 0 0 0 2px var(--thinking-ring);
 }
 
 .thinking-slider-rail {
@@ -875,16 +876,10 @@
 	left: -12px;
 	border-radius: 999px;
 	overflow: hidden;
-	background: var(--accent);
-	transition: width 0.3s var(--slider-ease);
-}
-
-.thinking-slider[data-level="xhigh"] .thinking-slider-fill,
-.thinking-slider[data-level="max"] .thinking-slider-fill,
-.thinking-slider[data-level="ultra"] .thinking-slider-fill {
 	background: linear-gradient(105deg, #3563e9, #7967ef 45%, #a76dff 72%, #5c6ded);
 	background-size: 220% 100%;
 	animation: thinking-gradient-flow 8s ease-in-out infinite alternate;
+	transition: width 0.3s var(--slider-ease);
 }
 
 .thinking-slider[data-level="ultra"] .thinking-slider-fill {
