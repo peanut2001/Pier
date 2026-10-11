@@ -755,6 +755,10 @@ button.sidebar-update-action {
 	color: var(--text);
 }
 
+.dropdown-menu.anchored-menu.add-workspace-menu {
+	right: auto;
+}
+
 .node-item-text {
 	display: flex;
 	flex-direction: column;

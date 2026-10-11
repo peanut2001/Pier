@@ -151,6 +151,17 @@
 	transform-origin: top right;
 }
 
+/* Menus rendered in a body portal are positioned by AnchoredMenu, so they can escape clipped panes. */
+.dropdown-menu.anchored-menu {
+	position: fixed;
+	top: auto;
+	right: auto;
+	bottom: auto;
+	z-index: 60;
+	max-width: calc(100vw - 16px);
+	outline: none;
+}
+
 .dropdown-menu.up {
 	top: auto;
 	bottom: calc(100% + 8px);

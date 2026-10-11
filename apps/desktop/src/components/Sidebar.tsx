@@ -1,7 +1,7 @@
 import { agentRuntimeLabel } from "@pier/chat-state";
 import type { ApprovalPolicy, PeerInfo, SessionSummary, WorkspaceInfo } from "@pier/protocol";
 import { DEFAULT_AGENT_RUNTIME } from "@pier/protocol";
-import { type DragEvent, useEffect, useState } from "react";
+import { type DragEvent, useEffect, useRef, useState } from "react";
 import { POLICY_DESCRIPTION, POLICY_LABEL, relativeTime, sessionTitle } from "../lib/format.ts";
 import {
 	type ComputerInfo,
@@ -13,6 +13,7 @@ import {
 	useComputers,
 	useStore,
 } from "../lib/store.tsx";
+import { AnchoredMenu } from "./AnchoredMenu.tsx";
 import { useHostStatus } from "./HostPanels.tsx";
 import {
 	IconArchive,
@@ -31,7 +32,6 @@ import {
 import { Modal } from "./Modal.tsx";
 import { platformName } from "./RemotePanel.tsx";
 import { SessionCleanupDialog } from "./SessionCleanup.tsx";
-import { useOutsideClick } from "./SessionControls.tsx";
 
 const SESSION_PAGE = 30;
 
@@ -104,6 +104,7 @@ export function AddWorkspaceItems({ onDone }: { onDone: () => void }) {
 						type="button"
 						key={computer.id}
 						className="dropdown-item"
+						role="menuitem"
 						disabled={blocked}
 						onClick={() => {
 							onDone();
@@ -124,6 +125,7 @@ export function AddWorkspaceItems({ onDone }: { onDone: () => void }) {
 			<button
 				type="button"
 				className="dropdown-item"
+				role="menuitem"
 				onClick={() => {
 					onDone();
 					store.openAddPeer();
@@ -146,10 +148,11 @@ function AddWorkspaceButton() {
 	const store = useStore();
 	const hasPeers = useAppState((s) => s.peers.length > 0);
 	const [open, setOpen] = useState(false);
-	const ref = useOutsideClick(open, () => setOpen(false));
+	const triggerRef = useRef<HTMLButtonElement>(null);
 	return (
-		<div className="dropdown" ref={ref}>
+		<div className="dropdown">
 			<button
+				ref={triggerRef}
 				type="button"
 				className="ghost icon"
 				title="添加工作区"
@@ -158,9 +161,14 @@ function AddWorkspaceButton() {
 				<IconPlus size={14} />
 			</button>
 			{open ? (
-				<div className="dropdown-menu node-menu add-workspace-menu">
+				<AnchoredMenu
+					anchor={triggerRef}
+					onClose={() => setOpen(false)}
+					className="node-menu add-workspace-menu"
+					label="添加工作区"
+				>
 					<AddWorkspaceItems onDone={() => setOpen(false)} />
-				</div>
+				</AnchoredMenu>
 			) : null}
 		</div>
 	);
