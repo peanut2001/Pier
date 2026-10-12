@@ -2719,7 +2719,7 @@ dependencies = [
 
 [[package]]
 name = "pier-desktop"
-version = "0.2.39"
+version = "0.2.40"
 dependencies = [
  "base64 0.22.1",
  "portable-pty",
@@ -3487,7 +3487,7 @@ dependencies = [
 
 [[package]]
 name = "serial2"
-version = "0.2.39"
+version = "0.2.38"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b16809bc35793b19ce4e0c53924bc0dce3937f15487997cfdaed936004180730"
 dependencies = [

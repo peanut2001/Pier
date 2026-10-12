@@ -2,7 +2,14 @@ import { createSocket } from "node:dgram";
 import { type AddressInfo, createServer } from "node:net";
 import { endianness } from "node:os";
 import { describe, expect, it } from "vitest";
-import { HostPortSampler, parseLsof, parseProcSockets, parseSs, parseWindowsPorts } from "../src/ports/listening.ts";
+import {
+	HostPortSampler,
+	parseLsof,
+	parseProcSockets,
+	parseSs,
+	parseWindowsNetstat,
+	parseWindowsPorts,
+} from "../src/ports/listening.ts";
 
 describe("listening port discovery", () => {
 	it("reads TCP/UDP, IPv4/IPv6 and optional process information from ss", () => {
@@ -63,6 +70,28 @@ describe("listening port discovery", () => {
 				'[{"protocol":"udp","address":"0.0.0.0","port":53},{"protocol":"tcp","address":"x","port":70000}]',
 			),
 		).toEqual([{ protocol: "udp", address: "0.0.0.0", port: 53 }]);
+	});
+
+	it("reads the Windows netstat fallback without including connected TCP sockets", () => {
+		expect(
+			parseWindowsNetstat(
+				[
+					"Active Connections",
+					"  Proto  Local Address          Foreign Address        State           PID",
+					"  TCP    127.0.0.1:3000         0.0.0.0:0              LISTENING       42",
+					"  TCP    [::]:8080             [::]:0                 LISTENING       53",
+					"  TCP    127.0.0.1:55000       127.0.0.1:3000         ESTABLISHED     42",
+					"  TCP    127.0.0.1:70000       0.0.0.0:0              LISTENING       42",
+					"  UDP    0.0.0.0:5353          *:*                                    64",
+					"  UDP    [::1]:53             *:*                                    75",
+				].join("\r\n"),
+			),
+		).toEqual([
+			{ protocol: "tcp", address: "127.0.0.1", port: 3000, pid: 42 },
+			{ protocol: "tcp", address: "::", port: 8080, pid: 53 },
+			{ protocol: "udp", address: "0.0.0.0", port: 5353, pid: 64 },
+			{ protocol: "udp", address: "::1", port: 53, pid: 75 },
+		]);
 	});
 
 	it("discovers real TCP and UDP listeners and shares concurrent samples", async () => {

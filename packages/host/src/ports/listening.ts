@@ -105,6 +105,22 @@ export function parseWindowsPorts(text: string): HostPort[] {
 	return ports;
 }
 
+/** netstat stays available when PowerShell's NetTCPIP provider fails or is slow to start. */
+export function parseWindowsNetstat(text: string): HostPort[] {
+	const ports: HostPort[] = [];
+	for (const line of text.split(/\r?\n/)) {
+		const fields = line.trim().split(/\s+/);
+		const protocol = fields[0]?.toLowerCase();
+		if (protocol !== "tcp" && protocol !== "udp") continue;
+		if (protocol === "tcp" && fields[3] !== "LISTENING") continue;
+		const local = endpoint(fields[1] ?? "");
+		if (!local) continue;
+		const pid = Number(fields[protocol === "tcp" ? 4 : 3]);
+		ports.push({ protocol, ...local, ...(Number.isInteger(pid) && pid > 0 ? { pid } : {}) });
+	}
+	return ports;
+}
+
 function run(command: string, args: string[], emptyExit = false): Promise<string> {
 	return new Promise((resolve, reject) => {
 		execFile(
@@ -149,7 +165,11 @@ async function readPorts(): Promise<HostPort[]> {
 			"$sockets=if($kind -eq 'tcp'){Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue}else{Get-NetUDPEndpoint -ErrorAction SilentlyContinue}; " +
 			"foreach($s in $sockets){ " +
 			"$rows+=@{protocol=$kind;address=$s.LocalAddress;port=$s.LocalPort;pid=$s.OwningProcess;process=$processes[[int]$s.OwningProcess]}} }; ConvertTo-Json -InputObject @($rows) -Compress";
-		return parseWindowsPorts(await run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script]));
+		try {
+			return parseWindowsPorts(await run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script]));
+		} catch {
+			return parseWindowsNetstat(await run("netstat.exe", ["-ano"]));
+		}
 	}
 	throw new PierProtocolError("UNSUPPORTED", "这台主机的系统暂不支持查看监听端口");
 }
