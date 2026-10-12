@@ -166,6 +166,8 @@ bun run pier-cli
 
 ### 桌面端
 
+桌面安装包支持 Linux x64 / ARM64（`.deb`、`.AppImage`）、macOS Intel / Apple Silicon（`.dmg`）和 Windows x64（`.setup.exe`）。Linux ARM64 包名为 `pier-desktop-v<版本>-linux-arm64.deb` / `.AppImage`，以 Ubuntu 24.04（glibc 2.39）为构建基线；Linux x64 继续使用 Ubuntu 22.04。安装包与签名更新包随 [GitHub Release](https://github.com/yiranxiaohui/Pier/releases/latest) 发布，ARM64 同样支持应用内自动更新。
+
 除 Node 与 Bun 外还需要 Rust（stable），以及 Tauri 的[系统依赖](https://v2.tauri.app/start/prerequisites/)（Linux 上为 `libwebkit2gtk-4.1-dev`、`libayatana-appindicator3-dev`、`librsvg2-dev` 等）。
 
 ```bash

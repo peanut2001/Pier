@@ -14,6 +14,8 @@ const base = {
 const bundles = [
 	`pier-desktop-${tag}-linux-x64.AppImage`,
 	`pier-desktop-${tag}-linux-x64.deb`,
+	`pier-desktop-${tag}-linux-arm64.AppImage`,
+	`pier-desktop-${tag}-linux-arm64.deb`,
 	`pier-desktop-${tag}-darwin-arm64.app.tar.gz`,
 	`pier-desktop-${tag}-darwin-arm64.dmg`,
 	`pier-desktop-${tag}-darwin-x64.app.tar.gz`,
@@ -37,6 +39,9 @@ describe("updater manifest", () => {
 			"darwin-aarch64-app",
 			"darwin-x86_64",
 			"darwin-x86_64-app",
+			"linux-aarch64",
+			"linux-aarch64-appimage",
+			"linux-aarch64-deb",
 			"linux-x86_64",
 			"linux-x86_64-appimage",
 			"linux-x86_64-deb",
@@ -49,7 +54,21 @@ describe("updater manifest", () => {
 			signature: `sig:pier-desktop-${tag}-linux-x64.deb`,
 			url: `https://github.com/owner/Pier/releases/download/${tag}/pier-desktop-${tag}-linux-x64.deb`,
 		});
+		expect(manifest.platforms["linux-aarch64"]).toEqual(manifest.platforms["linux-aarch64-appimage"]);
+		expect(manifest.platforms["linux-aarch64-appimage"]).toEqual({
+			signature: `sig:pier-desktop-${tag}-linux-arm64.AppImage`,
+			url: `https://github.com/owner/Pier/releases/download/${tag}/pier-desktop-${tag}-linux-arm64.AppImage`,
+		});
+		expect(manifest.platforms["linux-aarch64-deb"]).toEqual({
+			signature: `sig:pier-desktop-${tag}-linux-arm64.deb`,
+			url: `https://github.com/owner/Pier/releases/download/${tag}/pier-desktop-${tag}-linux-arm64.deb`,
+		});
 		expect(manifest.platforms["windows-x86_64"].url).toMatch(/windows-x64\.setup\.exe$/);
+	});
+
+	it("rejects an unsigned ARM64 update even when x64 bundles are signed", () => {
+		const { [`pier-desktop-${tag}-linux-arm64.AppImage.sig`]: _, ...rest } = signatures;
+		expect(() => buildManifest({ ...base, assets: bundles, signatures: rest })).toThrow(/linux-arm64\.AppImage\.sig/);
 	});
 
 	it("fails when a bundle has no signature", () => {

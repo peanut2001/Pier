@@ -72,6 +72,8 @@ jobs:
         include:
           # 22.04 keeps the glibc / WebKitGTK baseline low for the Linux packages.
           - { platform: linux-x64, runner: ubuntu-22.04, bundles: "deb,appimage" }
+          # Native ARM64 bundles use the available Ubuntu 24.04 ARM runner.
+          - { platform: linux-arm64, runner: ubuntu-24.04-arm, bundles: "deb,appimage" }
           # `app` produces the signed updater archive (.app.tar.gz) next to the dmg.
           - { platform: darwin-arm64, runner: macos-latest, bundles: "app,dmg" }
           - { platform: darwin-x64, runner: macos-15-intel, bundles: "app,dmg" }

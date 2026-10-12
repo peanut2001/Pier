@@ -56,7 +56,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [bun-linux-x64, bun-darwin-arm64, bun-windows-x64]
+        target: [bun-linux-x64, bun-linux-arm64, bun-darwin-arm64, bun-windows-x64]
     steps:
       - uses: actions/checkout@v5
 
@@ -90,7 +90,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
     defaults:
       run:
         shell: bash
