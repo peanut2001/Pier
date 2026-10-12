@@ -272,7 +272,7 @@ pier-host uninstall --purge        # 另行删除该安装使用的 Pier 配置�
 指定版本或仅安装、不启动：
 
 ```bash
-pier-host update --version v0.2.40
+pier-host update --version v0.2.41
 pier-host update --no-start
 ```
 
