@@ -4,6 +4,7 @@ Pier 的所有重要变更都记录在这里。版本号规则：日常发版只
 
 ## 未发布
 
+- **Linux NVIDIA 桌面兼容**：启动时自动绕过 WebKitGTK 的 DMA-BUF 渲染路径，修复 DGX Spark（GB10）等 NVIDIA 设备上 GBM/KMS 报错导致的白屏；保留用户显式设置的渲染环境变量。
 - **Linux ARM64 桌面安装包**：发布流程新增原生 ARM64 构建，提供 `.deb`、`.AppImage` 及其签名，支持应用内自动更新；与 x64 一样以 Ubuntu 22.04 为构建基线。
 
 ## v0.2.40 — 2026-10-12

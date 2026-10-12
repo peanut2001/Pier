@@ -4,5 +4,7 @@
 fn main() {
     // Before any thread or GTK starts: forget the entries of earlier launches' AppImage mounts.
     pier_desktop_lib::drop_stale_appimage_env();
+    #[cfg(target_os = "linux")]
+    pier_desktop_lib::configure_linux_graphics();
     pier_desktop_lib::run()
 }

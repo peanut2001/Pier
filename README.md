@@ -168,6 +168,8 @@ bun run pier-cli
 
 桌面安装包支持 Linux x64 / ARM64（`.deb`、`.AppImage`）、macOS Intel / Apple Silicon（`.dmg`）和 Windows x64（`.setup.exe`）。Linux ARM64 包名为 `pier-desktop-v<版本>-linux-arm64.deb` / `.AppImage`，与 x64 一样以 Ubuntu 22.04（glibc 2.35）为构建基线。安装包与签名更新包随 [GitHub Release](https://github.com/yiranxiaohui/Pier/releases/latest) 发布，ARM64 同样支持应用内自动更新。
 
+**Linux NVIDIA 显卡兼容**：桌面端启动时检测 NVIDIA 显卡，自动设置 `WEBKIT_DISABLE_DMABUF_RENDERER=1`，避免 WebKitGTK 在 DGX Spark（GB10）等设备上因 `Failed to create GBM buffer` / `DRM_IOCTL_MODE_CREATE_DUMB failed` 显示白屏。已显式设置该环境变量时保留原值。旧版 AppImage 可用 `WEBKIT_DISABLE_DMABUF_RENDERER=1 ./pier-desktop-*.AppImage` 启动（请将文件名替换为实际下载的文件），`.deb` 安装后可用 `WEBKIT_DISABLE_DMABUF_RENDERER=1 pier-desktop` 启动。使用当前桌面用户运行，无需 `sudo`。
+
 除 Node 与 Bun 外还需要 Rust（stable），以及 Tauri 的[系统依赖](https://v2.tauri.app/start/prerequisites/)（Linux 上为 `libwebkit2gtk-4.1-dev`、`libayatana-appindicator3-dev`、`librsvg2-dev` 等）。
 
 ```bash

@@ -1,6 +1,8 @@
 mod appimage_env;
 mod autostart;
 mod host;
+#[cfg(target_os = "linux")]
+mod linux_graphics;
 mod terminal;
 mod transfer;
 mod tray;
@@ -14,6 +16,8 @@ use transfer::DownloadManager;
 use updater::UpdateManager;
 
 pub use appimage_env::drop_stale_entries as drop_stale_appimage_env;
+#[cfg(target_os = "linux")]
+pub use linux_graphics::configure as configure_linux_graphics;
 
 pub(crate) fn show_main_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {

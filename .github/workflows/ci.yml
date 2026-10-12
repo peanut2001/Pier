@@ -138,6 +138,11 @@ jobs:
         working-directory: apps/desktop/src-tauri
         run: cargo fmt --check
 
+      - name: NVIDIA renderer regression tests
+        if: runner.os == 'Linux'
+        working-directory: apps/desktop/src-tauri
+        run: cargo test --lib --locked linux_graphics::tests
+
       - name: cargo clippy
         working-directory: apps/desktop/src-tauri
         run: cargo clippy --all-targets --locked -- -D warnings
