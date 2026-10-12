@@ -110,6 +110,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: apps/desktop/src-tauri
+          # GTK-linked Rust artifacts cannot be shared between Ubuntu runner images.
+          key: ${{ matrix.os }}
 
       - name: Linux system dependencies
         if: runner.os == 'Linux'
