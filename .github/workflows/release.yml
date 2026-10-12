@@ -121,7 +121,8 @@ jobs:
             echo "::error::The TAURI_SIGNING_PRIVATE_KEY secret is required to sign update bundles"
             exit 1
           fi
-          bun run tauri build --bundles ${{ matrix.bundles }}
+          # Include linuxdeploy output so AppImage failures have actionable diagnostics.
+          bun run tauri build --verbose --bundles ${{ matrix.bundles }}
 
       # The app is ad-hoc signed (bundle.macOS.signingIdentity "-"), not notarized: Gatekeeper
       # then offers "Open Anyway" instead of reporting the download as damaged. Check that the
