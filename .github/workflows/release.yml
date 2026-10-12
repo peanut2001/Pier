@@ -72,8 +72,7 @@ jobs:
         include:
           # 22.04 keeps the glibc / WebKitGTK baseline low for the Linux packages.
           - { platform: linux-x64, runner: ubuntu-22.04, bundles: "deb,appimage" }
-          # Native ARM64 bundles use the available Ubuntu 24.04 ARM runner.
-          - { platform: linux-arm64, runner: ubuntu-24.04-arm, bundles: "deb,appimage" }
+          - { platform: linux-arm64, runner: ubuntu-22.04-arm, bundles: "deb,appimage" }
           # `app` produces the signed updater archive (.app.tar.gz) next to the dmg.
           - { platform: darwin-arm64, runner: macos-latest, bundles: "app,dmg" }
           - { platform: darwin-x64, runner: macos-15-intel, bundles: "app,dmg" }
@@ -107,6 +106,23 @@ jobs:
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
+
+      - name: Preserve the ARM64 Bun sidecar during AppImage bundling
+        if: matrix.platform == 'linux-arm64'
+        run: |
+          # patchelf's ARM64 rpath rewrite breaks Bun's compiled executable. The sidecar
+          # links only system libraries, so it does not need an AppImage library rpath.
+          wrapper="$RUNNER_TEMP/pier-patchelf"
+          cat > "$wrapper" <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          if [[ "${1:-}" == "--set-rpath" && "${!#}" == */pier-host ]]; then
+            exit 0
+          fi
+          exec /usr/bin/patchelf "$@"
+          SH
+          chmod +x "$wrapper"
+          echo "PATCHELF=$wrapper" >> "$GITHUB_ENV"
 
       # beforeBuildCommand builds the sidecar for this runner and the web UI.
       # The updater key signs the update bundles (createUpdaterArtifacts in tauri.conf.json);
@@ -156,6 +172,24 @@ jobs:
             node packages/host/scripts/smoke-sidecar.mjs "$exe" "${{ needs.verify.outputs.version }}"
           PI_PACKAGE_DIR="$tauri/pi-assets" \
             node packages/host/scripts/smoke-mcp.mjs "$exe"
+
+      - name: Verify the ARM64 installers and packaged sidecar
+        if: matrix.platform == 'linux-arm64'
+        run: |
+          tauri=apps/desktop/src-tauri
+          bundle="$tauri/target/release/bundle"
+          dpkg-deb --field "$bundle"/deb/*.deb Architecture | grep -qx arm64
+          appimage=$(realpath "$bundle"/appimage/*.AppImage)
+          mkdir unpacked-appimage
+          (cd unpacked-appimage && "$appimage" --appimage-extract > /dev/null)
+          appdir=unpacked-appimage/squashfs-root
+          exe="$appdir/usr/bin/pier-host"
+          assets=$(find "$appdir" -type d -name pi-assets -print -quit)
+          [ -n "$assets" ] || { echo "::error::No pi assets in the AppImage"; exit 1; }
+          cmp "$tauri/binaries/pier-host-aarch64-unknown-linux-gnu" "$exe"
+          ldd "$exe"
+          PI_PACKAGE_DIR="$assets" node packages/host/scripts/smoke-sidecar.mjs "$exe" "${{ needs.verify.outputs.version }}"
+          PI_PACKAGE_DIR="$assets" node packages/host/scripts/smoke-mcp.mjs "$exe"
 
       - name: Collect bundles
         run: |
