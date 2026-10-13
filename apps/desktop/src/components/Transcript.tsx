@@ -1,4 +1,11 @@
-import { type AssistantBlock, buildTranscript, type ChatState, type TranscriptItem } from "@pier/chat-state";
+import {
+	type AssistantBlock,
+	buildTranscript,
+	type ChatState,
+	isWaitingForModel,
+	type TranscriptItem,
+	waitingForModelLabel,
+} from "@pier/chat-state";
 import type { UiRequest } from "@pier/protocol";
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { clockTime, formatTokens } from "../lib/format.ts";
@@ -33,9 +40,10 @@ function blocksEqual(a: AssistantBlock[], b: AssistantBlock[]): boolean {
 		if (x.kind === "tool" && y.kind === "tool") {
 			return x.status === y.status && x.execution === y.execution && x.result === y.result && x.call === y.call;
 		}
-		return x.kind === "text" || x.kind === "thinking"
-			? (x as { text: string }).text === (y as { text: string }).text
-			: true;
+		if (x.kind === "thinking" && y.kind === "thinking") {
+			return x.text === y.text && x.redacted === y.redacted && x.live === y.live;
+		}
+		return x.kind !== "text" || (y.kind === "text" && x.text === y.text);
 	});
 }
 
@@ -46,7 +54,6 @@ const AssistantMessageView = memo(
 			.filter((b): b is Extract<AssistantBlock, { kind: "text" }> => b.kind === "text")
 			.map((b) => b.text)
 			.join("\n\n");
-		const last = blocks.length - 1;
 		return (
 			<div className={`message assistant${streaming ? " streaming" : ""}`}>
 				{blocks.map((block, i) => {
@@ -57,7 +64,7 @@ const AssistantMessageView = memo(
 					if (block.kind === "thinking") {
 						return (
 							// biome-ignore lint/suspicious/noArrayIndexKey: blocks are positional content parts.
-							<Thinking key={i} text={block.text} redacted={block.redacted} live={streaming && i === last} />
+							<Thinking key={i} text={block.text} redacted={block.redacted} live={block.live} />
 						);
 					}
 					return <ToolCard key={block.call.id || i} block={block} approval={approvals.get(block.call.id)} />;
@@ -210,14 +217,7 @@ export function Transcript({ chat, workspaceId }: { chat: ChatState; workspaceId
 		setShowJump(false);
 	}, [chat.sessionId]);
 
-	const running = chat.runState === "streaming" || chat.runState === "retrying";
-	const lastItem = items.at(-1);
-	// Keep the typing indicator until the streaming reply has something visible;
-	// `message_start` arrives with empty content well before the first delta.
-	const waitingForModel =
-		running &&
-		!chat.pendingUi.length &&
-		!(lastItem?.kind === "assistant" && lastItem.streaming && lastItem.blocks.length > 0);
+	const waitingForModel = isWaitingForModel(chat, items);
 
 	return (
 		<MarkdownFiles workspaceId={workspaceId}>
@@ -246,10 +246,9 @@ export function Transcript({ chat, workspaceId }: { chat: ChatState; workspaceId
 						<ItemView key={item.key} item={item} approvals={approvals} />
 					))}
 					{waitingForModel ? (
-						<div className="typing">
-							<span />
-							<span />
-							<span />
+						<div className="model-activity" role="status">
+							<IconBrain size={14} className="thinking-live" />
+							<span className="shimmer">{waitingForModelLabel(chat)}</span>
 						</div>
 					) : null}
 				</div>

@@ -5,10 +5,12 @@ import {
 	contentText,
 	editDiff,
 	editReplacements,
+	isWaitingForModel,
 	summarizeToolCall,
 	type ToolBlock,
 	type TranscriptItem,
 	toolOutputText,
+	waitingForModelLabel,
 } from "@pier/chat-state";
 import { memo, useMemo, useState } from "react";
 import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
@@ -174,21 +176,14 @@ function Thinking({ text, redacted, live }: { text: string; redacted: boolean; l
 	);
 }
 
-function AssistantItem({ blocks, streaming }: { blocks: AssistantBlock[]; streaming: boolean }) {
+function AssistantItem({ blocks }: { blocks: AssistantBlock[] }) {
 	return (
 		<View style={styles.assistant}>
 			{blocks.map((block, index) => {
 				const key = `${block.kind}-${index}`;
 				if (block.kind === "text") return <Markdown key={key} text={block.text} />;
 				if (block.kind === "thinking") {
-					return (
-						<Thinking
-							key={key}
-							text={block.text}
-							redacted={block.redacted}
-							live={streaming && index === blocks.length - 1}
-						/>
-					);
+					return <Thinking key={key} text={block.text} redacted={block.redacted} live={block.live} />;
 				}
 				return <ToolCard key={block.call.id} block={block} />;
 			})}
@@ -231,7 +226,7 @@ const TranscriptRow = memo(function TranscriptRow({ item }: { item: TranscriptIt
 				</View>
 			);
 		case "assistant":
-			return <AssistantItem blocks={item.blocks} streaming={item.streaming} />;
+			return <AssistantItem blocks={item.blocks} />;
 		case "bash":
 			return (
 				<View style={[styles.tool, { borderColor: p.border, backgroundColor: p.card }]}>
@@ -268,11 +263,7 @@ const TranscriptRow = memo(function TranscriptRow({ item }: { item: TranscriptIt
 export function Transcript({ chat }: { chat: ChatState }) {
 	const p = usePalette();
 	const items = useMemo(() => buildTranscript(chat), [chat]);
-	const last = items[items.length - 1];
-	const waiting =
-		isBusy(chat.runState) &&
-		!chat.pendingUi.length &&
-		!(last?.kind === "assistant" && last.streaming && last.blocks.length > 0);
+	const waiting = isWaitingForModel(chat, items);
 	return (
 		<View style={styles.transcript}>
 			{items.map((item) => (
@@ -281,9 +272,7 @@ export function Transcript({ chat }: { chat: ChatState }) {
 			{waiting ? (
 				<View style={[styles.waiting, { backgroundColor: p.accentSoft }]}>
 					<ActivityIndicator size="small" color={p.accentText} />
-					<Text style={[styles.waitingText, { color: p.accentText }]}>
-						{chat.runState === "compacting" ? "正在压缩上下文…" : "Agent 工作中…"}
-					</Text>
+					<Text style={[styles.waitingText, { color: p.accentText }]}>{waitingForModelLabel(chat)}</Text>
 				</View>
 			) : null}
 			{chat.errorMessage && !isBusy(chat.runState) ? (

@@ -7,6 +7,7 @@ import {
 	cacheableChatState,
 	editReplacements,
 	initialChatState,
+	isWaitingForModel,
 	parsePartialJson,
 	reduceChat,
 	sessionUsage,
@@ -14,6 +15,7 @@ import {
 	stripTrailingImageHints,
 	summarizeToolCall,
 	userText,
+	waitingForModelLabel,
 } from "../src/index.ts";
 
 const summary: SessionSummary = {
@@ -107,8 +109,8 @@ describe("reduceChat", () => {
 				assistantMessageEvent: { type: "toolcall_delta", contentIndex: 2, delta: '{"command":"ls -' },
 			},
 		]);
-		expect(state.streaming?.content[0]).toEqual({ type: "thinking", thinking: "hmm" });
-		expect(state.streaming?.content[1]).toEqual({ type: "text", text: "Hello" });
+		expect(state.streaming?.content[0]).toEqual({ type: "thinking", thinking: "hmm", completed: false });
+		expect(state.streaming?.content[1]).toEqual({ type: "text", text: "Hello", completed: false });
 		expect(state.streaming?.content[2]).toMatchObject({ type: "toolCall", id: "t1", arguments: { command: "ls -" } });
 
 		let items = buildTranscript(state);
@@ -188,7 +190,9 @@ describe("reduceChat", () => {
 			{ type: "message_update", assistantMessageEvent: { type: "thinking_start", contentIndex: 0 } },
 		]);
 		item = buildTranscript(state).at(-1);
-		expect(item?.kind === "assistant" && item.blocks).toEqual([{ kind: "thinking", text: "", redacted: false }]);
+		expect(item?.kind === "assistant" && item.blocks).toEqual([
+			{ kind: "thinking", text: "", redacted: false, live: true },
+		]);
 
 		state = run(state, [
 			{ type: "message_update", assistantMessageEvent: { type: "thinking_end", contentIndex: 0, content: "" } },
@@ -212,6 +216,121 @@ describe("reduceChat", () => {
 		});
 		const [item] = buildTranscript(state);
 		expect(item?.kind === "assistant" && item.blocks[0]).toMatchObject({ status: "interrupted" });
+	});
+
+	it("shows activity between streamed parts after a progress message", () => {
+		let state = run(loaded(), [
+			{ type: "session.status", state: "streaming" },
+			{ type: "message_start", message: { role: "assistant", content: [], timestamp: 2 } },
+			{ type: "message_update", assistantMessageEvent: { type: "text_start", contentIndex: 0 } },
+			{ type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "已完成修改。" } },
+		]);
+		const waiting = () => isWaitingForModel(state, buildTranscript(state));
+		expect(waiting()).toBe(false);
+		state = run(state, [{ type: "message_update", assistantMessageEvent: { type: "text_end", contentIndex: 0 } }]);
+		expect(waiting()).toBe(true);
+		expect(state.streaming?.content[0]).toMatchObject({ text: "已完成修改。", completed: true });
+
+		state = run(state, [{ type: "message_update", assistantMessageEvent: { type: "text_start", contentIndex: 1 } }]);
+		// Earlier visible text must not hide activity while the next part is still empty.
+		expect(waiting()).toBe(true);
+		state = run(state, [
+			{ type: "message_update", assistantMessageEvent: { type: "thinking_start", contentIndex: 2 } },
+		]);
+		expect(waiting()).toBe(false);
+		state = run(state, [
+			{ type: "message_update", assistantMessageEvent: { type: "thinking_delta", contentIndex: 2, delta: "检查结果" } },
+			{ type: "message_update", assistantMessageEvent: { type: "thinking_end", contentIndex: 2 } },
+		]);
+		expect(waiting()).toBe(true);
+		const item = buildTranscript(state).at(-1);
+		expect(item?.kind === "assistant" && item.blocks.at(-1)).toMatchObject({ kind: "thinking", live: false });
+		state = run(state, [{ type: "session.status", state: "idle" }]);
+		expect(waiting()).toBe(false);
+	});
+
+	it("restores waiting after completed text and reasoning from a snapshot", () => {
+		for (const part of [
+			{ type: "text", text: "进度说明", completed: true },
+			{ type: "thinking", thinking: "", completed: true },
+		]) {
+			const state = loaded({
+				session: { ...summary, state: "streaming" },
+				streamingMessage: { role: "assistant", content: [part], timestamp: 2 },
+				model: { provider: "codex", id: "m", name: "M", reasoning: true, input: ["text"] },
+			});
+			expect(isWaitingForModel(state, buildTranscript(state))).toBe(true);
+			expect(waitingForModelLabel(state)).toBe("思考中…");
+		}
+		// Old hosts omit completion metadata: keep visible streaming text as the activity signal.
+		const oldHost = loaded({
+			session: { ...summary, state: "streaming" },
+			streamingMessage: { role: "assistant", content: [{ type: "text", text: "输出中" }], timestamp: 2 },
+		});
+		expect(isWaitingForModel(oldHost, buildTranscript(oldHost))).toBe(false);
+	});
+
+	it("uses tool progress while a tool runs and resumes waiting after it finishes", () => {
+		let state = loaded({
+			session: { ...summary, state: "streaming" },
+			messages: [
+				{
+					role: "assistant",
+					content: [{ type: "toolCall", id: "t1", name: "bash", arguments: { command: "test" } }],
+					timestamp: 1,
+				},
+			],
+			pendingToolCalls: ["t1"],
+			streamingMessage: {
+				role: "assistant",
+				content: [{ type: "text", text: "等待测试", completed: true }],
+				timestamp: 2,
+			},
+		});
+		expect(isWaitingForModel(state, buildTranscript(state))).toBe(false);
+		state = run(state, [{ type: "tool_execution_end", toolCallId: "t1", toolName: "bash", isError: false }]);
+		expect(isWaitingForModel(state, buildTranscript(state))).toBe(true);
+	});
+
+	it("shows retry and compaction activity without showing it during loading or approval", () => {
+		const state = loaded({ session: { ...summary, state: "streaming" } });
+		expect(isWaitingForModel({ ...state, loaded: false }, [])).toBe(false);
+		const request: UiRequest = {
+			id: "u1",
+			sessionId: "s1",
+			kind: "approval",
+			title: "Approve",
+			createdAt: summary.createdAt,
+		};
+		expect(isWaitingForModel({ ...state, pendingUi: [request] }, [])).toBe(false);
+		for (const runState of ["idle", "inactive"] as const) {
+			expect(isWaitingForModel({ ...state, runState }, [])).toBe(false);
+		}
+		for (const [runState, label] of [
+			["retrying", "正在重试…"],
+			["compacting", "正在压缩上下文…"],
+		] as const) {
+			const busy = { ...state, runState };
+			expect(isWaitingForModel(busy, [])).toBe(true);
+			expect(waitingForModelLabel(busy)).toBe(label);
+		}
+		expect(waitingForModelLabel(state)).toBe("Agent 工作中…");
+	});
+
+	it("does not let an unfinished tool from an earlier turn hide current activity", () => {
+		const state = loaded({
+			session: { ...summary, state: "streaming" },
+			messages: [
+				{ role: "assistant", content: [{ type: "toolCall", id: "old", name: "bash", arguments: {} }], timestamp: 1 },
+				{ role: "user", content: "继续", timestamp: 2 },
+			],
+			streamingMessage: {
+				role: "assistant",
+				content: [{ type: "text", text: "正在检查", completed: true }],
+				timestamp: 3,
+			},
+		});
+		expect(isWaitingForModel(state, buildTranscript(state))).toBe(true);
 	});
 
 	it("restores in-flight state from a snapshot", () => {
@@ -245,7 +364,7 @@ describe("reduceChat", () => {
 			{ type: "ui.resolved", requestId: "u1", resolution: "answered" },
 			{ type: "queue_update", steering: [], followUp: ["f"] },
 		]);
-		expect(next.streaming?.content[0]).toEqual({ type: "text", text: "partial" });
+		expect(next.streaming?.content[0]).toEqual({ type: "text", text: "partial", completed: false });
 		expect(next.pendingUi).toHaveLength(0);
 		expect(next.queue).toEqual({ steering: [], followUp: ["f"] });
 		// Snapshot input is not mutated by later deltas.

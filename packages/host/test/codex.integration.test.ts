@@ -3,14 +3,17 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+	applySnapshot,
 	buildTranscript,
 	ChatController,
 	type ChatState,
 	initialChatState,
+	isWaitingForModel,
 	reduceChat,
 	resolveSlash,
 	runBuiltin,
 	type SlashActions,
+	waitingForModelLabel,
 } from "@pier/chat-state";
 import type { PierClient } from "@pier/client";
 import type { SessionSummary, WorkspaceInfo } from "@pier/protocol";
@@ -263,6 +266,27 @@ describe("Codex runtime", () => {
 
 		const compacted = await client.request("session.compact", { sessionId: session.id });
 		expect(compacted).toEqual({ summary: "", tokensBefore: 0 });
+	});
+
+	it("keeps activity visible after commentary completes, including a fresh snapshot", async () => {
+		const { session } = await client.request("session.create", { workspaceId: workspace.id, runtime: "codex" });
+		const { rec, state } = await open(session);
+		await client.request("session.prompt", { sessionId: session.id, text: "progress then wait" });
+		await rec.waitFor(
+			(frame) =>
+				frame.event.type === "message_update" &&
+				(frame.event.assistantMessageEvent as { type: string }).type === "text_end",
+		);
+		expect(state().runState).toBe("streaming");
+		expect(state().streaming?.content[0]).toMatchObject({ text: "Progress reported.", completed: true });
+		expect(isWaitingForModel(state(), buildTranscript(state()))).toBe(true);
+		expect(waitingForModelLabel(state())).toBe("思考中…");
+		const snapshot = await client.request("session.snapshot", { sessionId: session.id });
+		const restored = applySnapshot(initialChatState(session.id), snapshot);
+		expect(isWaitingForModel(restored, buildTranscript(restored))).toBe(true);
+		await client.request("session.abort", { sessionId: session.id });
+		await rec.waitFor((frame) => frame.event.type === "session.status" && frame.event.state === "idle");
+		expect(isWaitingForModel(state(), buildTranscript(state()))).toBe(false);
 	});
 
 	it("aborts a running turn", async () => {

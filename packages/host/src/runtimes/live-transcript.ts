@@ -11,12 +11,15 @@ import type { WireEvent } from "@pier/protocol";
 export interface TextPart {
 	type: "text";
 	text: string;
+	/** Retained in snapshots so clients can detect gaps between streamed parts. */
+	completed?: boolean;
 }
 
 export interface ThinkingPart {
 	type: "thinking";
 	thinking: string;
 	redacted?: boolean;
+	completed?: boolean;
 }
 
 export interface ImagePart {
@@ -164,7 +167,7 @@ export class LiveTranscript {
 
 	textStart(index = this.nextIndex()): number {
 		const draft = this.beginAssistant();
-		draft.content[index] = { type: "text", text: "" };
+		draft.content[index] = { type: "text", text: "", completed: false };
 		this.update({ type: "text_start", contentIndex: index });
 		return index;
 	}
@@ -173,6 +176,7 @@ export class LiveTranscript {
 		const part = this.beginAssistant().content[index];
 		if (part?.type !== "text") return;
 		part.text += delta;
+		part.completed = false;
 		this.update({ type: "text_delta", contentIndex: index, delta });
 	}
 
@@ -180,6 +184,7 @@ export class LiveTranscript {
 		const part = this.beginAssistant().content[index];
 		if (part?.type !== "text") return;
 		if (content !== undefined) part.text = content;
+		part.completed = true;
 		this.update({ type: "text_end", contentIndex: index, content: part.text });
 	}
 
@@ -191,7 +196,12 @@ export class LiveTranscript {
 
 	thinkingStart(index = this.nextIndex(), redacted = false): number {
 		const draft = this.beginAssistant();
-		draft.content[index] = { type: "thinking", thinking: "", ...(redacted ? { redacted: true } : {}) };
+		draft.content[index] = {
+			type: "thinking",
+			thinking: "",
+			completed: false,
+			...(redacted ? { redacted: true } : {}),
+		};
 		this.update({ type: "thinking_start", contentIndex: index });
 		return index;
 	}
@@ -200,6 +210,7 @@ export class LiveTranscript {
 		const part = this.beginAssistant().content[index];
 		if (part?.type !== "thinking") return;
 		part.thinking += delta;
+		part.completed = false;
 		this.update({ type: "thinking_delta", contentIndex: index, delta });
 	}
 
@@ -207,6 +218,7 @@ export class LiveTranscript {
 		const part = this.beginAssistant().content[index];
 		if (part?.type !== "thinking") return;
 		if (content !== undefined) part.thinking = content;
+		part.completed = true;
 		this.update({ type: "thinking_end", contentIndex: index, content: part.thinking });
 	}
 

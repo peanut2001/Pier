@@ -33,7 +33,7 @@ export interface ToolBlock {
 
 export type AssistantBlock =
 	| { kind: "text"; text: string }
-	| { kind: "thinking"; text: string; redacted: boolean }
+	| { kind: "thinking"; text: string; redacted: boolean; live: boolean }
 	| ToolBlock;
 
 export type TranscriptItem =
@@ -68,9 +68,9 @@ function assistantBlocks(
 			// Keep the in-progress thinking part even before (or without) any text: some
 			// providers stream only an empty/encrypted thinking block for a long time,
 			// and dropping it would leave the reply blank while the model is working.
-			const live = streaming && index === content.length - 1;
+			const live = streaming && part.completed !== true && index === content.length - 1;
 			if (part.thinking || part.redacted || live) {
-				blocks.push({ kind: "thinking", text: part.thinking, redacted: !!part.redacted });
+				blocks.push({ kind: "thinking", text: part.thinking, redacted: !!part.redacted, live });
 			}
 		} else if (part.type === "toolCall") {
 			const result = results.get(part.id);
@@ -168,6 +168,36 @@ export function buildTranscript(state: ChatState): TranscriptItem[] {
 		});
 	}
 	return items;
+}
+
+/** Show activity during gaps between parts, even when the current message already has text. */
+export function isWaitingForModel(state: ChatState, items: TranscriptItem[]): boolean {
+	if (!state.loaded || state.pendingUi.length || state.runState === "idle" || state.runState === "inactive")
+		return false;
+	if (state.runState === "compacting" || state.runState === "retrying") return true;
+	const lastItem = items.at(-1);
+	for (const item of items) {
+		if (item.kind !== "assistant") continue;
+		if (
+			item.blocks.some(
+				(block) =>
+					(block.kind === "thinking" && block.live) ||
+					(block.kind === "tool" &&
+						(block.status === "generating" ||
+							block.status === "running" ||
+							(block.status === "pending" && (item.streaming || item === lastItem)))),
+			)
+		)
+			return false;
+	}
+	const part = state.streaming?.content.at(-1);
+	return !(part?.type === "text" && part.completed !== true && part.text.trim());
+}
+
+export function waitingForModelLabel(state: ChatState): string {
+	if (state.runState === "compacting") return "正在压缩上下文…";
+	if (state.runState === "retrying") return "正在重试…";
+	return state.model?.reasoning && state.thinkingLevel !== "off" ? "思考中…" : "Agent 工作中…";
 }
 
 function str(value: unknown): string | undefined {

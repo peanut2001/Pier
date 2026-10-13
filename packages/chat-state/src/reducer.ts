@@ -196,22 +196,23 @@ function applyAssistantEvent(draft: AssistantMessage | undefined, event: Assista
 	};
 	switch (event.type) {
 		case "text_start":
-			set({ type: "text", text: "" });
+			set({ type: "text", text: "", completed: false });
 			break;
 		case "text_delta":
-			set({ type: "text", text: (at?.type === "text" ? at.text : "") + (event.delta ?? "") });
+			set({ type: "text", text: (at?.type === "text" ? at.text : "") + (event.delta ?? ""), completed: false });
 			break;
 		case "text_end":
-			set({ type: "text", text: event.content ?? (at?.type === "text" ? at.text : "") });
+			set({ type: "text", text: event.content ?? (at?.type === "text" ? at.text : ""), completed: true });
 			break;
 		case "thinking_start":
-			set({ type: "thinking", thinking: "" });
+			set({ type: "thinking", thinking: "", completed: false });
 			break;
 		case "thinking_delta":
 			set({
 				...(at?.type === "thinking" ? at : {}),
 				type: "thinking",
 				thinking: (at?.type === "thinking" ? at.thinking : "") + (event.delta ?? ""),
+				completed: false,
 			} as ThinkingPart);
 			break;
 		case "thinking_end":
@@ -219,6 +220,7 @@ function applyAssistantEvent(draft: AssistantMessage | undefined, event: Assista
 				...(at?.type === "thinking" ? at : {}),
 				type: "thinking",
 				thinking: event.content ?? (at?.type === "thinking" ? at.thinking : ""),
+				completed: true,
 			} as ThinkingPart);
 			break;
 		case "toolcall_start":
