@@ -142,6 +142,32 @@ describe("computer-to-computer (peers)", () => {
 		expect((await aDesktop.request("peer.list")).peers[0]?.connected).toBe(false);
 	});
 
+	it("creates files and empty folders on the peer through the local desktop gateway", async () => {
+		const aWorkspace = (await aDesktop.request("workspace.add", { path: a.workspaceDir })).workspace;
+		const remote = viaA((await pair()).id);
+		await remote.connect();
+		expect(
+			await remote.request("workspace.createFile", { workspaceId: bWorkspace.id, path: "new/note.md" }),
+		).toMatchObject({ path: "new/note.md", size: 0 });
+		expect(
+			await remote.request("workspace.createDirectory", { workspaceId: bWorkspace.id, path: "new/empty" }),
+		).toEqual({ path: "new/empty" });
+		expect(readFileSync(join(b.workspaceDir, "new", "note.md"), "utf8")).toBe("");
+		expect(
+			(await bDesktop.request("workspace.files", { workspaceId: bWorkspace.id, path: "new/empty" })).entries,
+		).toEqual([]);
+		expect(
+			(await aDesktop.request("workspace.files", { workspaceId: aWorkspace.id })).entries.some(
+				(entry) => entry.name === "new",
+			),
+		).toBe(false);
+		await expectCode(
+			remote.request("workspace.createFile", { workspaceId: bWorkspace.id, path: "new/note.md" }),
+			"CONFLICT",
+		);
+		remote.close();
+	});
+
 	it("previews a confirmed artifact outside the remote workspace once through the local gateway", async () => {
 		const outside = mkdtempSync(join(homedir(), ".pier-peer-preview-test-"));
 		try {

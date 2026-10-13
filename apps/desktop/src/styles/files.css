@@ -133,6 +133,17 @@ body.resizing-panel {
 	overflow: auto;
 }
 
+.files-create-dialog .field {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	margin-top: 16px;
+}
+
+.files-create-dialog .field-label {
+	margin-bottom: 0;
+}
+
 .files-row {
 	position: relative;
 	display: flex;

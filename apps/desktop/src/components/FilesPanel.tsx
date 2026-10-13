@@ -25,7 +25,7 @@ import {
 } from "../lib/file-transfers.ts";
 import { formatBytes, joinPath, relativeTime } from "../lib/format.ts";
 import { useCanOpenTerminal } from "../lib/remote-terminals.ts";
-import { hostCanDeleteFiles, hostTransfersFiles, useAppState, useStore } from "../lib/store.tsx";
+import { hostCanCreateFiles, hostCanDeleteFiles, hostTransfersFiles, useAppState, useStore } from "../lib/store.tsx";
 import { terminals } from "../lib/terminals.ts";
 import { ContextMenu, type ContextMenuItem, type ContextMenuPosition, contextMenuPosition } from "./ContextMenu.tsx";
 import {
@@ -36,8 +36,10 @@ import {
 	IconDownload,
 	IconExternal,
 	IconFile,
+	IconFilePlus,
 	IconFolder,
 	IconFolderOpen,
+	IconFolderPlus,
 	IconLink,
 	IconLoader,
 	IconMessagePlus,
@@ -82,6 +84,103 @@ function errorText(error: unknown): string {
 	if (code === "NOT_FOUND") return "目录不存在";
 	if (code === "FORBIDDEN") return "无权访问该目录";
 	return message;
+}
+
+/** Create an entry on the workspace's computer, without opening a local file picker. */
+function CreateDialog({
+	workspace,
+	dir,
+	kind,
+	onClose,
+	onCreated,
+}: {
+	workspace: WorkspaceInfo;
+	dir: string;
+	kind: "file" | "directory";
+	onClose: () => void;
+	onCreated: (path: string) => void;
+}) {
+	const store = useStore();
+	const [name, setName] = useState("");
+	const [busy, setBusy] = useState(false);
+	const [error, setError] = useState<string>();
+	const input = useRef<HTMLInputElement>(null);
+	useEffect(() => input.current?.focus(), []);
+	const what = kind === "file" ? "文件" : "文件夹";
+	const create = async () => {
+		if (busy || !name.trim()) return;
+		const value = name.trim();
+		const segments = value.split(/[\\/]+/).filter((part) => part && part !== ".");
+		if (!segments.length || /^[\\/]|^[a-zA-Z]:/.test(value) || segments.some((part) => part === "..")) {
+			setError("请输入当前目录内的名称或相对路径，不能使用绝对路径或 ..");
+			return;
+		}
+		setBusy(true);
+		setError(undefined);
+		try {
+			const path = dir ? `${dir}/${value}` : value;
+			const result =
+				kind === "file" ? await store.createFile(workspace.id, path) : await store.createDirectory(workspace.id, path);
+			store.toast("info", `已创建${what}「${result.path}」`);
+			onCreated(result.path);
+		} catch (error) {
+			const code = (error as { code?: string }).code;
+			setError(
+				code === "CONFLICT"
+					? "已有同名文件或文件夹，请使用其他名称"
+					: code === "FORBIDDEN"
+						? "没有权限创建，或目标目录位于工作区之外"
+						: `创建失败：${errorText(error)}`,
+			);
+			setBusy(false);
+		}
+	};
+	return (
+		<Modal title={`新建${what}`} className="files-create-dialog" onClose={() => !busy && onClose()}>
+			<form
+				onSubmit={(event) => {
+					event.preventDefault();
+					void create();
+				}}
+			>
+				<p className="muted small">创建位置：{store.nodeName(store.nodeOf(workspace.id))}</p>
+				<code className="path">{joinPath(workspace.path, dir)}</code>
+				<label className="field">
+					<span className="field-label">{what}名称</span>
+					<input
+						ref={input}
+						value={name}
+						onChange={(event) => setName(event.target.value)}
+						placeholder={kind === "file" ? "例如 notes/todo.md" : "例如 src/components"}
+						maxLength={4096}
+						disabled={busy}
+						autoComplete="off"
+					/>
+				</label>
+				<p className="muted small">可以带子目录，缺少的上级文件夹会自动创建。</p>
+				{error ? (
+					<p className="error-text small" role="alert">
+						{error}
+					</p>
+				) : null}
+				<div className="modal-actions">
+					<button type="button" className="ghost" disabled={busy} onClick={onClose}>
+						取消
+					</button>
+					<button type="submit" disabled={busy || !name.trim()}>
+						{busy ? (
+							<IconLoader size={14} className="spin" />
+						) : kind === "file" ? (
+							<IconFilePlus size={14} />
+						) : (
+							<IconFolderPlus size={14} />
+						)}
+						{busy ? "正在创建…" : "创建"}
+					</button>
+				</div>
+			</form>
+		</Modal>
+	);
 }
 
 /** Confirms and performs a permanent delete of one or more entries of the file panel. */
@@ -351,8 +450,20 @@ function useWorkspaceTree(workspaceId: string) {
 	);
 
 	const collapseAll = useCallback(() => updateExpanded((set) => set.clear()), [updateExpanded]);
+	const reveal = useCallback(
+		(path: string, directory: boolean) => {
+			const parents: string[] = [];
+			for (let parent = directory ? path : parentPath(path); parent; parent = parentPath(parent)) parents.push(parent);
+			updateExpanded((set) => {
+				for (const parent of parents) set.add(parent);
+			});
+			void load("");
+			for (const parent of parents) void load(parent);
+		},
+		[load, updateExpanded],
+	);
 
-	return { dirs, expanded, reload, toggle, collapseAll };
+	return { dirs, expanded, reload, toggle, collapseAll, reveal };
 }
 
 function entryTitle(entry: WorkspaceFileEntry): string {
@@ -393,10 +504,11 @@ function deleteRoots(entries: WorkspaceFileEntry[]): WorkspaceFileEntry[] {
  */
 export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInfo; composerKey?: string }) {
 	const store = useStore();
-	const connection = useAppState((s) => s.connection);
+	const connection = useAppState((s) => s.nodes[s.workspaceNodes[workspace.id] ?? s.node]?.connection);
 	// Terminals open on the workspace's computer (this one, or a paired one that runs them).
 	const canTerminal = useCanOpenTerminal(workspace);
-	const canDelete = useAppState((s) => hostCanDeleteFiles(s.hostInfo));
+	const canDelete = useAppState((s) => hostCanDeleteFiles(s.nodes[s.workspaceNodes[workspace.id] ?? s.node]?.hostInfo));
+	const canCreate = useAppState((s) => hostCanCreateFiles(s.nodes[s.workspaceNodes[workspace.id] ?? s.node]?.hostInfo));
 	const canTransfer = useAppState(
 		(s) =>
 			s.nodes[s.workspaceNodes[workspace.id] ?? s.node]?.connection === "open" &&
@@ -414,8 +526,9 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 	}>();
 	/** Entries awaiting delete confirmation. */
 	const [deleting, setDeleting] = useState<WorkspaceFileEntry[]>();
+	const [creating, setCreating] = useState<{ dir: string; kind: "file" | "directory" }>();
 	const version = useAppState((s) => s.filesVersion[workspace.id] ?? 0);
-	const { dirs, expanded, reload, toggle, collapseAll } = useWorkspaceTree(workspace.id);
+	const { dirs, expanded, reload, toggle, collapseAll, reveal } = useWorkspaceTree(workspace.id);
 	const [selectedPaths, setSelectedPaths] = useState<Set<string>>(() => new Set());
 	const [selectionAnchor, setSelectionAnchor] = useState<string>();
 	const [copied, setCopied] = useState<string>();
@@ -581,6 +694,20 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 		input.value = "";
 		input.click();
 	};
+	const createItems = (dir: string): ContextMenuItem[] => [
+		{
+			label: "新建文件…",
+			icon: <IconFilePlus size={14} />,
+			disabled: !canCreate || connection !== "open",
+			onSelect: () => setCreating({ dir, kind: "file" }),
+		},
+		{
+			label: "新建文件夹…",
+			icon: <IconFolderPlus size={14} />,
+			disabled: !canCreate || connection !== "open",
+			onSelect: () => setCreating({ dir, kind: "directory" }),
+		},
+	];
 	const uploadItems = (dir: string): ContextMenuItem[] => [
 		{
 			label: dir ? "上传文件到此处…" : "上传文件…",
@@ -631,6 +758,8 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 		const reveal = store.canRevealPaths;
 		if (!entry) {
 			return [
+				...createItems(""),
+				"separator",
 				{ label: "刷新", icon: <IconRefresh size={14} />, disabled: connection !== "open", onSelect: refresh },
 				{ label: "全部折叠", icon: <IconChevronUp size={14} />, disabled: !expanded.size, onSelect: collapseAll },
 				"separator",
@@ -709,7 +838,7 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 			{ label: "复制名称", icon: <IconCopy size={14} />, onSelect: () => copyText(entry.name, entry.path) },
 			"separator",
 			...(isDir
-				? uploadItems(entry.path)
+				? [...createItems(entry.path), "separator" as const, ...uploadItems(entry.path)]
 				: [
 						{
 							label: "下载…",
@@ -869,6 +998,24 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 			<ResizeHandle />
 			<header className="files-header">
 				<PanelHeading workspaceId={workspace.id} name={workspace.name} title={workspace.path} />
+				<button
+					type="button"
+					className="ghost icon"
+					title={canCreate ? "新建文件" : "新建文件（请更新文件所在电脑的 Pier）"}
+					disabled={!canCreate || connection !== "open"}
+					onClick={() => setCreating({ dir: "", kind: "file" })}
+				>
+					<IconFilePlus size={14} />
+				</button>
+				<button
+					type="button"
+					className="ghost icon"
+					title={canCreate ? "新建文件夹" : "新建文件夹（请更新文件所在电脑的 Pier）"}
+					disabled={!canCreate || connection !== "open"}
+					onClick={() => setCreating({ dir: "", kind: "directory" })}
+				>
+					<IconFolderPlus size={14} />
+				</button>
 				<button type="button" className="ghost icon" title="刷新" disabled={connection !== "open"} onClick={refresh}>
 					<IconRefresh size={14} className={loading ? "spin" : undefined} />
 				</button>
@@ -938,6 +1085,19 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 				/>
 			) : null}
 			{overwrite ? <OverwriteDialog question={overwrite.question} onAnswer={answerOverwrite} /> : null}
+			{creating ? (
+				<CreateDialog
+					workspace={workspace}
+					dir={creating.dir}
+					kind={creating.kind}
+					onClose={() => setCreating(undefined)}
+					onCreated={(path) => {
+						reveal(path, creating.kind === "directory");
+						if (creating.kind === "file") store.openFilePreview(workspace.id, path, composerKey);
+						setCreating(undefined);
+					}}
+				/>
+			) : null}
 			{deleting ? (
 				<DeleteDialog workspace={workspace} entries={deleting} onClose={() => setDeleting(undefined)} />
 			) : null}

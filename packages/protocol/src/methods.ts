@@ -242,6 +242,10 @@ export const MethodParamsSchemas = {
 		text: z.string().max(4 * 1024 * 1024),
 		expectedModifiedAt: z.string().max(64).optional(),
 	}),
+	/** Create an empty workspace file without replacing an existing entry (1.40). Missing parents are created. */
+	"workspace.createFile": z.object({ workspaceId: Id, path: z.string().min(1).max(4096) }),
+	/** Create a workspace directory without replacing an existing entry (1.40). Missing parents are created. */
+	"workspace.createDirectory": z.object({ workspaceId: Id, path: z.string().min(1).max(4096) }),
 	/**
 	 * Permanently delete a workspace file, directory (recursively) or symlink (1.11). A symlink
 	 * is removed itself, never its target; the workspace root cannot be deleted.
@@ -885,6 +889,8 @@ export interface MethodResults {
 	"workspace.previewFile": WorkspaceFileContent;
 	"workspace.authorizeFilePreview": WorkspaceFileContent;
 	"workspace.writeFile": WorkspaceFileWriteResult;
+	"workspace.createFile": WorkspaceFileWriteResult;
+	"workspace.createDirectory": { path: string };
 	"workspace.deletePath": WorkspacePathDeleteResult;
 	"workspace.readBytes": WorkspaceFileBytes;
 	"workspace.uploadStart": WorkspaceUploadStart;

@@ -16,6 +16,8 @@ import type { PierClient } from "@pier/client";
 import { PierProtocolError, type WorkspaceInfo } from "@pier/protocol";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+	createWorkspaceDirectory,
+	createWorkspaceFile,
 	deleteWorkspacePath,
 	listWorkspaceDirectory,
 	MAX_DIRECTORY_ENTRIES,
@@ -131,6 +133,76 @@ describe("listWorkspaceDirectory", () => {
 		const result = await listWorkspaceDirectory(root, "big");
 		expect(result.entries).toHaveLength(MAX_DIRECTORY_ENTRIES);
 		expect(result).toMatchObject({ truncated: true, total: MAX_DIRECTORY_ENTRIES + 5 });
+	});
+});
+
+describe("create workspace entries", () => {
+	let root: string;
+	let outside: string;
+	beforeEach(() => {
+		root = mkdtempSync(join(tmpdir(), "pier-create-"));
+		outside = mkdtempSync(join(tmpdir(), "pier-create-outside-"));
+	});
+	afterEach(() => {
+		rmSync(root, { recursive: true, force: true });
+		rmSync(outside, { recursive: true, force: true });
+	});
+
+	it("creates empty files and folders, including missing parents and normalized paths", async () => {
+		expect(await createWorkspaceFile(root, "notes\\todo.md")).toMatchObject({ path: "notes/todo.md", size: 0 });
+		expect(readFileSync(join(root, "notes", "todo.md"), "utf8")).toBe("");
+		expect(await createWorkspaceDirectory(root, "src/./components/empty/")).toEqual({ path: "src/components/empty" });
+		expect(await listWorkspaceDirectory(root, "src/components/empty")).toEqual({
+			path: "src/components/empty",
+			entries: [],
+		});
+	});
+
+	it("refuses existing files and directories without changing their contents", async () => {
+		writeFileSync(join(root, "existing"), "keep me");
+		mkdirSync(join(root, "directory"));
+		writeFileSync(join(root, "directory", "child"), "keep child");
+		for (const create of [createWorkspaceFile, createWorkspaceDirectory]) {
+			for (const path of ["existing", "directory"]) await expectCode(create(root, path), "CONFLICT");
+		}
+		expect(readFileSync(join(root, "existing"), "utf8")).toBe("keep me");
+		expect(readFileSync(join(root, "directory", "child"), "utf8")).toBe("keep child");
+	});
+
+	it("rejects root paths, escapes and parents that are files", async () => {
+		writeFileSync(join(root, "file"), "unchanged");
+		for (const create of [createWorkspaceFile, createWorkspaceDirectory]) {
+			for (const path of ["", ".", "./", "../escape", "nested/../../escape", outside, "C:\\outside", "bad\0name"]) {
+				await expectCode(create(root, path), "BAD_REQUEST");
+			}
+			await expectCode(create(root, "file/child"), "BAD_REQUEST");
+		}
+		expect(readFileSync(join(root, "file"), "utf8")).toBe("unchanged");
+	});
+
+	it.skipIf(process.platform === "win32")("confines symlink parents and never replaces a final symlink", async () => {
+		mkdirSync(join(root, "inside"));
+		symlinkSync(outside, join(root, "escape"));
+		symlinkSync(join(root, "inside"), join(root, "link"));
+		symlinkSync(join(outside, "missing"), join(root, "dangling"));
+		for (const create of [createWorkspaceFile, createWorkspaceDirectory]) {
+			await expectCode(create(root, "escape/new/child"), "FORBIDDEN");
+			await expectCode(create(root, "dangling"), "CONFLICT");
+			await expectCode(create(root, "link"), "CONFLICT");
+		}
+		await createWorkspaceFile(root, "link/new.txt");
+		await createWorkspaceDirectory(root, "link/empty");
+		expect(statSync(join(root, "inside", "new.txt")).size).toBe(0);
+		expect(statSync(join(root, "inside", "empty")).isDirectory()).toBe(true);
+		expect(existsSync(join(outside, "new"))).toBe(false);
+		expect(existsSync(join(outside, "missing"))).toBe(false);
+	});
+
+	it.each(["file", "directory"] as const)("allows only one concurrent creation of the same %s", async (kind) => {
+		const create = kind === "file" ? createWorkspaceFile : createWorkspaceDirectory;
+		const results = await Promise.allSettled([create(root, "new/entry"), create(root, "new/entry")]);
+		expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+		expect(results.find((result) => result.status === "rejected")).toMatchObject({ reason: { code: "CONFLICT" } });
 	});
 });
 
@@ -382,6 +454,29 @@ describe("workspace.files", () => {
 			client.request("workspace.writeFile", { workspaceId: "nope", path: "docs/guide.md", text: "" }),
 			"NOT_FOUND",
 		);
+	});
+
+	it("creates workspace files and empty directories through the local protocol", async () => {
+		expect(
+			await client.request("workspace.createFile", { workspaceId: workspace.id, path: "new/note.md" }),
+		).toMatchObject({ path: "new/note.md", size: 0 });
+		expect(await client.request("workspace.createDirectory", { workspaceId: workspace.id, path: "new/empty" })).toEqual(
+			{ path: "new/empty" },
+		);
+		expect(
+			(await client.request("workspace.files", { workspaceId: workspace.id, path: "new" })).entries.map((entry) => [
+				entry.path,
+				entry.kind,
+			]),
+		).toEqual([
+			["new/empty", "directory"],
+			["new/note.md", "file"],
+		]);
+		await expectCode(
+			client.request("workspace.createFile", { workspaceId: workspace.id, path: "docs/guide.md" }),
+			"CONFLICT",
+		);
+		await expectCode(client.request("workspace.createDirectory", { workspaceId: "nope", path: "new" }), "NOT_FOUND");
 	});
 
 	it("deletes a workspace path with workspace.deletePath", async () => {

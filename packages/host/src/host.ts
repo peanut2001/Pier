@@ -83,6 +83,8 @@ import type { AppShell, ShellMethod } from "./shell.ts";
 import { HostTerminals } from "./terminals.ts";
 import {
 	authorizeWorkspaceFilePreview,
+	createWorkspaceDirectory,
+	createWorkspaceFile,
 	deleteWorkspacePath,
 	listWorkspaceDirectory,
 	previewWorkspaceFile,
@@ -190,6 +192,8 @@ const AUDITED_METHODS = new Set<MethodName>([
 	"workspace.setPolicy",
 	"workspace.authorizeFilePreview",
 	"workspace.writeFile",
+	"workspace.createFile",
+	"workspace.createDirectory",
 	"workspace.deletePath",
 	"workspace.uploadStart",
 	"workspace.uploadFinish",
@@ -304,6 +308,8 @@ function auditDetail(method: MethodName, params: Record<string, unknown>): Recor
 				path: params.path,
 				bytes: typeof params.text === "string" ? Buffer.byteLength(params.text) : 0,
 			};
+		case "workspace.createFile":
+		case "workspace.createDirectory":
 		case "workspace.deletePath":
 			return { workspaceId: params.workspaceId, path: params.path };
 		case "workspace.authorizeFilePreview":
@@ -1101,6 +1107,10 @@ export class PierHost implements RequestHandler {
 					params.text,
 					params.expectedModifiedAt,
 				),
+			"workspace.createFile": (_ctx, params) =>
+				createWorkspaceFile(this.requireWorkspace(params.workspaceId).path, params.path),
+			"workspace.createDirectory": (_ctx, params) =>
+				createWorkspaceDirectory(this.requireWorkspace(params.workspaceId).path, params.path),
 			"workspace.deletePath": (_ctx, params) =>
 				deleteWorkspacePath(this.requireWorkspace(params.workspaceId).path, params.path),
 			"workspace.readBytes": (_ctx, params) =>

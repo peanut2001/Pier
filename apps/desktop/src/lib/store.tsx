@@ -117,6 +117,11 @@ export function hostCanDeleteFiles(info: HostInfo | undefined): boolean {
 	return hostSpeaks(info, 11);
 }
 
+/** Whether a host can create workspace files and directories directly (1.40). */
+export function hostCanCreateFiles(info: HostInfo | undefined): boolean {
+	return hostSpeaks(info, 40);
+}
+
 /** Whether a host can upload and download workspace files in chunks (`workspace.readBytes` / `upload*`, 1.21). */
 export function hostTransfersFiles(info: HostInfo | undefined): boolean {
 	return hostSpeaks(info, 21);
@@ -2223,6 +2228,32 @@ export class PierStore {
 		const client = this.clientFor(workspaceId);
 		if (!client) throw new Error("尚未连接到 Pier Host");
 		return client.request("workspace.files", path ? { workspaceId, path } : { workspaceId });
+	}
+
+	/** Create an empty file on the workspace's computer and refresh its file panel. */
+	async createFile(workspaceId: string, path: string): Promise<WorkspaceFileWriteResult> {
+		const client = this.fileCreationClient(workspaceId);
+		const result = await client.request("workspace.createFile", { workspaceId, path });
+		this.bumpFiles(workspaceId);
+		return result;
+	}
+
+	/** Create a directory on the workspace's computer and refresh its file panel. */
+	async createDirectory(workspaceId: string, path: string): Promise<{ path: string }> {
+		const client = this.fileCreationClient(workspaceId);
+		const result = await client.request("workspace.createDirectory", { workspaceId, path });
+		this.bumpFiles(workspaceId);
+		return result;
+	}
+
+	private fileCreationClient(workspaceId: string): PierClient {
+		const node = this.nodeOf(workspaceId);
+		const client = this.openClient(node);
+		if (!client) throw new Error("尚未连接到文件所在电脑的 Pier Host");
+		if (!hostCanCreateFiles(this.state.nodes[node]?.hostInfo)) {
+			throw new Error("文件所在电脑的 Pier 版本过旧，不支持新建文件和文件夹，请先更新它");
+		}
+		return client;
 	}
 
 	/** Read one workspace file for preview; rejects with the host's error. */
