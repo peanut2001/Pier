@@ -15,6 +15,7 @@ import {
 	dropEntries,
 	type OverwriteAnswer,
 	type OverwriteQuestion,
+	pasteWorkspaceEntries,
 	type Transfer,
 	transferFinished,
 	transfers,
@@ -27,12 +28,21 @@ import { formatBytes, joinPath, relativeTime } from "../lib/format.ts";
 import { useCanOpenTerminal } from "../lib/remote-terminals.ts";
 import { hostCanCreateFiles, hostCanDeleteFiles, hostTransfersFiles, useAppState, useStore } from "../lib/store.tsx";
 import { terminals } from "../lib/terminals.ts";
+import {
+	clearWorkspaceClipboard,
+	setWorkspaceClipboard,
+	useWorkspaceClipboard,
+	useWorkspacePasteBusy,
+	type WorkspaceClipboardEntry,
+	type WorkspaceClipboardMode,
+} from "../lib/workspace-clipboard.ts";
 import { ContextMenu, type ContextMenuItem, type ContextMenuPosition, contextMenuPosition } from "./ContextMenu.tsx";
 import {
 	IconAlert,
 	IconChevronRight,
 	IconChevronUp,
 	IconCopy,
+	IconCut,
 	IconDownload,
 	IconExternal,
 	IconFile,
@@ -44,6 +54,7 @@ import {
 	IconLoader,
 	IconMessagePlus,
 	IconPanelRight,
+	IconPaste,
 	IconRefresh,
 	IconTerminal,
 	IconTrash,
@@ -276,10 +287,14 @@ function OverwriteDialog({
 }) {
 	const [all, setAll] = useState(false);
 	return (
-		<Modal title="文件已存在" onClose={() => onAnswer({ choice: "cancel" })}>
-			<p>工作区中已经有同名文件，要用上传的文件替换它吗？</p>
+		<Modal title="目标已存在" onClose={() => onAnswer({ choice: "cancel" })}>
+			<p>
+				{question.canOverwrite === false
+					? "目标目录中已经有同名项目，请跳过或取消后更改名称。"
+					: "目标目录中已经有同名文件，要替换它吗？"}
+			</p>
 			<code className="path">{question.path}</code>
-			{question.more ? (
+			{question.more && question.canOverwrite !== false ? (
 				<label className="files-overwrite-all muted small">
 					<input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} />
 					对其余同名文件执行相同操作
@@ -287,13 +302,18 @@ function OverwriteDialog({
 			) : null}
 			<div className="modal-actions">
 				<button type="button" className="ghost" onClick={() => onAnswer({ choice: "cancel" })}>
-					{question.more ? "取消其余上传" : "取消"}
+					{question.more ? "取消其余操作" : "取消"}
 				</button>
 				{/* biome-ignore lint/a11y/noAutofocus: focus the safe choice so Enter does not replace. */}
 				<button type="button" autoFocus onClick={() => onAnswer({ choice: "skip", all })}>
 					跳过
 				</button>
-				<button type="button" className="danger" onClick={() => onAnswer({ choice: "overwrite", all })}>
+				<button
+					type="button"
+					className="danger"
+					disabled={question.canOverwrite === false}
+					onClick={() => onAnswer({ choice: "overwrite", all })}
+				>
 					替换
 				</button>
 			</div>
@@ -308,7 +328,13 @@ function transferStatus(t: Transfer): string {
 		case "running":
 			return t.total !== undefined ? `${formatBytes(t.done)} / ${formatBytes(t.total)}` : "准备中…";
 		case "done":
-			return t.kind === "upload" ? "已上传" : "已下载";
+			return t.kind === "upload"
+				? "已上传"
+				: t.kind === "download"
+					? "已下载"
+					: t.kind === "move"
+						? "已移动"
+						: "已复制";
 		case "cancelled":
 			return "已取消";
 		case "skipped":
@@ -324,7 +350,7 @@ function TransferList({ workspaceId }: { workspaceId: string }) {
 	if (!items.length) return null;
 	const finished = items.filter(transferFinished).length;
 	return (
-		<section className="files-transfers" aria-label="上传与下载">
+		<section className="files-transfers" aria-label="文件传输">
 			{items.map((t) => {
 				const percent = t.total ? Math.min(100, (t.done / t.total) * 100) : t.state === "done" ? 100 : 0;
 				const done = transferFinished(t);
@@ -335,7 +361,15 @@ function TransferList({ workspaceId }: { workspaceId: string }) {
 						title={`${t.path}${t.savedTo ? ` → ${t.savedTo}` : ""}`}
 					>
 						<span className="files-transfer-icon">
-							{t.kind === "upload" ? <IconUpload size={13} /> : <IconDownload size={13} />}
+							{t.kind === "upload" ? (
+								<IconUpload size={13} />
+							) : t.kind === "download" ? (
+								<IconDownload size={13} />
+							) : t.kind === "move" ? (
+								<IconCut size={13} />
+							) : (
+								<IconCopy size={13} />
+							)}
 						</span>
 						<div className="files-transfer-main">
 							<div className="files-transfer-line">
@@ -352,6 +386,7 @@ function TransferList({ workspaceId }: { workspaceId: string }) {
 							type="button"
 							className="ghost icon"
 							title={done ? "移除" : "取消"}
+							disabled={!done && t.cancellable === false}
 							onClick={() => (done ? transfers.dismiss(t.id) : transfers.cancel(t.id))}
 						>
 							<IconX size={12} />
@@ -514,6 +549,9 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 			s.nodes[s.workspaceNodes[workspace.id] ?? s.node]?.connection === "open" &&
 			hostTransfersFiles(s.nodes[s.workspaceNodes[workspace.id] ?? s.node]?.hostInfo),
 	);
+	const clipboard = useWorkspaceClipboard();
+	const pasteBusy = useWorkspacePasteBusy();
+	const canPaste = canTransfer && Boolean(clipboard) && !pasteBusy;
 	const fileInput = useRef<HTMLInputElement>(null);
 	const folderInput = useRef<HTMLInputElement>(null);
 	/** Workspace directory the next picked files go to. */
@@ -524,6 +562,26 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 		question: OverwriteQuestion;
 		resolve: (answer: OverwriteAnswer) => void;
 	}>();
+	const overwriteRef = useRef(overwrite);
+	const mounted = useRef(true);
+	const askOverwrite = (question: OverwriteQuestion): Promise<OverwriteAnswer> =>
+		new Promise((resolve) => {
+			if (!mounted.current) {
+				resolve({ choice: "cancel" });
+				return;
+			}
+			overwriteRef.current?.resolve({ choice: "cancel" });
+			const pending = { question, resolve };
+			overwriteRef.current = pending;
+			setOverwrite(pending);
+		});
+	useEffect(() => {
+		mounted.current = true;
+		return () => {
+			mounted.current = false;
+			overwriteRef.current?.resolve({ choice: "cancel" });
+		};
+	}, []);
 	/** Entries awaiting delete confirmation. */
 	const [deleting, setDeleting] = useState<WorkspaceFileEntry[]>();
 	const [creating, setCreating] = useState<{ dir: string; kind: "file" | "directory" }>();
@@ -610,6 +668,20 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 		const paths = visibleSelection().map((entry) => (absolute ? joinPath(workspace.path, entry.path) : entry.path));
 		copyText(paths.join("\n"), paths.length === 1 ? paths[0] : undefined);
 	};
+	const copyEntries = (entries: WorkspaceFileEntry[], mode: WorkspaceClipboardMode) => {
+		if (!canTransfer || pasteBusy) return;
+		const roots = deleteRoots(entries);
+		if (roots.some((entry) => entry.kind === "other")) {
+			store.toast("error", "请选择普通文件或文件夹");
+			return;
+		}
+		setWorkspaceClipboard(mode, workspace.id, roots as WorkspaceClipboardEntry[]);
+		store.toast("info", `已${mode === "move" ? "剪切" : "复制"} ${roots.length} 项，切换到目标工作区后粘贴`);
+	};
+	const paste = (dir: string) => {
+		if (!canPaste || !clipboard) return;
+		void pasteWorkspaceEntries(store, clipboard, workspace, dir, askOverwrite);
+	};
 	const openEntry = (entry: WorkspaceFileEntry) => {
 		if (entry.kind === "directory") {
 			toggle(entry.path);
@@ -629,10 +701,16 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 			setSelectedPaths(new Set(visiblePaths));
 			setSelectionAnchor(entry.path);
 		} else if (command && key === "c") {
-			if (selectedPaths.size) copySelectedPaths(event.shiftKey);
+			if (event.shiftKey) copySelectedPaths(true);
+			else copyEntries(selectedPaths.has(entry.path) ? visibleSelection() : [entry], "copy");
+		} else if (command && key === "x" && !event.shiftKey) {
+			copyEntries(selectedPaths.has(entry.path) ? visibleSelection() : [entry], "move");
+		} else if (command && key === "v" && !event.shiftKey) {
+			paste(entry.kind === "directory" ? entry.path : parentPath(entry.path));
 		} else if (event.key === "Escape") {
 			setSelectedPaths(new Set());
 			setSelectionAnchor(undefined);
+			clearWorkspaceClipboard();
 		} else if (!command && ["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
 			const index = visiblePaths.indexOf(entry.path);
 			const next =
@@ -672,21 +750,13 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 	};
 
 	const upload = (items: UploadItem[]) => {
-		void uploadFiles(
-			store,
-			workspace,
-			items,
-			(question) => new Promise((resolve) => setOverwrite({ question, resolve })),
-		);
+		void uploadFiles(store, workspace, items, askOverwrite);
 	};
 	const answerOverwrite = (answer: OverwriteAnswer) => {
-		overwrite?.resolve(answer);
+		overwriteRef.current?.resolve(answer);
+		overwriteRef.current = undefined;
 		setOverwrite(undefined);
 	};
-	// A question left open when the panel closes cancels the rest of its uploads.
-	const overwriteRef = useRef(overwrite);
-	overwriteRef.current = overwrite;
-	useEffect(() => () => overwriteRef.current?.resolve({ choice: "cancel" }), []);
 	const pickUpload = (dir: string, folder: boolean) => {
 		uploadDir.current = dir;
 		const input = folder ? folderInput.current : fileInput.current;
@@ -756,6 +826,29 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 
 	const menuItems = (entry?: WorkspaceFileEntry): ContextMenuItem[] => {
 		const reveal = store.canRevealPaths;
+		const pasteItem = (dir: string): ContextMenuItem => ({
+			label: dir ? "粘贴到此处" : "粘贴到工作区",
+			icon: <IconPaste size={14} />,
+			hint: /Mac/.test(platform) ? "⌘V" : "Ctrl+V",
+			disabled: !canPaste,
+			onSelect: () => paste(dir),
+		});
+		const copyItems = (entries: WorkspaceFileEntry[]): ContextMenuItem[] => [
+			{
+				label: entries.length > 1 ? `复制 ${deleteRoots(entries).length} 个项目` : "复制",
+				icon: <IconCopy size={14} />,
+				hint: /Mac/.test(platform) ? "⌘C" : "Ctrl+C",
+				disabled: !canTransfer || pasteBusy || entries.some((e) => e.kind === "other"),
+				onSelect: () => copyEntries(entries, "copy"),
+			},
+			{
+				label: entries.length > 1 ? `剪切 ${deleteRoots(entries).length} 个项目` : "剪切",
+				icon: <IconCut size={14} />,
+				hint: /Mac/.test(platform) ? "⌘X" : "Ctrl+X",
+				disabled: !canTransfer || pasteBusy || entries.some((e) => e.kind === "other"),
+				onSelect: () => copyEntries(entries, "move"),
+			},
+		];
 		if (!entry) {
 			return [
 				...createItems(""),
@@ -766,6 +859,7 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 				{ label: "复制工作区路径", icon: <IconCopy size={14} />, onSelect: () => copyText(workspace.path) },
 				"separator",
 				...uploadItems(""),
+				pasteItem(""),
 				"separator",
 				canTerminal && {
 					label: "在终端中打开",
@@ -782,6 +876,8 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 		const selectedEntries = selectedPaths.has(entry.path) ? visibleSelection() : [entry];
 		if (selectedEntries.length > 1) {
 			return [
+				...copyItems(selectedEntries),
+				"separator",
 				{
 					label: `复制 ${selectedEntries.length} 个相对路径`,
 					icon: <IconCopy size={14} />,
@@ -828,6 +924,9 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 			composerKey
 				? { label: "插入路径到输入框", icon: <IconMessagePlus size={14} />, onSelect: () => insert(entry) }
 				: null,
+			"separator",
+			...copyItems([entry]),
+			pasteItem(isDir ? entry.path : parentPath(entry.path)),
 			"separator",
 			{ label: "复制相对路径", icon: <IconCopy size={14} />, onSelect: () => copyPath(entry) },
 			{
@@ -903,7 +1002,7 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 						<div key={entry.path}>
 							{/* biome-ignore lint/a11y/noStaticElementInteractions: the row's button is the focusable control; this only adds its context menu. */}
 							<div
-								className={`files-row${isSelected ? " selected" : ""}${menu?.entry?.path === entry.path ? " menu-open" : ""}${entry.kind === "other" ? " dim" : ""}${isDir && dropDir === entry.path ? " drop-target" : ""}`}
+								className={`files-row${isSelected ? " selected" : ""}${menu?.entry?.path === entry.path ? " menu-open" : ""}${entry.kind === "other" ? " dim" : ""}${clipboard?.mode === "move" && clipboard.sourceWorkspaceId === workspace.id && clipboard.entries.some((item) => entry.path === item.path || entry.path.startsWith(`${item.path}/`)) ? " cut" : ""}${isDir && dropDir === entry.path ? " drop-target" : ""}`}
 								style={{ paddingLeft: 6 + depth * 14 }}
 								data-drop-dir={isDir ? entry.path : parentPath(entry.path)}
 								onContextMenu={(event) => {
@@ -918,13 +1017,14 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 							>
 								<button
 									type="button"
+									role="treeitem"
 									className="files-entry"
 									ref={(button) => {
 										if (button) entryRefs.current.set(entry.path, button);
 										else entryRefs.current.delete(entry.path);
 									}}
 									data-entry-path={entry.path}
-									aria-pressed={isSelected}
+									aria-selected={isSelected}
 									title={entryTitle(entry)}
 									{...(isDir ? { "aria-expanded": open } : {})}
 									onKeyDown={(event) => onEntryKeyDown(event, entry)}
@@ -996,44 +1096,73 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 	return (
 		<aside className="files-panel" aria-label="工作区文件">
 			<ResizeHandle />
-			<header className="files-header">
+			<header className="files-header files-header-with-toolbar">
 				<PanelHeading workspaceId={workspace.id} name={workspace.name} title={workspace.path} />
-				<button
-					type="button"
-					className="ghost icon"
-					title={canCreate ? "新建文件" : "新建文件（请更新文件所在电脑的 Pier）"}
-					disabled={!canCreate || connection !== "open"}
-					onClick={() => setCreating({ dir: "", kind: "file" })}
-				>
-					<IconFilePlus size={14} />
-				</button>
-				<button
-					type="button"
-					className="ghost icon"
-					title={canCreate ? "新建文件夹" : "新建文件夹（请更新文件所在电脑的 Pier）"}
-					disabled={!canCreate || connection !== "open"}
-					onClick={() => setCreating({ dir: "", kind: "directory" })}
-				>
-					<IconFolderPlus size={14} />
-				</button>
-				<button type="button" className="ghost icon" title="刷新" disabled={connection !== "open"} onClick={refresh}>
-					<IconRefresh size={14} className={loading ? "spin" : undefined} />
-				</button>
-				<button type="button" className="ghost icon" title="全部折叠" disabled={!expanded.size} onClick={collapseAll}>
-					<IconChevronUp size={14} />
-				</button>
-				<button type="button" className="ghost icon" title="关闭面板" onClick={() => store.toggleFilesPanel(false)}>
-					<IconX size={14} />
-				</button>
+				<div className="files-toolbar">
+					<button
+						type="button"
+						className="ghost icon"
+						title={canCreate ? "新建文件" : "新建文件（请更新文件所在电脑的 Pier）"}
+						disabled={!canCreate || connection !== "open"}
+						onClick={() => setCreating({ dir: "", kind: "file" })}
+					>
+						<IconFilePlus size={14} />
+					</button>
+					<button
+						type="button"
+						className="ghost icon"
+						title={canCreate ? "新建文件夹" : "新建文件夹（请更新文件所在电脑的 Pier）"}
+						disabled={!canCreate || connection !== "open"}
+						onClick={() => setCreating({ dir: "", kind: "directory" })}
+					>
+						<IconFolderPlus size={14} />
+					</button>
+					{clipboard ? (
+						<button
+							type="button"
+							className="ghost icon"
+							title={pasteBusy ? "正在粘贴…" : "粘贴到工作区（Ctrl/⌘+V）"}
+							disabled={!canPaste}
+							onClick={() => paste("")}
+						>
+							<IconPaste size={14} />
+						</button>
+					) : null}
+					<button type="button" className="ghost icon" title="刷新" disabled={connection !== "open"} onClick={refresh}>
+						<IconRefresh size={14} className={loading ? "spin" : undefined} />
+					</button>
+					<button type="button" className="ghost icon" title="全部折叠" disabled={!expanded.size} onClick={collapseAll}>
+						<IconChevronUp size={14} />
+					</button>
+					<button type="button" className="ghost icon" title="关闭面板" onClick={() => store.toggleFilesPanel(false)}>
+						<IconX size={14} />
+					</button>
+				</div>
 			</header>
-			{/* biome-ignore lint/a11y/noStaticElementInteractions: context menu for the blank area; every action is also in the header. */}
 			<div
 				className={`files-tree${dropDir === "" ? " drop-target" : ""}`}
+				role="tree"
+				aria-label="工作区文件列表"
+				aria-multiselectable="true"
+				tabIndex={0}
 				onKeyDown={(event) => {
+					if (
+						(event.ctrlKey || event.metaKey) &&
+						event.key.toLowerCase() === "v" &&
+						!event.shiftKey &&
+						!event.altKey &&
+						!event.nativeEvent.isComposing
+					) {
+						event.preventDefault();
+						event.stopPropagation();
+						paste("");
+						return;
+					}
 					if (event.key !== "Escape") return;
 					clearTimeout(clickTimer.current);
 					setSelectedPaths(new Set());
 					setSelectionAnchor(undefined);
+					clearWorkspaceClipboard();
 				}}
 				onClick={(event) => {
 					if ((event.target as Element).closest(".files-row")) return;
@@ -1054,7 +1183,7 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 			<TransferList workspaceId={workspace.id} />
 			<div
 				className="files-hint"
-				title={`Shift+单击范围选择，${/Mac/.test(platform) ? "⌘" : "Ctrl"}+单击增减选择；方向键导航，Shift+↑/↓ 扩展选择，←/→ 折叠/展开；空格增减选择，Ctrl/⌘+A 全选可见项目，Ctrl/⌘+C 复制相对路径，Ctrl/⌘+Shift+C 复制绝对路径，Delete / ⌘⌫ 删除，Esc 清除选择`}
+				title={`Shift+单击范围选择，${/Mac/.test(platform) ? "⌘" : "Ctrl"}+单击增减选择；方向键导航，Shift+↑/↓ 扩展选择，←/→ 折叠/展开；Ctrl/⌘+A 全选，Ctrl/⌘+C 复制，Ctrl/⌘+X 剪切，Ctrl/⌘+V 粘贴到当前文件夹，Ctrl/⌘+Shift+C 复制绝对路径，Delete / ⌘⌫ 删除，Esc 清除选择与文件剪贴板`}
 			>
 				{selectedPaths.size > 1
 					? `已选择 ${selectedPaths.size} 项 · 右键批量操作`

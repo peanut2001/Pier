@@ -127,6 +127,10 @@ export function hostTransfersFiles(info: HostInfo | undefined): boolean {
 	return hostSpeaks(info, 21);
 }
 
+export function hostTransfersWorkspacePaths(info: HostInfo | undefined): boolean {
+	return hostSpeaks(info, 41);
+}
+
 /** Whether a host offers Git source control for workspaces (`git.*`, 1.28). */
 export function hostSupportsGit(info: HostInfo | undefined): boolean {
 	return hostSpeaks(info, 28);
@@ -2319,15 +2323,17 @@ export class PierStore {
 			throw new Error("这台电脑的 Pier 版本过旧，不支持删除文件");
 		}
 		const result = await client.request("workspace.deletePath", { workspaceId, path });
-		const preview = this.state.filePreview;
-		if (
-			preview?.workspaceId === workspaceId &&
-			(preview.path === result.path || preview.path.startsWith(`${result.path}/`))
-		) {
-			this.closeFilePreview();
-		}
+		this.closeMovedFilePreview(workspaceId, result.path);
 		this.bumpFiles(workspaceId);
 		return result;
+	}
+
+	/** A preview of a moved/deleted path must not keep showing stale source content. */
+	closeMovedFilePreview(workspaceId: string, path: string): void {
+		const preview = this.state.filePreview;
+		if (preview?.workspaceId === workspaceId && (preview.path === path || preview.path.startsWith(`${path}/`))) {
+			this.closeFilePreview();
+		}
 	}
 
 	/**
@@ -2341,6 +2347,12 @@ export class PierStore {
 			throw new Error("那台电脑的 Pier 版本过旧，不支持上传和下载文件，请先更新它");
 		}
 		return client;
+	}
+
+	requireNativeFileTransfers(workspaceId: string): void {
+		if (!hostTransfersWorkspacePaths(this.state.nodes[this.nodeOf(workspaceId)]?.hostInfo)) {
+			throw new Error("文件所在电脑的 Pier 版本过旧，请先更新它以复制或移动工作区文件");
+		}
 	}
 
 	bumpFiles(workspaceId: string): void {

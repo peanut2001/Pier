@@ -125,6 +125,19 @@ export const IconCopy = make(
 		<path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
 	</>,
 );
+export const IconCut = make(
+	<>
+		<circle cx="6" cy="6" r="3" />
+		<circle cx="6" cy="18" r="3" />
+		<path d="m8.12 8.12 12 12M8.12 15.88 20 4M14 14l6 6" />
+	</>,
+);
+export const IconPaste = make(
+	<>
+		<rect x="8" y="2" width="8" height="4" rx="1" />
+		<path d="M8 4H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2M9 12h6M9 16h6" />
+	</>,
+);
 export const IconStop = make(<rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none" />);
 export const IconClock = make(
 	<>

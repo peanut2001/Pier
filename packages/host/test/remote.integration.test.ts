@@ -208,6 +208,14 @@ describe("remote access", () => {
 		expect((await phone.request("workspace.files", { workspaceId: added.id, path: "notes/empty" })).entries).toEqual(
 			[],
 		);
+		await phone.request("workspace.transferPath", {
+			workspaceId: added.id,
+			path: "x.txt",
+			destinationWorkspaceId: workspace.id,
+			destinationPath: "from-phone.txt",
+			mode: "copy",
+		});
+		expect(readFileSync(join(t.workspaceDir, "from-phone.txt"), "utf8")).toBe("new");
 		expect(await phone.request("workspace.deletePath", { workspaceId: added.id, path: "x.txt" })).toEqual({
 			path: "x.txt",
 			kind: "file",
@@ -263,6 +271,7 @@ describe("remote access", () => {
 		expect(audit).toMatch(/"event":"workspace.createFile".*"path":"notes\/new.md"/);
 		expect(audit).toMatch(/"event":"workspace.createDirectory".*"path":"notes\/empty"/);
 		expect(audit).toMatch(/"event":"workspace.deletePath".*"path":"x.txt"/);
+		expect(audit).toMatch(/"event":"workspace.transferPath".*"destinationPath":"from-phone.txt"/);
 		expect(audit).not.toContain("TOP-SECRET");
 		phone.close();
 	});

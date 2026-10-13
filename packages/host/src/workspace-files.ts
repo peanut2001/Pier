@@ -310,7 +310,12 @@ export async function writeWorkspaceFile(
  * the entry itself is not followed, so deleting a symlink removes only the link, never its
  * target. The workspace root itself cannot be deleted.
  */
-export async function deleteWorkspacePath(workspaceRoot: string, path: string): Promise<WorkspacePathDeleteResult> {
+export async function deleteWorkspacePath(
+	workspaceRoot: string,
+	path: string,
+	expectedModifiedAt?: string,
+	expectedSize?: number,
+): Promise<WorkspacePathDeleteResult> {
 	const relPath = normalizeRelativePath(path);
 	if (!relPath) throw new PierProtocolError("BAD_REQUEST", "Cannot delete the workspace root");
 	const root = await workspaceRealRoot(workspaceRoot);
@@ -320,6 +325,14 @@ export async function deleteWorkspacePath(workspaceRoot: string, path: string): 
 	const target = join(parent, name);
 	try {
 		const info = await lstat(target);
+		if (expectedModifiedAt !== undefined || expectedSize !== undefined) {
+			if (
+				!info.isFile() ||
+				(expectedModifiedAt !== undefined && info.mtime.toISOString() !== expectedModifiedAt) ||
+				(expectedSize !== undefined && info.size !== expectedSize)
+			)
+				throw new PierProtocolError("CONFLICT", `Source file changed; keeping it: ${relPath}`);
+		}
 		const kind = info.isDirectory() ? "directory" : info.isFile() ? "file" : "other";
 		await rm(target, { recursive: kind === "directory", maxRetries: 2 });
 		return { path: relPath, kind };

@@ -4,12 +4,19 @@ import {
 	bytesToBase64,
 	downloadFile,
 	type OverwriteAnswer,
+	pasteWorkspaceEntries,
 	TRANSFER_CHUNK_BYTES,
 	transfers,
 	uploadFiles,
 	uploadItemsFromInput,
 } from "../src/lib/file-transfers.ts";
 import type { PierStore } from "../src/lib/store.tsx";
+import {
+	clearWorkspaceClipboard,
+	getWorkspaceClipboard,
+	setWorkspaceClipboard,
+	type WorkspaceClipboardState,
+} from "../src/lib/workspace-clipboard.ts";
 
 const workspace = { id: "w1", path: "/ws", name: "ws" } as WorkspaceInfo;
 
@@ -29,6 +36,9 @@ function fakeStore(handle: (call: Call) => unknown, sink?: { writes: string[]; f
 	};
 	const store = {
 		fileTransferClient: () => client,
+		nodeOf: () => "local",
+		requireNativeFileTransfers: vi.fn(),
+		closeMovedFilePreview: vi.fn(),
 		toast: vi.fn(),
 		bumpFiles: vi.fn(),
 		saveLocalFile: async () =>
@@ -54,6 +64,7 @@ function fakeStore(handle: (call: Call) => unknown, sink?: { writes: string[]; f
 beforeEach(() => {
 	for (const t of transfers.snapshot()) transfers.cancel(t.id);
 	transfers.clearFinished("w1");
+	clearWorkspaceClipboard();
 });
 
 describe("bytesToBase64", () => {
@@ -161,5 +172,123 @@ describe("downloadFile", () => {
 		await downloadFile(second.store, workspace, "f.txt");
 		expect(changed.aborted).toBe(true);
 		expect(transfers.snapshot().at(-1)).toMatchObject({ state: "error", error: "文件在下载过程中被修改，请重新下载" });
+	});
+});
+
+const copied = (mode: "copy" | "move" = "copy"): WorkspaceClipboardState => ({
+	mode,
+	sourceWorkspaceId: "source",
+	entries: [{ path: "src/a.bin", name: "a.bin", kind: "file" }],
+});
+
+describe("pasteWorkspaceEntries", () => {
+	it("copies a folder with a native Host operation, without downloading it to the client", async () => {
+		const { store, calls } = fakeStore(() => ({ sourcePath: "folder", path: "target/folder", kind: "directory" }));
+		await pasteWorkspaceEntries(
+			store,
+			{ ...copied(), entries: [{ path: "folder", name: "folder", kind: "directory" }] },
+			workspace,
+			"target",
+			async () => ({ choice: "cancel" }),
+		);
+		expect(calls).toEqual([
+			{
+				method: "workspace.transferPath",
+				params: {
+					workspaceId: "source",
+					path: "folder",
+					destinationWorkspaceId: "w1",
+					destinationPath: "target/folder",
+					mode: "copy",
+					overwrite: false,
+				},
+			},
+		]);
+		expect(store.bumpFiles).toHaveBeenCalledWith("source");
+		expect(store.bumpFiles).toHaveBeenCalledWith("w1");
+	});
+
+	it("asks before replacing files and keeps skipped moves in the clipboard", async () => {
+		const { store, calls } = fakeStore(({ params }) => {
+			if (!params.overwrite) throw new PierProtocolError("CONFLICT", "exists", { kind: "file" });
+			return {};
+		});
+		setWorkspaceClipboard("move", "source", copied().entries);
+		const clipboard = getWorkspaceClipboard() as WorkspaceClipboardState;
+		await pasteWorkspaceEntries(store, clipboard, workspace, "", async () => ({ choice: "skip" }));
+		expect(calls).toHaveLength(1);
+		expect(getWorkspaceClipboard()).toBe(clipboard);
+		await pasteWorkspaceEntries(store, clipboard, workspace, "", async (question) => {
+			expect(question.canOverwrite).toBe(true);
+			return { choice: "overwrite" };
+		});
+		expect(calls.at(-1)?.params.overwrite).toBe(true);
+		expect(getWorkspaceClipboard()).toBeUndefined();
+	});
+
+	it("never replaces existing directories", async () => {
+		const { store, calls } = fakeStore(() => {
+			throw new PierProtocolError("CONFLICT", "exists", { kind: "directory" });
+		});
+		await pasteWorkspaceEntries(store, copied(), workspace, "", async (question) => {
+			expect(question.canOverwrite).toBe(false);
+			return { choice: "skip" };
+		});
+		expect(calls).toHaveLength(1);
+	});
+
+	it("streams a cross-Host file and deletes its guarded source only after the destination is committed", async () => {
+		const { store, calls } = fakeStore(({ method, params }) => {
+			if (method === "workspace.readBytes")
+				return { size: 5, modifiedAt: "t1", data: params.offset ? "AP8=" : "YWJj", eof: Boolean(params.offset) };
+			if (method === "workspace.uploadStart") return { uploadId: "u", chunkBytes: 4 * 1024 * 1024 };
+			if (method === "workspace.uploadChunk")
+				return { received: (params.offset as number) + Buffer.from(params.data as string, "base64").length };
+			return {};
+		});
+		store.nodeOf = (id) => (id === "source" ? "remote" : "local");
+		await pasteWorkspaceEntries(store, copied("move"), workspace, "target", async () => ({ choice: "cancel" }));
+		expect(calls.filter((call) => call.method === "workspace.uploadChunk").map((call) => call.params.data)).toEqual([
+			"YWJj",
+			"AP8=",
+		]);
+		expect(calls.slice(-2).map((call) => call.method)).toEqual(["workspace.uploadFinish", "workspace.deletePath"]);
+		expect(calls.at(-1)?.params).toEqual({
+			workspaceId: "source",
+			path: "src/a.bin",
+			expectedModifiedAt: "t1",
+			expectedSize: 5,
+		});
+	});
+
+	it("cancels an unfinished destination and retains a source changed while transferring", async () => {
+		const { store, calls } = fakeStore(({ method, params }) => {
+			if (method === "workspace.readBytes")
+				return { size: 5, modifiedAt: params.offset ? "t2" : "t1", data: "YWJj", eof: Boolean(params.offset) };
+			if (method === "workspace.uploadStart") return { uploadId: "u", chunkBytes: 4 * 1024 * 1024 };
+			if (method === "workspace.uploadChunk") return { received: 3 };
+			return {};
+		});
+		store.nodeOf = (id) => (id === "source" ? "remote" : "local");
+		await pasteWorkspaceEntries(store, copied("move"), workspace, "", async () => ({ choice: "cancel" }));
+		expect(calls.at(-1)?.method).toBe("workspace.uploadCancel");
+		expect(
+			calls.some((call) => call.method === "workspace.uploadFinish" || call.method === "workspace.deletePath"),
+		).toBe(false);
+		expect(transfers.snapshot().at(-1)?.state).toBe("error");
+	});
+
+	it("rejects cross-Host folder moves before making changes", async () => {
+		const { store, calls } = fakeStore(() => ({}));
+		store.nodeOf = (id) => (id === "source" ? "remote" : "local");
+		await pasteWorkspaceEntries(
+			store,
+			{ ...copied("move"), entries: [{ path: "folder", name: "folder", kind: "directory" }] },
+			workspace,
+			"",
+			async () => ({ choice: "cancel" }),
+		);
+		expect(calls).toEqual([]);
+		expect(store.toast).toHaveBeenCalledWith("error", expect.stringContaining("跨电脑暂只支持普通文件"));
 	});
 });
