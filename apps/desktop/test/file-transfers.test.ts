@@ -182,6 +182,51 @@ const copied = (mode: "copy" | "move" = "copy"): WorkspaceClipboardState => ({
 });
 
 describe("pasteWorkspaceEntries", () => {
+	it("moves dragged files within the workspace and preserves an existing file clipboard", async () => {
+		const { store, calls } = fakeStore(() => ({}));
+		setWorkspaceClipboard("copy", "source", copied().entries);
+		const clipboard = getWorkspaceClipboard();
+		await pasteWorkspaceEntries(
+			store,
+			{ mode: "move", sourceWorkspaceId: "w1", entries: [{ path: "notes.txt", name: "notes.txt", kind: "file" }] },
+			workspace,
+			"target",
+			async () => ({ choice: "cancel" }),
+		);
+		expect(calls).toEqual([
+			{
+				method: "workspace.transferPath",
+				params: {
+					workspaceId: "w1",
+					path: "notes.txt",
+					destinationWorkspaceId: "w1",
+					destinationPath: "target/notes.txt",
+					mode: "move",
+					overwrite: false,
+				},
+			},
+		]);
+		expect(getWorkspaceClipboard()).toBe(clipboard);
+		expect(store.closeMovedFilePreview).toHaveBeenCalledWith("w1", "notes.txt");
+		expect(store.bumpFiles).toHaveBeenCalledWith("w1");
+	});
+
+	it("rejects a drag move on an older Host before dispatching any requests", async () => {
+		const { store, calls } = fakeStore(() => ({}));
+		store.requireNativeFileTransfers = () => {
+			throw new Error("Host needs an update");
+		};
+		await pasteWorkspaceEntries(
+			store,
+			{ ...copied("move"), sourceWorkspaceId: "w1" },
+			workspace,
+			"target",
+			async () => ({ choice: "cancel" }),
+		);
+		expect(calls).toEqual([]);
+		expect(store.toast).toHaveBeenCalledWith("error", "Host needs an update");
+	});
+
 	it("copies a folder with a native Host operation, without downloading it to the client", async () => {
 		const { store, calls } = fakeStore(() => ({ sourcePath: "folder", path: "target/folder", kind: "directory" }));
 		await pasteWorkspaceEntries(

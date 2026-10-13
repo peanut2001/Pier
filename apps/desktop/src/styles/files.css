@@ -635,6 +635,10 @@ body.resizing-panel {
 	opacity: 0.5;
 }
 
+.files-row.dragging .files-entry {
+	opacity: 0.5;
+}
+
 /* ---- context menu ---------------------------------------------------------------- */
 
 .dropdown-menu.context-menu {

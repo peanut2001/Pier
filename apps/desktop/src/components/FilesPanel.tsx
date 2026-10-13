@@ -8,6 +8,7 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { WORKSPACE_FILE_DRAG_TYPE, workspaceDragEntries, workspaceDropEntries } from "../lib/file-drag.ts";
 import { type SelectionUpdate, selectByKeyboard, selectByPointer } from "../lib/file-selection.ts";
 import {
 	downloadFile,
@@ -26,7 +27,14 @@ import {
 } from "../lib/file-transfers.ts";
 import { formatBytes, joinPath, relativeTime } from "../lib/format.ts";
 import { useCanOpenTerminal } from "../lib/remote-terminals.ts";
-import { hostCanCreateFiles, hostCanDeleteFiles, hostTransfersFiles, useAppState, useStore } from "../lib/store.tsx";
+import {
+	hostCanCreateFiles,
+	hostCanDeleteFiles,
+	hostTransfersFiles,
+	hostTransfersWorkspacePaths,
+	useAppState,
+	useStore,
+} from "../lib/store.tsx";
 import { terminals } from "../lib/terminals.ts";
 import {
 	clearWorkspaceClipboard,
@@ -35,6 +43,7 @@ import {
 	useWorkspacePasteBusy,
 	type WorkspaceClipboardEntry,
 	type WorkspaceClipboardMode,
+	type WorkspaceClipboardState,
 } from "../lib/workspace-clipboard.ts";
 import { ContextMenu, type ContextMenuItem, type ContextMenuPosition, contextMenuPosition } from "./ContextMenu.tsx";
 import {
@@ -552,6 +561,12 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 	const clipboard = useWorkspaceClipboard();
 	const pasteBusy = useWorkspacePasteBusy();
 	const canPaste = canTransfer && Boolean(clipboard) && !pasteBusy;
+	const nativeTransfers = useAppState((s) =>
+		hostTransfersWorkspacePaths(s.nodes[s.workspaceNodes[workspace.id] ?? s.node]?.hostInfo),
+	);
+	const canMove = canTransfer && nativeTransfers && !pasteBusy;
+	const dragged = useRef<WorkspaceClipboardState>(undefined);
+	const [dragPaths, setDragPaths] = useState<ReadonlySet<string>>(() => new Set());
 	const fileInput = useRef<HTMLInputElement>(null);
 	const folderInput = useRef<HTMLInputElement>(null);
 	/** Workspace directory the next picked files go to. */
@@ -798,7 +813,38 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 		const row = (event.target as Element).closest?.("[data-drop-dir]");
 		return row?.getAttribute("data-drop-dir") ?? "";
 	};
+	const endDrag = () => {
+		dragged.current = undefined;
+		setDragPaths(new Set());
+		setDropDir(undefined);
+	};
+	const onEntryDragStart = (event: ReactDragEvent<HTMLButtonElement>, entry: WorkspaceFileEntry) => {
+		clearTimeout(clickTimer.current);
+		const entries = workspaceDragEntries(visibleEntries, selectedPaths, entry);
+		if (!canMove || !entries.length) {
+			event.preventDefault();
+			return;
+		}
+		event.stopPropagation();
+		if (!selectedPaths.has(entry.path)) {
+			applySelection(selectByPointer(visiblePaths, selectedPaths, selectionAnchor, entry.path));
+		}
+		setMenu(undefined);
+		dragged.current = { mode: "move", sourceWorkspaceId: workspace.id, entries };
+		setDragPaths(new Set(entries.map((item) => item.path)));
+		event.dataTransfer.effectAllowed = "move";
+		event.dataTransfer.setData(WORKSPACE_FILE_DRAG_TYPE, workspace.id);
+	};
 	const onDragOver = (event: ReactDragEvent<HTMLDivElement>) => {
+		if ([...event.dataTransfer.types].includes(WORKSPACE_FILE_DRAG_TYPE)) {
+			event.preventDefault();
+			event.stopPropagation();
+			const dir = dropTarget(event);
+			const valid = canMove && dragged.current && workspaceDropEntries(dragged.current.entries, dir).length > 0;
+			event.dataTransfer.dropEffect = valid ? "move" : "none";
+			setDropDir(valid ? dir : undefined);
+			return;
+		}
 		if (!canTransfer || !dragHasFiles(event.dataTransfer)) return;
 		event.preventDefault();
 		event.dataTransfer.dropEffect = "copy";
@@ -809,6 +855,17 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 		if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropDir(undefined);
 	};
 	const onDrop = (event: ReactDragEvent<HTMLDivElement>) => {
+		if ([...event.dataTransfer.types].includes(WORKSPACE_FILE_DRAG_TYPE)) {
+			event.preventDefault();
+			event.stopPropagation();
+			const snapshot = dragged.current;
+			const dir = dropTarget(event);
+			endDrag();
+			if (!canMove || !snapshot) return;
+			const entries = workspaceDropEntries(snapshot.entries, dir);
+			if (entries.length) void pasteWorkspaceEntries(store, { ...snapshot, entries }, workspace, dir, askOverwrite);
+			return;
+		}
 		setDropDir(undefined);
 		if (!canTransfer || !dragHasFiles(event.dataTransfer)) return;
 		event.preventDefault();
@@ -1002,7 +1059,7 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 						<div key={entry.path}>
 							{/* biome-ignore lint/a11y/noStaticElementInteractions: the row's button is the focusable control; this only adds its context menu. */}
 							<div
-								className={`files-row${isSelected ? " selected" : ""}${menu?.entry?.path === entry.path ? " menu-open" : ""}${entry.kind === "other" ? " dim" : ""}${clipboard?.mode === "move" && clipboard.sourceWorkspaceId === workspace.id && clipboard.entries.some((item) => entry.path === item.path || entry.path.startsWith(`${item.path}/`)) ? " cut" : ""}${isDir && dropDir === entry.path ? " drop-target" : ""}`}
+								className={`files-row${isSelected ? " selected" : ""}${menu?.entry?.path === entry.path ? " menu-open" : ""}${entry.kind === "other" ? " dim" : ""}${clipboard?.mode === "move" && clipboard.sourceWorkspaceId === workspace.id && clipboard.entries.some((item) => entry.path === item.path || entry.path.startsWith(`${item.path}/`)) ? " cut" : ""}${dragPaths.has(entry.path) ? " dragging" : ""}${isDir && dropDir === entry.path ? " drop-target" : ""}`}
 								style={{ paddingLeft: 6 + depth * 14 }}
 								data-drop-dir={isDir ? entry.path : parentPath(entry.path)}
 								onContextMenu={(event) => {
@@ -1025,6 +1082,9 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 									}}
 									data-entry-path={entry.path}
 									aria-selected={isSelected}
+									draggable={canMove && entry.kind !== "other"}
+									onDragStart={(event) => onEntryDragStart(event, entry)}
+									onDragEnd={endDrag}
 									title={entryTitle(entry)}
 									{...(isDir ? { "aria-expanded": open } : {})}
 									onKeyDown={(event) => onEntryKeyDown(event, entry)}
@@ -1183,13 +1243,15 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 			<TransferList workspaceId={workspace.id} />
 			<div
 				className="files-hint"
-				title={`Shift+单击范围选择，${/Mac/.test(platform) ? "⌘" : "Ctrl"}+单击增减选择；方向键导航，Shift+↑/↓ 扩展选择，←/→ 折叠/展开；Ctrl/⌘+A 全选，Ctrl/⌘+C 复制，Ctrl/⌘+X 剪切，Ctrl/⌘+V 粘贴到当前文件夹，Ctrl/⌘+Shift+C 复制绝对路径，Delete / ⌘⌫ 删除，Esc 清除选择与文件剪贴板`}
+				title={`拖动项目到文件夹移动，拖到空白处移回工作区根目录；Shift+单击范围选择，${/Mac/.test(platform) ? "⌘" : "Ctrl"}+单击增减选择；方向键导航，Shift+↑/↓ 扩展选择，←/→ 折叠/展开；Ctrl/⌘+A 全选，Ctrl/⌘+C 复制，Ctrl/⌘+X 剪切，Ctrl/⌘+V 粘贴到当前文件夹，Ctrl/⌘+Shift+C 复制绝对路径，Delete / ⌘⌫ 删除，Esc 清除选择与文件剪贴板`}
 			>
 				{selectedPaths.size > 1
 					? `已选择 ${selectedPaths.size} 项 · 右键批量操作`
-					: composerKey
-						? "单击查看，双击插入路径 · Shift 范围选择，Ctrl/⌘ 多选"
-						: "单击查看 · Shift 范围选择，Ctrl/⌘ 多选 · 右键更多操作"}
+					: canMove
+						? `拖到文件夹移动 · ${composerKey ? "双击插入路径" : "单击查看"}`
+						: composerKey
+							? "单击查看，双击插入路径 · Shift 范围选择，Ctrl/⌘ 多选"
+							: "单击查看 · Shift 范围选择，Ctrl/⌘ 多选 · 右键更多操作"}
 			</div>
 			<input
 				ref={fileInput}
