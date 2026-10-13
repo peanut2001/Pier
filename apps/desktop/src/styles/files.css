@@ -150,14 +150,16 @@ body.resizing-panel {
 	overflow: auto;
 }
 
-.files-create-dialog .field {
+.files-create-dialog .field,
+.files-conflict-dialog .field {
 	display: flex;
 	flex-direction: column;
 	gap: 8px;
 	margin-top: 16px;
 }
 
-.files-create-dialog .field-label {
+.files-create-dialog .field-label,
+.files-conflict-dialog .field-label {
 	margin-bottom: 0;
 }
 

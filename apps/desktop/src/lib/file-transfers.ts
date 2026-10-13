@@ -56,6 +56,33 @@ export interface OverwriteAnswer {
 	all?: boolean;
 }
 
+export interface PasteConflictQuestion extends OverwriteQuestion {
+	suggestedName: string;
+	error?: string;
+}
+
+export type PasteConflictAnswer = OverwriteAnswer | { choice: "rename"; name: string };
+
+/** Keep renaming within the chosen destination directory. */
+export function pasteNameError(name: string, existingName: string): string | undefined {
+	const value = name.trim();
+	if (!value || value === "." || value === "..") return "请输入有效的名称";
+	if (/[\\/]/.test(value) || [...value].some((char) => char.charCodeAt(0) < 32) || /^[a-zA-Z]:/.test(value))
+		return "名称不能包含路径分隔符或控制字符";
+	if (value === existingName) return "此名称已被占用，请使用其他名称";
+	return undefined;
+}
+
+function suggestedPasteName(name: string, kind: string): string {
+	const dot = kind === "file" ? name.lastIndexOf(".") : -1;
+	const stem = dot > 0 ? name.slice(0, dot) : name;
+	const extension = dot > 0 ? name.slice(dot) : "";
+	const copy = / \(副本(?: (\d+))?\)$/.exec(stem);
+	return copy
+		? `${stem.slice(0, copy.index)} (副本 ${Number(copy[1] ?? 1) + 1})${extension}`
+		: `${stem} (副本)${extension}`;
+}
+
 /** A local file to upload and its workspace-relative destination. */
 export interface UploadItem {
 	file: File;
@@ -339,7 +366,7 @@ export async function pasteWorkspaceEntries(
 	clipboard: WorkspaceClipboardState,
 	destinationWorkspace: WorkspaceInfo,
 	destinationDir: string,
-	ask: (question: OverwriteQuestion) => Promise<OverwriteAnswer>,
+	ask: (question: PasteConflictQuestion) => Promise<PasteConflictAnswer>,
 ): Promise<void> {
 	if (!beginWorkspacePaste()) {
 		store.toast("info", "正在粘贴文件，请等待完成");
@@ -357,7 +384,7 @@ async function runWorkspacePaste(
 	clipboard: WorkspaceClipboardState,
 	destinationWorkspace: WorkspaceInfo,
 	destinationDir: string,
-	ask: (question: OverwriteQuestion) => Promise<OverwriteAnswer>,
+	ask: (question: PasteConflictQuestion) => Promise<PasteConflictAnswer>,
 ): Promise<void> {
 	const sourceWorkspaceId = clipboard.sourceWorkspaceId;
 	let source: PierClient;
@@ -387,7 +414,7 @@ async function runWorkspacePaste(
 	let failures = 0;
 	let skipped = 0;
 	const completed: string[] = [];
-	for (const [index, item] of queued.entries()) {
+	entries: for (const [index, item] of queued.entries()) {
 		if (stopped || transfers.isCancelled(item.transfer.id)) {
 			stopped = true;
 			transfers.update(item.transfer.id, { state: "cancelled" });
@@ -423,33 +450,54 @@ async function runWorkspacePaste(
 					);
 				}
 			};
-			try {
-				await run(false);
-			} catch (error) {
-				const kind =
-					error instanceof PierProtocolError ? (error.data as { kind?: string } | undefined)?.kind : undefined;
-				if (
-					!(error instanceof PierProtocolError) ||
-					error.code !== "CONFLICT" ||
-					!["file", "directory", "other"].includes(kind ?? "")
-				)
-					throw error;
-				const canOverwrite = kind === "file" && item.entry.kind === "file" && !item.entry.symlink;
-				let choice = canOverwrite ? always : undefined;
-				if (!choice) {
-					const answer = await ask({ path: item.path, more: index < queued.length - 1, canOverwrite });
-					choice = answer.choice;
-					if (canOverwrite && answer.all && choice !== "cancel") always = choice;
-				}
-				if (choice === "cancel") throw new CancelledError();
-				if (choice === "skip") {
-					skipped++;
-					transfers.update(item.transfer.id, { state: "skipped" });
-					continue;
-				}
-				if (!canOverwrite) throw error;
+			let overwrite = false;
+			let renamed = false;
+			for (;;) {
 				if (transfers.isCancelled(item.transfer.id)) throw new CancelledError();
-				await run(true);
+				try {
+					await run(overwrite);
+					break;
+				} catch (error) {
+					if (!(error instanceof PierProtocolError)) throw error;
+					// Older Hosts report pasting into the source directory as BAD_REQUEST.
+					const samePath = error.code === "BAD_REQUEST" && error.message.includes("same path");
+					const kind = (error.data as { kind?: string } | undefined)?.kind;
+					if (!samePath && (error.code !== "CONFLICT" || !["file", "directory", "other"].includes(kind ?? "")))
+						throw error;
+					const canOverwrite = !samePath && kind === "file" && item.entry.kind === "file" && !item.entry.symlink;
+					const question: PasteConflictQuestion = {
+						path: item.path,
+						more: index < queued.length - 1,
+						canOverwrite,
+						suggestedName: suggestedPasteName(baseName(item.path), item.entry.kind),
+						...(renamed ? { error: "此名称已被占用，请使用其他名称" } : {}),
+					};
+					if (overwrite) always = undefined;
+					let answer: PasteConflictAnswer =
+						canOverwrite && !renamed && always ? { choice: always } : await ask(question);
+					while (answer.choice === "rename") {
+						const invalid = pasteNameError(answer.name, baseName(item.path));
+						if (!invalid) break;
+						answer = await ask({ ...question, suggestedName: answer.name, error: invalid });
+					}
+					if (answer.choice === "cancel") throw new CancelledError();
+					if (answer.choice === "rename") {
+						const name = answer.name.trim();
+						item.path = childPath(destinationDir, name);
+						renamed = true;
+						overwrite = false;
+						transfers.update(item.transfer.id, { path: item.path, name, done: 0, cancellable: !sameHost });
+						continue;
+					}
+					if (canOverwrite && answer.all) always = answer.choice;
+					if (answer.choice === "skip") {
+						skipped++;
+						transfers.update(item.transfer.id, { state: "skipped" });
+						continue entries;
+					}
+					if (!canOverwrite) throw error;
+					overwrite = true;
+				}
 			}
 			completed.push(item.entry.path);
 			if (clipboard.mode === "move") store.closeMovedFilePreview(sourceWorkspaceId, item.entry.path);

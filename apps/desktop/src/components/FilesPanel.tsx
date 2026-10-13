@@ -16,6 +16,9 @@ import {
 	dropEntries,
 	type OverwriteAnswer,
 	type OverwriteQuestion,
+	type PasteConflictAnswer,
+	type PasteConflictQuestion,
+	pasteNameError,
 	pasteWorkspaceEntries,
 	type Transfer,
 	transferFinished,
@@ -286,46 +289,92 @@ function DeleteDialog({
 	);
 }
 
-/** Asks whether an upload may replace an existing file. */
+/** Resolves a name conflict, with an editable destination name when pasting. */
 function OverwriteDialog({
 	question,
 	onAnswer,
+	rename,
 }: {
 	question: OverwriteQuestion;
 	onAnswer: (answer: OverwriteAnswer) => void;
+	rename?: { suggestedName: string; error?: string; onRename: (name: string) => void };
 }) {
 	const [all, setAll] = useState(false);
+	const [name, setName] = useState(rename?.suggestedName ?? "");
+	const [error, setError] = useState(rename?.error);
+	const input = useRef<HTMLInputElement>(null);
+	useEffect(() => {
+		input.current?.focus();
+		input.current?.select();
+	}, []);
 	return (
-		<Modal title="目标已存在" onClose={() => onAnswer({ choice: "cancel" })}>
-			<p>
-				{question.canOverwrite === false
-					? "目标目录中已经有同名项目，请跳过或取消后更改名称。"
-					: "目标目录中已经有同名文件，要替换它吗？"}
-			</p>
-			<code className="path">{question.path}</code>
-			{question.more && question.canOverwrite !== false ? (
-				<label className="files-overwrite-all muted small">
-					<input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} />
-					对其余同名文件执行相同操作
-				</label>
-			) : null}
-			<div className="modal-actions">
-				<button type="button" className="ghost" onClick={() => onAnswer({ choice: "cancel" })}>
-					{question.more ? "取消其余操作" : "取消"}
-				</button>
-				{/* biome-ignore lint/a11y/noAutofocus: focus the safe choice so Enter does not replace. */}
-				<button type="button" autoFocus onClick={() => onAnswer({ choice: "skip", all })}>
-					跳过
-				</button>
-				<button
-					type="button"
-					className="danger"
-					disabled={question.canOverwrite === false}
-					onClick={() => onAnswer({ choice: "overwrite", all })}
-				>
-					替换
-				</button>
-			</div>
+		<Modal
+			title={rename ? "改名后粘贴" : "目标已存在"}
+			className="files-conflict-dialog"
+			onClose={() => onAnswer({ choice: "cancel" })}
+		>
+			<form
+				onSubmit={(event) => {
+					event.preventDefault();
+					if (!rename) return;
+					const invalid = pasteNameError(name, question.path.slice(question.path.lastIndexOf("/") + 1));
+					if (invalid) setError(invalid);
+					else rename.onRename(name.trim());
+				}}
+			>
+				<p>
+					{rename
+						? "目标目录中已有同名文件或文件夹，请输入新名称后继续粘贴。"
+						: question.canOverwrite === false
+							? "目标目录中已经有同名项目，请跳过或取消后更改名称。"
+							: "目标目录中已经有同名文件，要替换它吗？"}
+				</p>
+				<code className="path">{question.path}</code>
+				{rename ? (
+					<label className="field">
+						<span className="field-label">新名称</span>
+						<input
+							ref={input}
+							value={name}
+							onChange={(event) => {
+								setName(event.target.value);
+								setError(undefined);
+							}}
+							autoComplete="off"
+						/>
+					</label>
+				) : null}
+				{error ? (
+					<p className="error-text small" role="alert">
+						{error}
+					</p>
+				) : null}
+				{question.more && question.canOverwrite !== false ? (
+					<label className="files-overwrite-all muted small">
+						<input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} />
+						{rename ? "对其余同名文件应用跳过或替换" : "对其余同名文件执行相同操作"}
+					</label>
+				) : null}
+				<div className="modal-actions">
+					<button type="button" className="ghost" onClick={() => onAnswer({ choice: "cancel" })}>
+						{question.more ? "取消其余操作" : "取消"}
+					</button>
+					{/* biome-ignore lint/a11y/noAutofocus: focus the safe choice so Enter does not replace. */}
+					<button type="button" autoFocus={!rename} onClick={() => onAnswer({ choice: "skip", all })}>
+						跳过
+					</button>
+					{question.canOverwrite !== false ? (
+						<button type="button" className="danger" onClick={() => onAnswer({ choice: "overwrite", all })}>
+							替换
+						</button>
+					) : null}
+					{rename ? (
+						<button type="submit" disabled={!name.trim()}>
+							改名并粘贴
+						</button>
+					) : null}
+				</div>
+			</form>
 		</Modal>
 	);
 }
@@ -573,11 +622,14 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 	const uploadDir = useRef("");
 	/** Directory highlighted while files are dragged over the tree. */
 	const [dropDir, setDropDir] = useState<string>();
-	const [overwrite, setOverwrite] = useState<{
-		question: OverwriteQuestion;
-		resolve: (answer: OverwriteAnswer) => void;
-	}>();
+	const [overwrite, setOverwrite] = useState<
+		(
+			| { kind: "upload"; question: OverwriteQuestion; resolve: (answer: OverwriteAnswer) => void }
+			| { kind: "paste"; question: PasteConflictQuestion; resolve: (answer: PasteConflictAnswer) => void }
+		) & { id: number }
+	>();
 	const overwriteRef = useRef(overwrite);
+	const nextConflictId = useRef(0);
 	const mounted = useRef(true);
 	const askOverwrite = (question: OverwriteQuestion): Promise<OverwriteAnswer> =>
 		new Promise((resolve) => {
@@ -586,7 +638,18 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 				return;
 			}
 			overwriteRef.current?.resolve({ choice: "cancel" });
-			const pending = { question, resolve };
+			const pending = { kind: "upload" as const, question, resolve, id: nextConflictId.current++ };
+			overwriteRef.current = pending;
+			setOverwrite(pending);
+		});
+	const askPasteConflict = (question: PasteConflictQuestion): Promise<PasteConflictAnswer> =>
+		new Promise((resolve) => {
+			if (!mounted.current) {
+				resolve({ choice: "cancel" });
+				return;
+			}
+			overwriteRef.current?.resolve({ choice: "cancel" });
+			const pending = { kind: "paste" as const, question, resolve, id: nextConflictId.current++ };
 			overwriteRef.current = pending;
 			setOverwrite(pending);
 		});
@@ -695,7 +758,7 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 	};
 	const paste = (dir: string) => {
 		if (!canPaste || !clipboard) return;
-		void pasteWorkspaceEntries(store, clipboard, workspace, dir, askOverwrite);
+		void pasteWorkspaceEntries(store, clipboard, workspace, dir, askPasteConflict);
 	};
 	const openEntry = (entry: WorkspaceFileEntry) => {
 		if (entry.kind === "directory") {
@@ -769,6 +832,13 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 	};
 	const answerOverwrite = (answer: OverwriteAnswer) => {
 		overwriteRef.current?.resolve(answer);
+		overwriteRef.current = undefined;
+		setOverwrite(undefined);
+	};
+	const answerRename = (name: string) => {
+		const pending = overwriteRef.current;
+		if (pending?.kind !== "paste") return;
+		pending.resolve({ choice: "rename", name });
 		overwriteRef.current = undefined;
 		setOverwrite(undefined);
 	};
@@ -863,7 +933,7 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 			endDrag();
 			if (!canMove || !snapshot) return;
 			const entries = workspaceDropEntries(snapshot.entries, dir);
-			if (entries.length) void pasteWorkspaceEntries(store, { ...snapshot, entries }, workspace, dir, askOverwrite);
+			if (entries.length) void pasteWorkspaceEntries(store, { ...snapshot, entries }, workspace, dir, askPasteConflict);
 			return;
 		}
 		setDropDir(undefined);
@@ -1275,7 +1345,14 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 					onClose={() => setMenu(undefined)}
 				/>
 			) : null}
-			{overwrite ? <OverwriteDialog question={overwrite.question} onAnswer={answerOverwrite} /> : null}
+			{overwrite ? (
+				<OverwriteDialog
+					key={overwrite.id}
+					question={overwrite.question}
+					onAnswer={answerOverwrite}
+					rename={overwrite.kind === "paste" ? { ...overwrite.question, onRename: answerRename } : undefined}
+				/>
+			) : null}
 			{creating ? (
 				<CreateDialog
 					workspace={workspace}
