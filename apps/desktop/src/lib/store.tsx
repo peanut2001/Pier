@@ -44,6 +44,7 @@ import type {
 	ProviderInfo,
 	ProviderListResult,
 	RemoteAccessStatus,
+	ResourceMethod,
 	ScheduledTask,
 	ScheduledTaskRun,
 	SessionCleanupResult,
@@ -59,12 +60,13 @@ import type {
 import { PierProtocolError, parseProtocolVersion } from "@pier/protocol";
 import { createContext, useContext, useMemo, useSyncExternalStore } from "react";
 import type { Bridge, HostStatus, LocalFileSink, UpdateStatus } from "./bridge.ts";
+import { remoteServiceUrl } from "./browser-url.ts";
 import { fileToken } from "./composer-text.ts";
 import { newSessionDefaultsFromSettings } from "./new-session-defaults.ts";
 import { remotePageBlocker } from "./settings-target.ts";
 import { isYunlianProvider, movedToLine, YUNLIAN_SITE, yunlianGroupOf, yunlianProvider } from "./yunlian.ts";
 
-export const APP_VERSION = "0.2.33";
+export const APP_VERSION = "0.2.41";
 
 /** Node id of this computer; any other node is a paired computer's host id. */
 export const LOCAL_NODE = "local";
@@ -242,6 +244,7 @@ export type SettingsSection =
 	| "models"
 	| "workspaces"
 	| "extensions"
+	| "resources"
 	| "pi"
 	| "claude"
 	| "codex"
@@ -287,8 +290,10 @@ export interface AppState {
 	peers: PeerInfo[];
 	/** The "add a computer" (pair with a link) dialog is open. */
 	addPeerOpen: boolean;
-	/** Workspaces of every computer: this one's first, then each paired computer's. */
+	/** Workspaces of every computer, in the sidebar's saved display order. */
 	workspaces: WorkspaceInfo[];
+	/** Preferred sidebar order, including computers whose workspace lists have not loaded yet. */
+	workspaceOrder: string[];
 	/** The computer each workspace in `workspaces` belongs to. */
 	workspaceNodes: Record<string, string>;
 	/** This computer's workspaces were loaded (the main area can decide what to show). */
@@ -382,6 +387,8 @@ function deriveWorkspaces(state: AppState): Partial<AppState> {
 			workspaces.push(workspace);
 		}
 	}
+	const order = new Map(state.workspaceOrder.map((id, index) => [id, index]));
+	workspaces.sort((a, b) => (order.get(a.id) ?? Infinity) - (order.get(b.id) ?? Infinity));
 	const local = state.nodes[LOCAL_NODE] ?? EMPTY_NODE;
 	return {
 		workspaces,
@@ -418,6 +425,7 @@ const FILES_PANEL_KEY = "pier.filesPanel";
 /** The views of the right-hand panel. */
 export type RightPanelTab = "files" | "git";
 const SIDEBAR_KEY = "pier.sidebar";
+const WORKSPACE_ORDER_KEY = "pier.workspaceOrder";
 export const SIDEBAR_MIN_WIDTH = 180;
 export const SIDEBAR_MAX_WIDTH = 480;
 export const SIDEBAR_DEFAULT_WIDTH = 228;
@@ -506,6 +514,7 @@ export class PierStore {
 	private readonly autoSend = new Set<string>();
 	private nextToastId = 1;
 	private readonly refreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
+	private readonly workspaceLoadSeq = new Map<string, number>();
 	private readonly taskLoadSeq = new Map<string, number>();
 	/** Sign-in events that arrived before `provider.login` answered with their flow id. */
 	private authBacklog: EventFrame[] = [];
@@ -567,6 +576,14 @@ export class PierStore {
 				return {};
 			}
 		})();
+		const workspaceOrder = (() => {
+			try {
+				const saved: unknown = JSON.parse(localStorage.getItem(WORKSPACE_ORDER_KEY) ?? "[]");
+				return Array.isArray(saved) ? [...new Set(saved.filter((id): id is string => typeof id === "string"))] : [];
+			} catch {
+				return [];
+			}
+		})();
 		const state: AppState = {
 			scheduledTasksOpen: false,
 			taskData: {},
@@ -579,6 +596,7 @@ export class PierStore {
 			peers: [],
 			addPeerOpen: false,
 			workspaces: [],
+			workspaceOrder,
 			workspaceNodes: {},
 			workspacesLoaded: false,
 			sessions: {},
@@ -623,7 +641,9 @@ export class PierStore {
 		const next = typeof patch === "function" ? patch(this.state) : patch;
 		const previousNode = this.state.node;
 		let state: AppState = { ...this.state, ...next };
-		if ("nodes" in next || "peers" in next) state = { ...state, ...deriveWorkspaces(state) };
+		if ("nodes" in next || "peers" in next || "workspaceOrder" in next) {
+			state = { ...state, ...deriveWorkspaces(state) };
+		}
 		// The computer on screen follows the workspace on screen.
 		const screen = state.newChat ? state.newChat.workspaceId : state.selectedWorkspaceId;
 		const owner = screen ? state.workspaceNodes[screen] : undefined;
@@ -650,6 +670,9 @@ export class PierStore {
 		}
 		if ("sidebar" in next || "sidebarWidth" in next) {
 			localStorage.setItem(SIDEBAR_KEY, JSON.stringify({ open: this.state.sidebar, width: this.state.sidebarWidth }));
+		}
+		if ("workspaceOrder" in next) {
+			localStorage.setItem(WORKSPACE_ORDER_KEY, JSON.stringify(state.workspaceOrder));
 		}
 		if ("filesPanel" in next || "filesPanelWidth" in next || "rightPanelTab" in next) {
 			localStorage.setItem(
@@ -850,6 +873,7 @@ export class PierStore {
 			const target = s.newChat?.workspaceId !== undefined && workspaceIds.has(s.newChat.workspaceId);
 			return {
 				nodes,
+				workspaceOrder: s.workspaceOrder.filter((id) => !workspaceIds.has(id)),
 				...(selected ? { selectedWorkspaceId: undefined, selectedSessionId: undefined } : {}),
 				...(target ? { newChat: {} } : {}),
 				...(s.node === node ? { node: LOCAL_NODE } : {}),
@@ -1127,7 +1151,7 @@ export class PierStore {
 			}));
 		} else if (event.type === "settings.changed") {
 			this.set((s) => ({ piSettingsVersion: s.piSettingsVersion + 1 }));
-		} else if (event.type === "agentConfig.changed") {
+		} else if (event.type === "agentConfig.changed" || event.type === "resources.changed") {
 			this.set((s) => ({ agentConfigVersion: s.agentConfigVersion + 1 }));
 		} else if (event.type === "extension.progress") {
 			const { type: _type, ...progress } = event as unknown as ExtensionProgressState & { type: string };
@@ -1155,10 +1179,11 @@ export class PierStore {
 	 * Keep the selection and the new-chat target on existing workspaces. A workspace whose
 	 * computer has not answered yet (offline, still connecting) stays selected.
 	 */
-	private fixSelection(): void {
+	private fixSelection(removed: ReadonlySet<string> = new Set()): void {
 		const { workspaces, workspaceNodes, nodes, selectedWorkspaceId, newChat } = this.state;
 		const gone = (id: string | undefined) => {
 			if (!id) return true;
+			if (removed.has(id)) return true;
 			if (id in workspaceNodes) return false;
 			// Unknown: gone once every computer that could have it has answered.
 			return Object.values(nodes).every((n) => n.workspacesLoaded || n.connection === "closed");
@@ -1181,16 +1206,27 @@ export class PierStore {
 		if (Object.keys(patch).length) this.set(patch);
 	}
 
+	/** Reconcile an authoritative list, including workspaces removed by another device. */
+	private async loadWorkspaceList(node: string, client: PierClient): Promise<WorkspaceInfo[] | undefined> {
+		const seq = (this.workspaceLoadSeq.get(node) ?? 0) + 1;
+		this.workspaceLoadSeq.set(node, seq);
+		const { workspaces } = await client.request("workspace.list");
+		if (this.clients.get(node) !== client || this.workspaceLoadSeq.get(node) !== seq) return undefined;
+		const removed = (this.state.nodes[node]?.workspaces ?? []).filter((w) => !workspaces.some((x) => x.id === w.id));
+		this.patchNode(node, { workspaces, workspacesLoaded: true });
+		for (const workspace of removed) this.forgetWorkspace(node, workspace.id);
+		if (node !== LOCAL_NODE) this.saveNodeCache();
+		this.fixSelection();
+		return workspaces;
+	}
+
 	/** Load a computer's workspaces and sessions, including collapsed groups' running agents. */
 	async loadWorkspaces(node = this.state.node): Promise<void> {
 		const client = this.clients.get(node);
 		if (!client) return;
 		try {
-			const { workspaces } = await client.request("workspace.list");
-			if (this.clients.get(node) !== client) return;
-			this.patchNode(node, { workspaces, workspacesLoaded: true });
-			if (node !== LOCAL_NODE) this.saveNodeCache();
-			this.fixSelection();
+			const workspaces = await this.loadWorkspaceList(node, client);
+			if (!workspaces) return;
 			void this.loadTasks(node);
 			await Promise.all(workspaces.map((w) => this.refreshSessions(w.id)));
 			if (this.clients.get(node) !== client) return;
@@ -1762,7 +1798,7 @@ export class PierStore {
 		if (!client || this.state.nodes[node]?.connection !== "open") return;
 		// A removed workspace can still get a late refresh (closing its sessions announces list
 		// changes); its list is gone, so there is nothing to load or report.
-		const known = () => workspaceId in this.state.workspaceNodes;
+		const known = () => this.state.workspaceNodes[workspaceId] === node;
 		if (!known()) return;
 		const current = () => this.clients.get(node) === client && known();
 		try {
@@ -1770,7 +1806,18 @@ export class PierStore {
 			if (!current()) return;
 			this.set((s) => ({ sessions: { ...s.sessions, [workspaceId]: sessions } }));
 		} catch (error) {
-			if (current()) this.toast("error", `加载会话列表失败：${errorText(error)}`);
+			if (!current()) return;
+			if (error instanceof PierProtocolError && error.code === "NOT_FOUND") {
+				// Session-close events can beat workspace.changed to the UI. Confirm removal
+				// against the host before reporting an error, without recursively reloading sessions.
+				try {
+					const workspaces = await this.loadWorkspaceList(node, client);
+					if (!workspaces || !current()) return;
+				} catch {
+					if (!current()) return;
+				}
+			}
+			this.toast("error", `加载会话列表失败：${errorText(error)}`);
 		}
 	}
 
@@ -1903,11 +1950,24 @@ export class PierStore {
 		return client.request("runtime.install", { runtime });
 	}
 
+	/** Models offered by an agent on the computer the settings screen manages. */
+	async listAgentModels(runtime: AgentConfigRuntime): Promise<MethodResult<"model.list">> {
+		const client = this.settingsClient;
+		if (!client) throw this.settingsOffline();
+		return client.request("model.list", { runtime });
+	}
+
 	/** Read a runtime's user file, plus a workspace's files; rejects with the host's error. */
 	async getAgentConfig(runtime: AgentConfigRuntime, workspaceId?: string): Promise<AgentConfigResult> {
 		const client = this.settingsClient;
 		if (!client) throw this.settingsOffline();
 		return client.request("agentConfig.get", { runtime, ...(workspaceId ? { workspaceId } : {}) });
+	}
+
+	async resourceRequest<M extends ResourceMethod>(method: M, params: MethodParams<M>): Promise<MethodResult<M>> {
+		const client = this.settingsClient;
+		if (!client) throw this.settingsOffline();
+		return client.request(method, params, { timeoutMs: method === "mcp.test" ? 60_000 : 45_000 });
 	}
 
 	/** Set (or, without `value`, remove) settings in one file. Failures are reported as a toast. */
@@ -2090,6 +2150,25 @@ export class PierStore {
 	}
 
 	// ---- workspaces --------------------------------------------------------------------
+
+	/** Move a sidebar group without changing its host, sessions or current selection. */
+	moveWorkspace(workspaceId: string, targetId: string, position: "before" | "after"): void {
+		const { workspaces, workspaceOrder } = this.state;
+		if (
+			workspaceId === targetId ||
+			!workspaces.some((w) => w.id === workspaceId) ||
+			!workspaces.some((w) => w.id === targetId)
+		) {
+			return;
+		}
+		// Keep saved entries for computers that are still loading, so reordering another group
+		// cannot erase their positions. Previously unseen workspaces join at the end.
+		const order = [...new Set([...workspaceOrder, ...workspaces.map((w) => w.id)])].filter((id) => id !== workspaceId);
+		order.splice(order.indexOf(targetId) + (position === "after" ? 1 : 0), 0, workspaceId);
+		if (order.some((id, index) => id !== workspaceOrder[index]) || order.length !== workspaceOrder.length) {
+			this.set({ workspaceOrder: order });
+		}
+	}
 
 	toggleSidebar(open = !this.state.sidebar): void {
 		if (open !== this.state.sidebar) this.set({ sidebar: open });
@@ -2301,13 +2380,7 @@ export class PierStore {
 		const node = this.nodeOf(workspaceId);
 		const client = this.clients.get(node);
 		const result = await this.callWith(client, "移除工作区", (c) => c.request("workspace.remove", { workspaceId }));
-		if (!result || !client) return;
-		for (const [id, chat] of this.chats) {
-			if (chat.workspaceId === workspaceId) this.dropChat(id);
-		}
-		if (this.state.selectedWorkspaceId === workspaceId) {
-			this.set({ selectedWorkspaceId: undefined, selectedSessionId: undefined });
-		}
+		if (!result || !client || this.clients.get(node) !== client) return;
 		this.forgetWorkspace(node, workspaceId);
 		await this.loadWorkspaces(node);
 	}
@@ -2316,17 +2389,26 @@ export class PierStore {
 	private forgetWorkspace(node: string, workspaceId: string): void {
 		clearTimeout(this.refreshTimers.get(workspaceId));
 		this.refreshTimers.delete(workspaceId);
+		for (const [id, chat] of this.chats) {
+			if (chat.workspaceId === workspaceId) this.dropChat(id);
+		}
 		const workspaces = this.state.nodes[node]?.workspaces ?? [];
 		if (workspaces.some((w) => w.id === workspaceId)) {
 			this.patchNode(node, { workspaces: workspaces.filter((w) => w.id !== workspaceId) });
 			if (node !== LOCAL_NODE) this.saveNodeCache();
 		}
-		if (workspaceId in this.state.sessions) {
+		if (
+			workspaceId in this.state.sessions ||
+			workspaceId in this.state.expanded ||
+			this.state.workspaceOrder.includes(workspaceId)
+		) {
 			this.set((s) => {
 				const { [workspaceId]: _removed, ...sessions } = s.sessions;
-				return { sessions };
+				const { [workspaceId]: _expanded, ...expanded } = s.expanded;
+				return { sessions, expanded, workspaceOrder: s.workspaceOrder.filter((id) => id !== workspaceId) };
 			});
 		}
+		this.fixSelection(new Set([workspaceId]));
 	}
 
 	async setPolicy(workspaceId: string, policy: ApprovalPolicy): Promise<void> {
@@ -3077,6 +3159,31 @@ export class PierStore {
 	/** Ask where to save a download named `name` on this computer; null when cancelled. */
 	saveLocalFile(name: string): Promise<LocalFileSink | null> {
 		return this.bridge.saveFile(name);
+	}
+
+	/** Resolve localhost against the conversation/terminal's host before opening it locally. */
+	async openWorkspaceUrl(url: string, workspaceId?: string): Promise<void> {
+		const node = workspaceId ? this.nodeOf(workspaceId) : LOCAL_NODE;
+		const remoteUrl = remoteServiceUrl(url);
+		if (!workspaceId || node === LOCAL_NODE || !remoteUrl) {
+			this.openExternal(url);
+			return;
+		}
+		const client = this.nodeClient(LOCAL_NODE);
+		if (!client) {
+			this.toast("error", "尚未连接到本机 Pier Host");
+			return;
+		}
+		try {
+			const info = await client.request(
+				"browser.open",
+				{ peerId: node, workspaceId, url: remoteUrl, mode: "service" },
+				{ timeoutMs: 60_000 },
+			);
+			await this.bridge.openExternal(info.localUrl);
+		} catch (error) {
+			this.toast("error", `无法打开远程网页：${error instanceof Error ? error.message : String(error)}`);
+		}
 	}
 
 	openExternal(url: string): void {

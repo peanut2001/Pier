@@ -2,6 +2,10 @@
 
 A cross-device workbench for coding agents.
 
+<p align="center">
+  <img src="docs/images/pier-overview.png" alt="Pier 跨设备编程 Agent 工作台：电脑上运行，手机上掌控（界面示意）" width="640" />
+</p>
+
 Pier 是编码 Agent 的跨设备工作台：在同一个界面中使用内置的 [pi](https://github.com/earendil-works/pi) 和电脑上安装的 [Claude Code](https://code.claude.com)、[Codex](https://github.com/openai/codex)，统一管理多台电脑上的工作区与会话，并提供文件、Git 和终端操作。Agent 常驻在各自的电脑上运行，你可以从桌面端或手机端查看进度、发送指令和审批操作。
 
 - 桌面端：Tauri 2，内置 Pier Host（Agent 运行时：内置的 pi SDK，以及电脑上安装的 Claude Code、Codex）
@@ -10,6 +14,31 @@ Pier 是编码 Agent 的跨设备工作台：在同一个界面中使用内置�
 - 不在同一网络：通过自建的 [Pier Relay](apps/relay/README.md) 连接（私有 / 开放两种模式，带网页管理后台：账号、访问令牌、在线切换模式），优先打洞 P2P 直连，打不通时经中继转发；中继只看得到密文
 
 开发计划见 [docs/PLAN.md](docs/PLAN.md)，协议见 [docs/protocol.md](docs/protocol.md)，远程访问的安全设计见 [docs/security.md](docs/security.md)，技术验证结论见 [docs/spikes.md](docs/spikes.md)。
+
+## 界面预览
+
+以下截图来自实际运行的 Pier 界面，使用示例工作区与演示模型。桌面端截自浏览器预览，手机端截自 Web 预览。
+
+### 桌面端：会话、工具调用与审批
+
+左侧管理工作区和会话，中间查看 Agent 的回复、文件修改 diff 与操作审批，右侧浏览项目文件。
+
+![Pier 桌面工作台：会话列表、文件修改 diff、操作审批与工作区文件](docs/images/desktop-workbench.png)
+
+### 桌面端：Git 源代码管理
+
+在同一个工作台里查看更改、暂存文件和提交代码，也可以切换分支、查看提交记录。
+
+![Pier 桌面端 Git 面板：当前分支、更改列表、提交入口与提交记录](docs/images/desktop-git.png)
+
+### 手机端：查看主机与跟进会话
+
+配对后查看电脑的运行状态、工作区和会话；进入同一会话即可查看工具执行结果、发送指令或审批操作。
+
+<p align="center">
+  <img src="docs/images/mobile-host.png" alt="Pier 手机端主机概览：连接状态、资源占用、工作区和会话列表" width="320" />
+  <img src="docs/images/mobile-chat.png" alt="Pier 手机端会话：工具调用结果、操作审批和消息输入" width="320" />
+</p>
 
 ## 当前状态
 
@@ -67,6 +96,13 @@ CLI 不在 `PATH` 中时，可以用 `PIER_CLAUDE_PATH` / `PIER_CODEX_PATH` 指�
 
 修改对之后新建（或重新打开）的会话生效。Pier 按工作区审批策略设置的项（Claude Code 的默认权限模式，Codex 的审批策略与沙箱）只影响终端中的 CLI。设置其他电脑时这两页修改那台电脑上的文件，那台电脑需要协议 1.23 或更高。
 
+**统一 Skills 与 MCP 管理**：桌面端「设置 → Skills 与 MCP」与手机端电脑页面的同名入口，可选择 pi、Claude Code 或 Codex，并查看全局资源及所选工作区的项目资源；支持管理已配对的电脑（目标 Host 需要协议 1.38）。
+
+- **Skills**：查看、搜索、新建、编辑 `SKILL.md`、从目标电脑的本地技能目录导入（保留脚本和资源）、启用 / 停用及删除。pi 使用自己的资源设置；Claude Code 使用 `~/.claude/skills` 和项目 / 祖先目录的 `.claude/skills`，停用通过 `permissions.deny` 的 `Skill(name)` 与 `Skill(name *)` 规则实现；Codex 使用共享的 `~/.agents/skills`、项目 / 祖先目录的 `.agents/skills` 和兼容的 `CODEX_HOME/skills`，启用状态写入原生 `skills.config`。扩展包内技能可查看并通过包管理启用 / 停用；系统技能和符号链接技能不能编辑或直接删除。独立技能删除到 Pier 回收站，删除共享目录中的技能会影响其他读取同一目录的工具。pi 的 npm / Git 扩展包安装、更新与仓库搜索继续在「扩展」页操作。
+- **MCP**：添加、编辑、启用 / 停用、删除服务器及测试连接；支持 stdio 与 Streamable HTTP，Claude Code 还支持 SSE。参数每行一个，环境变量和请求头使用 JSON，高级选项会保留。pi 写入 `~/.pi/agent/mcp.json` / `.pi/mcp.json`，并在 Pier 会话中加载 SDK 内置 MCP、codemode 与 tool-search 扩展；新服务器默认直接展示工具，已有工具展示设置保留。Claude Code 写入 `~/.claude.json`（全局 / 本地）或 `.mcp.json`（项目）；停用时将定义存入 `~/.pier/resources/disabled-mcp.json` 并从活动配置移除，启用时恢复。Codex 写入 `config.toml` 的 `mcp_servers`，保留注释和其他设置，项目配置仍需受信任的工作区。
+
+MCP 测试会连接目标电脑上的服务器，stdio 测试会启动配置的程序；结果显示本次连接与工具发现情况，不代表 Agent 会话的持续连接状态。测试不回传子进程日志或凭据。需要 OAuth、原生凭据助手或远程执行器的服务器继续由对应 Agent 完成登录 / 凭据解析；连接测试不启动登录流程。pi 的 MCP 工具与资源调用按工作区策略审批，空闲会话在修改后重新加载，运行中的会话完成后执行 `/reload`；Claude Code / Codex 修改后需新建或重新打开会话。编辑器检测文件版本冲突，不覆盖外部修改。
+
 **一键接入云链API**：在「设置 → 个人中心」中添加一个分组并选择令牌后，在「配置到 pi / Claude Code / Codex」中选择要接入的 Agent，同一个令牌可以同时接入多个（密钥由 Host 直接写入；Claude Code 与 Codex 写入全局配置，需要协议 1.25）：
 
 - **pi**：读取令牌可用的全部模型，添加为服务商「云链API · 分组名」，可以在「模型与服务商」中查看和编辑。
@@ -77,6 +113,28 @@ CLI 不在 `PATH` 中时，可以用 `PIER_CLAUDE_PATH` / `PIER_CODEX_PATH` 指�
 已配置的分组会标出「pi」「Claude Code」「Codex」，之后可以在「Agent 配置」中查看和修改。
 
 调试时 `bun run faux-host --agents` 会同时提供电脑上的 Claude Code 与 Codex（真实会话，会消耗额度）；`npx tsx packages/host/scripts/live-agent-check.ts claude-code [模型]` 用真实 CLI 走一遍创建、流式输出、审批、重命名、重新打开与分叉。
+
+### 主机端口与映射
+
+点击底部状态栏的「端口」，或在主机状态卡片中点击「查看端口与映射」，可选择本机或已配对的远程主机，查看正在监听的 TCP / UDP 端口、监听地址及系统权限允许读取的进程名称和 PID。支持 Linux、macOS 和 Windows，列表每 5 秒刷新，也可按端口、地址或进程筛选。监听状态不代表端口能从公网访问；Linux 上仅查询 Host 所在网络命名空间，未发布到宿主机的容器端口不会列出。
+
+选择远程主机后，点击 TCP 端口行中的「映射」，确认远程地址、远程端口和本地端口，再点击「创建映射」。也可手动填写目标。远程通配监听地址会转换为那台主机的回环地址；其他监听地址原样使用。本地端口可指定为固定端口，留空或填 `0` 则自动分配；端口占用或权限不足时会提示更换。
+
+映射仅监听当前电脑的 `127.0.0.1`，通过独立的配对加密连接转发原始 TCP 数据，不启动浏览器，也不依赖工作区。浏览器、数据库客户端、SSH 工具等可连接列表里的本地地址。面板支持复制地址、关闭单条映射和查看最近一次远程连接失败的提示。关闭面板不影响映射；退出 Pier、管理连接断开、远程主机断开或移除配对会清理映射，重新连接后需手动创建，不保存或自动恢复。最多同时创建 32 条映射，目前不支持 UDP 映射。
+
+本机需要协议 **1.39+**；查看端口的目标主机需要 **1.39+**，手动映射已有 TCP 服务只要求目标主机 **1.37+**。旧版主机会显示升级提示。
+
+### 在本地操作远程网页
+
+在工作区首页、新建会话页或会话标题栏点击「浏览器」：网页始终在当前电脑渲染，远程电脑不需要安装或运行浏览器（两端 Host 需要协议 1.37）。
+
+- **开发服务**：输入远程电脑上的 `http://localhost:3000` 等地址，Pier 建立加密 TCP 端口转发，在本地默认浏览器打开。支持 HTTP、WebSocket 和热更新；远程聊天和终端中的回环网页链接也会自动转发。地址中的路径、查询和锚点保留。
+- **远程网络**：启动本地 Chrome / Chromium / Edge 独立窗口，通过所选电脑连接网站和解析目标域名，使用它的出口 IP，并保留网页原始域名。适用于多个端口、依赖原始域名、HTTPS 证书或登录流程的网站。本地需要已安装 Chromium 系浏览器；未自动找到时设置本地 Host 的 `PIER_BROWSER_BIN` 为浏览器可执行文件。不开启无沙箱模式。
+- **Agent 操作**：默认关闭，勾选「允许这个工作区的 pi 操作独立浏览器」后，内置 pi 的 `pier_browser` 工具可列出标签页、导航、读取页面、点击、输入、按键、执行页面脚本和截图。「询问」「智能」策略对交互操作请求审批，只读操作直接执行；「自动」直接执行。Claude Code / Codex 尚未内置这个工具，外部集成可调用协议的 `browser.action`。
+
+独立浏览器的配置和登录状态按所选主机保存在**本地** `~/.pier/browser-profiles`（或 `PIER_DIR` 下），不继承远程浏览器已有的标签页或登录。每台目标主机同时只开一个独立浏览器，可在窗口中增加标签页；不同主机使用不同配置目录。关闭「浏览器」面板不影响已打开的连接，可在面板的连接列表关闭；退出 Pier、浏览器进程退出、设备被吊销或远程连接断开时清理相关连接，重新连接后需重新打开。
+
+转发端口和代理仅监听本地 `127.0.0.1`，浏览器控制通过私有进程管道，不开放调试端口。浏览器流量使用独立的配对加密连接，可经现有直连 / Relay / P2P 路径传输，不与聊天订阅共用协议连接。开发服务模式会把地址改为本地随机端口，原始域名、绝对地址或 HTTPS 证书依赖请使用远程网络模式；后者代理浏览器的 HTTP(S) / WebSocket 流量，不是系统 VPN。
 
 ### 定时任务
 
@@ -107,6 +165,10 @@ bun run pier-cli
 ```
 
 ### 桌面端
+
+桌面安装包支持 Linux x64 / ARM64（`.deb`、`.AppImage`）、macOS Intel / Apple Silicon（`.dmg`）和 Windows x64（`.setup.exe`）。Linux ARM64 包名为 `pier-desktop-v<版本>-linux-arm64.deb` / `.AppImage`，与 x64 一样以 Ubuntu 22.04（glibc 2.35）为构建基线。安装包与签名更新包随 [GitHub Release](https://github.com/yiranxiaohui/Pier/releases/latest) 发布，ARM64 同样支持应用内自动更新。
+
+**Linux NVIDIA 显卡兼容**：桌面端启动时检测 NVIDIA 显卡，自动设置 `WEBKIT_DISABLE_DMABUF_RENDERER=1`，避免 WebKitGTK 在 DGX Spark（GB10）等设备上因 `Failed to create GBM buffer` / `DRM_IOCTL_MODE_CREATE_DUMB failed` 显示白屏。已显式设置该环境变量时保留原值。旧版 AppImage 可用 `WEBKIT_DISABLE_DMABUF_RENDERER=1 ./pier-desktop-*.AppImage` 启动（请将文件名替换为实际下载的文件），`.deb` 安装后可用 `WEBKIT_DISABLE_DMABUF_RENDERER=1 pier-desktop` 启动。使用当前桌面用户运行，无需 `sudo`。
 
 除 Node 与 Bun 外还需要 Rust（stable），以及 Tauri 的[系统依赖](https://v2.tauri.app/start/prerequisites/)（Linux 上为 `libwebkit2gtk-4.1-dev`、`libayatana-appindicator3-dev`、`librsvg2-dev` 等）。
 
@@ -170,9 +232,57 @@ bun run --cwd apps/mobile web                 # 在浏览器中“添加电脑 �
 
 配对链接可以从桌面“设置 → 手机与远程 → 显示配对二维码 → 复制配对链接”获得；只运行 faux-host 时，也可以用 `bun run pier-cli --url <url> --token <token>` 输入 `/pair` 生成链接，再用 `/pair yes` 确认（`/remote`、`/devices`、`/revoke` 管理远程访问与设备）。Android 模拟器访问宿主机时，用 `bun run faux-host --remote --remote-address 10.0.2.2:7433` 让二维码里带上模拟器可达的地址。
 
+### 无桌面 Linux 安装与卸载
+
+Linux x86_64 / arm64 服务器可以单独运行 Pier Host。从 [GitHub Release](https://github.com/yiranxiaohui/Pier/releases/latest) 下载 `pier-host-v<版本>-linux-x64` 或 `pier-host-v<版本>-linux-arm64`，改名为 `pier-host` 后直接运行：
+
+```bash
+chmod +x pier-host
+./pier-host
+# 另开终端，使用同一个文件配对：
+./pier-host cli
+```
+
+在 CLI 中依次输入 `/remote on`、`/pair`；客户端粘贴链接后输入 `/pair yes`。单文件 Host 从 v0.2.36 起提供，包含运行时、CLI、pi 资源及 Photon WASM；无需安装脚本、旁边的资源文件、Node、Bun、桌面或编译工具。资源首次运行时自动准备到 Pier 自己的状态目录，之后复用。Release 中的 `SHA256SUMS.txt` 可用于核对下载文件。
+
+需要后台服务、开机启动和命令行更新时，让二进制自己安装：
+
+```bash
+./pier-host install                 # 普通账号安装用户服务；root 安装系统服务
+./pier-host install --user          # 显式选择用户服务
+./pier-host install --no-start      # 只安装、不启动；没有 systemd manager 时也可使用
+```
+
+普通账号安装到 `~/.local/share/pier-host`，命令放在 `~/.local/bin`，配置为 systemd 用户服务；root 安装到 `/opt/pier-host`，命令放在 `/usr/local/bin`，配置为系统服务。服务安装后自动启用并启动。普通账号要在退出 SSH 后继续运行并在开机时启动，需要管理员执行 `sudo loginctl enable-linger "$USER"`。若 `~/.local/bin` 尚未在 PATH 中，请使用命令的绝对路径或将它加入 PATH。
+
+```bash
+pier-host status                   # 服务状态
+pier-host logs                     # 实时日志
+pier-host cli                      # 配置工作区、远程访问和配对
+# 在 CLI 中依次输入 /remote on、/pair；客户端粘贴链接后输入 /pair yes
+pier-host update                   # 更新到最新正式版
+pier-host stop                     # 停止服务
+pier-host start                    # 启动服务
+pier-host uninstall                # 停止并移除服务、命令和程序，保留 ~/.pier
+pier-host uninstall --purge        # 另行删除该安装使用的 Pier 配置、配对、定时任务等状态
+```
+
+卸载不会删除项目文件，也不会删除共享的 `~/.pi`、`~/.claude`、`~/.codex` 或公共安装的 Claude Code / Codex。重新安装会沿用保留的 Pier 状态。同一状态目录不能同时用于正在运行的桌面 Host 和独立 Host；安装、卸载会拒绝处理仍在运行的实例。
+
+指定版本或仅安装、不启动：
+
+```bash
+pier-host update --version v0.2.41
+pier-host update --no-start
+```
+
+内置更新命令下载对应架构的单文件，并校验 Release 的 SHA-256 和版本后替换，启动失败时恢复上一版。可用 `PIER_HOST_PREFIX` 自定义安装前缀、`PIER_HOST_STATE_DIR` 自定义 Pier 状态目录；更新和卸载会沿用安装时保存的路径。直接运行时无需 systemd；不安装的便携副本停机后删除该文件即可。独立 Host 支持 Agent 会话、工作区、文件 / Git、定时任务和远程访问；交互终端与桌面应用更新仍需桌面端。
+
+为已有安装保留 `.tar.gz` 压缩包和旧安装脚本。若之前通过脚本安装，先用旧 `pier-host uninstall` 卸载（默认保留数据），再执行新二进制的 `install`；也可以继续使用原来的压缩包更新方式。
+
 ### Sidecar
 
-构建单文件 sidecar（输出到 `packages/host/bin/`，包含 pi 运行时资源）：
+构建桌面 sidecar 及旁边的 pi 运行时资源（输出到 `packages/host/bin/`）：
 
 ```bash
 bun run build:sidecar                            # 当前平台
@@ -198,7 +308,7 @@ Pier 自身状态保存在 `~/.pier`（可用 `PIER_DIR` 覆盖）：`config.jso
 
 1. 更新所有版本号，并在 `CHANGELOG.md` 中新增 `## v<版本> — <日期>` 小节；合并到 `main`。
 2. 在 `main` 的该提交上打 tag 并推送：`git tag -a v<版本> -m "Pier v<版本>" && git push origin v<版本>`。
-3. `.github/workflows/release.yml` 会校验 tag、版本号以及该提交是否在 `main` 上，然后运行完整检查；接着在各平台 runner 上用 `tauri build` 打包桌面端安装包（deb / AppImage / dmg / NSIS；macOS 包为 ad-hoc 签名并校验签名，未公证；其他平台未签名），并用 `packages/host/scripts/smoke-sidecar.mjs` 冒烟测试安装包内置的 sidecar；同时用 `expo prebuild` + Gradle 构建 Android APK（arm64-v8a / armeabi-v7a / x86_64）；最后创建 GitHub Release，附带桌面端安装包、更新包及其签名、`latest.json`、Android APK、`latest-android.json` 和 `SHA256SUMS.txt`，发布说明取自 CHANGELOG。Pier Host 随桌面端一起安装，不再单独发布 sidecar 压缩包。版本号带 `-` 后缀（如 `0.1.0-rc.1`）时标记为 prerelease。
+3. `.github/workflows/release.yml` 会校验 tag、版本号以及该提交是否在 `main` 上，然后运行完整检查；接着在各平台 runner 上用 `tauri build` 打包桌面端安装包（deb / AppImage / dmg / NSIS；macOS 包为 ad-hoc 签名并校验签名，未公证；其他平台未签名），并用 `packages/host/scripts/smoke-sidecar.mjs` 冒烟测试安装包内置的 sidecar；Linux x64 / arm64 runner 还会用 `packages/host/scripts/build-host-release.mjs` 构建独立 Host 压缩包（包含 `pier-cli`、pi 资源和服务管理脚本），在没有 DISPLAY / WAYLAND_DISPLAY 的环境中进行冒烟测试；同时用 `expo prebuild` + Gradle 构建 Android APK（arm64-v8a / armeabi-v7a / x86_64）；最后创建 GitHub Release，附带桌面端安装包、更新包及其签名、独立 Host 压缩包、`latest.json`、Android APK、`latest-android.json` 和 `SHA256SUMS.txt`，发布说明取自 CHANGELOG。版本号带 `-` 后缀（如 `0.1.0-rc.1`）时标记为 prerelease。
 
 打 tag 之前可以先在 `main` 上手动触发一次试运行：`gh workflow run release.yml --ref main`。它会构建并冒烟测试全部产物（上传为 workflow artifacts），但跳过 tag 校验和发布。
 

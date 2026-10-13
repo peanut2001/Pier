@@ -27,7 +27,7 @@ import { type StunServer, startStunServer } from "./stun.ts";
 
 export type { RegistrationPolicy, RelaySettings } from "./store.ts";
 
-export const RELAY_VERSION = "0.2.33";
+export const RELAY_VERSION = "0.2.41";
 
 export interface RelayServerOptions {
 	/** TCP port for HTTP / WebSocket (default 7480; 0 picks a free port). */
@@ -70,6 +70,15 @@ export interface RelayServerOptions {
 	log?: (message: string) => void;
 }
 
+/** Public STUN fallbacks announced when no extra ICE servers were configured. */
+export const DEFAULT_ICE_SERVER_URLS = [
+	"stun:stun.miwifi.com:3478",
+	"stun:stun.qq.com:3478",
+	"stun:stun.l.google.com:19302",
+	"stun:stun.cloudflare.com:3478",
+	"stun:global.stun.twilio.com:3478",
+] as const;
+
 /** How a registered computer was let in. */
 export type HostVia = "open" | "static" | "account";
 
@@ -99,6 +108,8 @@ export interface RelayServer {
 	configure(change: Partial<RelaySettings>): RelaySettings;
 	/** Registered computers. */
 	hosts(): RelayHostInfo[];
+	/** Disconnect one registered computer and all of its relay streams. */
+	kickHost(key: string): boolean;
 	close(): Promise<void>;
 }
 
@@ -260,6 +271,7 @@ export const MODE_DEFAULTS = {
 } as const;
 
 function initialSettings(options: RelayServerOptions): RelaySettings {
+	const iceServers = options.iceServers ?? DEFAULT_ICE_SERVER_URLS.map((urls) => ({ urls }));
 	return {
 		mode: options.mode,
 		maxHosts: options.maxHosts ?? null,
@@ -267,7 +279,7 @@ function initialSettings(options: RelayServerOptions): RelaySettings {
 		bytesPerSecond: options.bytesPerSecond ?? null,
 		connectsPerMinute: options.connectsPerMinute ?? 120,
 		publicHost: options.publicHost ?? null,
-		iceServers: (options.iceServers ?? []).flatMap((s) => (Array.isArray(s.urls) ? s.urls : [s.urls])),
+		iceServers: iceServers.flatMap((s) => (Array.isArray(s.urls) ? s.urls : [s.urls])),
 	};
 }
 
@@ -468,6 +480,15 @@ export async function startRelayServer(options: RelayServerOptions): Promise<Rel
 		closeQuietly(stream.device, code, reason);
 		closeQuietly(stream.hostSocket, code, reason);
 	};
+	const kickHost = (key: string): boolean => {
+		const entry = hosts.get(key);
+		if (!entry) return false;
+		hosts.delete(key);
+		for (const stream of [...entry.streams]) endStream(stream, 1000, "Kicked from relay");
+		closeQuietly(entry.socket, 1000, "Kicked from relay");
+		log(`kicked computer ${key.slice(0, 8)}… (${hosts.size} online)`);
+		return true;
+	};
 
 	const onDevice = (socket: WebSocket, req: IncomingMessage, host: HostEntry) => {
 		track(socket);
@@ -641,6 +662,7 @@ export async function startRelayServer(options: RelayServerOptions): Promise<Rel
 				configure,
 				hosts: hostList,
 				stats,
+				kickHost,
 				revalidate,
 				effective: () => ({ maxHosts: maxHosts(), bytesPerSecond: bytesPerSecond() }),
 			},
@@ -655,6 +677,7 @@ export async function startRelayServer(options: RelayServerOptions): Promise<Rel
 		settings: currentSettings,
 		configure,
 		hosts: hostList,
+		kickHost,
 		close: async () => {
 			if (closing) return closing;
 			closing = shutdown();

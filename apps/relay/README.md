@@ -76,6 +76,7 @@ Caddy：`relay.example.com { reverse_proxy 127.0.0.1:7480 }`。
 - **第一个账号**：还没有账号时，打开中继的网址会显示「创建管理员账号」，第一个注册的账号自动成为管理员（不受注册方式限制）。部署后请尽快注册，以免被别人抢先；之后的账号按注册方式处理。
 - **账号**：管理员可以在「系统设置」中选择注册方式——注册需审核（默认）、开放注册或关闭注册；在「用户」中通过审核、停用、设为管理员、重置密码或删除账号。
 - **访问令牌**：每个账号在「访问令牌」中创建自己的令牌（`prt_` 开头，只显示一次），填到 Pier 的中继设置中；「电脑」列出用自己令牌注册的在线电脑（管理员看到全部）。删除令牌、停用或删除账号后，用它注册的电脑立即断开（私有模式）。开放模式下也可以填令牌，电脑会关联到账号。
+- **踢出电脑**：在「电脑」列表中点击「踢出」并确认，会立即关闭该电脑在此中继上的注册、正在转发和等待接入的连接。普通账号可踢出自己的电脑，管理员可踢出任意电脑。Pier 可能自动重连；私有模式下可以删除该电脑使用的账号令牌以阻止再次接入，命令行令牌需要在服务器启动配置中撤销。已建立的 P2P 或局域网直连不受影响。
 - **系统设置**：在线切换私有 / 开放模式（切到私有模式时，没有有效令牌的电脑立即断开），调整最多注册的电脑数、每台电脑的连接数、带宽上限、每分钟连接次数、STUN 公网地址与额外的 STUN 服务器，都不需要重启。**在后台保存过设置后，保存的设置优先于启动参数与环境变量**（令牌、端口、`--trust-proxy` 等除外）。
 
 数据保存在数据目录的 `pier-relay.json` 中（0600）：密码为 scrypt 哈希，令牌与登录会话只保存 SHA-256。备份这个文件即可；忘记密码时可以让其他管理员重置。不指定数据目录时没有管理后台，行为与之前相同。
@@ -98,7 +99,7 @@ Caddy：`relay.example.com { reverse_proxy 127.0.0.1:7480 }`。
 | `--host <地址>` | `PIER_RELAY_HOST` | 监听的地址，默认全部 |
 | `--stun-port <n>` | `PIER_RELAY_STUN_PORT` | STUN 的 UDP 端口，默认 3478，`0` 关闭（关闭后不再尝试 P2P，除非另外指定 STUN） |
 | `--public-host <名称>` | `PIER_RELAY_PUBLIC_HOST` | 告诉电脑与手机的 STUN 地址中的主机名，默认取电脑连接中继时的 `Host` 头 |
-| `--ice-server <url>`（可重复） | `PIER_RELAY_ICE_SERVERS`（逗号分隔） | 另外提供的 STUN 服务器，例如 `stun:stun.miwifi.com:3478` |
+| `--ice-server <url>`（可重复） | `PIER_RELAY_ICE_SERVERS`（逗号分隔） | 另外提供的 STUN 服务器；不填写时使用下面的默认列表 |
 | `--max-hosts <n>` | `PIER_RELAY_MAX_HOSTS` | 最多注册的电脑数，私有模式默认 10000，开放模式默认 1000 |
 | `--max-streams <n>` | `PIER_RELAY_MAX_STREAMS` | 每台电脑同时经中继的连接数，默认 32 |
 | `--rate-limit <字节/秒>` | `PIER_RELAY_RATE_LIMIT` | 每个连接每个方向的带宽上限，`0` 不限；私有模式默认不限，开放模式默认 2 MiB/s |
@@ -107,6 +108,18 @@ Caddy：`relay.example.com { reverse_proxy 127.0.0.1:7480 }`。
 `GET /health` 返回 `{"ok":true,"service":"pier-relay","version":"…","mode":"…"}`，可用于健康检查。每个 IP 每分钟最多发起 120 次连接。
 
 以下选项也可以在管理后台中修改，保存后以后台为准：模式、`--public-host`、`--ice-server`、`--max-hosts`、`--max-streams`、`--rate-limit`。
+
+除中继自己的 STUN（未关闭时）外，未指定 `--ice-server` / `PIER_RELAY_ICE_SERVERS` 时还会公布这些公共 STUN 服务器：
+
+```text
+stun:stun.miwifi.com:3478        # 国内
+stun:stun.qq.com:3478            # 国内
+stun:stun.l.google.com:19302     # 国外
+stun:stun.cloudflare.com:3478    # 国外
+stun:global.stun.twilio.com:3478 # 国外
+```
+
+命令行或环境变量显式填写服务器后，会替换这组默认值；在管理后台保存设置时也可以清空列表来停用额外服务器。
 
 ## 协议
 

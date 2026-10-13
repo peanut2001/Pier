@@ -1,5 +1,14 @@
 import type { WorkspaceFileEntry, WorkspaceInfo } from "@pier/protocol";
-import { type DragEvent as ReactDragEvent, useCallback, useEffect, useRef, useState } from "react";
+import {
+	type DragEvent as ReactDragEvent,
+	type KeyboardEvent as ReactKeyboardEvent,
+	useCallback,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
+import { type SelectionUpdate, selectByKeyboard, selectByPointer } from "../lib/file-selection.ts";
 import {
 	downloadFile,
 	dragHasFiles,
@@ -75,53 +84,72 @@ function errorText(error: unknown): string {
 	return message;
 }
 
-/** Confirms and performs a permanent delete of one entry of the file panel. */
+/** Confirms and performs a permanent delete of one or more entries of the file panel. */
 function DeleteDialog({
 	workspace,
-	entry,
+	entries,
 	onClose,
 }: {
 	workspace: WorkspaceInfo;
-	entry: WorkspaceFileEntry;
+	entries: WorkspaceFileEntry[];
 	onClose: () => void;
 }) {
 	const store = useStore();
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string>();
-	const isDir = entry.kind === "directory" && !entry.symlink;
-	const what = entry.symlink ? "符号链接" : isDir ? "文件夹" : "文件";
+	const completed = useRef(new Set<string>());
+	const single = entries.length === 1 ? entries[0] : undefined;
+	const isDir = single?.kind === "directory" && !single.symlink;
+	const what = single ? (single.symlink ? "符号链接" : isDir ? "文件夹" : "文件") : "项目";
 	const remove = async () => {
 		setBusy(true);
 		setError(undefined);
-		try {
-			await store.deletePath(workspace.id, entry.path);
-			store.toast("info", `已删除${what}「${entry.name}」`);
-			onClose();
-		} catch (e) {
-			const code = (e as { code?: string }).code;
-			setError(
-				code === "NOT_FOUND"
-					? `${what}已不存在`
-					: code === "FORBIDDEN"
-						? "没有权限删除，或它位于工作区之外"
-						: errorText(e),
-			);
-			if (code === "NOT_FOUND") store.bumpFiles(workspace.id);
-			setBusy(false);
+		for (const entry of entries) {
+			if (completed.current.has(entry.path)) continue;
+			try {
+				await store.deletePath(workspace.id, entry.path);
+			} catch (e) {
+				const code = (e as { code?: string }).code;
+				if (code === "NOT_FOUND") store.bumpFiles(workspace.id);
+				else {
+					const reason = code === "FORBIDDEN" ? "没有权限删除，或它位于工作区之外" : errorText(e);
+					const progress = completed.current.size ? `已完成 ${completed.current.size} 项；` : "";
+					setError(`${progress}删除「${entry.name}」失败：${reason}`);
+					setBusy(false);
+					return;
+				}
+			}
+			completed.current.add(entry.path);
 		}
+		store.toast("info", single ? `已删除${what}「${single.name}」` : `已删除 ${entries.length} 个项目`);
+		onClose();
 	};
 	return (
-		<Modal title={`删除${what}`} onClose={onClose}>
+		<Modal title={single ? `删除${what}` : `删除 ${entries.length} 个项目`} onClose={() => !busy && onClose()}>
 			<p>
-				确定要永久删除{what}「<strong>{entry.name}</strong>」吗？
+				{single ? (
+					<>
+						确定要永久删除{what}「<strong>{single.name}</strong>」吗？
+					</>
+				) : (
+					<>确定要永久删除选中的 {entries.length} 个文件或文件夹吗？</>
+				)}
 			</p>
-			<code className="path">{joinPath(workspace.path, entry.path)}</code>
+			<div className="files-delete-paths">
+				{entries.map((entry) => (
+					<code className="path" key={entry.path}>
+						{joinPath(workspace.path, entry.path)}
+					</code>
+				))}
+			</div>
 			<p className="muted small">
-				{entry.symlink
+				{single?.symlink
 					? "只删除这个链接，不影响它指向的内容。"
 					: isDir
 						? "文件夹中的所有文件和子文件夹都会一起删除。"
-						: null}
+						: single
+							? null
+							: "选中的文件夹会连同其中的内容一起删除；符号链接只删除链接本身。"}
 				删除不会进入废纸篓 / 回收站，无法撤销。
 			</p>
 			{error ? <p className="error-text small">{error}</p> : null}
@@ -132,7 +160,7 @@ function DeleteDialog({
 				</button>
 				<button type="button" className="danger" disabled={busy} onClick={() => void remove()}>
 					{busy ? <IconLoader size={14} className="spin" /> : <IconTrash size={14} />}
-					{busy ? "正在删除…" : "永久删除"}
+					{busy ? "正在删除…" : completed.current.size ? "重试剩余项目" : "永久删除"}
 				</button>
 			</div>
 		</Modal>
@@ -335,6 +363,30 @@ function entryTitle(entry: WorkspaceFileEntry): string {
 	return parts.join(" · ");
 }
 
+/** Flatten the entries currently visible in the expanded tree, in display order. */
+function collectVisibleEntries(
+	path: string,
+	dirs: Record<string, DirState>,
+	expanded: ReadonlySet<string>,
+	out: WorkspaceFileEntry[],
+): void {
+	for (const entry of dirs[path]?.entries ?? []) {
+		out.push(entry);
+		if (entry.kind === "directory" && expanded.has(entry.path)) collectVisibleEntries(entry.path, dirs, expanded, out);
+	}
+}
+
+/** Selected directories make their descendants redundant for a bulk delete. */
+function deleteRoots(entries: WorkspaceFileEntry[]): WorkspaceFileEntry[] {
+	const paths = new Set(entries.map((entry) => entry.path));
+	return entries.filter((entry) => {
+		for (let parent = parentPath(entry.path); parent; parent = parentPath(parent)) {
+			if (paths.has(parent)) return false;
+		}
+		return true;
+	});
+}
+
 /**
  * `composerKey` is the draft key of the composer on screen (a session id, or the new-chat
  * draft); without it the panel only offers copying paths.
@@ -360,18 +412,36 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 		question: OverwriteQuestion;
 		resolve: (answer: OverwriteAnswer) => void;
 	}>();
-	/** Entry awaiting delete confirmation. */
-	const [deleting, setDeleting] = useState<WorkspaceFileEntry>();
+	/** Entries awaiting delete confirmation. */
+	const [deleting, setDeleting] = useState<WorkspaceFileEntry[]>();
 	const version = useAppState((s) => s.filesVersion[workspace.id] ?? 0);
 	const { dirs, expanded, reload, toggle, collapseAll } = useWorkspaceTree(workspace.id);
-	const [selected, setSelected] = useState<string>();
+	const [selectedPaths, setSelectedPaths] = useState<Set<string>>(() => new Set());
+	const [selectionAnchor, setSelectionAnchor] = useState<string>();
 	const [copied, setCopied] = useState<string>();
 	/** Open context menu; without `entry` it is the menu for the workspace root (blank area). */
 	const [menu, setMenu] = useState<{ position: ContextMenuPosition; entry?: WorkspaceFileEntry }>();
 	const lastReload = useRef(0);
 	/** Pending single-click preview, cancelled when the click turns out to be a double click. */
 	const clickTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+	const entryRefs = useRef(new Map<string, HTMLButtonElement>());
+	const visibleEntries = useMemo(() => {
+		const entries: WorkspaceFileEntry[] = [];
+		collectVisibleEntries("", dirs, expanded, entries);
+		return entries;
+	}, [dirs, expanded]);
+	const visiblePaths = useMemo(() => visibleEntries.map((entry) => entry.path), [visibleEntries]);
 	useEffect(() => () => clearTimeout(clickTimer.current), []);
+
+	// Refreshes and collapsed directories must not leave hidden selections.
+	useEffect(() => {
+		const visible = new Set(visiblePaths);
+		setSelectedPaths((current) => {
+			const next = new Set([...current].filter((path) => visible.has(path)));
+			return next.size === current.size ? current : next;
+		});
+		if (selectionAnchor && !visible.has(selectionAnchor)) setSelectionAnchor(undefined);
+	}, [selectionAnchor, visiblePaths]);
 
 	// Reload when opened, reconnected, or after an agent run in this workspace.
 	// biome-ignore lint/correctness/useExhaustiveDependencies: `version` is the trigger.
@@ -409,6 +479,83 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 	const refresh = () => {
 		lastReload.current = Date.now();
 		reload();
+	};
+	const applySelection = (update: SelectionUpdate) => {
+		setSelectedPaths(update.selected);
+		setSelectionAnchor(update.anchor);
+	};
+	const selectEntry = (entry: WorkspaceFileEntry, event: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean }) => {
+		applySelection(selectByPointer(visiblePaths, selectedPaths, selectionAnchor, entry.path, event));
+	};
+	const focusEntry = (path: string) => {
+		const button = entryRefs.current.get(path);
+		button?.focus({ preventScroll: true });
+		button?.scrollIntoView({ block: "nearest" });
+	};
+	const visibleSelection = () => visibleEntries.filter((entry) => selectedPaths.has(entry.path));
+	const copySelectedPaths = (absolute: boolean) => {
+		const paths = visibleSelection().map((entry) => (absolute ? joinPath(workspace.path, entry.path) : entry.path));
+		copyText(paths.join("\n"), paths.length === 1 ? paths[0] : undefined);
+	};
+	const openEntry = (entry: WorkspaceFileEntry) => {
+		if (entry.kind === "directory") {
+			toggle(entry.path);
+			return;
+		}
+		if (entry.kind === "file") store.openFilePreview(workspace.id, entry.path, composerKey);
+	};
+	const onEntryKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>, entry: WorkspaceFileEntry) => {
+		if (event.nativeEvent.isComposing || event.altKey) return;
+		const command = event.metaKey || event.ctrlKey;
+		const key = event.key.toLowerCase();
+		const move = (path: string) => {
+			applySelection(selectByKeyboard(visiblePaths, selectionAnchor ?? entry.path, path, event.shiftKey));
+			focusEntry(path);
+		};
+		if (command && key === "a" && !event.shiftKey) {
+			setSelectedPaths(new Set(visiblePaths));
+			setSelectionAnchor(entry.path);
+		} else if (command && key === "c") {
+			if (selectedPaths.size) copySelectedPaths(event.shiftKey);
+		} else if (event.key === "Escape") {
+			setSelectedPaths(new Set());
+			setSelectionAnchor(undefined);
+		} else if (!command && ["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+			const index = visiblePaths.indexOf(entry.path);
+			const next =
+				event.key === "Home"
+					? 0
+					: event.key === "End"
+						? visiblePaths.length - 1
+						: Math.max(0, Math.min(visiblePaths.length - 1, index + (event.key === "ArrowUp" ? -1 : 1)));
+			const path = visiblePaths[next];
+			if (path) move(path);
+		} else if (!command && event.key === "ArrowRight") {
+			if (entry.kind === "directory") {
+				if (!expanded.has(entry.path)) toggle(entry.path);
+				else {
+					const child = dirs[entry.path]?.entries?.[0];
+					if (child) move(child.path);
+				}
+			}
+		} else if (!command && event.key === "ArrowLeft") {
+			if (entry.kind === "directory" && expanded.has(entry.path)) toggle(entry.path);
+			else {
+				const parent = parentPath(entry.path);
+				if (parent) move(parent);
+			}
+		} else if (event.key === " " && !event.shiftKey) {
+			if (!event.repeat) selectEntry(entry, { shiftKey: false, ctrlKey: true, metaKey: false });
+		} else if (!command && event.key === "Enter") {
+			openEntry(entry);
+		} else if (event.key === "Delete" || (event.key === "Backspace" && event.metaKey)) {
+			if (!canDelete || connection !== "open") return;
+			const targets = selectedPaths.has(entry.path) ? visibleSelection() : [entry];
+			setDeleting(deleteRoots(targets));
+		} else return;
+		clearTimeout(clickTimer.current);
+		event.preventDefault();
+		event.stopPropagation();
 	};
 
 	const upload = (items: UploadItem[]) => {
@@ -503,6 +650,36 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 				},
 			];
 		}
+		const selectedEntries = selectedPaths.has(entry.path) ? visibleSelection() : [entry];
+		if (selectedEntries.length > 1) {
+			return [
+				{
+					label: `复制 ${selectedEntries.length} 个相对路径`,
+					icon: <IconCopy size={14} />,
+					onSelect: () => copySelectedPaths(false),
+				},
+				{
+					label: `复制 ${selectedEntries.length} 个绝对路径`,
+					icon: <IconCopy size={14} />,
+					onSelect: () => copySelectedPaths(true),
+				},
+				composerKey
+					? {
+							label: `插入 ${selectedEntries.length} 个路径到输入框`,
+							icon: <IconMessagePlus size={14} />,
+							onSelect: () => selectedEntries.forEach(insert),
+						}
+					: null,
+				"separator",
+				canDelete && {
+					label: `删除 ${selectedEntries.length} 个项目…`,
+					icon: <IconTrash size={14} />,
+					danger: true,
+					disabled: connection !== "open",
+					onSelect: () => setDeleting(deleteRoots(selectedEntries)),
+				},
+			];
+		}
 		const isDir = entry.kind === "directory";
 		const absolute = joinPath(workspace.path, entry.path);
 		const open = isDir && expanded.has(entry.path);
@@ -556,7 +733,7 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 				hint: /Mac/.test(platform) ? "⌘⌫" : "Delete",
 				danger: true,
 				disabled: connection !== "open",
-				onSelect: () => setDeleting(entry),
+				onSelect: () => setDeleting([entry]),
 			},
 		];
 	};
@@ -592,48 +769,53 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 				{entries.map((entry) => {
 					const isDir = entry.kind === "directory";
 					const open = isDir && expanded.has(entry.path);
+					const isSelected = selectedPaths.has(entry.path);
 					return (
 						<div key={entry.path}>
 							{/* biome-ignore lint/a11y/noStaticElementInteractions: the row's button is the focusable control; this only adds its context menu. */}
 							<div
-								className={`files-row${selected === entry.path ? " selected" : ""}${menu?.entry?.path === entry.path ? " menu-open" : ""}${entry.kind === "other" ? " dim" : ""}${isDir && dropDir === entry.path ? " drop-target" : ""}`}
+								className={`files-row${isSelected ? " selected" : ""}${menu?.entry?.path === entry.path ? " menu-open" : ""}${entry.kind === "other" ? " dim" : ""}${isDir && dropDir === entry.path ? " drop-target" : ""}`}
 								style={{ paddingLeft: 6 + depth * 14 }}
 								data-drop-dir={isDir ? entry.path : parentPath(entry.path)}
 								onContextMenu={(event) => {
 									event.preventDefault();
 									event.stopPropagation();
 									clearTimeout(clickTimer.current);
-									setSelected(entry.path);
+									if (!selectedPaths.has(entry.path)) {
+										applySelection(selectByPointer(visiblePaths, selectedPaths, selectionAnchor, entry.path));
+									}
 									setMenu({ position: contextMenuPosition(event), entry });
 								}}
 							>
 								<button
 									type="button"
 									className="files-entry"
+									ref={(button) => {
+										if (button) entryRefs.current.set(entry.path, button);
+										else entryRefs.current.delete(entry.path);
+									}}
+									data-entry-path={entry.path}
+									aria-pressed={isSelected}
 									title={entryTitle(entry)}
 									{...(isDir ? { "aria-expanded": open } : {})}
-									onKeyDown={(event) => {
-										const del = event.key === "Delete" || (event.key === "Backspace" && event.metaKey);
-										if (!del || !canDelete || connection !== "open") return;
-										event.preventDefault();
-										setSelected(entry.path);
-										setDeleting(entry);
-									}}
+									onKeyDown={(event) => onEntryKeyDown(event, entry)}
 									onClick={(event) => {
-										setSelected(entry.path);
+										clearTimeout(clickTimer.current);
+										selectEntry(entry, event);
+										if (event.shiftKey || event.metaKey || event.ctrlKey) return;
 										if (isDir) {
 											toggle(entry.path);
 											return;
 										}
-										clearTimeout(clickTimer.current);
 										if (entry.kind !== "file" || event.detail > 1) return;
 										// With a composer, wait briefly so a double click inserts the path instead.
 										const open = () => store.openFilePreview(workspace.id, entry.path, composerKey);
 										if (composerKey && event.detail === 1) clickTimer.current = setTimeout(open, 250);
 										else open();
 									}}
-									onDoubleClick={() => {
+									onDoubleClick={(event) => {
 										clearTimeout(clickTimer.current);
+										if (event.shiftKey || event.metaKey || event.ctrlKey) return;
 										if (!isDir) insert(entry);
 									}}
 								>
@@ -700,6 +882,18 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 			{/* biome-ignore lint/a11y/noStaticElementInteractions: context menu for the blank area; every action is also in the header. */}
 			<div
 				className={`files-tree${dropDir === "" ? " drop-target" : ""}`}
+				onKeyDown={(event) => {
+					if (event.key !== "Escape") return;
+					clearTimeout(clickTimer.current);
+					setSelectedPaths(new Set());
+					setSelectionAnchor(undefined);
+				}}
+				onClick={(event) => {
+					if ((event.target as Element).closest(".files-row")) return;
+					clearTimeout(clickTimer.current);
+					setSelectedPaths(new Set());
+					setSelectionAnchor(undefined);
+				}}
 				onContextMenu={(event) => {
 					event.preventDefault();
 					setMenu({ position: contextMenuPosition(event) });
@@ -711,8 +905,15 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 				{connection === "open" || dirs[""] ? renderDir("", 0) : <div className="files-note">正在连接 Pier Host…</div>}
 			</div>
 			<TransferList workspaceId={workspace.id} />
-			<div className="files-hint">
-				{composerKey ? "单击查看内容，双击插入路径，右键更多操作" : "单击查看内容，右键更多操作"}
+			<div
+				className="files-hint"
+				title={`Shift+单击范围选择，${/Mac/.test(platform) ? "⌘" : "Ctrl"}+单击增减选择；方向键导航，Shift+↑/↓ 扩展选择，←/→ 折叠/展开；空格增减选择，Ctrl/⌘+A 全选可见项目，Ctrl/⌘+C 复制相对路径，Ctrl/⌘+Shift+C 复制绝对路径，Delete / ⌘⌫ 删除，Esc 清除选择`}
+			>
+				{selectedPaths.size > 1
+					? `已选择 ${selectedPaths.size} 项 · 右键批量操作`
+					: composerKey
+						? "单击查看，双击插入路径 · Shift 范围选择，Ctrl/⌘ 多选"
+						: "单击查看 · Shift 范围选择，Ctrl/⌘ 多选 · 右键更多操作"}
 			</div>
 			<input
 				ref={fileInput}
@@ -737,7 +938,9 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 				/>
 			) : null}
 			{overwrite ? <OverwriteDialog question={overwrite.question} onAnswer={answerOverwrite} /> : null}
-			{deleting ? <DeleteDialog workspace={workspace} entry={deleting} onClose={() => setDeleting(undefined)} /> : null}
+			{deleting ? (
+				<DeleteDialog workspace={workspace} entries={deleting} onClose={() => setDeleting(undefined)} />
+			) : null}
 		</aside>
 	);
 }

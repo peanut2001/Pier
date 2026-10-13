@@ -56,7 +56,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [bun-linux-x64, bun-darwin-arm64, bun-windows-x64]
+        target: [bun-linux-x64, bun-linux-arm64, bun-darwin-arm64, bun-windows-x64]
     steps:
       - uses: actions/checkout@v5
 
@@ -79,7 +79,9 @@ jobs:
 
       - name: Smoke test (native target only)
         if: matrix.target == 'bun-linux-x64'
-        run: node packages/host/scripts/smoke-sidecar.mjs packages/host/bin/pier-host
+        run: |
+          node packages/host/scripts/smoke-sidecar.mjs packages/host/bin/pier-host
+          node packages/host/scripts/smoke-mcp.mjs packages/host/bin/pier-host
 
   desktop:
     name: desktop shell (${{ matrix.os }})
@@ -88,7 +90,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, ubuntu-22.04-arm, macos-latest, windows-latest]
     defaults:
       run:
         shell: bash
@@ -108,6 +110,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: apps/desktop/src-tauri
+          # GTK-linked Rust artifacts cannot be shared between Ubuntu runner images.
+          key: ${{ matrix.os }}
 
       - name: Linux system dependencies
         if: runner.os == 'Linux'
@@ -133,6 +137,11 @@ jobs:
       - name: cargo fmt
         working-directory: apps/desktop/src-tauri
         run: cargo fmt --check
+
+      - name: NVIDIA renderer regression tests
+        if: runner.os == 'Linux'
+        working-directory: apps/desktop/src-tauri
+        run: cargo test --lib --locked linux_graphics::tests
 
       - name: cargo clippy
         working-directory: apps/desktop/src-tauri

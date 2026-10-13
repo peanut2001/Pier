@@ -1,3 +1,4 @@
+import type { BrowserCommand } from "./browser.ts";
 import type {
 	AgentConfigRuntime,
 	AgentConfigScope,
@@ -17,6 +18,7 @@ import type {
 	UiResolution,
 	UiResponse,
 } from "./domain.ts";
+import type { ResourceRuntime } from "./resources.ts";
 
 /**
  * Pi session events forwarded verbatim (after pi's JSON wire transformation, which
@@ -83,6 +85,8 @@ export type PierSessionEvent =
 
 /** Host-scoped events (no `sessionId`, no `seq`). */
 export type PierHostEvent =
+	| { type: "resources.changed"; runtime: ResourceRuntime; workspaceId?: string }
+	| { type: "browser.command"; browserId: string; requestId: string; command: BrowserCommand }
 	| { type: "task.changed" }
 	| { type: "host.notice"; level: "info" | "warning" | "error"; message: string; sessionId?: string }
 	| { type: "workspace.changed" }

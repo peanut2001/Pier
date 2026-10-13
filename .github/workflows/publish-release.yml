@@ -57,6 +57,7 @@ jobs:
           required = {
               'verify tag · lint · typecheck · test', 'mobile android', 'updater manifest',
               'desktop linux-x64', 'desktop windows-x64', 'desktop darwin-arm64', 'desktop darwin-x64',
+              'desktop linux-arm64', 'headless host linux-x64', 'headless host linux-arm64',
           }
           successful = {job['name'] for job in jobs if job['status'] == 'completed' and job['conclusion'] == 'success'}
           assert required <= successful, f'Builds not successful: {required - successful}'
@@ -84,12 +85,13 @@ jobs:
           tag = os.environ['RELEASE_TAG']
           signed = {f'pier-desktop-{tag}-{suffix}' for suffix in [
               'linux-x64.AppImage', 'linux-x64.deb', 'windows-x64.setup.exe',
+              'linux-arm64.AppImage', 'linux-arm64.deb',
               'darwin-arm64.app.tar.gz', 'darwin-x64.app.tar.gz',
           ]}
           expected = signed | {name + '.sig' for name in signed} | {
               f'pier-desktop-{tag}-darwin-arm64.dmg', f'pier-desktop-{tag}-darwin-x64.dmg',
               f'pier-mobile-{tag}-android.apk', 'latest.json', 'latest-android.json',
-          }
+          } | {f'pier-host-{tag}-linux-{arch}{suffix}' for arch in ['x64', 'arm64'] for suffix in ['', '.tar.gz']}
           assert {p.name for p in root.iterdir()} == expected, 'Unexpected or missing release artifacts'
           assert all(p.is_file() and not p.is_symlink() and p.stat().st_size for p in root.iterdir()), 'Invalid artifact'
           version = json.loads(Path('package.json').read_text())['version']

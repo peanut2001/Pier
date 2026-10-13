@@ -605,3 +605,67 @@ Claude Code 与 Codex 会话（1.22）发出同样形态的事件与 `AgentMessa
 ## 8. 空闲回收
 
 没有订阅者、非运行中、没有待处理 UI 请求，且 30 分钟无活动的会话会被自动 `dispose`（`session.closed { reason: "idle" }`），之后可通过 `session.open` 重新加载。
+
+## 统一 Skills 与 MCP 管理（1.38）
+
+以下方法向已认证的本地及配对客户端开放。`runtime` 为 `pi`、`claude-code` 或 `codex`；`workspaceId?` 为目标 Host 的已注册工作区，省略时只查看全局。`scope` 为 `user` / `project`，Claude MCP 另支持 `local`（存放在用户状态中的项目私有定义）。项目 / 本地操作必须提供工作区。
+
+| 方法 | 参数 | 结果 |
+| --- | --- | --- |
+| `skills.list` | `{ runtime, workspaceId? }` | `{ items: SkillInfo[], errors: string[] }`。技能包含 `scope, name, description, path, enabled, editable, deletable, shared`；路径必须来自列表才能读取或修改 |
+| `skills.read` | `{ runtime, workspaceId?, path }` | `{ skill, text, revision }`；`revision` 为内容 SHA-256 |
+| `skills.save` | `{ runtime, workspaceId?, scope, name, text, path?, expectedRevision? }` | `{ skill, text, revision }`；无 `path` 时创建独立技能，已存在的目录返回 `CONFLICT`。编辑需要列表路径与读取时的版本；冲突返回 `CONFLICT`，扩展包 / 系统 / 符号链接技能不可编辑 |
+| `skills.import` | `{ runtime, workspaceId?, scope, sourcePath, name? }` | `{ skill, text, revision }`；从目标电脑上绝对路径的技能目录或 `SKILL.md` 复制技能、脚本和资源，不覆盖已有目录 |
+| `skills.setEnabled` | `{ runtime, workspaceId?, path, enabled }` | `{ changed }`；pi 更新资源设置，Codex 更新 `skills.config`，Claude 更新技能 `permissions.deny` 规则，不删除技能文件 |
+| `skills.delete` | `{ runtime, workspaceId?, path, expectedRevision? }` | `{ deleted }`；独立技能目录移入回收站，pi 的显式资源路径遵循 `extension.delete` 的移除语义 |
+| `mcp.list` | `{ runtime, workspaceId? }` | `{ items: McpServerInfo[], errors: string[] }`；服务器包含 `scope, name, path, enabled, config, revision`。`config` 是原生配置，可能含凭据，仅通过认证连接返回 |
+| `mcp.save` | `{ runtime, workspaceId?, scope, name, config, enabled?(true), expectedRevision?, create?(false) }` | `McpServerInfo`；新建时传 `create: true` 防止覆盖同名服务器，编辑时必须匹配旧版本；保留其他服务器、配置项及 Codex TOML 注释 |
+| `mcp.setEnabled` | `{ runtime, workspaceId?, scope, name, enabled, expectedRevision }` | `McpServerInfo`；Claude 定义停用后归档在 Pier 状态目录，启用时恢复；pi / Codex 使用原生 `enabled`，支持 pi 的项目启用状态覆盖 |
+| `mcp.delete` | `{ runtime, workspaceId?, scope, name, expectedRevision }` | `{ deleted }`；只移除指定定义，保留其他服务器与应用配置 |
+| `mcp.test` | `{ runtime, workspaceId?, scope, name }` | `{ ok, tools: { name }[], message }`；显式建立 stdio / HTTP / Claude SSE 连接、发现工具并关闭连接；不调用业务工具、不启动 OAuth、不回传子进程日志或凭据。客户端建议 60 秒超时 |
+
+变更广播 `resources.changed = { runtime, workspaceId? }`，并通知相关扩展 / Agent 配置页面。pi 空闲会话重新加载，忙碌会话保持原运行并在结束后 `/reload`；Claude / Codex 原生配置在会话新建 / 重新打开时读取。审计只记录 runtime、scope、资源名称与工作区，不记录技能正文、MCP 配置、环境变量、请求头或凭据。
+
+## 主机端口与独立 TCP 映射（1.39）
+
+端口面板独立于浏览器和工作区。本机 Host 创建回环 TCP 监听器，通过 `PeerManager` 为每条映射建立独立的配对加密连接，复用 `tunnel.*` 的流控和半关闭语义；支持现有直连 / Relay / P2P。目标转发 Host 需要 1.37，端口查询需要 1.39。
+
+| 方法 | 参数 | 返回 |
+|---|---|---|
+| `host.ports` | — | `{ ports: HostPort[], truncated }`；查看这台主机正在监听的 TCP 和未连接 UDP 套接字，不扫描网络或防火墙 |
+| `portForward.open` 🔒 | `{ peerId, remoteHost, remotePort, localPort? }` | `PortForward`；本地监听 `127.0.0.1`，`localPort` 省略或为 `0` 时自动分配 |
+| `portForward.list` 🔒 | — | `{ forwards: PortForward[] }`；只返回调用连接创建的映射 |
+| `portForward.close` 🔒 | `{ id }` | `{ closed }`；关闭指定映射及其所有 TCP 流，其他连接的映射返回 `false` |
+
+`HostPort = { protocol:"tcp"|"udp", address, port, pid?, process? }`。Linux 优先使用 `ss`，缺少命令时读取 `/proc/net/{tcp,tcp6,udp,udp6}`；macOS 使用 `lsof`，Windows 使用 PowerShell 的 `Get-NetTCPConnection` / `Get-NetUDPEndpoint`。仅执行固定只读命令，不提升权限、不读取进程命令行；进程名称/PID 不可读时省略。Linux 仅显示 Host 所在网络命名空间的监听端口。样本缓存 1 秒并共享并发查询，最多返回 4096 条，超出时设置 `truncated:true`。
+
+`PortForward = { id, peerId, remoteHost, remotePort, localHost:"127.0.0.1", localPort, lastError? }`。只允许已配对目标和不带 URL / 凭据的目标地址；所有端口限定在 1–65535（本地额外允许 0）。本地端口冲突返回 `CONFLICT`，权限不足返回 `FORBIDDEN`。创建映射只确认本地监听器启动；远程服务在本地程序连接时按需连接，失败会更新 `lastError`，下一次成功连接清除此字段。最多 32 条映射，不支持 UDP 转发。
+
+映射属于创建它的本地协议连接；关闭 UI 面板不会关闭该连接。管理连接断开、目标配对连接断开、设备吊销、移除配对或 Host 退出均清理监听器与流。不持久化映射或自动恢复。只有本地认证客户端可以管理映射；远程已配对设备可以查询 `host.ports`，但不能在此主机创建监听器。TCP 流继续由 `tunnel.open` 审计目标/端口，不记录流量或进程列表。
+
+## 本地渲染的浏览器（1.37）
+
+本机 Host 负责本地浏览器进程和回环监听器，通过 `PeerManager` 为浏览器建立独立的配对加密连接（现有 Relay / P2P 可用）。远程 Host 仅连接目标 TCP 服务，运行独立 Host 的无桌面 Linux 同样可提供转发。配对仍表示完全信任；这里只对已认证连接开放。旧版目标 Host 在打开时提示更新。
+
+| 方法 | 参数 | 返回 |
+|---|---|---|
+| `tunnel.open` | `{ host, port }` | `{ tunnelId }`；10 秒连接超时，仅允许域名 / IP，无 URL 和凭据 |
+| `tunnel.read` | `{ tunnelId }` | `{ data, end }`；base64 原始字节，每次最多 64 KiB；最多等 25 秒，无数据时返回空串和 `end:false`；同一流只能有一个挂起读取 |
+| `tunnel.write` | `{ tunnelId, data, end? }` | `{ written }`；单块最多 64 KiB，`end` 半关闭写方向 |
+| `tunnel.close` | `{ tunnelId }` | `{ closed }`；释放 TCP 套接字和缓冲 |
+| `browser.open` 🔒 | `{ workspaceId, peerId?, url, mode, controlled? }` | `LocalBrowserInfo`；`mode:service` 转发一个端口，返回本地 URL，由 UI 打开默认浏览器；`mode:network` 启动本地 Chromium 独立窗口和远程 HTTP / CONNECT 代理；`controlled:true` 也使用独立窗口并注册工作区控制器 |
+| `browser.list` 🔒 | — | `{ browsers: LocalBrowserInfo[] }`；只列出调用连接创建的实例 |
+| `browser.close` 🔒 | `{ browserId }` | `{ closed }`；关闭代理、转发和项目启动的独立浏览器 |
+| `browser.attach` | `{ workspaceId, browserId }` | `{ attached:true }`；调用连接声明可在本地执行此工作区的浏览器命令 |
+| `browser.detach` | `{ browserId }` | `{ detached }`；只有注册连接可以移除 |
+| `browser.action` | `{ workspaceId, browserId?, command }` | `BrowserResult`；多个控制器时必须指定 ID；没有控制器时提示先在客户端打开并允许 Agent 操作 |
+| `browser.result` | `{ requestId, result?, error? }` | `{ accepted }`；只有接收命令的注册连接能回复；命令超时或被取消后回复被忽略 |
+
+`LocalBrowserInfo = { browserId, workspaceId, peerId?, url, localUrl, mode, controllable }`。
+`BrowserCommand = { action, tabId?, url?, selector?, text?, key?, expression? }`；`action` 支持 `tabs` / `navigate` / `snapshot` / `click` / `fill` / `press` / `evaluate` / `screenshot`，选择器是 CSS。导航仅接受不带 userinfo 的 HTTP(S) 地址。`BrowserResult = { text?, image?: { data, mimeType:"image/png" } }`。
+
+`browser.command` 事件 `{ browserId, requestId, command }` 只发给注册此控制器的连接，不广播、不写 EventLog。注册连接在本地私有 CDP 进程管道执行后调用 `browser.result`，远程等待上限 30 秒。断线、移除控制器或取消会话请求时结束等待。内置 pi 工具 `pier_browser` 使用相同路由和工作区审批策略；协议调用者按现有完全信任模型自行控制审批。
+
+所有 TCP 流属于创建它的连接，其他连接访问时为 `NOT_FOUND`，关闭返回 `false`。每台 Host 最多 128 流，每条连接最多 64 流；每流读缓冲达到 512 KiB 后暂停套接字读取，低于 256 KiB 后继续。写入等待 Node 流回调后确认。客户端通过流背压按需读取，保持 HTTP(S)、WebSocket 和半关闭语义。连接断开 / Host 关闭时销毁所有所属套接字；目标连接断开或设备吊销时，本地回环监听器和独立浏览器也被清理。
+
+浏览器仅由本地客户端显式启动，`controlled` 默认关闭；网络方式启动独立浏览器本身不授予 Agent 操作权限。独立浏览器配置按主机保存在本机 `browser-profiles`，配置目录由主机 ID 的 SHA-256 派生，浏览器控制不监听 TCP 调试端口。代理保持目标 origin，由远程 Host 解析域名与连接目标；关闭 QUIC 并限制 WebRTC 的非代理 UDP，覆盖 HTTP(S) / WebSocket 流量，不承诺系统级 VPN 语义。审计只记录连接目标 / 端口、工作区和动作名，不记录网页数据、输入、脚本或截图。
