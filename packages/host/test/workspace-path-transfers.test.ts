@@ -5,6 +5,7 @@ import {
 	readdirSync,
 	readFileSync,
 	readlinkSync,
+	realpathSync,
 	rmSync,
 	symlinkSync,
 	writeFileSync,
@@ -16,17 +17,21 @@ import { deleteWorkspacePath } from "../src/workspace-files.ts";
 import { transferWorkspacePath } from "../src/workspace-path-transfers.ts";
 import { startTestHost } from "./helpers.ts";
 
-const faults = vi.hoisted(() => ({ crossDevice: "", changeAfterCopy: "" }));
+const faults = vi.hoisted(() => ({ crossDevice: "", changeAfterCopy: "", crossDeviceHits: 0, copies: 0 }));
 vi.mock("node:fs/promises", async (importOriginal) => {
 	const fs = await importOriginal<typeof import("node:fs/promises")>();
 	return {
 		...fs,
 		rename: async (from: string, to: string) => {
-			if (from === faults.crossDevice) throw Object.assign(new Error("cross device"), { code: "EXDEV" });
+			if (from === faults.crossDevice) {
+				faults.crossDeviceHits++;
+				throw Object.assign(new Error("cross device"), { code: "EXDEV" });
+			}
 			return fs.rename(from, to);
 		},
 		cp: async (from: string, to: string, options: Parameters<typeof fs.cp>[2]) => {
 			await fs.cp(from, to, options);
+			faults.copies++;
 			if (faults.changeAfterCopy) await fs.writeFile(faults.changeAfterCopy, "new content");
 		},
 	};
@@ -37,7 +42,9 @@ describe("workspace path transfers", () => {
 	let source: string;
 	let destination: string;
 	beforeEach(() => {
-		root = mkdtempSync(join(tmpdir(), "pier-path-transfer-"));
+		// Match the canonical paths used by workspaceRealRoot, including macOS /var
+		// aliases and Windows temporary-directory casing, so EXDEV is actually injected.
+		root = realpathSync.native(mkdtempSync(join(tmpdir(), "pier-path-transfer-")));
 		source = join(root, "source");
 		destination = join(root, "destination");
 		mkdirSync(join(source, "folder", "empty"), { recursive: true });
@@ -47,6 +54,8 @@ describe("workspace path transfers", () => {
 		writeFileSync(join(source, "folder", "file.bin"), Buffer.from([0, 1, 255]));
 		faults.crossDevice = "";
 		faults.changeAfterCopy = "";
+		faults.crossDeviceHits = 0;
+		faults.copies = 0;
 	});
 	afterEach(() => rmSync(root, { recursive: true, force: true }));
 
@@ -109,6 +118,8 @@ describe("workspace path transfers", () => {
 	it("finishes cross-filesystem moves only after copying all contents", async () => {
 		faults.crossDevice = join(source, "folder");
 		await transferWorkspacePath(source, "folder", destination, "folder", "move");
+		expect(faults.crossDeviceHits).toBe(1);
+		expect(faults.copies).toBe(1);
 		expect(existsSync(join(source, "folder"))).toBe(false);
 		expect(existsSync(join(destination, "folder", "empty"))).toBe(true);
 	});
@@ -119,6 +130,8 @@ describe("workspace path transfers", () => {
 		await expect(transferWorkspacePath(source, "folder", destination, "folder", "move")).rejects.toMatchObject({
 			code: "CONFLICT",
 		});
+		expect(faults.crossDeviceHits).toBe(1);
+		expect(faults.copies).toBe(1);
 		expect(readFileSync(faults.changeAfterCopy, "utf8")).toBe("new content");
 		expect(readdirSync(destination)).toEqual([]);
 	});
