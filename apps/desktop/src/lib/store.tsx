@@ -56,14 +56,17 @@ import type {
 	WorkspaceFileWriteResult,
 	WorkspaceInfo,
 	WorkspacePathDeleteResult,
+	WorkspacePathTransferResult,
 } from "@pier/protocol";
 import { PierProtocolError, parseProtocolVersion } from "@pier/protocol";
 import { createContext, useContext, useMemo, useSyncExternalStore } from "react";
 import type { Bridge, HostStatus, LocalFileSink, UpdateStatus } from "./bridge.ts";
 import { remoteServiceUrl } from "./browser-url.ts";
 import { fileToken } from "./composer-text.ts";
+import { workspaceNameError } from "./file-names.ts";
 import { newSessionDefaultsFromSettings } from "./new-session-defaults.ts";
 import { remotePageBlocker } from "./settings-target.ts";
+import { beginWorkspacePaste, finishWorkspacePaste, renameWorkspaceClipboardPath } from "./workspace-clipboard.ts";
 import { isYunlianProvider, movedToLine, YUNLIAN_SITE, yunlianGroupOf, yunlianProvider } from "./yunlian.ts";
 
 export const APP_VERSION = "0.2.43";
@@ -2258,6 +2261,33 @@ export class PierStore {
 			throw new Error("文件所在电脑的 Pier 版本过旧，不支持新建文件和文件夹，请先更新它");
 		}
 		return client;
+	}
+
+	/** Rename an entry on its owning computer without replacing an existing destination. */
+	async renamePath(workspaceId: string, path: string, name: string): Promise<WorkspacePathTransferResult> {
+		const error = workspaceNameError(name);
+		if (error) throw new Error(error);
+		const destinationPath = path.slice(0, path.lastIndexOf("/") + 1) + name.trim();
+		if (destinationPath === path) throw new Error("请输入新的名称");
+		const client = this.openClient(this.nodeOf(workspaceId));
+		if (!client) throw new Error("尚未连接到文件所在电脑的 Pier Host");
+		this.requireNativeFileTransfers(workspaceId);
+		if (!beginWorkspacePaste()) throw new Error("正在复制或移动文件，请稍后重试");
+		try {
+			const result = await client.request("workspace.transferPath", {
+				workspaceId,
+				path,
+				destinationWorkspaceId: workspaceId,
+				destinationPath,
+				mode: "move",
+			});
+			renameWorkspaceClipboardPath(workspaceId, result.sourcePath, result.path);
+			this.closeMovedFilePreview(workspaceId, result.sourcePath);
+			this.bumpFiles(workspaceId);
+			return result;
+		} finally {
+			finishWorkspacePaste();
+		}
 	}
 
 	/** Read one workspace file for preview; rejects with the host's error. */

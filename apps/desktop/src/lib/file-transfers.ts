@@ -8,6 +8,7 @@
 import type { PierClient } from "@pier/client";
 import { PierProtocolError, type WorkspaceInfo } from "@pier/protocol";
 import { useSyncExternalStore } from "react";
+import { workspaceNameError } from "./file-names.ts";
 import type { PierStore } from "./store.tsx";
 import {
 	beginWorkspacePaste,
@@ -65,11 +66,9 @@ export type PasteConflictAnswer = OverwriteAnswer | { choice: "rename"; name: st
 
 /** Keep renaming within the chosen destination directory. */
 export function pasteNameError(name: string, existingName: string): string | undefined {
-	const value = name.trim();
-	if (!value || value === "." || value === "..") return "请输入有效的名称";
-	if (/[\\/]/.test(value) || [...value].some((char) => char.charCodeAt(0) < 32) || /^[a-zA-Z]:/.test(value))
-		return "名称不能包含路径分隔符或控制字符";
-	if (value === existingName) return "此名称已被占用，请使用其他名称";
+	const error = workspaceNameError(name);
+	if (error) return error;
+	if (name.trim() === existingName) return "此名称已被占用，请使用其他名称";
 	return undefined;
 }
 

@@ -43,6 +43,19 @@ export function clearWorkspaceClipboard(): void {
 	emit();
 }
 
+/** Keep copied/cut entries pointing at their renamed root or descendant. */
+export function renameWorkspaceClipboardPath(workspaceId: string, from: string, to: string): void {
+	if (current?.sourceWorkspaceId !== workspaceId) return;
+	const entries = current.entries.map((entry) => {
+		if (entry.path !== from && !entry.path.startsWith(`${from}/`)) return entry;
+		const path = to + entry.path.slice(from.length);
+		return { ...entry, path, name: path.slice(path.lastIndexOf("/") + 1) };
+	});
+	if (entries.every((entry, index) => entry === current?.entries[index])) return;
+	current = { ...current, entries };
+	emit();
+}
+
 export function subscribeWorkspaceClipboard(listener: () => void): () => void {
 	listeners.add(listener);
 	return () => listeners.delete(listener);

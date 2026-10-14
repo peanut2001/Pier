@@ -9,6 +9,7 @@ import {
 	useState,
 } from "react";
 import { WORKSPACE_FILE_DRAG_TYPE, workspaceDragEntries, workspaceDropEntries } from "../lib/file-drag.ts";
+import { workspaceNameError } from "../lib/file-names.ts";
 import { type SelectionUpdate, selectByKeyboard, selectByPointer } from "../lib/file-selection.ts";
 import {
 	downloadFile,
@@ -67,6 +68,7 @@ import {
 	IconMessagePlus,
 	IconPanelRight,
 	IconPaste,
+	IconPencil,
 	IconRefresh,
 	IconTerminal,
 	IconTrash,
@@ -199,6 +201,101 @@ function CreateDialog({
 							<IconFolderPlus size={14} />
 						)}
 						{busy ? "正在创建…" : "创建"}
+					</button>
+				</div>
+			</form>
+		</Modal>
+	);
+}
+
+function RenameDialog({
+	workspace,
+	entry,
+	onClose,
+	onRenamed,
+}: {
+	workspace: WorkspaceInfo;
+	entry: WorkspaceFileEntry;
+	onClose: () => void;
+	onRenamed: (path: string) => void;
+}) {
+	const store = useStore();
+	const [name, setName] = useState(entry.name);
+	const [busy, setBusy] = useState(false);
+	const [error, setError] = useState<string>();
+	const input = useRef<HTMLInputElement>(null);
+	useEffect(() => {
+		input.current?.focus();
+		// Select the stem of ordinary files, but the entire name of dotfiles, folders and links.
+		const dot =
+			entry.kind === "file" && !entry.symlink && !entry.name.startsWith(".") ? entry.name.lastIndexOf(".") : -1;
+		input.current?.setSelectionRange(0, dot > 0 ? dot : entry.name.length);
+	}, [entry]);
+	const rename = async () => {
+		if (busy || name.trim() === entry.name) return;
+		const invalid = workspaceNameError(name);
+		if (invalid) {
+			setError(invalid);
+			return;
+		}
+		setBusy(true);
+		setError(undefined);
+		try {
+			const result = await store.renamePath(workspace.id, entry.path, name);
+			store.toast("info", `已重命名为「${name.trim()}」`);
+			onRenamed(result.path);
+		} catch (error) {
+			const code = (error as { code?: string }).code;
+			setError(
+				code === "CONFLICT"
+					? "已有同名文件或文件夹，请使用其他名称"
+					: code === "NOT_FOUND"
+						? "原项目或所在目录已不存在，请刷新文件列表"
+						: code === "FORBIDDEN"
+							? "没有权限重命名，或所在目录位于工作区之外"
+							: `重命名失败：${errorText(error)}`,
+			);
+			setBusy(false);
+		}
+	};
+	return (
+		<Modal title="重命名" className="files-create-dialog" onClose={() => !busy && onClose()}>
+			<form
+				onSubmit={(event) => {
+					event.preventDefault();
+					void rename();
+				}}
+			>
+				<code className="path">{joinPath(workspace.path, entry.path)}</code>
+				<label className="field">
+					<span className="field-label">新名称</span>
+					<input
+						ref={input}
+						value={name}
+						onChange={(event) => {
+							setName(event.target.value);
+							setError(undefined);
+						}}
+						onKeyDown={(event) => {
+							if (event.key === "Enter" && event.nativeEvent.isComposing) event.preventDefault();
+						}}
+						maxLength={255}
+						disabled={busy}
+						autoComplete="off"
+					/>
+				</label>
+				{error ? (
+					<p className="error-text small" role="alert">
+						{error}
+					</p>
+				) : null}
+				<div className="modal-actions">
+					<button type="button" className="ghost" disabled={busy} onClick={onClose}>
+						取消
+					</button>
+					<button type="submit" disabled={busy || !name.trim() || name.trim() === entry.name}>
+						{busy ? <IconLoader size={14} className="spin" /> : <IconPencil size={14} />}
+						{busy ? "正在重命名…" : "重命名"}
 					</button>
 				</div>
 			</form>
@@ -556,7 +653,36 @@ function useWorkspaceTree(workspaceId: string) {
 		[load, updateExpanded],
 	);
 
-	return { dirs, expanded, reload, toggle, collapseAll, reveal };
+	const renamed = (from: string, to: string) => {
+		const remap = (path: string) =>
+			path === from || path.startsWith(`${from}/`) ? to + path.slice(from.length) : path;
+		// Ignore in-flight listings from before the rename, including the old parent listing.
+		requests.current.clear();
+		setDirs((current) =>
+			Object.fromEntries(
+				Object.entries(current).map(([path, dir]) => [
+					remap(path),
+					{
+						...dir,
+						entries: dir.entries?.map((entry) => ({
+							...entry,
+							path: remap(entry.path),
+							name: entry.path === from ? to.slice(to.lastIndexOf("/") + 1) : entry.name,
+						})),
+					},
+				]),
+			),
+		);
+		updateExpanded((set) => {
+			const next = [...set].map(remap);
+			set.clear();
+			for (const path of next) set.add(path);
+		});
+		void load("");
+		for (const path of expandedRef.current) void load(remap(path));
+	};
+
+	return { dirs, expanded, reload, toggle, collapseAll, reveal, renamed };
 }
 
 function entryTitle(entry: WorkspaceFileEntry): string {
@@ -663,8 +789,9 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 	/** Entries awaiting delete confirmation. */
 	const [deleting, setDeleting] = useState<WorkspaceFileEntry[]>();
 	const [creating, setCreating] = useState<{ dir: string; kind: "file" | "directory" }>();
+	const [renaming, setRenaming] = useState<WorkspaceFileEntry>();
 	const version = useAppState((s) => s.filesVersion[workspace.id] ?? 0);
-	const { dirs, expanded, reload, toggle, collapseAll, reveal } = useWorkspaceTree(workspace.id);
+	const { dirs, expanded, reload, toggle, collapseAll, reveal, renamed } = useWorkspaceTree(workspace.id);
 	const [selectedPaths, setSelectedPaths] = useState<Set<string>>(() => new Set());
 	const [selectionAnchor, setSelectionAnchor] = useState<string>();
 	const [copied, setCopied] = useState<string>();
@@ -742,6 +869,11 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 		button?.scrollIntoView({ block: "nearest" });
 	};
 	const visibleSelection = () => visibleEntries.filter((entry) => selectedPaths.has(entry.path));
+	const startRename = (entry: WorkspaceFileEntry) => {
+		if (!canMove || (entry.kind === "other" && !entry.symlink)) return;
+		clearTimeout(clickTimer.current);
+		setRenaming(entry);
+	};
 	const copySelectedPaths = (absolute: boolean) => {
 		const paths = visibleSelection().map((entry) => (absolute ? joinPath(workspace.path, entry.path) : entry.path));
 		copyText(paths.join("\n"), paths.length === 1 ? paths[0] : undefined);
@@ -785,6 +917,9 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 			copyEntries(selectedPaths.has(entry.path) ? visibleSelection() : [entry], "move");
 		} else if (command && key === "v" && !event.shiftKey) {
 			paste(entry.kind === "directory" ? entry.path : parentPath(entry.path));
+		} else if (!command && !event.shiftKey && event.key === "F2") {
+			if (selectedPaths.has(entry.path) && selectedPaths.size > 1) return;
+			startRename(entry);
 		} else if (event.key === "Escape") {
 			setSelectedPaths(new Set());
 			setSelectionAnchor(undefined);
@@ -1054,6 +1189,13 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 			"separator",
 			...copyItems([entry]),
 			pasteItem(isDir ? entry.path : parentPath(entry.path)),
+			{
+				label: "重命名…",
+				icon: <IconPencil size={14} />,
+				hint: "F2",
+				disabled: !canMove || (entry.kind === "other" && !entry.symlink),
+				onSelect: () => startRename(entry),
+			},
 			"separator",
 			{ label: "复制相对路径", icon: <IconCopy size={14} />, onSelect: () => copyPath(entry) },
 			{
@@ -1277,6 +1419,20 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 				tabIndex={0}
 				onKeyDown={(event) => {
 					if (
+						event.target === event.currentTarget &&
+						event.key === "F2" &&
+						!event.ctrlKey &&
+						!event.metaKey &&
+						!event.altKey &&
+						!event.shiftKey &&
+						!event.nativeEvent.isComposing
+					) {
+						const selected = visibleSelection();
+						if (selected.length === 1 && selected[0]) startRename(selected[0]);
+						event.preventDefault();
+						return;
+					}
+					if (
 						(event.ctrlKey || event.metaKey) &&
 						event.key.toLowerCase() === "v" &&
 						!event.shiftKey &&
@@ -1313,7 +1469,7 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 			<TransferList workspaceId={workspace.id} />
 			<div
 				className="files-hint"
-				title={`拖动项目到文件夹移动，拖到空白处移回工作区根目录；Shift+单击范围选择，${/Mac/.test(platform) ? "⌘" : "Ctrl"}+单击增减选择；方向键导航，Shift+↑/↓ 扩展选择，←/→ 折叠/展开；Ctrl/⌘+A 全选，Ctrl/⌘+C 复制，Ctrl/⌘+X 剪切，Ctrl/⌘+V 粘贴到当前文件夹，Ctrl/⌘+Shift+C 复制绝对路径，Delete / ⌘⌫ 删除，Esc 清除选择与文件剪贴板`}
+				title={`拖动项目到文件夹移动，拖到空白处移回工作区根目录；Shift+单击范围选择，${/Mac/.test(platform) ? "⌘" : "Ctrl"}+单击增减选择；方向键导航，Shift+↑/↓ 扩展选择，←/→ 折叠/展开；Ctrl/⌘+A 全选，Ctrl/⌘+C 复制，Ctrl/⌘+X 剪切，Ctrl/⌘+V 粘贴到当前文件夹，F2 重命名，Ctrl/⌘+Shift+C 复制绝对路径，Delete / ⌘⌫ 删除，Esc 清除选择与文件剪贴板`}
 			>
 				{selectedPaths.size > 1
 					? `已选择 ${selectedPaths.size} 项 · 右键批量操作`
@@ -1363,6 +1519,20 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 						reveal(path, creating.kind === "directory");
 						if (creating.kind === "file") store.openFilePreview(workspace.id, path, composerKey);
 						setCreating(undefined);
+					}}
+				/>
+			) : null}
+			{renaming ? (
+				<RenameDialog
+					key={renaming.path}
+					workspace={workspace}
+					entry={renaming}
+					onClose={() => setRenaming(undefined)}
+					onRenamed={(path) => {
+						renamed(renaming.path, path);
+						setSelectedPaths(new Set([path]));
+						setSelectionAnchor(path);
+						setRenaming(undefined);
 					}}
 				/>
 			) : null}

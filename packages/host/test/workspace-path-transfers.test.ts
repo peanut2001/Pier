@@ -80,6 +80,24 @@ describe("workspace path transfers", () => {
 		expect(readFileSync(join(destination, "moved", ".git", "config"), "utf8")).toBe("git metadata");
 	});
 
+	it("renames entries in place while retaining content and rejecting occupied names", async () => {
+		writeFileSync(join(source, "folder", ".env.example"), "configuration");
+		await transferWorkspacePath(source, "folder/.env.example", source, "folder/.env", "move");
+		expect(readFileSync(join(source, "folder", ".env"), "utf8")).toBe("configuration");
+		expect(existsSync(join(source, "folder", ".env.example"))).toBe(false);
+		await expect(transferWorkspacePath(source, "folder/file.bin", source, "folder/.env", "move")).rejects.toMatchObject(
+			{
+				code: "CONFLICT",
+			},
+		);
+		expect(readFileSync(join(source, "folder", ".env"), "utf8")).toBe("configuration");
+		expect(readFileSync(join(source, "folder", "file.bin"))).toEqual(Buffer.from([0, 1, 255]));
+		await transferWorkspacePath(source, "folder", source, "renamed", "move");
+		expect(existsSync(join(source, "folder"))).toBe(false);
+		expect(readFileSync(join(source, "renamed", ".env"), "utf8")).toBe("configuration");
+		expect(existsSync(join(source, "renamed", "empty"))).toBe(true);
+	});
+
 	it("replaces only explicitly confirmed regular files and never replaces folders", async () => {
 		writeFileSync(join(destination, "existing"), "old");
 		await expect(
@@ -114,6 +132,15 @@ describe("workspace path transfers", () => {
 			});
 		},
 	);
+
+	it.skipIf(process.platform === "win32")("renames a broken symlink without touching its target", async () => {
+		const missing = join(root, "missing");
+		symlinkSync(missing, join(source, "link"));
+		await transferWorkspacePath(source, "link", source, "renamed-link", "move");
+		expect(readlinkSync(join(source, "renamed-link"))).toBe(missing);
+		expect(readdirSync(source)).not.toContain("link");
+		expect(existsSync(missing)).toBe(false);
+	});
 
 	it("finishes cross-filesystem moves only after copying all contents", async () => {
 		faults.crossDevice = join(source, "folder");
