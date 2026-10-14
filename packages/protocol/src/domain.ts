@@ -231,6 +231,13 @@ export interface WorkspacePathDeleteResult {
 	kind: "file" | "directory" | "other";
 }
 
+/** Result of a native copy or move between workspaces on one Host (1.41). */
+export interface WorkspacePathTransferResult {
+	sourcePath: string;
+	path: string;
+	kind: "file" | "directory" | "other";
+}
+
 /** A byte range of a workspace file (`workspace.readBytes`, 1.21), e.g. one download chunk. */
 export interface WorkspaceFileBytes {
 	/** Path relative to the workspace root, normalized and joined with "/". */

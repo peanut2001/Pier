@@ -72,6 +72,7 @@ import {
 	type WorkspaceFileWriteResult,
 	type WorkspaceInfo,
 	type WorkspacePathDeleteResult,
+	type WorkspacePathTransferResult,
 	type WorkspaceUploadStart,
 } from "./domain.ts";
 import type { HostPorts, PortForward } from "./ports.ts";
@@ -242,11 +243,30 @@ export const MethodParamsSchemas = {
 		text: z.string().max(4 * 1024 * 1024),
 		expectedModifiedAt: z.string().max(64).optional(),
 	}),
+	/** Create an empty workspace file without replacing an existing entry (1.40). Missing parents are created. */
+	"workspace.createFile": z.object({ workspaceId: Id, path: z.string().min(1).max(4096) }),
+	/** Create a workspace directory without replacing an existing entry (1.40). Missing parents are created. */
+	"workspace.createDirectory": z.object({ workspaceId: Id, path: z.string().min(1).max(4096) }),
 	/**
 	 * Permanently delete a workspace file, directory (recursively) or symlink (1.11). A symlink
 	 * is removed itself, never its target; the workspace root cannot be deleted.
 	 */
-	"workspace.deletePath": z.object({ workspaceId: Id, path: z.string().min(1).max(4096) }),
+	"workspace.deletePath": z.object({
+		workspaceId: Id,
+		path: z.string().min(1).max(4096),
+		/** Optional file version guard for a cross-Host move (1.41); rejects symlinks/directories. */
+		expectedModifiedAt: z.string().max(64).optional(),
+		expectedSize: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
+	}),
+	/** Copy or move a complete path between workspaces on this Host (1.41), including empty directories and links. */
+	"workspace.transferPath": z.object({
+		workspaceId: Id,
+		path: z.string().min(1).max(4096),
+		destinationWorkspaceId: Id,
+		destinationPath: z.string().min(1).max(4096),
+		mode: z.enum(["copy", "move"]),
+		overwrite: z.boolean().optional(),
+	}),
 	/**
 	 * Read up to `length` bytes of a workspace file from `offset` (1.21), base64-encoded, e.g.
 	 * to download it in chunks.
@@ -885,7 +905,10 @@ export interface MethodResults {
 	"workspace.previewFile": WorkspaceFileContent;
 	"workspace.authorizeFilePreview": WorkspaceFileContent;
 	"workspace.writeFile": WorkspaceFileWriteResult;
+	"workspace.createFile": WorkspaceFileWriteResult;
+	"workspace.createDirectory": { path: string };
 	"workspace.deletePath": WorkspacePathDeleteResult;
+	"workspace.transferPath": WorkspacePathTransferResult;
 	"workspace.readBytes": WorkspaceFileBytes;
 	"workspace.uploadStart": WorkspaceUploadStart;
 	"workspace.uploadChunk": { received: number };

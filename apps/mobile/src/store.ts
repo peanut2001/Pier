@@ -49,7 +49,7 @@ import {
 import { RemoteTerminal } from "./terminal.ts";
 import { peerConnectionFactory } from "./webrtc.ts";
 
-export const APP_VERSION = "0.2.41";
+export const APP_VERSION = "0.2.44";
 
 /** Live session subscriptions kept for quick back-and-forth navigation. */
 const MAX_LIVE_CHATS = 4;
@@ -935,6 +935,11 @@ export class MobileStore {
 		return this.hostSpeaks(11);
 	}
 
+	/** Whether the connected computer can create files and directories directly (1.40). */
+	canCreateFiles(): boolean {
+		return this.hostSpeaks(40);
+	}
+
 	async listFiles(workspaceId: string, path: string): Promise<WorkspaceFilesResult> {
 		return this.requireClient().request("workspace.files", { workspaceId, ...(path ? { path } : {}) });
 	}
@@ -1002,18 +1007,14 @@ export class MobileStore {
 		}
 	}
 
-	/** Upload text (or an empty file) to a new workspace path. */
-	async createFile(workspaceId: string, path: string, text = ""): Promise<WorkspaceFileWriteResult> {
-		const bytes = new TextEncoder().encode(text);
-		let read = 0;
-		return this.uploadFile(workspaceId, path, {
-			size: bytes.length,
-			read: (length) => {
-				const part = bytes.subarray(read, read + length);
-				read += part.length;
-				return part;
-			},
-		});
+	/** Create an empty file directly on the connected computer. */
+	async createFile(workspaceId: string, path: string): Promise<WorkspaceFileWriteResult> {
+		return this.requireClient().request("workspace.createFile", { workspaceId, path });
+	}
+
+	/** Create an empty directory directly on the connected computer. */
+	async createDirectory(workspaceId: string, path: string): Promise<{ path: string }> {
+		return this.requireClient().request("workspace.createDirectory", { workspaceId, path });
 	}
 
 	/** Download a workspace file in pieces into `sink`. Resolves to its size. */

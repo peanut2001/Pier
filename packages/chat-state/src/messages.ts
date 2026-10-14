@@ -9,12 +9,15 @@
 export interface TextPart {
 	type: "text";
 	text: string;
+	/** Whether this streamed part ended; absent on older snapshots. */
+	completed?: boolean;
 }
 
 export interface ThinkingPart {
 	type: "thinking";
 	thinking: string;
 	redacted?: boolean;
+	completed?: boolean;
 }
 
 export interface ImagePart {

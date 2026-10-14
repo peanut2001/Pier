@@ -157,26 +157,13 @@
 	border-bottom: 1px solid var(--border);
 }
 
-.typing {
+.model-activity {
 	display: flex;
-	gap: 5px;
+	align-items: center;
+	gap: 7px;
 	padding: 10px 2px 18px;
-}
-
-.typing span {
-	width: 7px;
-	height: 7px;
-	border-radius: 50%;
-	background: var(--accent);
-	animation: bounce 1.2s ease-in-out infinite;
-}
-
-.typing span:nth-child(2) {
-	animation-delay: 0.15s;
-}
-
-.typing span:nth-child(3) {
-	animation-delay: 0.3s;
+	color: var(--text-muted);
+	font-size: 13px;
 }
 
 .jump-bottom {

@@ -122,6 +122,12 @@ async function runTurn(thread, turn, text) {
 			complete({ ...item, status: "declined" });
 		}
 	}
+	if (text.includes("progress")) {
+		const item = { type: "agentMessage", id: id("msg"), text: "", phase: "commentary" };
+		notify("item/started", { threadId, turnId, item, startedAtMs: Date.now() });
+		notify("item/agentMessage/delta", { threadId, turnId, itemId: item.id, delta: "Progress reported." });
+		complete({ ...item, text: "Progress reported." });
+	}
 	if (text.includes("wait")) {
 		await new Promise((resolve) => {
 			const timer = setInterval(() => {

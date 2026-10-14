@@ -35,7 +35,7 @@ function entryIcon(entry: WorkspaceFileEntry): IconName {
 	return "document-outline";
 }
 
-/** One directory of a workspace: browse, open, upload, download and delete files. */
+/** One directory of a workspace: browse, create, open, upload, download and delete entries. */
 export default function FilesScreen() {
 	const store = useStore();
 	const router = useRouter();
@@ -58,7 +58,7 @@ export default function FilesScreen() {
 	const [refreshing, setRefreshing] = useState(false);
 	const [menu, setMenu] = useState<WorkspaceFileEntry>();
 	const [addMenu, setAddMenu] = useState(false);
-	const [naming, setNaming] = useState(false);
+	const [naming, setNaming] = useState<"file" | "directory">();
 	const [progress, setProgress] = useState<string>();
 	const request = useRef(0);
 
@@ -84,6 +84,7 @@ export default function FilesScreen() {
 	const title = path ? baseName(path) : (workspace?.name ?? "文件");
 	const canTransfer = store.canTransferFiles();
 	const canEdit = store.canEditFiles();
+	const canCreate = store.canCreateFiles();
 
 	const openEntry = (entry: WorkspaceFileEntry) => {
 		if (entry.kind === "directory") {
@@ -228,7 +229,7 @@ export default function FilesScreen() {
 				options={{
 					title,
 					headerRight: () =>
-						online && canTransfer ? (
+						online && (canTransfer || canCreate) ? (
 							<HeaderAction label="上传或新建" icon="add" onPress={() => setAddMenu(true)} />
 						) : null,
 				}}
@@ -312,51 +313,85 @@ export default function FilesScreen() {
 				<ActionSheet
 					title={`添加到「${title}」`}
 					actions={[
-						{
-							label: "上传文件",
-							description: "从手机的文件中选择",
-							icon: "document-attach-outline",
-							onPress: () => pick("documents"),
-						},
-						{
-							label: "上传照片或视频",
-							description: "从相册中选择",
-							icon: "images-outline",
-							onPress: () => pick("media"),
-						},
-						{
-							label: "新建文件",
-							description: "在这个目录中创建一个空文件",
-							icon: "create-outline",
-							onPress: () => setNaming(true),
-						},
+						...(canCreate
+							? [
+									{
+										label: "新建文件",
+										description: "在这个目录中创建一个空文件",
+										icon: "create-outline" as const,
+										onPress: () => setNaming("file"),
+									},
+									{
+										label: "新建文件夹",
+										description: "在这个目录中创建一个空文件夹",
+										icon: "folder-outline" as const,
+										onPress: () => setNaming("directory"),
+									},
+								]
+							: []),
+						...(canTransfer
+							? [
+									{
+										label: "上传文件",
+										description: "从手机的文件中选择",
+										icon: "document-attach-outline" as const,
+										onPress: () => pick("documents"),
+									},
+									{
+										label: "上传照片或视频",
+										description: "从相册中选择",
+										icon: "images-outline" as const,
+										onPress: () => pick("media"),
+									},
+								]
+							: []),
 					]}
 					onClose={() => setAddMenu(false)}
 				/>
 			) : null}
 			{naming ? (
 				<PromptSheet
-					title="新建文件"
-					message={`在「${title}」中创建，可以带子目录，例如 notes/todo.md`}
-					placeholder="文件名"
+					title={naming === "file" ? "新建文件" : "新建文件夹"}
+					message={`在「${title}」中创建，可以带子目录，例如 ${naming === "file" ? "notes/todo.md" : "src/components"}`}
+					placeholder={naming === "file" ? "文件名" : "文件夹名"}
 					confirm="创建"
 					mono
-					onClose={() => setNaming(false)}
+					onClose={() => setNaming(undefined)}
 					onSubmit={async (name) => {
+						if (
+							/^[\\/]|^[a-zA-Z]:/.test(name) ||
+							name.split(/[\\/]+/).some((part) => part === "..") ||
+							!name.split(/[\\/]+/).some((part) => part && part !== ".")
+						) {
+							store.toast("error", "请输入当前目录内的名称或相对路径，不能使用绝对路径或 ..");
+							return false;
+						}
 						if ((listing?.entries ?? []).some((e) => e.name === name)) {
 							store.toast("error", `已经有名为 ${name} 的文件或目录`);
 							return false;
 						}
 						try {
-							const result = await store.createFile(workspaceId, childPath(path, name));
+							const destination = childPath(path, name);
+							const result =
+								naming === "file"
+									? await store.createFile(workspaceId, destination)
+									: await store.createDirectory(workspaceId, destination);
 							void load();
-							router.push({
-								pathname: "/host/[hostId]/file",
-								params: { hostId, workspaceId, path: result.path, edit: "1" },
-							});
+							store.toast("info", `已创建${naming === "file" ? "文件" : "文件夹"}「${result.path}」`);
+							if (naming === "file") {
+								router.push({
+									pathname: "/host/[hostId]/file",
+									params: { hostId, workspaceId, path: result.path, edit: "1" },
+								});
+							}
 							return true;
 						} catch (e) {
-							store.toast("error", `创建失败：${errorText(e)}`);
+							store.toast(
+								"error",
+								(e as { code?: string }).code === "CONFLICT"
+									? "已有同名文件或文件夹，请使用其他名称"
+									: `创建失败：${errorText(e)}`,
+							);
 							return false;
 						}
 					}}

@@ -1,5 +1,5 @@
 import type { Dirent } from "node:fs";
-import { lstat, open, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { lstat, mkdir, open, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
@@ -199,6 +199,73 @@ export function fsError(error: unknown, relPath: string): never {
 	throw error;
 }
 
+/** Resolve or create parent directories, following only symlinks that stay inside the workspace. */
+export async function ensureWorkspaceDirectory(root: string, segments: string[]): Promise<string> {
+	let dir = root;
+	for (let i = 0; i < segments.length; i++) {
+		const next = join(dir, segments[i] as string);
+		const shown = segments.slice(0, i + 1).join("/");
+		try {
+			await lstat(next);
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "ENOENT") fsError(error, shown);
+			try {
+				await mkdir(next);
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException).code !== "EEXIST") fsError(error, shown);
+			}
+		}
+		const real = await resolveInside(root, shown, "directory");
+		if (!(await stat(real)).isDirectory()) throw new PierProtocolError("BAD_REQUEST", `Not a directory: ${shown}`);
+		dir = real;
+	}
+	return dir;
+}
+
+async function newWorkspaceTarget(workspaceRoot: string, path: string): Promise<{ path: string; target: string }> {
+	const relPath = normalizeRelativePath(path);
+	if (!relPath) throw new PierProtocolError("BAD_REQUEST", "Cannot create the workspace root");
+	const segments = relPath.split("/");
+	const name = segments.pop() as string;
+	const root = await workspaceRealRoot(workspaceRoot);
+	const parent = await ensureWorkspaceDirectory(root, segments);
+	return { path: relPath, target: join(parent, name) };
+}
+
+function createError(error: unknown, path: string): never {
+	if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+		throw new PierProtocolError("CONFLICT", `A file or directory already exists: ${path}`);
+	}
+	fsError(error, path);
+}
+
+/** Create an empty file exclusively, so existing files, directories and symlinks are never replaced. */
+export async function createWorkspaceFile(workspaceRoot: string, path: string): Promise<WorkspaceFileWriteResult> {
+	const destination = await newWorkspaceTarget(workspaceRoot, path);
+	try {
+		const handle = await open(destination.target, "wx");
+		try {
+			const info = await handle.stat();
+			return { path: destination.path, size: info.size, modifiedAt: info.mtime.toISOString() };
+		} finally {
+			await handle.close();
+		}
+	} catch (error) {
+		createError(error, destination.path);
+	}
+}
+
+/** Create a directory exclusively, including an empty one, with missing parents created as needed. */
+export async function createWorkspaceDirectory(workspaceRoot: string, path: string): Promise<{ path: string }> {
+	const destination = await newWorkspaceTarget(workspaceRoot, path);
+	try {
+		await mkdir(destination.target);
+		return { path: destination.path };
+	} catch (error) {
+		createError(error, destination.path);
+	}
+}
+
 /**
  * Overwrite an existing workspace file with UTF-8 text. The file must resolve (after symlinks)
  * to a regular file inside the workspace root; new files are not created. The file is written
@@ -243,7 +310,12 @@ export async function writeWorkspaceFile(
  * the entry itself is not followed, so deleting a symlink removes only the link, never its
  * target. The workspace root itself cannot be deleted.
  */
-export async function deleteWorkspacePath(workspaceRoot: string, path: string): Promise<WorkspacePathDeleteResult> {
+export async function deleteWorkspacePath(
+	workspaceRoot: string,
+	path: string,
+	expectedModifiedAt?: string,
+	expectedSize?: number,
+): Promise<WorkspacePathDeleteResult> {
 	const relPath = normalizeRelativePath(path);
 	if (!relPath) throw new PierProtocolError("BAD_REQUEST", "Cannot delete the workspace root");
 	const root = await workspaceRealRoot(workspaceRoot);
@@ -253,6 +325,14 @@ export async function deleteWorkspacePath(workspaceRoot: string, path: string): 
 	const target = join(parent, name);
 	try {
 		const info = await lstat(target);
+		if (expectedModifiedAt !== undefined || expectedSize !== undefined) {
+			if (
+				!info.isFile() ||
+				(expectedModifiedAt !== undefined && info.mtime.toISOString() !== expectedModifiedAt) ||
+				(expectedSize !== undefined && info.size !== expectedSize)
+			)
+				throw new PierProtocolError("CONFLICT", `Source file changed; keeping it: ${relPath}`);
+		}
 		const kind = info.isDirectory() ? "directory" : info.isFile() ? "file" : "other";
 		await rm(target, { recursive: kind === "directory", maxRetries: 2 });
 		return { path: relPath, kind };

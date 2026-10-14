@@ -8,7 +8,14 @@
 import type { PierClient } from "@pier/client";
 import { PierProtocolError, type WorkspaceInfo } from "@pier/protocol";
 import { useSyncExternalStore } from "react";
+import { workspaceNameError } from "./file-names.ts";
 import type { PierStore } from "./store.tsx";
+import {
+	beginWorkspacePaste,
+	completeWorkspaceMoves,
+	finishWorkspacePaste,
+	type WorkspaceClipboardState,
+} from "./workspace-clipboard.ts";
 
 /** Bytes per request; small enough for smooth progress and cancelling over slow links. */
 export const TRANSFER_CHUNK_BYTES = 1024 * 1024;
@@ -17,7 +24,7 @@ export type TransferState = "queued" | "running" | "done" | "error" | "cancelled
 
 export interface Transfer {
 	id: number;
-	kind: "upload" | "download";
+	kind: "upload" | "download" | "copy" | "move";
 	workspaceId: string;
 	/** Workspace-relative path of the file. */
 	path: string;
@@ -29,6 +36,8 @@ export interface Transfer {
 	error?: string;
 	/** Where a finished download was saved, when known. */
 	savedTo?: string;
+	/** A native Host operation cannot be interrupted once dispatched. */
+	cancellable?: boolean;
 }
 
 /** What to do about an upload whose destination already exists. */
@@ -36,6 +45,8 @@ export type OverwriteChoice = "overwrite" | "skip" | "cancel";
 
 export interface OverwriteQuestion {
 	path: string;
+	/** Only regular files may replace a same-name destination. */
+	canOverwrite?: boolean;
 	/** More uploads follow, so the answer can apply to all of them. */
 	more: boolean;
 }
@@ -44,6 +55,31 @@ export interface OverwriteAnswer {
 	choice: OverwriteChoice;
 	/** Apply the same choice to the remaining conflicts of this batch. */
 	all?: boolean;
+}
+
+export interface PasteConflictQuestion extends OverwriteQuestion {
+	suggestedName: string;
+	error?: string;
+}
+
+export type PasteConflictAnswer = OverwriteAnswer | { choice: "rename"; name: string };
+
+/** Keep renaming within the chosen destination directory. */
+export function pasteNameError(name: string, existingName: string): string | undefined {
+	const error = workspaceNameError(name);
+	if (error) return error;
+	if (name.trim() === existingName) return "此名称已被占用，请使用其他名称";
+	return undefined;
+}
+
+function suggestedPasteName(name: string, kind: string): string {
+	const dot = kind === "file" ? name.lastIndexOf(".") : -1;
+	const stem = dot > 0 ? name.slice(0, dot) : name;
+	const extension = dot > 0 ? name.slice(dot) : "";
+	const copy = / \(副本(?: (\d+))?\)$/.exec(stem);
+	return copy
+		? `${stem.slice(0, copy.index)} (副本 ${Number(copy[1] ?? 1) + 1})${extension}`
+		: `${stem} (副本)${extension}`;
 }
 
 /** A local file to upload and its workspace-relative destination. */
@@ -136,7 +172,18 @@ function errorMessage(error: unknown): string {
 		if (error.code === "NOT_FOUND") return error.message.startsWith("Upload") ? "上传已失效，请重试" : "文件不存在";
 		if (error.code === "FORBIDDEN") return "没有权限，或路径位于工作区之外";
 	}
+	if (error instanceof PierProtocolError && error.code === "BAD_REQUEST") {
+		if (error.message.includes("same path")) return "源文件和目标位置相同，请选择另一个文件夹";
+		if (error.message.includes("descendants")) return "不能把文件夹粘贴到它自己或其子文件夹中";
+	}
+	if (error instanceof PierProtocolError && error.code === "CONFLICT" && /[Ss]ource.*changed/.test(error.message)) {
+		return "源文件在操作期间被修改，已保留源文件，请重试";
+	}
 	return error instanceof Error ? error.message : String(error);
+}
+
+function transferKindLabel(kind: Transfer["kind"]): string {
+	return kind === "move" ? "移动" : kind === "copy" ? "复制" : kind === "upload" ? "上传" : "下载";
 }
 
 /** Bytes encoded by a base64 string. */
@@ -309,6 +356,242 @@ export async function uploadFiles(
 			} else transfers.update(transfer.id, { state: "error", error: errorMessage(error) });
 		}
 		store.bumpFiles(workspace.id);
+	}
+}
+
+/** Paste files into any connected workspace; folders use the owning Host's native transfer. */
+export async function pasteWorkspaceEntries(
+	store: PierStore,
+	clipboard: WorkspaceClipboardState,
+	destinationWorkspace: WorkspaceInfo,
+	destinationDir: string,
+	ask: (question: PasteConflictQuestion) => Promise<PasteConflictAnswer>,
+): Promise<void> {
+	if (!beginWorkspacePaste()) {
+		store.toast("info", "正在粘贴文件，请等待完成");
+		return;
+	}
+	try {
+		await runWorkspacePaste(store, clipboard, destinationWorkspace, destinationDir, ask);
+	} finally {
+		finishWorkspacePaste();
+	}
+}
+
+async function runWorkspacePaste(
+	store: PierStore,
+	clipboard: WorkspaceClipboardState,
+	destinationWorkspace: WorkspaceInfo,
+	destinationDir: string,
+	ask: (question: PasteConflictQuestion) => Promise<PasteConflictAnswer>,
+): Promise<void> {
+	const sourceWorkspaceId = clipboard.sourceWorkspaceId;
+	let source: PierClient;
+	let destination: PierClient;
+	const sameHost = store.nodeOf(sourceWorkspaceId) === store.nodeOf(destinationWorkspace.id);
+	try {
+		source = store.fileTransferClient(sourceWorkspaceId);
+		destination = store.fileTransferClient(destinationWorkspace.id);
+		if (sameHost || clipboard.mode === "move") store.requireNativeFileTransfers(sourceWorkspaceId);
+		if (!sameHost && clipboard.entries.some((entry) => entry.kind !== "file" || entry.symlink)) {
+			throw new Error("跨电脑暂只支持普通文件；文件夹和符号链接可在同一台电脑的工作区之间复制或移动");
+		}
+	} catch (error) {
+		store.toast("error", errorMessage(error));
+		return;
+	}
+	const queued = clipboard.entries.map((entry) => {
+		const path = childPath(destinationDir, entry.name);
+		return {
+			entry,
+			path,
+			transfer: transfers.add({ kind: clipboard.mode, workspaceId: destinationWorkspace.id, path, name: entry.name }),
+		};
+	});
+	let always: OverwriteChoice | undefined;
+	let stopped = false;
+	let failures = 0;
+	let skipped = 0;
+	const completed: string[] = [];
+	entries: for (const [index, item] of queued.entries()) {
+		if (stopped || transfers.isCancelled(item.transfer.id)) {
+			stopped = true;
+			transfers.update(item.transfer.id, { state: "cancelled" });
+			continue;
+		}
+		transfers.update(item.transfer.id, { state: "running", cancellable: !sameHost });
+		try {
+			const run = async (overwrite: boolean) => {
+				if (sameHost) {
+					await source.request(
+						"workspace.transferPath",
+						{
+							workspaceId: sourceWorkspaceId,
+							path: item.entry.path,
+							destinationWorkspaceId: destinationWorkspace.id,
+							destinationPath: item.path,
+							mode: clipboard.mode,
+							overwrite,
+						},
+						{ timeoutMs: 30 * 60_000 },
+					);
+				} else {
+					await copyBetweenHosts(
+						source,
+						destination,
+						sourceWorkspaceId,
+						destinationWorkspace.id,
+						item.entry.path,
+						item.path,
+						overwrite,
+						item.transfer.id,
+						clipboard.mode === "move",
+					);
+				}
+			};
+			let overwrite = false;
+			let renamed = false;
+			for (;;) {
+				if (transfers.isCancelled(item.transfer.id)) throw new CancelledError();
+				try {
+					await run(overwrite);
+					break;
+				} catch (error) {
+					if (!(error instanceof PierProtocolError)) throw error;
+					// Older Hosts report pasting into the source directory as BAD_REQUEST.
+					const samePath = error.code === "BAD_REQUEST" && error.message.includes("same path");
+					const kind = (error.data as { kind?: string } | undefined)?.kind;
+					if (!samePath && (error.code !== "CONFLICT" || !["file", "directory", "other"].includes(kind ?? "")))
+						throw error;
+					const canOverwrite = !samePath && kind === "file" && item.entry.kind === "file" && !item.entry.symlink;
+					const question: PasteConflictQuestion = {
+						path: item.path,
+						more: index < queued.length - 1,
+						canOverwrite,
+						suggestedName: suggestedPasteName(baseName(item.path), item.entry.kind),
+						...(renamed ? { error: "此名称已被占用，请使用其他名称" } : {}),
+					};
+					if (overwrite) always = undefined;
+					let answer: PasteConflictAnswer =
+						canOverwrite && !renamed && always ? { choice: always } : await ask(question);
+					while (answer.choice === "rename") {
+						const invalid = pasteNameError(answer.name, baseName(item.path));
+						if (!invalid) break;
+						answer = await ask({ ...question, suggestedName: answer.name, error: invalid });
+					}
+					if (answer.choice === "cancel") throw new CancelledError();
+					if (answer.choice === "rename") {
+						const name = answer.name.trim();
+						item.path = childPath(destinationDir, name);
+						renamed = true;
+						overwrite = false;
+						transfers.update(item.transfer.id, { path: item.path, name, done: 0, cancellable: !sameHost });
+						continue;
+					}
+					if (canOverwrite && answer.all) always = answer.choice;
+					if (answer.choice === "skip") {
+						skipped++;
+						transfers.update(item.transfer.id, { state: "skipped" });
+						continue entries;
+					}
+					if (!canOverwrite) throw error;
+					overwrite = true;
+				}
+			}
+			completed.push(item.entry.path);
+			if (clipboard.mode === "move") store.closeMovedFilePreview(sourceWorkspaceId, item.entry.path);
+			transfers.update(item.transfer.id, { state: "done" });
+		} catch (error) {
+			if (error instanceof CancelledError) {
+				stopped = true;
+				transfers.update(item.transfer.id, { state: "cancelled" });
+			} else {
+				failures++;
+				transfers.update(item.transfer.id, { state: "error", error: errorMessage(error) });
+			}
+		} finally {
+			store.bumpFiles(sourceWorkspaceId);
+			store.bumpFiles(destinationWorkspace.id);
+		}
+	}
+	if (clipboard.mode === "move") completeWorkspaceMoves(clipboard, completed);
+	const label = transferKindLabel(clipboard.mode);
+	if (failures) store.toast("error", `已${label} ${completed.length} 项，${failures} 项失败；请查看传输列表`);
+	else
+		store.toast(
+			"info",
+			`已${label} ${completed.length} 项${skipped ? `，跳过 ${skipped} 项` : ""}${stopped ? "，其余已取消" : ""}`,
+		);
+}
+
+/** Stream one regular file; only delete a moved source if its last-read version still exists. */
+async function copyBetweenHosts(
+	source: PierClient,
+	destination: PierClient,
+	sourceWorkspaceId: string,
+	destinationWorkspaceId: string,
+	sourcePath: string,
+	destinationPath: string,
+	overwrite: boolean,
+	transferId: number,
+	move: boolean,
+): Promise<void> {
+	let uploadId: string | undefined;
+	try {
+		let chunk = await source.request("workspace.readBytes", {
+			workspaceId: sourceWorkspaceId,
+			path: sourcePath,
+			offset: 0,
+			length: TRANSFER_CHUNK_BYTES,
+		});
+		const version = `${chunk.size}@${chunk.modifiedAt}`;
+		const expectedModifiedAt = chunk.modifiedAt;
+		const expectedSize = chunk.size;
+		const started = await destination.request("workspace.uploadStart", {
+			workspaceId: destinationWorkspaceId,
+			path: destinationPath,
+			size: chunk.size,
+			overwrite,
+		});
+		uploadId = started.uploadId;
+		let offset = 0;
+		for (;;) {
+			if (transfers.isCancelled(transferId)) throw new CancelledError();
+			if (`${chunk.size}@${chunk.modifiedAt}` !== version) throw new Error("源文件在传输过程中被修改，请重试");
+			if (chunk.data) {
+				const result = await destination.request("workspace.uploadChunk", { uploadId, offset, data: chunk.data });
+				const next = offset + base64Bytes(chunk.data);
+				if (result.received !== next) throw new Error("目标电脑收到的字节数不一致，请重试");
+				offset = next;
+			}
+			transfers.update(transferId, { total: chunk.size, done: offset });
+			if (chunk.eof) break;
+			if (!chunk.data) throw new Error("读取源文件失败，请重试");
+			chunk = await source.request("workspace.readBytes", {
+				workspaceId: sourceWorkspaceId,
+				path: sourcePath,
+				offset,
+				length: Math.min(TRANSFER_CHUNK_BYTES, started.chunkBytes),
+			});
+		}
+		if (transfers.isCancelled(transferId)) throw new CancelledError();
+		transfers.update(transferId, { cancellable: false });
+		await destination.request("workspace.uploadFinish", { uploadId });
+		uploadId = undefined;
+		if (move) {
+			try {
+				await source.request("workspace.deletePath", {
+					workspaceId: sourceWorkspaceId,
+					path: sourcePath,
+					expectedModifiedAt,
+					expectedSize,
+				});
+			} catch (error) {
+				throw new Error(`文件已复制，但删除源文件失败：${errorMessage(error)}`);
+			}
+		}
+	} finally {
+		if (uploadId) await destination.request("workspace.uploadCancel", { uploadId }).catch(() => {});
 	}
 }
 

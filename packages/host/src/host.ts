@@ -83,6 +83,8 @@ import type { AppShell, ShellMethod } from "./shell.ts";
 import { HostTerminals } from "./terminals.ts";
 import {
 	authorizeWorkspaceFilePreview,
+	createWorkspaceDirectory,
+	createWorkspaceFile,
 	deleteWorkspacePath,
 	listWorkspaceDirectory,
 	previewWorkspaceFile,
@@ -90,9 +92,10 @@ import {
 	readWorkspaceFile,
 	writeWorkspaceFile,
 } from "./workspace-files.ts";
+import { transferWorkspacePath } from "./workspace-path-transfers.ts";
 import { WorkspaceUploads } from "./workspace-uploads.ts";
 
-export const PIER_HOST_VERSION = "0.2.41";
+export const PIER_HOST_VERSION = "0.2.44";
 
 /** How Pier introduces itself to NewAPI sites (their login sessions list shows the system). */
 function pierUserAgent(): string {
@@ -190,7 +193,10 @@ const AUDITED_METHODS = new Set<MethodName>([
 	"workspace.setPolicy",
 	"workspace.authorizeFilePreview",
 	"workspace.writeFile",
+	"workspace.createFile",
+	"workspace.createDirectory",
 	"workspace.deletePath",
+	"workspace.transferPath",
 	"workspace.uploadStart",
 	"workspace.uploadFinish",
 	"model.setDefault",
@@ -304,8 +310,19 @@ function auditDetail(method: MethodName, params: Record<string, unknown>): Recor
 				path: params.path,
 				bytes: typeof params.text === "string" ? Buffer.byteLength(params.text) : 0,
 			};
+		case "workspace.createFile":
+		case "workspace.createDirectory":
 		case "workspace.deletePath":
 			return { workspaceId: params.workspaceId, path: params.path };
+		case "workspace.transferPath":
+			return {
+				workspaceId: params.workspaceId,
+				path: params.path,
+				destinationWorkspaceId: params.destinationWorkspaceId,
+				destinationPath: params.destinationPath,
+				mode: params.mode,
+				overwrite: params.overwrite === true,
+			};
 		case "workspace.authorizeFilePreview":
 			return { workspaceId: params.workspaceId, path: params.path, expectedRealPath: params.expectedRealPath };
 		case "workspace.uploadStart":
@@ -1101,8 +1118,26 @@ export class PierHost implements RequestHandler {
 					params.text,
 					params.expectedModifiedAt,
 				),
+			"workspace.createFile": (_ctx, params) =>
+				createWorkspaceFile(this.requireWorkspace(params.workspaceId).path, params.path),
+			"workspace.createDirectory": (_ctx, params) =>
+				createWorkspaceDirectory(this.requireWorkspace(params.workspaceId).path, params.path),
 			"workspace.deletePath": (_ctx, params) =>
-				deleteWorkspacePath(this.requireWorkspace(params.workspaceId).path, params.path),
+				deleteWorkspacePath(
+					this.requireWorkspace(params.workspaceId).path,
+					params.path,
+					params.expectedModifiedAt,
+					params.expectedSize,
+				),
+			"workspace.transferPath": (_ctx, params) =>
+				transferWorkspacePath(
+					this.requireWorkspace(params.workspaceId).path,
+					params.path,
+					this.requireWorkspace(params.destinationWorkspaceId).path,
+					params.destinationPath,
+					params.mode,
+					params.overwrite,
+				),
 			"workspace.readBytes": (_ctx, params) =>
 				readWorkspaceBytes(this.requireWorkspace(params.workspaceId).path, params.path, params.offset, params.length),
 			"workspace.uploadStart": (ctx, params) =>

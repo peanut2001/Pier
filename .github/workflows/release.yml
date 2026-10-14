@@ -294,6 +294,13 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Check Expo SDK dependency versions
+        working-directory: apps/mobile
+        # Keep release validation aligned with CI and the locked Expo SDK.
+        env:
+          EXPO_OFFLINE: "1"
+        run: bunx expo install --check
+
       - name: Release keystore
         env:
           KEYSTORE: ${{ secrets.ANDROID_RELEASE_KEYSTORE }}

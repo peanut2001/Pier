@@ -144,12 +144,15 @@ class CandidateRace {
 				// Ignore.
 			}
 		}, this.timeoutMs);
+		this.timers.add(timer);
 		const fail = (message: string) => {
 			if (done) return;
 			done = true;
 			clearTimeout(timer);
+			this.timers.delete(timer);
 			socket.onopen = null;
-			socket.onerror = null;
+			// Node's ws emits an asynchronous error when a CONNECTING socket is closed.
+			socket.onerror = () => undefined;
 			socket.onclose = null;
 			this.live.delete(socket);
 			this.failed(message);
@@ -158,8 +161,9 @@ class CandidateRace {
 			if (done) return;
 			done = true;
 			clearTimeout(timer);
+			this.timers.delete(timer);
 			socket.onopen = null;
-			socket.onerror = null;
+			socket.onerror = () => undefined;
 			socket.onclose = null;
 			this.inFlight -= 1;
 			if (this.cancelled) {
@@ -219,7 +223,8 @@ class CandidateRace {
 		this.timers.clear();
 		for (const socket of this.live) {
 			socket.onopen = null;
-			socket.onerror = null;
+			// Keep a handler until closing finishes, including pending Node connections.
+			socket.onerror = () => undefined;
 			socket.onclose = null;
 			try {
 				socket.close(1000, "Not needed");

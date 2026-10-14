@@ -56,17 +56,20 @@ import type {
 	WorkspaceFileWriteResult,
 	WorkspaceInfo,
 	WorkspacePathDeleteResult,
+	WorkspacePathTransferResult,
 } from "@pier/protocol";
 import { PierProtocolError, parseProtocolVersion } from "@pier/protocol";
 import { createContext, useContext, useMemo, useSyncExternalStore } from "react";
 import type { Bridge, HostStatus, LocalFileSink, UpdateStatus } from "./bridge.ts";
 import { remoteServiceUrl } from "./browser-url.ts";
 import { fileToken } from "./composer-text.ts";
+import { workspaceNameError } from "./file-names.ts";
 import { newSessionDefaultsFromSettings } from "./new-session-defaults.ts";
 import { remotePageBlocker } from "./settings-target.ts";
+import { beginWorkspacePaste, finishWorkspacePaste, renameWorkspaceClipboardPath } from "./workspace-clipboard.ts";
 import { isYunlianProvider, movedToLine, YUNLIAN_SITE, yunlianGroupOf, yunlianProvider } from "./yunlian.ts";
 
-export const APP_VERSION = "0.2.41";
+export const APP_VERSION = "0.2.44";
 
 /** Node id of this computer; any other node is a paired computer's host id. */
 export const LOCAL_NODE = "local";
@@ -117,9 +120,18 @@ export function hostCanDeleteFiles(info: HostInfo | undefined): boolean {
 	return hostSpeaks(info, 11);
 }
 
+/** Whether a host can create workspace files and directories directly (1.40). */
+export function hostCanCreateFiles(info: HostInfo | undefined): boolean {
+	return hostSpeaks(info, 40);
+}
+
 /** Whether a host can upload and download workspace files in chunks (`workspace.readBytes` / `upload*`, 1.21). */
 export function hostTransfersFiles(info: HostInfo | undefined): boolean {
 	return hostSpeaks(info, 21);
+}
+
+export function hostTransfersWorkspacePaths(info: HostInfo | undefined): boolean {
+	return hostSpeaks(info, 41);
 }
 
 /** Whether a host offers Git source control for workspaces (`git.*`, 1.28). */
@@ -2225,6 +2237,59 @@ export class PierStore {
 		return client.request("workspace.files", path ? { workspaceId, path } : { workspaceId });
 	}
 
+	/** Create an empty file on the workspace's computer and refresh its file panel. */
+	async createFile(workspaceId: string, path: string): Promise<WorkspaceFileWriteResult> {
+		const client = this.fileCreationClient(workspaceId);
+		const result = await client.request("workspace.createFile", { workspaceId, path });
+		this.bumpFiles(workspaceId);
+		return result;
+	}
+
+	/** Create a directory on the workspace's computer and refresh its file panel. */
+	async createDirectory(workspaceId: string, path: string): Promise<{ path: string }> {
+		const client = this.fileCreationClient(workspaceId);
+		const result = await client.request("workspace.createDirectory", { workspaceId, path });
+		this.bumpFiles(workspaceId);
+		return result;
+	}
+
+	private fileCreationClient(workspaceId: string): PierClient {
+		const node = this.nodeOf(workspaceId);
+		const client = this.openClient(node);
+		if (!client) throw new Error("尚未连接到文件所在电脑的 Pier Host");
+		if (!hostCanCreateFiles(this.state.nodes[node]?.hostInfo)) {
+			throw new Error("文件所在电脑的 Pier 版本过旧，不支持新建文件和文件夹，请先更新它");
+		}
+		return client;
+	}
+
+	/** Rename an entry on its owning computer without replacing an existing destination. */
+	async renamePath(workspaceId: string, path: string, name: string): Promise<WorkspacePathTransferResult> {
+		const error = workspaceNameError(name);
+		if (error) throw new Error(error);
+		const destinationPath = path.slice(0, path.lastIndexOf("/") + 1) + name.trim();
+		if (destinationPath === path) throw new Error("请输入新的名称");
+		const client = this.openClient(this.nodeOf(workspaceId));
+		if (!client) throw new Error("尚未连接到文件所在电脑的 Pier Host");
+		this.requireNativeFileTransfers(workspaceId);
+		if (!beginWorkspacePaste()) throw new Error("正在复制或移动文件，请稍后重试");
+		try {
+			const result = await client.request("workspace.transferPath", {
+				workspaceId,
+				path,
+				destinationWorkspaceId: workspaceId,
+				destinationPath,
+				mode: "move",
+			});
+			renameWorkspaceClipboardPath(workspaceId, result.sourcePath, result.path);
+			this.closeMovedFilePreview(workspaceId, result.sourcePath);
+			this.bumpFiles(workspaceId);
+			return result;
+		} finally {
+			finishWorkspacePaste();
+		}
+	}
+
 	/** Read one workspace file for preview; rejects with the host's error. */
 	async readFile(workspaceId: string, path: string): Promise<WorkspaceFileContent> {
 		const client = this.clientFor(workspaceId);
@@ -2288,15 +2353,17 @@ export class PierStore {
 			throw new Error("这台电脑的 Pier 版本过旧，不支持删除文件");
 		}
 		const result = await client.request("workspace.deletePath", { workspaceId, path });
-		const preview = this.state.filePreview;
-		if (
-			preview?.workspaceId === workspaceId &&
-			(preview.path === result.path || preview.path.startsWith(`${result.path}/`))
-		) {
-			this.closeFilePreview();
-		}
+		this.closeMovedFilePreview(workspaceId, result.path);
 		this.bumpFiles(workspaceId);
 		return result;
+	}
+
+	/** A preview of a moved/deleted path must not keep showing stale source content. */
+	closeMovedFilePreview(workspaceId: string, path: string): void {
+		const preview = this.state.filePreview;
+		if (preview?.workspaceId === workspaceId && (preview.path === path || preview.path.startsWith(`${path}/`))) {
+			this.closeFilePreview();
+		}
 	}
 
 	/**
@@ -2310,6 +2377,12 @@ export class PierStore {
 			throw new Error("那台电脑的 Pier 版本过旧，不支持上传和下载文件，请先更新它");
 		}
 		return client;
+	}
+
+	requireNativeFileTransfers(workspaceId: string): void {
+		if (!hostTransfersWorkspacePaths(this.state.nodes[this.nodeOf(workspaceId)]?.hostInfo)) {
+			throw new Error("文件所在电脑的 Pier 版本过旧，请先更新它以复制或移动工作区文件");
+		}
 	}
 
 	bumpFiles(workspaceId: string): void {

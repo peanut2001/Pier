@@ -8,10 +8,10 @@
  */
 import { randomUUID } from "node:crypto";
 import type { FileHandle } from "node:fs/promises";
-import { lstat, mkdir, open, rename, rm, stat } from "node:fs/promises";
+import { lstat, open, rename, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { PierProtocolError, type WorkspaceFileWriteResult, type WorkspaceUploadStart } from "@pier/protocol";
-import { fsError, normalizeRelativePath, resolveInside, workspaceRealRoot } from "./workspace-files.ts";
+import { ensureWorkspaceDirectory, fsError, normalizeRelativePath, workspaceRealRoot } from "./workspace-files.ts";
 
 /** Largest decoded `data` of one `workspace.uploadChunk`. */
 export const MAX_UPLOAD_CHUNK_BYTES = 4 * 1024 * 1024;
@@ -43,36 +43,6 @@ interface Upload {
 export interface WorkspaceUploadsOptions {
 	idleMs?: number;
 	log?: (message: string) => void;
-}
-
-/**
- * Resolve the directory `segments` (relative to `root`) and create the parts that are missing.
- * Existing parts are followed (symlinks included) and must stay inside the workspace.
- */
-async function ensureDirectory(root: string, segments: string[]): Promise<string> {
-	let dir = root;
-	for (let i = 0; i < segments.length; i++) {
-		const next = join(dir, segments[i] as string);
-		const shown = segments.slice(0, i + 1).join("/");
-		let exists = true;
-		try {
-			await lstat(next);
-		} catch (error) {
-			if ((error as NodeJS.ErrnoException).code !== "ENOENT") fsError(error, shown);
-			exists = false;
-		}
-		if (!exists) {
-			try {
-				await mkdir(next);
-			} catch (error) {
-				if ((error as NodeJS.ErrnoException).code !== "EEXIST") fsError(error, shown);
-			}
-		}
-		const real = await resolveInside(root, shown, "directory");
-		if (!(await stat(real)).isDirectory()) throw new PierProtocolError("BAD_REQUEST", `Not a directory: ${shown}`);
-		dir = real;
-	}
-	return dir;
 }
 
 /** What is at `path` now, without following a final symlink's target kind for files. */
@@ -132,7 +102,7 @@ export class WorkspaceUploads {
 		const segments = relPath.split("/");
 		const name = segments.pop() as string;
 		const root = await workspaceRealRoot(workspaceRoot);
-		const dir = await ensureDirectory(root, segments);
+		const dir = await ensureWorkspaceDirectory(root, segments);
 		const target = join(dir, name);
 		let kind: Awaited<ReturnType<typeof existing>>;
 		try {
