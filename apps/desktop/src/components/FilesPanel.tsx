@@ -1281,6 +1281,7 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 									if (!selectedPaths.has(entry.path)) {
 										applySelection(selectByPointer(visiblePaths, selectedPaths, selectionAnchor, entry.path));
 									}
+									focusEntry(entry.path);
 									setMenu({ position: contextMenuPosition(event), entry });
 								}}
 							>
@@ -1302,6 +1303,8 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 									onKeyDown={(event) => onEntryKeyDown(event, entry)}
 									onClick={(event) => {
 										clearTimeout(clickTimer.current);
+										// WebKit on macOS does not focus buttons on pointer clicks.
+										event.currentTarget.focus({ preventScroll: true });
 										selectEntry(entry, event);
 										if (event.shiftKey || event.metaKey || event.ctrlKey) return;
 										if (isDir) {
@@ -1441,7 +1444,9 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 					) {
 						event.preventDefault();
 						event.stopPropagation();
-						paste("");
+						const selected = visibleSelection();
+						const target = selected.find((entry) => entry.path === selectionAnchor) ?? selected.at(-1);
+						paste(target ? (target.kind === "directory" ? target.path : parentPath(target.path)) : "");
 						return;
 					}
 					if (event.key !== "Escape") return;
@@ -1453,6 +1458,7 @@ export function FilesPanel({ workspace, composerKey }: { workspace: WorkspaceInf
 				onClick={(event) => {
 					if ((event.target as Element).closest(".files-row")) return;
 					clearTimeout(clickTimer.current);
+					event.currentTarget.focus({ preventScroll: true });
 					setSelectedPaths(new Set());
 					setSelectionAnchor(undefined);
 				}}
