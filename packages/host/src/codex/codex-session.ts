@@ -46,6 +46,7 @@ export const CODEX_CAPABILITIES: AgentRuntimeCapabilities = {
 	rename: true,
 	setModel: true,
 	thinking: true,
+	fastMode: true,
 	reload: false,
 	images: true,
 	piExtensions: false,
@@ -68,6 +69,7 @@ export interface CodexThreadStart {
 	/** Model and effort the app server reported for the thread. */
 	model?: string;
 	effort?: string | null;
+	serviceTier?: string | null;
 	messages?: TranscriptMessage[];
 }
 
@@ -105,6 +107,8 @@ export class CodexSession extends ManagedSession {
 	private readonly forkedFrom: string | undefined;
 	private modelId: string | undefined;
 	private thinkingLevel: ThinkingLevel;
+	private serviceTier: string | null | undefined;
+	private fastChange: Promise<unknown> = Promise.resolve();
 	private turnId: string | undefined;
 	/** Content index of streamed text and reasoning items. */
 	private readonly itemIndex = new Map<string, number>();
@@ -137,6 +141,7 @@ export class CodexSession extends ManagedSession {
 		).toISOString();
 		this.forkedFrom = typeof thread.forkedFromId === "string" ? thread.forkedFromId : undefined;
 		this.modelId = start.model ?? (typeof thread.model === "string" ? thread.model : undefined);
+		this.serviceTier = start.serviceTier;
 		this.thinkingLevel =
 			effortToLevel(start.effort ?? thread.reasoningEffort) ??
 			(this.currentModel()?.thinkingLevels?.includes("medium") ? "medium" : "off");
@@ -256,6 +261,11 @@ export class CodexSession extends ManagedSession {
 		this.lastActivity = Date.now();
 		const t = this.transcript;
 		switch (method) {
+			case "thread/settings/updated": {
+				const tier = (params.threadSettings as Json | undefined)?.serviceTier;
+				if (tier === null || typeof tier === "string") this.updateServiceTier(tier);
+				return;
+			}
 			case "turn/started": {
 				const turn = (params.turn ?? {}) as Json;
 				this.turnId = String(turn.id ?? "");
@@ -542,6 +552,7 @@ export class CodexSession extends ManagedSession {
 						}
 					: {}),
 			thinkingLevel: this.thinkingLevel,
+			fastMode: this.fastMode,
 			...(t.errorMessage ? { errorMessage: t.errorMessage } : {}),
 		};
 	}
@@ -566,6 +577,7 @@ export class CodexSession extends ManagedSession {
 		this.setRunState("streaming");
 		const user = this.transcript.addUser(content);
 		try {
+			await this.fastChange;
 			const response = await this.host.server().request<{ turn?: Json }>("turn/start", {
 				threadId: this.threadId,
 				clientUserMessageId: clientId,
@@ -575,6 +587,7 @@ export class CodexSession extends ManagedSession {
 				sandboxPolicy: policy.sandboxPolicy,
 				...(this.modelId ? { model: this.modelId } : {}),
 				effort: levelToEffort(this.thinkingLevel),
+				...(this.serviceTier !== undefined ? { serviceTier: this.serviceTier } : {}),
 			});
 			const turnId = typeof response.turn?.id === "string" ? response.turn.id : undefined;
 			if (turnId) {
@@ -727,6 +740,30 @@ export class CodexSession extends ManagedSession {
 		this.thinkingLevel = next;
 		this.emit({ type: "thinking_level_changed", level: next });
 		return next;
+	}
+
+	private get fastMode(): boolean {
+		return this.serviceTier === "priority" || this.serviceTier === "fast";
+	}
+
+	private updateServiceTier(tier: string | null): void {
+		if (this.serviceTier === tier) return;
+		this.serviceTier = tier;
+		this.emit({ type: "session.fast", enabled: this.fastMode });
+	}
+
+	override setFast(enabled?: boolean): Promise<boolean> {
+		// Serialize toggles from multiple clients, deriving the next value after the previous
+		// change settles. A failed change must not prevent later requests.
+		const change = this.fastChange.then(async () => {
+			const serviceTier = (enabled ?? !this.fastMode) ? "priority" : null;
+			// Persist without submitting a model turn. During a run, this affects subsequent turns.
+			await this.host.server().request("thread/settings/update", { threadId: this.threadId, serviceTier });
+			this.updateServiceTier(serviceTier);
+			return this.fastMode;
+		});
+		this.fastChange = change.catch(() => {});
+		return change;
 	}
 
 	override forkPoints(): Array<{ entryId: string; text: string }> {

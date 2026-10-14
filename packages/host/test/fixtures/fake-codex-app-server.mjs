@@ -40,6 +40,7 @@ function newThread(cwd, extra = {}) {
 		modelProvider: "openai",
 		model: "gpt-test",
 		reasoningEffort: null,
+		serviceTier: null,
 		createdAt: now(),
 		updatedAt: now(),
 		status: { type: "idle" },
@@ -186,7 +187,13 @@ const handlers = {
 	"thread/start": (params) => {
 		const thread = newThread(params.cwd);
 		notify("thread/started", { thread: threadView(thread) });
-		return { thread: threadView(thread), model: "gpt-test", modelProvider: "openai", reasoningEffort: null };
+		return {
+			thread: threadView(thread),
+			model: "gpt-test",
+			modelProvider: "openai",
+			reasoningEffort: null,
+			serviceTier: thread.serviceTier,
+		};
 	},
 	"thread/list": (params) => ({
 		data: [...threads.values()]
@@ -197,7 +204,12 @@ const handlers = {
 	"thread/resume": (params) => {
 		const thread = threads.get(params.threadId);
 		if (!thread) throw new Error("no such thread");
-		return { thread: threadView(thread), model: thread.model, reasoningEffort: thread.reasoningEffort };
+		return {
+			thread: threadView(thread),
+			model: thread.model,
+			reasoningEffort: thread.reasoningEffort,
+			serviceTier: thread.serviceTier,
+		};
 	},
 	"thread/turns/list": (params) => ({ data: threads.get(params.threadId)?.turns ?? [], nextCursor: null }),
 	"thread/fork": (params) => {
@@ -206,9 +218,20 @@ const handlers = {
 		const thread = newThread(source.cwd, {
 			forkedFromId: source.id,
 			preview: source.preview,
+			serviceTier: source.serviceTier,
 			turns: structuredClone(source.turns.slice(0, end + 1)),
 		});
-		return { thread: threadView(thread), model: thread.model, reasoningEffort: null };
+		return { thread: threadView(thread), model: thread.model, reasoningEffort: null, serviceTier: thread.serviceTier };
+	},
+	"thread/settings/update": (params) => {
+		const thread = threads.get(params.threadId);
+		if (thread.rejectSettings) {
+			thread.rejectSettings = false;
+			throw new Error("Fast mode unavailable");
+		}
+		thread.serviceTier = params.serviceTier ?? "default";
+		notify("thread/settings/updated", { threadId: thread.id, threadSettings: { serviceTier: thread.serviceTier } });
+		return {};
 	},
 	"thread/name/set": (params) => {
 		const thread = threads.get(params.threadId);
@@ -238,6 +261,7 @@ const handlers = {
 		const turn = { id: id("turn"), items: [userItem], status: "inProgress", error: null, startedAt: now() };
 		thread.turns.push(turn);
 		thread.lastTurnParams = params;
+		if (params.serviceTier !== undefined) thread.serviceTier = params.serviceTier ?? "default";
 		active.set(thread.id, { turnId: turn.id, steered: [] });
 		setTimeout(() => {
 			notify("item/started", { threadId: thread.id, turnId: turn.id, item: userItem, startedAtMs: Date.now() });
@@ -259,6 +283,10 @@ const handlers = {
 	},
 	// Test helper: what the last turn/start asked for.
 	"fake/lastTurn": (params) => threads.get(params.threadId)?.lastTurnParams ?? null,
+	"fake/rejectSettings": (params) => {
+		threads.get(params.threadId).rejectSettings = true;
+		return {};
+	},
 };
 
 createInterface({ input: process.stdin }).on("line", async (line) => {

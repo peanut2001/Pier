@@ -391,6 +391,8 @@ export interface AgentRuntimeCapabilities {
 	setModel: boolean;
 	/** `thinking.set`. */
 	thinking: boolean;
+	/** `fast.set` (1.43). Absent from older hosts: unsupported. */
+	fastMode?: boolean;
 	/** `session.reload`. */
 	reload: boolean;
 	/** Image attachments in prompts. */
@@ -596,6 +598,8 @@ export interface SessionSnapshot {
 	queue: QueueState;
 	model?: ModelInfo;
 	thinkingLevel: ThinkingLevel;
+	/** Whether Codex Fast mode is enabled (1.43). Absent for other runtimes/older hosts. */
+	fastMode?: boolean;
 	statuses: Record<string, string>;
 	widgets: Record<string, { lines: string[]; placement?: string }>;
 	title?: string;

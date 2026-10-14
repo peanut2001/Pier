@@ -188,6 +188,7 @@ const AUDITED_METHODS = new Set<MethodName>([
 	"session.reload",
 	"model.set",
 	"thinking.set",
+	"fast.set",
 	"ui.respond",
 	// Managing the computer (open to paired devices since 1.10).
 	"workspace.add",
@@ -292,6 +293,8 @@ function auditDetail(method: MethodName, params: Record<string, unknown>): Recor
 			return { provider: params.provider, modelId: params.modelId };
 		case "thinking.set":
 			return { level: params.level };
+		case "fast.set":
+			return { enabled: params.enabled };
 		case "workspace.add":
 			return { path: params.path, ...(params.policy ? { policy: params.policy } : {}) };
 		case "workspace.remove":
@@ -1339,6 +1342,9 @@ export class PierHost implements RequestHandler {
 			}),
 			"thinking.set": async (_ctx, params) => ({
 				level: await this.pool.require(params.sessionId).setThinking(params.level, params.persist ?? false),
+			}),
+			"fast.set": async (_ctx, params) => ({
+				enabled: await this.pool.require(params.sessionId).setFast(params.enabled),
 			}),
 			"model.setDefault": async (_ctx, params) => ({
 				defaultModel: await this.providers.setDefault(params.provider, params.modelId),

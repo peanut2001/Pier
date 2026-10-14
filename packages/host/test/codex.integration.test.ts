@@ -53,6 +53,111 @@ describe("Codex runtime", () => {
 		return t.host.pool.runtime("codex") as CodexRuntime;
 	}
 
+	it("changes Fast mode through slash commands without a model turn and persists it across reopen", async () => {
+		const { session } = await client.request("session.create", { workspaceId: workspace.id, runtime: "codex" });
+		const errors: string[] = [];
+		const controller = new ChatController(client, session, {
+			onChange() {},
+			onReplaced() {},
+			onSettled() {},
+			onError: (message) => errors.push(message),
+		});
+		await controller.start();
+		const list = await controller.loadCommands();
+		expect(controller.chat.fastMode).toBe(false);
+		const notices: string[] = [];
+		const actions: SlashActions = {
+			newSession: () => false,
+			fork: () => false,
+			notify: (_level, message) => notices.push(message),
+		};
+		const command = resolveSlash("/fast", list.commands, list.known, "codex");
+		expect(command).toEqual({ kind: "builtin", name: "fast", args: "" });
+		expect(await runBuiltin(controller, "fast", "", actions)).toEqual({ kind: "done" });
+		expect(controller.chat.fastMode).toBe(true);
+		expect(controller.chat.thinkingLevel).toBe("medium");
+		expect(controller.chat.messages).toEqual([]);
+		expect(await runtime().server().request("fake/lastTurn", { threadId: session.id })).toBeNull();
+		const snapshot = await client.request("session.snapshot", { sessionId: session.id });
+		expect(applySnapshot(initialChatState(session.id), snapshot).fastMode).toBe(true);
+		await controller.dispose();
+		const { rec, state } = await open(session);
+		await client.request("session.prompt", { sessionId: session.id, text: "hello" });
+		await rec.waitForType("agent_settled");
+		expect(await runtime().server().request("fake/lastTurn", { threadId: session.id })).toMatchObject({
+			serviceTier: "priority",
+			effort: "medium",
+		});
+		const { points } = await client.request("session.forkPoints", { sessionId: session.id });
+		const forked = await client.request("session.fork", {
+			sessionId: session.id,
+			entryId: points[0]?.entryId ?? "",
+			position: "at",
+		});
+		expect((await client.request("session.snapshot", { sessionId: forked.session.id })).fastMode).toBe(true);
+		await client.request("fast.set", { sessionId: session.id, enabled: false });
+		await expect.poll(() => state().fastMode).toBe(false);
+		const from = rec.mark();
+		await client.request("session.prompt", { sessionId: session.id, text: "standard speed" });
+		await rec.waitForType("agent_settled", from);
+		expect(await runtime().server().request("fake/lastTurn", { threadId: session.id })).toMatchObject({
+			serviceTier: null,
+		});
+		await client.request("fast.set", { sessionId: session.id, enabled: true });
+		await client.request("session.close", { sessionId: session.id });
+		await client.request("session.open", { workspaceId: workspace.id, sessionId: session.id });
+		expect((await client.request("session.snapshot", { sessionId: session.id })).fastMode).toBe(true);
+		expect(errors).toEqual([]);
+		expect(notices).toEqual(["Fast 模式已开启"]);
+		await client.request("fast.set", { sessionId: session.id, enabled: false });
+		await client.request("session.close", { sessionId: session.id });
+		await client.request("session.open", { workspaceId: workspace.id, sessionId: session.id });
+		expect((await client.request("session.snapshot", { sessionId: session.id })).fastMode).toBe(false);
+	});
+
+	it("applies Fast changes to the next queued turn and preserves state when Codex rejects the change", async () => {
+		const { session } = await client.request("session.create", { workspaceId: workspace.id, runtime: "codex" });
+		const { rec, state } = await open(session);
+		await client.request("session.prompt", { sessionId: session.id, text: "wait here" });
+		await rec.waitForType("agent_start");
+		await client.request("session.followUp", { sessionId: session.id, text: "next at Fast" });
+		expect(await client.request("fast.set", { sessionId: session.id })).toEqual({ enabled: true });
+		expect(
+			await runtime().server().request<Record<string, unknown>>("fake/lastTurn", { threadId: session.id }),
+		).not.toHaveProperty("serviceTier", "priority");
+		await runtime().server().request("fake/rejectSettings", { threadId: session.id });
+		await expect(client.request("fast.set", { sessionId: session.id, enabled: false })).rejects.toThrow(
+			"Fast mode unavailable",
+		);
+		expect((await client.request("session.snapshot", { sessionId: session.id })).fastMode).toBe(true);
+		await client.request("session.steer", { sessionId: session.id, text: "continue" });
+		await rec.waitFor(
+			(frame) =>
+				frame.event.type === "message_end" && JSON.stringify(frame.event.message).includes("Reply to next at Fast"),
+		);
+		await expect.poll(() => state().runState).toBe("idle");
+		expect(await runtime().server().request("fake/lastTurn", { threadId: session.id })).toMatchObject({
+			serviceTier: "priority",
+		});
+		expect(await client.request("fast.set", { sessionId: session.id })).toEqual({ enabled: false });
+	});
+
+	it("rejects Fast mode for other runtimes", async () => {
+		const { session } = await client.request("session.create", { workspaceId: workspace.id });
+		await expect(client.request("fast.set", { sessionId: session.id })).rejects.toMatchObject({ code: "UNSUPPORTED" });
+	});
+
+	it("serializes Fast toggles from multiple clients", async () => {
+		const { session } = await client.request("session.create", { workspaceId: workspace.id, runtime: "codex" });
+		expect(
+			await Promise.all([
+				client.request("fast.set", { sessionId: session.id }),
+				client.request("fast.set", { sessionId: session.id }),
+			]),
+		).toEqual([{ enabled: true }, { enabled: false }]);
+		expect((await client.request("session.snapshot", { sessionId: session.id })).fastMode).toBe(false);
+	});
+
 	async function open(session: SessionSummary) {
 		let state: ChatState = initialChatState(session.id, session);
 		const rec = new Recorder();

@@ -76,6 +76,7 @@ export interface SessionContent {
 	pendingToolCalls: string[];
 	model?: ModelInfo;
 	thinkingLevel: ThinkingLevel;
+	fastMode?: boolean;
 	errorMessage?: string;
 }
 
@@ -292,6 +293,7 @@ export abstract class ManagedSession {
 			queue: this.queue(),
 			...(c.model ? { model: c.model } : {}),
 			thinkingLevel: c.thinkingLevel,
+			...(c.fastMode !== undefined ? { fastMode: c.fastMode } : {}),
 			statuses: Object.fromEntries(this.bridge.statuses),
 			widgets: Object.fromEntries(this.bridge.widgets),
 			...(this.bridge.title ? { title: this.bridge.title } : {}),
@@ -390,6 +392,10 @@ export abstract class ManagedSession {
 	refreshModel(): void {}
 
 	abstract setThinking(level: ThinkingLevel, persist: boolean): string | Promise<string>;
+
+	setFast(_enabled?: boolean): Promise<boolean> {
+		return Promise.reject(this.unsupported("Fast mode"));
+	}
 
 	/** Slash commands the runtime handles when they arrive as a prompt. */
 	commands(): SessionCommandInfo[] | Promise<SessionCommandInfo[]> {

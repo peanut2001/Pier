@@ -61,7 +61,14 @@ export const BUILTIN_COMMANDS: readonly SlashCommand[] = [
 ];
 
 /** Built-in commands whose argument is picked from a list. */
-export const ARGUMENT_COMMANDS: ReadonlySet<string> = new Set(["model", "thinking", "reasoning", "effort", "fork"]);
+export const ARGUMENT_COMMANDS: ReadonlySet<string> = new Set([
+	"model",
+	"thinking",
+	"reasoning",
+	"effort",
+	"fork",
+	"fast",
+]);
 
 /** Use each agent's command names for the operations Pier implements. */
 const RUNTIME_COMMAND_NAMES: Record<string, Partial<Record<string, string>>> = {
@@ -98,6 +105,15 @@ export function builtinCommands(capabilities?: AgentRuntimeCapabilities, runtime
 			source: "builtin",
 			immediate: true,
 		});
+		if (capabilities?.fastMode) {
+			commands.push({
+				name: "fast",
+				description: "切换 Fast 模式",
+				argumentHint: "[on|off|status]",
+				source: "builtin",
+				immediate: true,
+			});
+		}
 	}
 	return commands;
 }
@@ -213,10 +229,11 @@ export interface SlashOption {
 
 /** The parts of `ChatController` the built-in commands use. */
 export interface SlashTarget {
-	readonly chat: { model?: ModelInfo; thinkingLevel: string; runState: string };
+	readonly chat: { model?: ModelInfo; thinkingLevel: string; runState: string; fastMode?: boolean };
 	listModels(): Promise<{ models: ModelInfo[] }>;
 	setModel(provider: string, modelId: string): Promise<unknown>;
 	setThinking(level: ThinkingLevel): Promise<unknown>;
+	setFast(enabled?: boolean): Promise<{ enabled: boolean } | undefined>;
 	compact(instructions?: string): Promise<unknown>;
 	forkPoints(): Promise<{ points: ForkPoint[] }>;
 	rename(name: string): Promise<unknown>;
@@ -226,6 +243,12 @@ export interface SlashTarget {
 /** Options for the argument of `/model`, `/thinking`, or `/fork`. */
 export async function loadArgumentOptions(target: SlashTarget, command: string): Promise<SlashOption[]> {
 	switch (command) {
+		case "fast":
+			return [
+				{ value: "on", label: "on", detail: "开启 Fast 模式", selected: target.chat.fastMode === true },
+				{ value: "off", label: "off", detail: "关闭 Fast 模式", selected: target.chat.fastMode === false },
+				{ value: "status", label: "status", detail: "查看 Fast 模式状态" },
+			];
 		case "model": {
 			const current = target.chat.model;
 			const { models } = await target.listModels();
@@ -335,6 +358,23 @@ export async function runBuiltin(
 	actions: SlashActions,
 ): Promise<SlashResult> {
 	switch (name) {
+		case "fast": {
+			const arg = args.toLowerCase();
+			if (arg && arg !== "on" && arg !== "off" && arg !== "status") {
+				actions.notify("warning", "用法：/fast [on|off|status]，不带参数切换 Fast 模式");
+				return FAILED;
+			}
+			if (arg === "status") {
+				actions.notify("info", `Fast 模式${target.chat.fastMode ? "已开启" : "已关闭"}`);
+				return DONE;
+			}
+			const result = await target.setFast(arg ? arg === "on" : undefined);
+			if (result === undefined) return FAILED;
+			const text = `Fast 模式${result.enabled ? "已开启" : "已关闭"}`;
+			const suffix = isIdle(target) ? "" : "，从下一轮生效";
+			actions.notify("info", text + suffix);
+			return DONE;
+		}
 		case "new":
 		case "clear":
 			return (await actions.newSession()) ? DONE : FAILED;

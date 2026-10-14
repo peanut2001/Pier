@@ -231,6 +231,7 @@ export class CodexRuntime implements AgentRuntime {
 			thread: (response.thread ?? {}) as Json,
 			...(typeof response.model === "string" ? { model: response.model } : {}),
 			effort: (response.reasoningEffort as string | null | undefined) ?? null,
+			serviceTier: response.serviceTier as string | null | undefined,
 		});
 	}
 
@@ -269,6 +270,7 @@ export class CodexRuntime implements AgentRuntime {
 			thread: { ...thread, name: thread.name ?? stored.name },
 			...(typeof response.model === "string" ? { model: response.model } : {}),
 			effort: (response.reasoningEffort as string | null | undefined) ?? null,
+			serviceTier: response.serviceTier as string | null | undefined,
 			messages: convertTurns(turns),
 		});
 	}
@@ -306,6 +308,7 @@ export class CodexRuntime implements AgentRuntime {
 			thread,
 			...(typeof response.model === "string" ? { model: response.model } : {}),
 			effort: (response.reasoningEffort as string | null | undefined) ?? null,
+			serviceTier: response.serviceTier as string | null | undefined,
 			messages: convertTurns(turns),
 		});
 		return position === "before" ? { session, selectedText: point.text } : { session };

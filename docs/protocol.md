@@ -1,4 +1,4 @@
-# Pier 协议 v1.42
+# Pier 协议 v1.43
 
 > 实现：`packages/protocol`（zod schema + TS 类型，Host 与所有客户端共享）。
 > 本文档描述线上格式与语义；字段的权威定义以 `packages/protocol/src` 为准。
@@ -179,7 +179,7 @@ Host 用它所在电脑上的 `git` 命令行（`PATH` 中的，或环境变量 
 
 `AgentInstallationStatus = { runtime, state: "idle" | "checking" | "downloading" | "verifying" | "installing" | "ready" | "error", version?, downloadedBytes?, totalBytes?, error? }`。客户端通过 `runtime.installStatus` 轮询进度，连接断开不影响任务；Host 退出会取消安装并清理暂存文件。仅支持 x64 / arm64 的 Windows、macOS、Linux。Claude Code 使用官方原生二进制和平台清单，Codex 使用官方完整原生发行包（含辅助程序），两者都校验 SHA-256 并运行 `--version` 验证后才更新用户级公共命令（`~/.local/bin`），并配置用户 `PATH`；外部终端重新打开后与 Pier 共用安装。程序按版本保存在 `~/.local/share/claude/versions` / `~/.local/share/codex/versions`。失败时恢复旧命令，配置、凭据与会话目录保留；Windows 程序被占用时提示关闭相关会话后重试。旧版 Pier 独立安装在下次更新时迁移，已经是最新版也会迁移；公共安装已经是最新版时检查 `PATH` 后返回 `ready`。成功安装广播 `{ type: "runtime.changed", runtime }`，客户端应刷新 Agent 列表；该事件不含凭据。已打开的 Codex 会话保留原来的 app-server 进程，全部关闭后才切换到新版。这两个方法向已配对设备开放，远程 `runtime.install` 记录运行时名称到审计日志。
 
-`capabilities: AgentRuntimeCapabilities = { steer, followUp, compact, fork, rename, setModel, thinking, reload, images, piExtensions }`：客户端据此隐藏会失败的操作。不支持的方法返回 `UNSUPPORTED`（例如 Claude Code / Codex 会话的 `session.reload`）。`piExtensions` 为 `false` 的运行时不加载 pi 的扩展、技能、提示词模板与 `settings.json`，扩展或设置变更后 Host 也不会重新加载这些会话。
+`capabilities: AgentRuntimeCapabilities = { steer, followUp, compact, fork, rename, setModel, thinking, fastMode?, reload, images, piExtensions }`：客户端据此隐藏会失败的操作。不支持的方法返回 `UNSUPPORTED`（例如 Claude Code / Codex 会话的 `session.reload`）。`fastMode`（1.43）只由 Codex 提供，省略时视为不支持。`piExtensions` 为 `false` 的运行时不加载 pi 的扩展、技能、提示词模板与 `settings.json`，扩展或设置变更后 Host 也不会重新加载这些会话。
 
 各运行时的差异：
 
@@ -238,6 +238,7 @@ pi 终端界面自带的命令（`/model`、`/compact`、`/new`、`/fork`、`/na
 | `model.list` | `{ sessionId?, workspaceId?, runtime? }` | `{ models: ModelInfo[], current?, thinkingLevel? }`（仅列出已配置凭据的模型）。带 `sessionId` 时列出该会话运行时的模型，否则列出 `runtime`（1.22，默认 `pi`）的模型。带 `sessionId` 时 `current` / `thinkingLevel` 是该会话的模型与思考等级；只带 `workspaceId` 时（1.19）是在该工作区新建会话时会使用的模型与思考等级（与 pi 的解析一致：有凭据的默认模型，否则第一个可用模型；思考等级依次取该模型的设置、默认思考等级、`medium`，再按模型能力钳制），供新建会话前在输入框中选择模型；都不带时只返回 `models` |
 | `model.set` | `{ sessionId, provider, modelId, persist? }` | `{ model }`；`persist: true` 写入 pi 全局默认值 |
 | `thinking.set` | `{ sessionId, level, persist? }` | `{ level }`（按模型能力钳制后的实际等级） |
+| `fast.set` | `{ sessionId, enabled? }` | `{ enabled }`；Codex Fast 模式（1.43）。省略 `enabled` 切换当前状态；开启调用 `thread/settings/update` 设置 `serviceTier: "priority"`，关闭设置 `null`。成功后发送 `session.fast` 并保存线程设置，下一轮 `turn/start` 使用该档位；不会发送模型消息、修改思考等级或写入全局配置。运行中切换只影响后续轮次。CLI 不支持该方法或拒绝更新时返回错误，保留原状态；其他运行时返回 `UNSUPPORTED` |
 | `model.setDefault` | `{ provider, modelId }` | `{ defaultModel }`；写入 pi 全局 settings，只影响新会话（1.2） |
 
 ### 服务商与凭据（1.2）
@@ -480,6 +481,7 @@ Claude Code 与 Codex 会话（1.22）发出同样形态的事件与 `AgentMessa
 | `session.snapshot` | `snapshot` | 仅在订阅 / 恢复时单独发给该连接，**不带 seq**，不写入日志 |
 | `session.status` | `state: idle\|streaming\|compacting\|retrying` | 状态变化时发送 |
 | `session.model` | `model?, thinkingLevel` | `model.set` 之后 |
+| `session.fast` | `enabled: boolean` | Codex Fast 状态变化时发送（1.43），包括原生 `thread/settings/updated` 通知 |
 | `session.replaced` | `previousSessionId, session` | 扩展命令（如 `/new`）替换了底层 pi 会话；帧的 `sessionId` 为旧 ID，随后会收到新会话的 `session.snapshot` |
 | `session.closed` | `reason: idle\|closed\|deleted\|host_shutdown` | 会话离开活跃池；`deleted` 表示会话已被 `session.delete` 删除（1.6） |
 | `ui.request` | `request: UiRequest` | 对话框或审批请求，见 §6 |
@@ -561,6 +563,7 @@ Claude Code 与 Codex 会话（1.22）发出同样形态的事件与 `AgentMessa
   pendingUi: UiRequest[];      // 仍待回答的对话框 / 审批
   queue: { steering: string[]; followUp: string[] };
   model?: ModelInfo; thinkingLevel: string;
+  fastMode?: boolean;          // Codex Fast 模式（1.43），其他运行时与旧 Host 省略
   statuses: Record<string, string>; widgets: Record<string, { lines: string[]; placement?: string }>;
   title?: string; errorMessage?: string;
   capabilities?: AgentRuntimeCapabilities; // 会话运行时的能力（1.22），见 §3 Agent 运行时

@@ -177,6 +177,7 @@ export function Composer({
 								</Text>
 							) : null}
 							<Icon name="chevron-down" size={13} color={p.faint} />
+							{chat.chat.fastMode ? <Text style={{ color: p.accentText }}>· Fast</Text> : null}
 						</Pressable>
 					) : (
 						<View style={styles.flex} />

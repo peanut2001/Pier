@@ -468,6 +468,8 @@ export const MethodParamsSchemas = {
 		.optional(),
 	"model.set": z.object({ ...SessionRef, provider: Id, modelId: Id, persist: z.boolean().optional() }),
 	"thinking.set": z.object({ ...SessionRef, level: ThinkingLevelSchema, persist: z.boolean().optional() }),
+	/** Codex Fast mode (1.43). Omit `enabled` to toggle the current thread setting. */
+	"fast.set": z.object({ ...SessionRef, enabled: z.boolean().optional() }),
 	"model.setDefault": z.object({ provider: Id, modelId: Id }),
 
 	"provider.list": z.object({}).optional(),
@@ -971,6 +973,7 @@ export interface MethodResults {
 	"model.list": { models: ModelInfo[]; current?: ModelInfo; thinkingLevel?: ThinkingLevel };
 	"model.set": { model: ModelInfo };
 	"thinking.set": { level: string };
+	"fast.set": { enabled: boolean };
 	"model.setDefault": { defaultModel: DefaultModelRef };
 	"provider.list": ProviderListResult;
 	"provider.login": { flowId: string };
