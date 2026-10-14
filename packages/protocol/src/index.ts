@@ -7,6 +7,7 @@ export * from "./fingerprint.ts";
 export * from "./frames.ts";
 export * from "./methods.ts";
 export * from "./ports.ts";
+export * from "./processes.ts";
 export * from "./resources.ts";
 export * from "./scheduled-tasks.ts";
 export * from "./version.ts";

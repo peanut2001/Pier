@@ -1,4 +1,4 @@
-# Pier 协议 v1.41
+# Pier 协议 v1.42
 
 > 实现：`packages/protocol`（zod schema + TS 类型，Host 与所有客户端共享）。
 > 本文档描述线上格式与语义；字段的权威定义以 `packages/protocol/src` 为准。
@@ -628,6 +628,19 @@ Claude Code 与 Codex 会话（1.22）发出同样形态的事件与 `AgentMessa
 | `mcp.test` | `{ runtime, workspaceId?, scope, name }` | `{ ok, tools: { name }[], message }`；显式建立 stdio / HTTP / Claude SSE 连接、发现工具并关闭连接；不调用业务工具、不启动 OAuth、不回传子进程日志或凭据。客户端建议 60 秒超时 |
 
 变更广播 `resources.changed = { runtime, workspaceId? }`，并通知相关扩展 / Agent 配置页面。pi 空闲会话重新加载，忙碌会话保持原运行并在结束后 `/reload`；Claude / Codex 原生配置在会话新建 / 重新打开时读取。审计只记录 runtime、scope、资源名称与工作区，不记录技能正文、MCP 配置、环境变量、请求头或凭据。
+
+## 主机进程管理（1.42）
+
+| 方法 | 参数 | 返回 |
+|---|---|---|
+| `host.processes` | — | `{ processes: HostProcess[], truncated }`；查询 Host 所在系统 / PID 命名空间中可读取的进程，最多 8192 条，按 PID 排序 |
+| `host.killProcess` | `{ pid, startToken, force?(false) }` | `{ signalled: true }`；核对最新启动标识后向单个进程发送 SIGTERM，`force:true` 改为 SIGKILL；Windows 两种方式均直接终止进程。成功仅表示信号已发送，不保证进程已退出 |
+
+`HostProcess = { pid, parentPid?, name, user?, memoryBytes?, startToken?, canTerminate }`。内存为常驻内存（字节）；Linux 的 `user` 为 UID，macOS 为用户名，Windows 省略用户 / 父 PID。`startToken` 是不透明的进程启动标识（Linux `/proc/<pid>/stat` 的启动时钟值，macOS `ps lstart` 的秒级时间，Windows `StartTime` ticks）；客户端结束时原样传回。`canTerminate` 表示启动标识可读且不受 Pier 的保护，不保证 OS 允许发送信号。不读取或返回命令行参数、环境变量。
+
+Linux 读取 `/proc`，macOS 执行固定 `ps` 查询，Windows 使用 PowerShell `Get-Process`。样本共享并发查询并缓存 1 秒；Linux 最多读取前 8192 个 PID，其余设置 `truncated:true`。结束操作绕过缓存重新核对启动标识，不自动提权、不向进程组发送信号：PID 不是 2–2147483647 的整数时返回 `BAD_REQUEST`，Host 自身 / Windows PID 4 返回 `FORBIDDEN`，进程消失返回 `NOT_FOUND`，启动标识变化返回 `CONFLICT`，不可读取启动标识或系统拒绝操作返回 `FORBIDDEN`。信号发送后清除样本缓存。
+
+两个方法均对本地认证连接和已配对的远程设备开放，不依赖工作区。远程结束操作审计仅记录 PID、是否强制和调用设备；不记录进程列表或启动标识。客户端应按目标主机协议 1.42 判断是否支持，断开连接 / 切换主机时丢弃旧查询结果和确认状态。
 
 ## 主机端口与独立 TCP 映射（1.39）
 

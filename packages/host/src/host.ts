@@ -45,6 +45,7 @@ import {
 } from "./connection.ts";
 import { GitService } from "./git.ts";
 import { listHostDirectories } from "./host-directories.ts";
+import { HostProcessManager } from "./host-processes.ts";
 import { HostStatsSampler } from "./host-stats.ts";
 import type { ManagedSession } from "./managed-session.ts";
 import { LoopbackRelays } from "./oauth-loopback.ts";
@@ -152,6 +153,7 @@ export interface PierHostOptions {
 
 /** Remote methods recorded in the audit log. */
 const AUDITED_METHODS = new Set<MethodName>([
+	"host.killProcess",
 	"skills.save",
 	"skills.import",
 	"skills.setEnabled",
@@ -241,6 +243,8 @@ const AUDITED_METHODS = new Set<MethodName>([
 
 function auditDetail(method: MethodName, params: Record<string, unknown>): Record<string, unknown> | undefined {
 	switch (method) {
+		case "host.killProcess":
+			return { pid: params.pid, force: params.force === true };
 		case "skills.save":
 		case "skills.import":
 		case "skills.setEnabled":
@@ -454,6 +458,7 @@ export class PierHost implements RequestHandler {
 	readonly browsers: LocalBrowsers;
 	readonly portForwards: LocalPortForwards;
 	readonly ports = new HostPortSampler();
+	readonly processes = new HostProcessManager();
 	readonly extensions: ExtensionManager;
 	readonly packageCatalog: PackageCatalog;
 	readonly settings: PiSettingsFiles;
@@ -982,6 +987,8 @@ export class PierHost implements RequestHandler {
 					p.workspaceId ? this.requireWorkspace(p.workspaceId).path : undefined,
 				),
 			"host.ports": () => this.ports.sample(),
+			"host.processes": () => this.processes.sample(),
+			"host.killProcess": (_ctx, params) => this.processes.kill(params.pid, params.startToken, params.force),
 			"portForward.open": (ctx, params) => this.portForwards.open(ctx.connection, params),
 			"portForward.list": (ctx) => ({ forwards: this.portForwards.list(ctx.connection) }),
 			"portForward.close": (ctx, params) => ({ closed: this.portForwards.close(ctx.connection, params.id) }),

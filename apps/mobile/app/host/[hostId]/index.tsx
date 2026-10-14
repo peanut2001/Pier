@@ -127,6 +127,16 @@ function ToolsCard({ hostId }: { hostId: string }) {
 			<View style={styles.toolRow}>
 				{online ? (
 					<Pressable
+						testID="open-processes"
+						onPress={() => router.push({ pathname: "/host/[hostId]/processes", params: { hostId } })}
+						style={({ pressed }) => [styles.tool, { backgroundColor: p.elevated }, pressed && styles.pressed]}
+					>
+						<Icon name="pulse-outline" size={18} color={p.accentText} />
+						<Text style={[styles.toolText, { color: p.text }]}>进程</Text>
+					</Pressable>
+				) : null}
+				{online ? (
+					<Pressable
 						testID="open-resources"
 						onPress={() => router.push({ pathname: "/host/[hostId]/resources", params: { hostId } })}
 						style={({ pressed }) => [styles.tool, { backgroundColor: p.elevated }, pressed && styles.pressed]}
@@ -568,9 +578,10 @@ const styles = StyleSheet.create({
 	hintText: { flex: 1, fontSize: 12.5 },
 	pending: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 12 },
 	tools: { gap: 8, paddingVertical: 10, paddingHorizontal: 10 },
-	toolRow: { flexDirection: "row", gap: 8 },
+	toolRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
 	tool: {
 		flex: 1,
+		minWidth: 140,
 		flexDirection: "row",
 		alignItems: "center",
 		justifyContent: "center",

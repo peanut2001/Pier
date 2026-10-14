@@ -76,6 +76,7 @@ import {
 	type WorkspaceUploadStart,
 } from "./domain.ts";
 import type { HostPorts, PortForward } from "./ports.ts";
+import type { HostProcesses } from "./processes.ts";
 import {
 	type McpServerInfo,
 	type McpTestResult,
@@ -123,6 +124,13 @@ export const ClientInfoSchema = z.object({
  */
 export const MethodParamsSchemas = {
 	...ResourceMethodSchemas,
+	"host.processes": z.object({}).optional(),
+	/** Signal one process, after verifying that its PID still has the listed start identity. */
+	"host.killProcess": z.object({
+		pid: z.number().int().min(2).max(2_147_483_647),
+		startToken: z.string().min(1).max(128),
+		force: z.boolean().optional(),
+	}),
 	"host.ports": z.object({}).optional(),
 	/** Local listeners are managed only by the local desktop, independently of browsers. */
 	"portForward.open": z.object({
@@ -853,6 +861,9 @@ export interface SubscribeResult {
 }
 
 export interface MethodResults {
+	"host.processes": HostProcesses;
+	/** A signal was sent; the process may still be shutting down. */
+	"host.killProcess": { signalled: true };
 	"host.ports": HostPorts;
 	"portForward.open": PortForward;
 	"portForward.list": { forwards: PortForward[] };
