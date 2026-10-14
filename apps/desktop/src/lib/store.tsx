@@ -139,6 +139,11 @@ export function hostSupportsGit(info: HostInfo | undefined): boolean {
 	return hostSpeaks(info, 28);
 }
 
+/** Whether a host can download a file opened through Markdown preview (1.44). */
+export function hostSupportsPreviewDownloads(info: HostInfo | undefined, remote = false): boolean {
+	return hostSpeaks(info, 44) && hostAuthorizesFilePreviews(info, remote);
+}
+
 export function hostSupportsScheduledTasks(info: HostInfo | undefined): boolean {
 	return hostSpeaks(info, 36);
 }

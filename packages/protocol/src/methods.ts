@@ -277,7 +277,9 @@ export const MethodParamsSchemas = {
 	}),
 	/**
 	 * Read up to `length` bytes of a workspace file from `offset` (1.21), base64-encoded, e.g.
-	 * to download it in chunks.
+	 * to download it in chunks. With `preview` (1.44), accept Markdown references using the
+	 * same workspace/temporary roots as `workspace.previewFile`. `expectedRealPath` permits
+	 * the exact outside target explicitly confirmed by the user, checked on every chunk.
 	 */
 	"workspace.readBytes": z.object({
 		workspaceId: Id,
@@ -288,6 +290,8 @@ export const MethodParamsSchemas = {
 			.int()
 			.min(1)
 			.max(4 * 1024 * 1024),
+		expectedRealPath: z.string().min(1).max(4096).optional(),
+		preview: z.boolean().optional(),
 	}),
 	/**
 	 * Begin uploading a file of `size` bytes to `path` in a workspace (1.21). Missing parent

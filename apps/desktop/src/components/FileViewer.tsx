@@ -1,11 +1,21 @@
 import type { WorkspaceFileContent } from "@pier/protocol";
 import { type KeyboardEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { formatBytes, joinPath, languageForPath, relativeTime } from "../lib/format.ts";
+import { downloadFile } from "../lib/file-transfers.ts";
+import { formatBytes, joinPath, languageForPath, relativeTime, relativeWorkspacePath } from "../lib/format.ts";
 import { filePreviewAuthorizationPath, filePreviewError } from "../lib/markdown-files.ts";
 import { isSensitiveFile } from "../lib/sensitive-files.ts";
-import { hostAuthorizesFilePreviews, LOCAL_NODE, useAppState, useCanManageWorkspace, useStore } from "../lib/store.tsx";
+import {
+	hostAuthorizesFilePreviews,
+	hostSupportsPreviewDownloads,
+	hostTransfersFiles,
+	LOCAL_NODE,
+	useAppState,
+	useCanManageWorkspace,
+	useStore,
+} from "../lib/store.tsx";
 import {
 	IconAlert,
+	IconDownload,
 	IconFile,
 	IconFolderOpen,
 	IconLoader,
@@ -165,6 +175,8 @@ export function FileViewer({
 	const [saveError, setSaveError] = useState<string>();
 	const [conflict, setConflict] = useState(false);
 	const [closePrompt, setClosePrompt] = useState(false);
+	const [downloading, setDownloading] = useState(false);
+	const [authorizedPreviewPath, setAuthorizedPreviewPath] = useState<string>();
 	const request = useRef(0);
 
 	const load = useCallback(
@@ -180,7 +192,10 @@ export function FileViewer({
 					: fromMarkdown
 						? store.previewFile(workspaceId, path)
 						: store.readFile(workspaceId, path));
-				if (request.current === id) setFile(result);
+				if (request.current === id) {
+					setFile(result);
+					setAuthorizedPreviewPath(authorizedPath);
+				}
 			} catch (e) {
 				if (request.current === id) setError(e);
 			} finally {
@@ -199,12 +214,22 @@ export function FileViewer({
 
 	const previewNode = useAppState((s) => s.workspaceNodes[workspaceId] || s.node);
 	const previewHost = useAppState((s) => s.nodes[previewNode]?.hostInfo);
-	const workspacePath = useAppState((s) => s.workspaces.find((workspace) => workspace.id === workspaceId)?.path);
+	const workspace = useAppState((s) => s.workspaces.find((workspace) => workspace.id === workspaceId));
+	const workspacePath = workspace?.path;
 	const absolutePath = /^(?:[\\/]|[a-zA-Z]:[\\/])/.test(path)
 		? path
 		: workspacePath
 			? joinPath(workspacePath, path)
 			: undefined;
+	const downloadPath = workspacePath && absolutePath ? relativeWorkspacePath(workspacePath, absolutePath) : undefined;
+	const previewDownloadPath = downloadPath ?? (fromMarkdown ? path : undefined);
+	const expectedRealPath = downloadPath ? undefined : authorizedPreviewPath;
+	const previewDownload = !downloadPath && fromMarkdown;
+	const canDownload =
+		!!workspace &&
+		!!previewDownloadPath &&
+		hostTransfersFiles(previewHost) &&
+		(!previewDownload || hostSupportsPreviewDownloads(previewHost, previewNode !== LOCAL_NODE));
 	const canReveal = previewNode === LOCAL_NODE && store.canRevealPaths && !!absolutePath;
 	const authorizationPath = fromMarkdown ? filePreviewAuthorizationPath(error) : undefined;
 	const canAuthorize = !!authorizationPath && hostAuthorizesFilePreviews(previewHost, previewNode !== LOCAL_NODE);
@@ -254,6 +279,16 @@ export function FileViewer({
 	const requestClose = () => {
 		if (dirty) setClosePrompt(true);
 		else onClose();
+	};
+
+	const download = async () => {
+		if (!workspace || !previewDownloadPath || downloading) return;
+		setDownloading(true);
+		try {
+			await downloadFile(store, workspace, previewDownloadPath, expectedRealPath, previewDownload);
+		} finally {
+			setDownloading(false);
+		}
 	};
 
 	let body: ReactNode;
@@ -477,6 +512,23 @@ export function FileViewer({
 							) : null}
 							{file?.kind === "text" && file.text ? <CopyButton text={file.text} label="复制内容" /> : null}
 							<CopyButton text={path} label="复制路径" iconOnly />
+							{file ? (
+								<button
+									type="button"
+									className="ghost icon"
+									title={
+										canDownload
+											? "下载到本机"
+											: previewDownload
+												? "当前 Pier 版本不支持下载预览文件，请先更新"
+												: "只能下载工作区内的文件，请将文件放入当前工作区"
+									}
+									disabled={!canDownload || downloading}
+									onClick={() => void download()}
+								>
+									{downloading ? <IconLoader size={14} className="spin" /> : <IconDownload size={14} />}
+								</button>
+							) : null}
 							{onInsert ? (
 								<button
 									type="button"

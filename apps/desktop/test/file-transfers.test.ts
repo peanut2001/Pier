@@ -175,6 +175,21 @@ describe("downloadFile", () => {
 		expect(changed.aborted).toBe(true);
 		expect(transfers.snapshot().at(-1)).toMatchObject({ state: "error", error: "文件在下载过程中被修改，请重新下载" });
 	});
+
+	it("forwards preview authorization while downloading an outside file", async () => {
+		const sink = { writes: [] as string[], finished: false, aborted: false };
+		const { store, calls } = fakeStore(
+			() => ({ path: "/exports/report.xlsx", size: 2, modifiedAt: "t1", offset: 0, data: "aGk=", eof: true }),
+			sink,
+		);
+		await downloadFile(store, workspace, "/home/me/exports/report.xlsx", "/home/me/exports/report.xlsx", true);
+		expect(calls[0]?.params).toMatchObject({
+			path: "/home/me/exports/report.xlsx",
+			expectedRealPath: "/home/me/exports/report.xlsx",
+			preview: true,
+		});
+		expect(sink.finished).toBe(true);
+	});
 });
 
 const copied = (mode: "copy" | "move" = "copy"): WorkspaceClipboardState => ({

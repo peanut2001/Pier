@@ -206,10 +206,16 @@ function baseName(path: string): string {
 }
 
 /**
- * Download a workspace file to this computer: asks where to save it, then copies it in chunks.
- * Resolves once the download ended (or the save dialog was cancelled).
+ * Download a workspace or preview file to this computer: asks where to save it, then copies it
+ * in chunks. Resolves once the download ended (or the save dialog was cancelled).
  */
-export async function downloadFile(store: PierStore, workspace: WorkspaceInfo, path: string): Promise<void> {
+export async function downloadFile(
+	store: PierStore,
+	workspace: WorkspaceInfo,
+	path: string,
+	expectedRealPath?: string,
+	preview = false,
+): Promise<void> {
 	let client: PierClient;
 	try {
 		client = store.fileTransferClient(workspace.id);
@@ -237,6 +243,8 @@ export async function downloadFile(store: PierStore, workspace: WorkspaceInfo, p
 				path,
 				offset,
 				length: TRANSFER_CHUNK_BYTES,
+				...(expectedRealPath ? { expectedRealPath } : {}),
+				...(preview ? { preview: true } : {}),
 			});
 			const stamp = `${chunk.size}@${chunk.modifiedAt}`;
 			if (version !== undefined && stamp !== version) throw new Error("文件在下载过程中被修改，请重新下载");

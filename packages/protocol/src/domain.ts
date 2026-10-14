@@ -216,7 +216,7 @@ export interface WorkspaceFileContent {
 
 /** Result of `workspace.writeFile` (1.8): the file's metadata after writing. */
 export interface WorkspaceFileWriteResult {
-	/** Path relative to the workspace root, normalized and joined with "/". */
+	/** Requested path; workspace downloads are relative, preview downloads may be absolute. */
 	path: string;
 	/** Size in bytes of the file on disk. */
 	size: number;
@@ -238,7 +238,7 @@ export interface WorkspacePathTransferResult {
 	kind: "file" | "directory" | "other";
 }
 
-/** A byte range of a workspace file (`workspace.readBytes`, 1.21), e.g. one download chunk. */
+/** A byte range of a file (`workspace.readBytes`, 1.21), e.g. one download chunk. */
 export interface WorkspaceFileBytes {
 	/** Path relative to the workspace root, normalized and joined with "/". */
 	path: string;

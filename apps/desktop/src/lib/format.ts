@@ -152,3 +152,16 @@ export function joinPath(base: string, relative: string): string {
 	const rel = windows ? relative.replaceAll("/", "\\") : relative;
 	return base.endsWith(sep) ? base + rel : base + sep + rel;
 }
+
+/** Return a path relative to a workspace root when both paths identify the same tree. */
+export function relativeWorkspacePath(root: string, path: string): string | undefined {
+	const normalizedRoot = root.replaceAll("\\", "/").replace(/\/+$/, "") || "/";
+	const normalizedPath = path.replaceAll("\\", "/");
+	const windows = /^[a-zA-Z]:\//.test(normalizedRoot);
+	const comparableRoot = windows ? normalizedRoot.toLowerCase() : normalizedRoot;
+	const comparablePath = windows ? normalizedPath.toLowerCase() : normalizedPath;
+	if (comparablePath === comparableRoot) return undefined;
+	const prefix = normalizedRoot === "/" ? "/" : `${normalizedRoot}/`;
+	if (!comparablePath.startsWith(windows ? prefix.toLowerCase() : prefix)) return undefined;
+	return normalizedPath.slice(prefix.length);
+}

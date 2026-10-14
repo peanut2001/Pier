@@ -89,6 +89,7 @@ import {
 	deleteWorkspacePath,
 	listWorkspaceDirectory,
 	previewWorkspaceFile,
+	readPreviewBytes,
 	readWorkspaceBytes,
 	readWorkspaceFile,
 	writeWorkspaceFile,
@@ -331,6 +332,7 @@ function auditDetail(method: MethodName, params: Record<string, unknown>): Recor
 				overwrite: params.overwrite === true,
 			};
 		case "workspace.authorizeFilePreview":
+		case "workspace.readBytes":
 			return { workspaceId: params.workspaceId, path: params.path, expectedRealPath: params.expectedRealPath };
 		case "workspace.uploadStart":
 			return {
@@ -765,7 +767,11 @@ export class PierHost implements RequestHandler {
 			if (!parsed.success) {
 				throw new PierProtocolError("BAD_REQUEST", `Invalid params for ${method}`, parsed.error.issues);
 			}
-			if (connection.device && AUDITED_METHODS.has(method)) {
+			const authorizedDownload =
+				method === "workspace.readBytes" &&
+				(parsed.data as ParsedMethodParams<"workspace.readBytes">).expectedRealPath !== undefined &&
+				(parsed.data as ParsedMethodParams<"workspace.readBytes">).offset === 0;
+			if (connection.device && (AUDITED_METHODS.has(method) || authorizedDownload)) {
 				const params = (parsed.data ?? {}) as Record<string, unknown>;
 				const detail = auditDetail(method, params);
 				this.remote.record({
@@ -1148,8 +1154,12 @@ export class PierHost implements RequestHandler {
 					params.mode,
 					params.overwrite,
 				),
-			"workspace.readBytes": (_ctx, params) =>
-				readWorkspaceBytes(this.requireWorkspace(params.workspaceId).path, params.path, params.offset, params.length),
+			"workspace.readBytes": (_ctx, params) => {
+				const root = this.requireWorkspace(params.workspaceId).path;
+				return params.preview || params.expectedRealPath
+					? readPreviewBytes(root, params.path, params.offset, params.length, params.expectedRealPath)
+					: readWorkspaceBytes(root, params.path, params.offset, params.length);
+			},
 			"workspace.uploadStart": (ctx, params) =>
 				this.uploads.start(
 					ctx.connection.connectionId,

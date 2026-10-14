@@ -345,31 +345,21 @@ export async function deleteWorkspacePath(
 export const MAX_READ_BYTES = 4 * 1024 * 1024;
 
 /**
- * Read a byte range of a workspace file, e.g. to download it in chunks. The file must resolve
- * (after symlinks) to a regular file inside the workspace root. Returns at most `length` bytes
+ * Read a byte range of a resolved regular file. Returns at most `length` bytes
  * from `offset` (fewer at the end of the file), base64-encoded, with the file's current size and
  * modification time so a client can notice the file changing between chunks.
  */
-export async function readWorkspaceBytes(
-	workspaceRoot: string,
-	path: string,
-	offset: number,
-	length: number,
-): Promise<WorkspaceFileBytes> {
-	const relPath = normalizeRelativePath(path);
-	if (!relPath) throw new PierProtocolError("BAD_REQUEST", "Not a file: .");
+async function readFileBytes(real: string, path: string, offset: number, length: number): Promise<WorkspaceFileBytes> {
 	if (!Number.isSafeInteger(offset) || offset < 0) throw new PierProtocolError("BAD_REQUEST", "Invalid offset");
 	if (!Number.isSafeInteger(length) || length < 1 || length > MAX_READ_BYTES) {
 		throw new PierProtocolError("BAD_REQUEST", `Length must be between 1 and ${MAX_READ_BYTES} bytes`);
 	}
-	const root = await workspaceRealRoot(workspaceRoot);
-	const real = await resolveInside(root, relPath, "file");
 	try {
-		if (!(await stat(real)).isFile()) throw new PierProtocolError("BAD_REQUEST", `Not a file: ${relPath}`);
+		if (!(await stat(real)).isFile()) throw new PierProtocolError("BAD_REQUEST", `Not a file: ${path}`);
 		const handle = await open(real, "r");
 		try {
 			const info = await handle.stat();
-			if (!info.isFile()) throw new PierProtocolError("BAD_REQUEST", `Not a file: ${relPath}`);
+			if (!info.isFile()) throw new PierProtocolError("BAD_REQUEST", `Not a file: ${path}`);
 			const want = Math.max(0, Math.min(length, info.size - offset));
 			const buffer = Buffer.alloc(want);
 			let filled = 0;
@@ -379,7 +369,7 @@ export async function readWorkspaceBytes(
 				filled += bytesRead;
 			}
 			return {
-				path: relPath,
+				path,
 				size: info.size,
 				modifiedAt: info.mtime.toISOString(),
 				offset,
@@ -391,8 +381,40 @@ export async function readWorkspaceBytes(
 		}
 	} catch (error) {
 		if (error instanceof PierProtocolError) throw error;
-		fsError(error, relPath);
+		fsError(error, path);
 	}
+}
+
+/** Download a workspace file without relaxing its path boundary. */
+export async function readWorkspaceBytes(
+	workspaceRoot: string,
+	path: string,
+	offset: number,
+	length: number,
+): Promise<WorkspaceFileBytes> {
+	const relPath = normalizeRelativePath(path);
+	if (!relPath) throw new PierProtocolError("BAD_REQUEST", "Not a file: .");
+	const root = await workspaceRealRoot(workspaceRoot);
+	const real = await resolveInside(root, relPath, "file");
+	return readFileBytes(real, relPath, offset, length);
+}
+
+/** Download a Markdown file reference, checking allowed roots or its confirmed target per chunk. */
+export async function readPreviewBytes(
+	workspaceRoot: string,
+	path: string,
+	offset: number,
+	length: number,
+	expectedRealPath?: string,
+): Promise<WorkspaceFileBytes> {
+	const { root, real } = await resolvePreviewPath(workspaceRoot, path);
+	if (expectedRealPath !== undefined && real !== expectedRealPath) {
+		throw new PierProtocolError("CONFLICT", "Preview target changed; confirm the current path again", {
+			reason: "PREVIEW_TARGET_CHANGED",
+		});
+	}
+	if (expectedRealPath === undefined) await requirePreviewRoot(root, real, path);
+	return readFileBytes(real, path, offset, length);
 }
 
 /**
@@ -412,10 +434,15 @@ export async function readWorkspaceFile(workspaceRoot: string, path: string): Pr
 /**
  * Preview a file referenced in Markdown. Relative paths stay in the workspace; absolute
  * paths may also point into the host's temporary directories (where agents save screenshots).
- * This does not relax the workspace's write, download or directory-listing operations.
+ * This does not relax the workspace's write or directory-listing operations.
  */
 export async function previewWorkspaceFile(workspaceRoot: string, path: string): Promise<WorkspaceFileContent> {
 	const { root, real } = await resolvePreviewPath(workspaceRoot, path);
+	await requirePreviewRoot(root, real, path);
+	return readPreviewFile(real, path);
+}
+
+async function requirePreviewRoot(root: string, real: string, path: string): Promise<void> {
 	if (!isInside(root, real)) {
 		const directories = process.platform === "win32" ? [tmpdir()] : [tmpdir(), "/tmp", "/var/tmp"];
 		const temporaryRoots = await Promise.all(directories.map((dir) => realpath(dir).catch(() => undefined)));
@@ -426,7 +453,6 @@ export async function previewWorkspaceFile(workspaceRoot: string, path: string):
 			});
 		}
 	}
-	return readPreviewFile(real, path);
 }
 
 /** One bounded read of the exact target confirmed by the user; stores no permission. */
