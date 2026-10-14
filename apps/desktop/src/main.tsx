@@ -17,6 +17,9 @@ if (/Linux/.test(navigator.userAgent) && !/Android/.test(navigator.userAgent)) {
 
 if (customTitleBar) document.documentElement.classList.add("custom-titlebar");
 
+// Only show the app's context menus, never the WebView's page actions (e.g. Reload).
+window.addEventListener("contextmenu", (event) => event.preventDefault(), { capture: true });
+
 // HTML5 file drops are enabled in the desktop window (the composer and file panel take them);
 // a file dropped anywhere else must not make the webview navigate to it.
 for (const type of ["dragover", "drop"] as const) {
