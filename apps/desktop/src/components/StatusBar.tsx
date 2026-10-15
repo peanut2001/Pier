@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { formatPercent, formatRate, formatSize, formatUptime } from "../lib/format.ts";
 import { type HostStatsEntry, LOCAL_NODE, useAppState, useStore } from "../lib/store.tsx";
 import { HostPortsPanel } from "./HostPortsPanel.tsx";
+import { HostProcessesPanel } from "./HostProcessesPanel.tsx";
 import {
 	IconActivity,
 	IconArrowDown,
@@ -119,12 +120,14 @@ function HostCard({
 	subtitle,
 	current,
 	onPorts,
+	onProcesses,
 }: {
 	node: string;
 	name: string;
 	subtitle: string;
 	current: boolean;
 	onPorts(node: string): void;
+	onProcesses(node: string): void;
 }) {
 	const store = useStore();
 	const entry = useAppState((s) => s.hostStats[node]);
@@ -150,6 +153,9 @@ function HostCard({
 				) : null}
 			</div>
 			<HostStatsBody entry={entry} />
+			<button type="button" className="ghost host-card-action" onClick={() => onProcesses(node)}>
+				<IconActivity size={13} /> 查看进程
+			</button>
 			<button type="button" className="ghost host-card-action" onClick={() => onPorts(node)}>
 				<IconLink size={13} /> 查看端口与映射
 			</button>
@@ -158,7 +164,15 @@ function HostCard({
 }
 
 /** Usage of this computer and every paired computer, sampled while open. */
-function HostStatusPopover({ onClose, onPorts }: { onClose(): void; onPorts(node: string): void }) {
+function HostStatusPopover({
+	onClose,
+	onPorts,
+	onProcesses,
+}: {
+	onClose(): void;
+	onPorts(node: string): void;
+	onProcesses(node: string): void;
+}) {
 	const store = useStore();
 	const node = useAppState((s) => s.node);
 	const peers = useAppState((s) => s.peers);
@@ -174,6 +188,7 @@ function HostStatusPopover({ onClose, onPorts }: { onClose(): void; onPorts(node
 					subtitle={["本机", platformName(localInfo?.platform)].filter(Boolean).join(" · ")}
 					current={node === LOCAL_NODE}
 					onPorts={onPorts}
+					onProcesses={onProcesses}
 				/>
 				{peers.length ? <div className="dropdown-group-title no-caps">远程主机</div> : null}
 				{peers.map((peer) => (
@@ -184,6 +199,7 @@ function HostStatusPopover({ onClose, onPorts }: { onClose(): void; onPorts(node
 						subtitle={["远程", platformName(peer.platform), peer.addresses[0] ?? ""].filter(Boolean).join(" · ")}
 						current={node === peer.id}
 						onPorts={onPorts}
+						onProcesses={onProcesses}
 					/>
 				))}
 			</div>
@@ -234,10 +250,15 @@ function HostStatus() {
 	useAppState((s) => s.localHostInfo);
 	const [open, setOpen] = useState(false);
 	const [portsNode, setPortsNode] = useState<string>();
+	const [processesNode, setProcessesNode] = useState<string>();
 	const close = useCallback(() => setOpen(false), []);
 	const openPorts = (target: string) => {
 		setOpen(false);
 		setPortsNode(target);
+	};
+	const openProcesses = (target: string) => {
+		setOpen(false);
+		setProcessesNode(target);
 	};
 	const ref = useOutsideClick(open, close);
 	useEffect(() => store.watchHostStats(false), [store]);
@@ -302,8 +323,16 @@ function HostStatus() {
 						</span>
 					) : null}
 				</button>
-				{open ? <HostStatusPopover onClose={close} onPorts={openPorts} /> : null}
+				{open ? <HostStatusPopover onClose={close} onPorts={openPorts} onProcesses={openProcesses} /> : null}
 			</div>
+			<button
+				type="button"
+				className="statusbar-item"
+				title={`查看 ${name} 的进程`}
+				onClick={() => openProcesses(node)}
+			>
+				<IconActivity size={12} /> 进程
+			</button>
 			<button
 				type="button"
 				className="statusbar-item"
@@ -313,6 +342,9 @@ function HostStatus() {
 				<IconLink size={12} /> 端口
 			</button>
 			{portsNode ? <HostPortsPanel initialNode={portsNode} onClose={() => setPortsNode(undefined)} /> : null}
+			{processesNode ? (
+				<HostProcessesPanel initialNode={processesNode} onClose={() => setProcessesNode(undefined)} />
+			) : null}
 		</>
 	);
 }

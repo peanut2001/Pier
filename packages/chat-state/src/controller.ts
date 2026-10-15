@@ -253,6 +253,20 @@ export class ChatController {
 		});
 	}
 
+	setFast(enabled?: boolean): Promise<{ enabled: boolean } | undefined> {
+		const sessionId = this.sessionId;
+		return this.run("设置 Fast 模式", async () => {
+			const result = await this.client.request("fast.set", {
+				sessionId,
+				...(enabled !== undefined ? { enabled } : {}),
+			});
+			if (this.sessionId === sessionId) {
+				this.update({ ...this.view, chat: { ...this.view.chat, fastMode: result.enabled } });
+			}
+			return result;
+		});
+	}
+
 	forkPoints() {
 		return this.client.request("session.forkPoints", { sessionId: this.sessionId });
 	}

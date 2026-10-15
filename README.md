@@ -93,6 +93,8 @@ CLI 不在 `PATH` 中时，可以用 `PIER_CLAUDE_PATH` / `PIER_CODEX_PATH` 指�
 
 **思考程度**：滑块和斜杠命令选项跟随模型实际支持的档位。Codex 报告支持 `ultra` 的模型会显示该档位并原样传给 Codex（需要协议 1.34 的 Host）；不支持的模型和未报告能力的旧版 Host 不会显示它。桌面和手机滑块在所有档位统一显示蓝紫渐变，输入栏和滑块中的档位文字使用紫色。桌面渐变会流动，焦点高亮使用紫色，`max` / `ultra` 还有漂浮星点；开启系统的“减少动态效果”后保留静态外观。
 
+**Codex Fast 模式**：`/fast` 切换开启状态，`/fast on` / `/fast off` 明确开启或关闭，`/fast status` 查看状态；输入 `/fast ` 可选择参数。开启后桌面端与手机端的输入栏显示 Fast。设置保存在当前 Codex 会话中，重新打开与分叉时读取原有状态，不修改全局配置或思考等级；运行中切换从下一轮生效。需要协议 1.43 的 Host 及支持线程设置更新的 Codex CLI。
+
 **可视化配置**：「设置 → Agent 配置」中的「Claude Code」与「Codex」标签页直接编辑它们自己的配置文件（与终端中的 CLI 共用），可以选择全局设置或某个工作区的设置，表单中标出每一项的当前值、继承或默认值，也可以切换到 JSON / TOML 直接编辑整个文件：
 
 - **Claude Code**：`~/.claude/settings.json`、工作区的 `.claude/settings.json`（项目）与 `.claude/settings.local.json`（本地）。包括接口与认证（`ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_API_KEY`，便于使用中转接口）、默认模型与别名对应的模型、思考程度、权限规则（允许 / 询问 / 禁止）、沙箱、MCP 与 Hooks 开关、隐私与自动更新，以及其他环境变量。
@@ -117,6 +119,14 @@ MCP 测试会连接目标电脑上的服务器，stdio 测试会启动配置的�
 已配置的分组会标出「pi」「Claude Code」「Codex」，之后可以在「Agent 配置」中查看和修改。
 
 调试时 `bun run faux-host --agents` 会同时提供电脑上的 Claude Code 与 Codex（真实会话，会消耗额度）；`npx tsx packages/host/scripts/live-agent-check.ts claude-code [模型]` 用真实 CLI 走一遍创建、流式输出、审批、重命名、重新打开与分叉。
+
+### 主机进程
+
+点击桌面底部状态栏的「进程」，或在主机状态卡片中点击「查看进程」，可选择本机或已配对的远程主机。手机端在主机页面点击「进程」。支持 Linux、macOS 和 Windows，需要目标主机协议 **1.42+**。
+
+列表每 5 秒刷新，显示进程名、PID、可读取的父 PID、用户 / UID 和常驻内存，支持搜索；桌面端可按内存、PID 或名称排序，手机端按内存排序。Linux 只显示 Host 所在 PID 命名空间的进程；不可读取的字段留空，不读取命令行参数。
+
+点击「结束」并确认后，Linux / macOS 向选中的单个进程发送 SIGTERM；无响应时可「强制结束」（SIGKILL）。Windows 的「结束」直接终止进程。结束前核对进程启动标识，PID 已复用时要求刷新列表。不能结束 PID 0 / 1、Windows System 或 Pier Host 自身；启动标识不可读取时也不能结束。操作使用运行 Host 的系统用户权限，不自动提权；权限不足会显示原因。发送成功表示系统已接收请求，程序可能仍在退出，后续刷新可查看结果。远程结束操作记录 PID 和是否强制到审计日志。
 
 ### 主机端口与映射
 

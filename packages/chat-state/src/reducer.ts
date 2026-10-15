@@ -54,6 +54,7 @@ export interface ChatState {
 	queue: QueueState;
 	model?: ModelInfo;
 	thinkingLevel: string;
+	fastMode?: boolean;
 	statuses: Record<string, string>;
 	widgets: Record<string, { lines: string[]; placement?: string }>;
 	title?: string;
@@ -139,6 +140,7 @@ export function applySnapshot(state: ChatState, snapshot: SessionSnapshot): Chat
 	if (snapshot.title) next.title = snapshot.title;
 	if (snapshot.errorMessage) next.errorMessage = snapshot.errorMessage;
 	if (snapshot.capabilities) next.capabilities = snapshot.capabilities;
+	if (snapshot.fastMode !== undefined) next.fastMode = snapshot.fastMode;
 	return next;
 }
 
@@ -414,6 +416,8 @@ export function reduceChat(state: ChatState, frame: EventFrame): ChatState {
 			};
 		case "thinking_level_changed":
 			return typeof event.level === "string" ? { ...state, thinkingLevel: event.level } : state;
+		case "session.fast":
+			return { ...state, fastMode: event.enabled as boolean };
 		case "session.model": {
 			const next: ChatState = { ...state, thinkingLevel: String(event.thinkingLevel ?? state.thinkingLevel) };
 			if (event.model) next.model = event.model as ModelInfo;

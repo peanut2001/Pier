@@ -20,6 +20,7 @@ import {
 	type ExtensionUpdateInfo,
 	type HostDirectoryListing,
 	type HostInfo,
+	type HostProcesses,
 	type HostStats,
 	type MethodParams,
 	type MethodResult,
@@ -916,6 +917,26 @@ export class MobileStore {
 
 	async hostStats(): Promise<HostStats> {
 		return this.requireClient().request("host.stats", {});
+	}
+
+	canManageProcesses(): boolean {
+		return this.hostSpeaks(42);
+	}
+
+	/** Bind process actions to the displayed host even if a confirmation outlives navigation. */
+	private processClient(hostId: string): PierClient {
+		if (this.activeHostId !== hostId) throw new Error("当前主机已切换，请重新打开进程列表");
+		const client = this.requireClient();
+		if (!this.canManageProcesses()) throw new Error("请先升级这台主机的 Pier（协议 1.42）");
+		return client;
+	}
+
+	async hostProcesses(hostId: string): Promise<HostProcesses> {
+		return this.processClient(hostId).request("host.processes", {}, { timeoutMs: 15_000 });
+	}
+
+	async killHostProcess(hostId: string, params: MethodParams<"host.killProcess">): Promise<{ signalled: true }> {
+		return this.processClient(hostId).request("host.killProcess", params, { timeoutMs: 15_000 });
 	}
 
 	// ---- workspace files ---------------------------------------------------------------

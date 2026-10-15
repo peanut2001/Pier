@@ -7,6 +7,7 @@ import {
 	MAX_IMAGE_PREVIEW_BYTES,
 	MAX_TEXT_PREVIEW_BYTES,
 	previewWorkspaceFile,
+	readPreviewBytes,
 	readWorkspaceFile,
 } from "../src/workspace-files.ts";
 import { startTestHost } from "./helpers.ts";
@@ -91,6 +92,21 @@ describe("Markdown file previews on the host", () => {
 		).rejects.toMatchObject({ code: "CONFLICT", data: { reason: "PREVIEW_TARGET_CHANGED" } });
 	});
 
+	it("reads preview files in chunks without widening workspace reads", async () => {
+		const path = join(outside, "private.txt");
+		const expectedRealPath = realpathSync(path);
+		expect(await readPreviewBytes(workspace, path, 0, 4, expectedRealPath)).toMatchObject({
+			path,
+			data: Buffer.from("outs").toString("base64"),
+			offset: 0,
+			eof: false,
+		});
+		await expect(readPreviewBytes(workspace, path, 0, 4, join(outside, "other.txt"))).rejects.toMatchObject({
+			code: "CONFLICT",
+			data: { reason: "PREVIEW_TARGET_CHANGED" },
+		});
+	});
+
 	it.skipIf(process.platform === "win32")("requires fresh confirmation after a symlink changes target", async () => {
 		const link = join(workspace, "linked.txt");
 		const first = join(outside, "private.txt");
@@ -173,9 +189,25 @@ describe("Markdown file previews on the host", () => {
 				kind: "image",
 				data: png.toString("base64"),
 			});
+			expect(
+				await client.request("workspace.readBytes", {
+					workspaceId: info.id,
+					path: join(root, "screen.png"),
+					offset: 0,
+					length: png.length,
+					preview: true,
+				}),
+			).toMatchObject({ path: join(root, "screen.png"), data: png.toString("base64"), eof: true });
 			const path = join(outside, "private.txt");
 			const params = { workspaceId: info.id, path, expectedRealPath: realpathSync(path) };
 			expect(await client.request("workspace.authorizeFilePreview", params)).toMatchObject({ text: "outside" });
+			expect(
+				await client.request("workspace.readBytes", {
+					...params,
+					offset: 0,
+					length: 4,
+				}),
+			).toMatchObject({ data: Buffer.from("outs").toString("base64"), eof: false });
 			await expect(client.request("workspace.previewFile", { workspaceId: info.id, path })).rejects.toMatchObject({
 				code: "FORBIDDEN",
 			});

@@ -54,6 +54,7 @@ describe("thinking levels", () => {
 			listModels: async () => ({ models: [opus] }),
 			setModel: vi.fn(),
 			setThinking: vi.fn(),
+			setFast: vi.fn(),
 			compact: vi.fn(),
 			forkPoints: async () => ({ points: [] }),
 			rename: vi.fn(),

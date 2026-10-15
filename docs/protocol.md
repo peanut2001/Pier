@@ -1,4 +1,4 @@
-# Pier 协议 v1.41
+# Pier 协议 v1.44
 
 > 实现：`packages/protocol`（zod schema + TS 类型，Host 与所有客户端共享）。
 > 本文档描述线上格式与语义；字段的权威定义以 `packages/protocol/src` 为准。
@@ -134,15 +134,15 @@ sidecar 的 stdio 协议：桌面端用 `--shell-terminals` 启动 Host，声明
 | `workspace.createDirectory` | `{ workspaceId, path }` | `{ path }`；直接创建文件夹，可创建空文件夹（1.40）。路径、上级目录、同名冲突与审计规则同 `workspace.createFile` |
 | `workspace.deletePath` | `{ workspaceId, path, expectedModifiedAt?, expectedSize? }` | `{ path, kind: "file"\|"directory"\|"other" }`；永久删除工作区中的一个文件、目录（连同其中所有内容）或符号链接，不进入废纸篓 / 回收站。`path` 的规则同 `workspace.files`，省略或指向工作区根目录（`""`、`.`）时 `BAD_REQUEST`；所在目录（跟随符号链接后）位于工作区之外时 `FORBIDDEN`，不存在时 `NOT_FOUND`，无权限或只读文件系统时 `FORBIDDEN`。条目本身不跟随符号链接：删除符号链接只删除链接，不影响它指向的内容，`kind` 为 `other`。远程调用写入审计日志（1.11）。1.41 新增可选的 `expectedModifiedAt` / `expectedSize`：提供任一项时只删除匹配版本的普通文件，目录、符号链接或已变更文件返回 `CONFLICT`，保留源项目 |
 | `workspace.transferPath` | `{ workspaceId, path, destinationWorkspaceId, destinationPath, mode: "copy"\|"move", overwrite? }` | `{ sourcePath, path, kind }`；在同一 Host 的两个已登记工作区（也可同工作区）之间复制或移动完整项目（1.41）。两条路径均相对各自工作区，根目录、相同实际路径、目录放入自身或子目录时 `BAD_REQUEST`；父目录须已存在且实际位于对应工作区内。项目本身的符号链接保留链接，不读取其目标；目录含隐藏内容与空目录。目标已存在时返回 `CONFLICT`（`data.kind` 为 `file` / `directory` / `other`），仅普通文件到普通文件可用 `overwrite: true` 替换，目录和链接不替换。复制先暂存后提交，同文件系统移动直接重命名；跨文件系统移动先完整复制并检查源目录树未改变，再移除源项目。失败保留源项目；目标已提交后源清理失败会返回错误，两边可能都保留。远程调用写入审计日志 |
-| `workspace.readBytes` | `{ workspaceId, path, offset, length }` | `WorkspaceFileBytes = { path, size, modifiedAt, offset, data, eof }`；读取工作区中一个文件从 `offset` 开始的最多 `length`（1 B–4 MiB）个字节，`data` 为 Base64，用于分块下载任意文件（含二进制）。`path` 与位置的规则同 `workspace.readFile`。`size` / `modifiedAt` 是读取时文件的当前状态，客户端可据此发现文件在两块之间被修改；`eof` 表示 `data` 已到文件末尾，`offset` 超出文件大小时 `data` 为空、`eof: true`。只读，不写审计日志（1.21） |
+| `workspace.readBytes` | `{ workspaceId, path, offset, length, preview?, expectedRealPath? }` | `WorkspaceFileBytes = { path, size, modifiedAt, offset, data, eof }`；默认读取工作区中一个文件从 `offset` 开始的最多 `length`（1 B–4 MiB）个字节，`data` 为 Base64，用于分块下载任意文件（含二进制）。`preview`（1.44）允许使用 `workspace.previewFile` 的工作区和临时目录路径；`expectedRealPath`（1.44）允许使用用户刚确认的工作区外路径，Host 在每个分块重新核对实际路径。`path` 的规则同 `workspace.readFile`。`size` / `modifiedAt` 是读取时文件的当前状态，客户端可据此发现文件在两块之间被修改；`eof` 表示 `data` 已到文件末尾，`offset` 超出文件大小时 `data` 为空、`eof: true`。只读，不写审计日志（1.21）；使用已确认的工作区外路径时远程首块写入审计日志 |
 | `workspace.uploadStart` | `{ workspaceId, path, size, overwrite? }` | `WorkspaceUploadStart = { uploadId, path, chunkBytes }`；开始把一个 `size` 字节的文件上传到工作区中的 `path`（1.21）。`path` 的规则同 `workspace.files`；缺少的上级目录会被创建，已有的上级目录（跟随符号链接后）位于工作区之外时 `FORBIDDEN`，是文件时 `BAD_REQUEST`。目标已是目录时 `CONFLICT`（`data.kind: "directory"`）；目标已是文件（或符号链接）且未给 `overwrite: true` 时 `CONFLICT`（`data.kind: "file"`）。数据先写入目标目录中的隐藏临时文件 `.<名称>.<id>.pier-upload`，完成后才替换为真实名称。`chunkBytes` 是一次 `uploadChunk` 最多接受的字节数（4 MiB），文件最大 16 GiB。每个连接最多同时 8 个上传；上传属于发起它的连接，该连接断开或 5 分钟未收到数据时自动取消并删除临时文件。远程调用写入审计日志 |
 | `workspace.uploadChunk` | `{ uploadId, offset, data }` | `{ received }`；向上传追加 Base64 数据（1.21）。`offset` 必须等于已收到的字节数，否则 `CONFLICT`（`data.received` 为已收到的字节数，可据此续传）；超过 `chunkBytes` 或累计超过 `size` 时 `BAD_REQUEST`；上传不存在、已过期或属于其他连接时 `NOT_FOUND`；同一上传同时只处理一个请求 |
 | `workspace.uploadFinish` | `{ uploadId }` | `{ path, size, modifiedAt }`；把收齐的上传移动到目标路径（1.21）。未收齐时 `BAD_REQUEST`（`data.received`），上传保留可继续；目标在上传期间变成目录，或未给 `overwrite` 而目标已出现时 `CONFLICT`，上传被丢弃。远程调用写入审计日志 |
 | `workspace.uploadCancel` | `{ uploadId }` | `{ cancelled }`；取消上传并删除已收到的数据（1.21）。上传不存在或属于其他连接时 `cancelled: false` |
 
-`workspace.previewFile`（1.31）：参数 `{ workspaceId, path }`，返回 `WorkspaceFileContent`，用于聊天和 Markdown 中的图片、文件链接。相对路径以工作区根目录为基准，允许 `.` / `..`，但解析符号链接后必须仍在工作区内；绝对路径必须位于工作区或 Host 的系统临时目录（`os.tmpdir()`，Unix 另含 `/tmp`、`/var/tmp`）中。`file://`、URL 编码和行号后缀由客户端转成文件路径。目录及特殊文件返回 `BAD_REQUEST`，越界返回 `FORBIDDEN`，不存在返回 `NOT_FOUND`；图片、文本大小限制与 `workspace.readFile` 相同。该只读方法可经已认证的远程连接调用，不改变 `workspace.readFile` 及所有写入、下载方法的路径规则。
+`workspace.previewFile`（1.31）：参数 `{ workspaceId, path }`，返回 `WorkspaceFileContent`，用于聊天和 Markdown 中的图片、文件链接。相对路径以工作区根目录为基准，允许 `.` / `..`，但解析符号链接后必须仍在工作区内；绝对路径必须位于工作区或 Host 的系统临时目录（`os.tmpdir()`，Unix 另含 `/tmp`、`/var/tmp`）中。`file://`、URL 编码和行号后缀由客户端转成文件路径。目录及特殊文件返回 `BAD_REQUEST`，越界返回 `FORBIDDEN`，不存在返回 `NOT_FOUND`；图片、文本大小限制与 `workspace.readFile` 相同。该只读方法可经已认证的远程连接调用，不改变 `workspace.readFile` 及写入方法的路径规则；通过 `workspace.readBytes` 下载需要协议 1.44。
 
-`workspace.authorizeFilePreview`（本机 1.33，已配对设备 1.35）：参数 `{ workspaceId, path, expectedRealPath }`，返回 `WorkspaceFileContent`。当预览返回 `FORBIDDEN` 且 `data.reason` 为 `OUTSIDE_ALLOWED_ROOTS` 时，客户端显示文件所在电脑与 `data.resolvedPath`，由用户确认后将该实际路径作为 `expectedRealPath` 传入。Host 重新解析文件路径，若与确认路径不一致则返回 `CONFLICT`（`PREVIEW_TARGET_CHANGED`）；否则按相同类型与大小限制只读取这一次。不会保存文件或目录授权，刷新及重新打开须重新确认，系统读取权限错误不能用此方法绕过。远程调用写入审计日志，仅记录工作区、请求路径与确认的实际路径，不记录文件内容。
+`workspace.authorizeFilePreview`（本机 1.33，已配对设备 1.35）：参数 `{ workspaceId, path, expectedRealPath }`，返回 `WorkspaceFileContent`。当预览返回 `FORBIDDEN` 且 `data.reason` 为 `OUTSIDE_ALLOWED_ROOTS` 时，客户端显示文件所在电脑与 `data.resolvedPath`，由用户确认后将该实际路径作为 `expectedRealPath` 传入。Host 重新解析文件路径，若与确认路径不一致则返回 `CONFLICT`（`PREVIEW_TARGET_CHANGED`）；否则按相同类型与大小限制读取。客户端可在协议 1.44 起把同一 `expectedRealPath` 传给 `workspace.readBytes` 分块下载，Host 每块重新核对路径。不会保存文件或目录授权，刷新及重新打开须重新确认，系统读取权限错误不能用此方法绕过。远程调用写入审计日志，仅记录工作区、请求路径与确认的实际路径，不记录文件内容。
 
 ### Git 源代码管理（1.28）
 
@@ -179,7 +179,7 @@ Host 用它所在电脑上的 `git` 命令行（`PATH` 中的，或环境变量 
 
 `AgentInstallationStatus = { runtime, state: "idle" | "checking" | "downloading" | "verifying" | "installing" | "ready" | "error", version?, downloadedBytes?, totalBytes?, error? }`。客户端通过 `runtime.installStatus` 轮询进度，连接断开不影响任务；Host 退出会取消安装并清理暂存文件。仅支持 x64 / arm64 的 Windows、macOS、Linux。Claude Code 使用官方原生二进制和平台清单，Codex 使用官方完整原生发行包（含辅助程序），两者都校验 SHA-256 并运行 `--version` 验证后才更新用户级公共命令（`~/.local/bin`），并配置用户 `PATH`；外部终端重新打开后与 Pier 共用安装。程序按版本保存在 `~/.local/share/claude/versions` / `~/.local/share/codex/versions`。失败时恢复旧命令，配置、凭据与会话目录保留；Windows 程序被占用时提示关闭相关会话后重试。旧版 Pier 独立安装在下次更新时迁移，已经是最新版也会迁移；公共安装已经是最新版时检查 `PATH` 后返回 `ready`。成功安装广播 `{ type: "runtime.changed", runtime }`，客户端应刷新 Agent 列表；该事件不含凭据。已打开的 Codex 会话保留原来的 app-server 进程，全部关闭后才切换到新版。这两个方法向已配对设备开放，远程 `runtime.install` 记录运行时名称到审计日志。
 
-`capabilities: AgentRuntimeCapabilities = { steer, followUp, compact, fork, rename, setModel, thinking, reload, images, piExtensions }`：客户端据此隐藏会失败的操作。不支持的方法返回 `UNSUPPORTED`（例如 Claude Code / Codex 会话的 `session.reload`）。`piExtensions` 为 `false` 的运行时不加载 pi 的扩展、技能、提示词模板与 `settings.json`，扩展或设置变更后 Host 也不会重新加载这些会话。
+`capabilities: AgentRuntimeCapabilities = { steer, followUp, compact, fork, rename, setModel, thinking, fastMode?, reload, images, piExtensions }`：客户端据此隐藏会失败的操作。不支持的方法返回 `UNSUPPORTED`（例如 Claude Code / Codex 会话的 `session.reload`）。`fastMode`（1.43）只由 Codex 提供，省略时视为不支持。`piExtensions` 为 `false` 的运行时不加载 pi 的扩展、技能、提示词模板与 `settings.json`，扩展或设置变更后 Host 也不会重新加载这些会话。
 
 各运行时的差异：
 
@@ -238,6 +238,7 @@ pi 终端界面自带的命令（`/model`、`/compact`、`/new`、`/fork`、`/na
 | `model.list` | `{ sessionId?, workspaceId?, runtime? }` | `{ models: ModelInfo[], current?, thinkingLevel? }`（仅列出已配置凭据的模型）。带 `sessionId` 时列出该会话运行时的模型，否则列出 `runtime`（1.22，默认 `pi`）的模型。带 `sessionId` 时 `current` / `thinkingLevel` 是该会话的模型与思考等级；只带 `workspaceId` 时（1.19）是在该工作区新建会话时会使用的模型与思考等级（与 pi 的解析一致：有凭据的默认模型，否则第一个可用模型；思考等级依次取该模型的设置、默认思考等级、`medium`，再按模型能力钳制），供新建会话前在输入框中选择模型；都不带时只返回 `models` |
 | `model.set` | `{ sessionId, provider, modelId, persist? }` | `{ model }`；`persist: true` 写入 pi 全局默认值 |
 | `thinking.set` | `{ sessionId, level, persist? }` | `{ level }`（按模型能力钳制后的实际等级） |
+| `fast.set` | `{ sessionId, enabled? }` | `{ enabled }`；Codex Fast 模式（1.43）。省略 `enabled` 切换当前状态；开启调用 `thread/settings/update` 设置 `serviceTier: "priority"`，关闭设置 `null`。成功后发送 `session.fast` 并保存线程设置，下一轮 `turn/start` 使用该档位；不会发送模型消息、修改思考等级或写入全局配置。运行中切换只影响后续轮次。CLI 不支持该方法或拒绝更新时返回错误，保留原状态；其他运行时返回 `UNSUPPORTED` |
 | `model.setDefault` | `{ provider, modelId }` | `{ defaultModel }`；写入 pi 全局 settings，只影响新会话（1.2） |
 
 ### 服务商与凭据（1.2）
@@ -480,6 +481,7 @@ Claude Code 与 Codex 会话（1.22）发出同样形态的事件与 `AgentMessa
 | `session.snapshot` | `snapshot` | 仅在订阅 / 恢复时单独发给该连接，**不带 seq**，不写入日志 |
 | `session.status` | `state: idle\|streaming\|compacting\|retrying` | 状态变化时发送 |
 | `session.model` | `model?, thinkingLevel` | `model.set` 之后 |
+| `session.fast` | `enabled: boolean` | Codex Fast 状态变化时发送（1.43），包括原生 `thread/settings/updated` 通知 |
 | `session.replaced` | `previousSessionId, session` | 扩展命令（如 `/new`）替换了底层 pi 会话；帧的 `sessionId` 为旧 ID，随后会收到新会话的 `session.snapshot` |
 | `session.closed` | `reason: idle\|closed\|deleted\|host_shutdown` | 会话离开活跃池；`deleted` 表示会话已被 `session.delete` 删除（1.6） |
 | `ui.request` | `request: UiRequest` | 对话框或审批请求，见 §6 |
@@ -561,6 +563,7 @@ Claude Code 与 Codex 会话（1.22）发出同样形态的事件与 `AgentMessa
   pendingUi: UiRequest[];      // 仍待回答的对话框 / 审批
   queue: { steering: string[]; followUp: string[] };
   model?: ModelInfo; thinkingLevel: string;
+  fastMode?: boolean;          // Codex Fast 模式（1.43），其他运行时与旧 Host 省略
   statuses: Record<string, string>; widgets: Record<string, { lines: string[]; placement?: string }>;
   title?: string; errorMessage?: string;
   capabilities?: AgentRuntimeCapabilities; // 会话运行时的能力（1.22），见 §3 Agent 运行时
@@ -628,6 +631,19 @@ Claude Code 与 Codex 会话（1.22）发出同样形态的事件与 `AgentMessa
 | `mcp.test` | `{ runtime, workspaceId?, scope, name }` | `{ ok, tools: { name }[], message }`；显式建立 stdio / HTTP / Claude SSE 连接、发现工具并关闭连接；不调用业务工具、不启动 OAuth、不回传子进程日志或凭据。客户端建议 60 秒超时 |
 
 变更广播 `resources.changed = { runtime, workspaceId? }`，并通知相关扩展 / Agent 配置页面。pi 空闲会话重新加载，忙碌会话保持原运行并在结束后 `/reload`；Claude / Codex 原生配置在会话新建 / 重新打开时读取。审计只记录 runtime、scope、资源名称与工作区，不记录技能正文、MCP 配置、环境变量、请求头或凭据。
+
+## 主机进程管理（1.42）
+
+| 方法 | 参数 | 返回 |
+|---|---|---|
+| `host.processes` | — | `{ processes: HostProcess[], truncated }`；查询 Host 所在系统 / PID 命名空间中可读取的进程，最多 8192 条，按 PID 排序 |
+| `host.killProcess` | `{ pid, startToken, force?(false) }` | `{ signalled: true }`；核对最新启动标识后向单个进程发送 SIGTERM，`force:true` 改为 SIGKILL；Windows 两种方式均直接终止进程。成功仅表示信号已发送，不保证进程已退出 |
+
+`HostProcess = { pid, parentPid?, name, user?, memoryBytes?, startToken?, canTerminate }`。内存为常驻内存（字节）；Linux 的 `user` 为 UID，macOS 为用户名，Windows 省略用户 / 父 PID。`startToken` 是不透明的进程启动标识（Linux `/proc/<pid>/stat` 的启动时钟值，macOS `ps lstart` 的秒级时间，Windows `StartTime` ticks）；客户端结束时原样传回。`canTerminate` 表示启动标识可读且不受 Pier 的保护，不保证 OS 允许发送信号。不读取或返回命令行参数、环境变量。
+
+Linux 读取 `/proc`，macOS 执行固定 `ps` 查询，Windows 使用 PowerShell `Get-Process`。样本共享并发查询并缓存 1 秒；Linux 最多读取前 8192 个 PID，其余设置 `truncated:true`。结束操作绕过缓存重新核对启动标识，不自动提权、不向进程组发送信号：PID 不是 2–2147483647 的整数时返回 `BAD_REQUEST`，Host 自身 / Windows PID 4 返回 `FORBIDDEN`，进程消失返回 `NOT_FOUND`，启动标识变化返回 `CONFLICT`，不可读取启动标识或系统拒绝操作返回 `FORBIDDEN`。信号发送后清除样本缓存。
+
+两个方法均对本地认证连接和已配对的远程设备开放，不依赖工作区。远程结束操作审计仅记录 PID、是否强制和调用设备；不记录进程列表或启动标识。客户端应按目标主机协议 1.42 判断是否支持，断开连接 / 切换主机时丢弃旧查询结果和确认状态。
 
 ## 主机端口与独立 TCP 映射（1.39）
 

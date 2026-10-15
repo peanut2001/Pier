@@ -36,6 +36,7 @@ function target(overrides: Partial<SlashTarget> = {}): SlashTarget {
 		listModels: async () => ({ models }),
 		setModel: vi.fn(async () => ({})),
 		setThinking: vi.fn(async (level: ThinkingLevel) => ({ level })),
+		setFast: vi.fn(async (enabled?: boolean) => ({ enabled: enabled ?? true })),
 		compact: vi.fn(async () => ({})),
 		forkPoints: async () => ({
 			points: [
@@ -135,6 +136,26 @@ describe("slash command menu", () => {
 });
 
 describe("built-in commands", () => {
+	it("toggles Fast mode, accepts explicit settings, and reports status without a request", async () => {
+		const t = target({ chat: { thinkingLevel: "high", runState: "streaming", fastMode: true } });
+		const a = actions();
+		for (const [arg, enabled] of [
+			["", undefined],
+			["ON", true],
+			["off", false],
+		] as const) {
+			expect(await runBuiltin(t, "fast", arg, a)).toEqual({ kind: "done" });
+			expect(t.setFast).toHaveBeenLastCalledWith(enabled);
+		}
+		expect(a.notes[0]).toContain("从下一轮生效");
+		expect(await runBuiltin(t, "fast", "status", a)).toEqual({ kind: "done" });
+		expect(a.notes.at(-1)).toBe("info: Fast 模式已开启");
+		expect(await runBuiltin(t, "fast", "turbo", a)).toEqual({ kind: "failed" });
+		expect(t.setFast).toHaveBeenCalledTimes(3);
+		expect(await runBuiltin(target({ setFast: async () => undefined }), "fast", "on", a)).toEqual({ kind: "failed" });
+		expect(t.setThinking).not.toHaveBeenCalled();
+	});
+
 	it("matches models by provider/id, unique id, or name", () => {
 		expect(matchModel(models, "openai/gpt-6")).toBe(models[2]);
 		expect(matchModel(models, "GPT-6")).toBe(models[2]);
@@ -204,6 +225,29 @@ describe("runtime capabilities", () => {
 		images: true,
 		piExtensions: false,
 	};
+
+	it("offers Fast only on Codex hosts that advertise it, with on/off argument choices", async () => {
+		for (const runtime of [undefined, "pi", "claude-code", "codex"]) {
+			const list = builtinCommands({ ...capabilities, fastMode: true }, runtime);
+			expect(list.some((command) => command.name === "fast")).toBe(runtime === "codex");
+		}
+		for (const caps of [undefined, capabilities, { ...capabilities, fastMode: false }]) {
+			expect(resolveSlash("/fast", builtinCommands(caps, "codex"), false, "codex")).toEqual({
+				kind: "unknown",
+				name: "fast",
+			});
+		}
+		const list = builtinCommands({ ...capabilities, fastMode: true }, "codex");
+		expect(resolveSlash("/fast", list)).toEqual({ kind: "builtin", name: "fast", args: "" });
+		expect(slashMenu("/fa", list)).toMatchObject({ kind: "commands", items: [{ name: "fast" }] });
+		expect(slashMenu("/fast ", list)).toEqual({ kind: "arguments", command: "fast", query: "" });
+		const options = await loadArgumentOptions(
+			target({ chat: { thinkingLevel: "high", runState: "idle", fastMode: false } }),
+			"fast",
+		);
+		expect(options.map((option) => option.value)).toEqual(["on", "off", "status"]);
+		expect(options.find((option) => option.selected)?.value).toBe("off");
+	});
 
 	it("hides built-ins the runtime does not support", () => {
 		expect(builtinCommands(capabilities).map((c) => c.name)).toEqual(["new", "model", "thinking", "compact", "name"]);

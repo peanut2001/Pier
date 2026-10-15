@@ -45,6 +45,7 @@ import {
 } from "./connection.ts";
 import { GitService } from "./git.ts";
 import { listHostDirectories } from "./host-directories.ts";
+import { HostProcessManager } from "./host-processes.ts";
 import { HostStatsSampler } from "./host-stats.ts";
 import type { ManagedSession } from "./managed-session.ts";
 import { LoopbackRelays } from "./oauth-loopback.ts";
@@ -88,6 +89,7 @@ import {
 	deleteWorkspacePath,
 	listWorkspaceDirectory,
 	previewWorkspaceFile,
+	readPreviewBytes,
 	readWorkspaceBytes,
 	readWorkspaceFile,
 	writeWorkspaceFile,
@@ -152,6 +154,7 @@ export interface PierHostOptions {
 
 /** Remote methods recorded in the audit log. */
 const AUDITED_METHODS = new Set<MethodName>([
+	"host.killProcess",
 	"skills.save",
 	"skills.import",
 	"skills.setEnabled",
@@ -186,6 +189,7 @@ const AUDITED_METHODS = new Set<MethodName>([
 	"session.reload",
 	"model.set",
 	"thinking.set",
+	"fast.set",
 	"ui.respond",
 	// Managing the computer (open to paired devices since 1.10).
 	"workspace.add",
@@ -241,6 +245,8 @@ const AUDITED_METHODS = new Set<MethodName>([
 
 function auditDetail(method: MethodName, params: Record<string, unknown>): Record<string, unknown> | undefined {
 	switch (method) {
+		case "host.killProcess":
+			return { pid: params.pid, force: params.force === true };
 		case "skills.save":
 		case "skills.import":
 		case "skills.setEnabled":
@@ -288,6 +294,8 @@ function auditDetail(method: MethodName, params: Record<string, unknown>): Recor
 			return { provider: params.provider, modelId: params.modelId };
 		case "thinking.set":
 			return { level: params.level };
+		case "fast.set":
+			return { enabled: params.enabled };
 		case "workspace.add":
 			return { path: params.path, ...(params.policy ? { policy: params.policy } : {}) };
 		case "workspace.remove":
@@ -324,6 +332,7 @@ function auditDetail(method: MethodName, params: Record<string, unknown>): Recor
 				overwrite: params.overwrite === true,
 			};
 		case "workspace.authorizeFilePreview":
+		case "workspace.readBytes":
 			return { workspaceId: params.workspaceId, path: params.path, expectedRealPath: params.expectedRealPath };
 		case "workspace.uploadStart":
 			return {
@@ -454,6 +463,7 @@ export class PierHost implements RequestHandler {
 	readonly browsers: LocalBrowsers;
 	readonly portForwards: LocalPortForwards;
 	readonly ports = new HostPortSampler();
+	readonly processes = new HostProcessManager();
 	readonly extensions: ExtensionManager;
 	readonly packageCatalog: PackageCatalog;
 	readonly settings: PiSettingsFiles;
@@ -757,7 +767,11 @@ export class PierHost implements RequestHandler {
 			if (!parsed.success) {
 				throw new PierProtocolError("BAD_REQUEST", `Invalid params for ${method}`, parsed.error.issues);
 			}
-			if (connection.device && AUDITED_METHODS.has(method)) {
+			const authorizedDownload =
+				method === "workspace.readBytes" &&
+				(parsed.data as ParsedMethodParams<"workspace.readBytes">).expectedRealPath !== undefined &&
+				(parsed.data as ParsedMethodParams<"workspace.readBytes">).offset === 0;
+			if (connection.device && (AUDITED_METHODS.has(method) || authorizedDownload)) {
 				const params = (parsed.data ?? {}) as Record<string, unknown>;
 				const detail = auditDetail(method, params);
 				this.remote.record({
@@ -982,6 +996,8 @@ export class PierHost implements RequestHandler {
 					p.workspaceId ? this.requireWorkspace(p.workspaceId).path : undefined,
 				),
 			"host.ports": () => this.ports.sample(),
+			"host.processes": () => this.processes.sample(),
+			"host.killProcess": (_ctx, params) => this.processes.kill(params.pid, params.startToken, params.force),
 			"portForward.open": (ctx, params) => this.portForwards.open(ctx.connection, params),
 			"portForward.list": (ctx) => ({ forwards: this.portForwards.list(ctx.connection) }),
 			"portForward.close": (ctx, params) => ({ closed: this.portForwards.close(ctx.connection, params.id) }),
@@ -1138,8 +1154,12 @@ export class PierHost implements RequestHandler {
 					params.mode,
 					params.overwrite,
 				),
-			"workspace.readBytes": (_ctx, params) =>
-				readWorkspaceBytes(this.requireWorkspace(params.workspaceId).path, params.path, params.offset, params.length),
+			"workspace.readBytes": (_ctx, params) => {
+				const root = this.requireWorkspace(params.workspaceId).path;
+				return params.preview || params.expectedRealPath
+					? readPreviewBytes(root, params.path, params.offset, params.length, params.expectedRealPath)
+					: readWorkspaceBytes(root, params.path, params.offset, params.length);
+			},
 			"workspace.uploadStart": (ctx, params) =>
 				this.uploads.start(
 					ctx.connection.connectionId,
@@ -1332,6 +1352,9 @@ export class PierHost implements RequestHandler {
 			}),
 			"thinking.set": async (_ctx, params) => ({
 				level: await this.pool.require(params.sessionId).setThinking(params.level, params.persist ?? false),
+			}),
+			"fast.set": async (_ctx, params) => ({
+				enabled: await this.pool.require(params.sessionId).setFast(params.enabled),
 			}),
 			"model.setDefault": async (_ctx, params) => ({
 				defaultModel: await this.providers.setDefault(params.provider, params.modelId),

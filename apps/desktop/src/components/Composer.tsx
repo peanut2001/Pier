@@ -277,6 +277,11 @@ export function Composer({
 				</div>
 				<div className="composer-actions">
 					<SessionModelPicker chat={chat} controller={controller} />
+					{chat.fastMode ? (
+						<span className="mini-tag" title="Fast 模式已开启，输入 /fast off 关闭">
+							Fast
+						</span>
+					) : null}
 					{running ? (
 						<>
 							<span className="composer-hint">Enter 引导 · Alt+Enter 排队</span>

@@ -1,0 +1,80 @@
+.host-processes-modal {
+	font-size: 13px;
+	user-select: text;
+	-webkit-user-select: text;
+}
+
+.host-processes-modal .modal-body {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+
+.host-processes-toolbar {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	flex-wrap: wrap;
+}
+
+.host-processes-toolbar input {
+	flex: 1;
+	min-width: 180px;
+}
+
+.host-processes-table-wrap {
+	max-height: 55vh;
+	overflow: auto;
+	border: 1px solid var(--border);
+	border-radius: 10px;
+}
+
+.host-processes-table {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: 12px;
+	text-align: left;
+}
+
+.host-processes-table th,
+.host-processes-table td {
+	padding: 7px 10px;
+	border-bottom: 1px solid var(--border);
+}
+
+.host-processes-table th {
+	position: sticky;
+	top: 0;
+	background: var(--bg-raised);
+	color: var(--text-muted);
+}
+
+.host-process-name {
+	min-width: 120px;
+	max-width: 240px;
+	overflow-wrap: anywhere;
+}
+
+.host-process-actions {
+	white-space: nowrap;
+}
+
+.host-process-actions button {
+	font-size: 12px;
+	padding: 3px 6px;
+}
+
+.host-process-confirm {
+	padding: 10px 12px;
+	border: 1px solid var(--danger);
+	border-radius: 10px;
+	overflow-wrap: anywhere;
+}
+
+.host-process-confirm p {
+	margin: 0 0 10px;
+}
+
+.host-process-confirm button + button {
+	margin-left: 8px;
+}

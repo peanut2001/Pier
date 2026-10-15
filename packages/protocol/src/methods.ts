@@ -76,6 +76,7 @@ import {
 	type WorkspaceUploadStart,
 } from "./domain.ts";
 import type { HostPorts, PortForward } from "./ports.ts";
+import type { HostProcesses } from "./processes.ts";
 import {
 	type McpServerInfo,
 	type McpTestResult,
@@ -123,6 +124,13 @@ export const ClientInfoSchema = z.object({
  */
 export const MethodParamsSchemas = {
 	...ResourceMethodSchemas,
+	"host.processes": z.object({}).optional(),
+	/** Signal one process, after verifying that its PID still has the listed start identity. */
+	"host.killProcess": z.object({
+		pid: z.number().int().min(2).max(2_147_483_647),
+		startToken: z.string().min(1).max(128),
+		force: z.boolean().optional(),
+	}),
 	"host.ports": z.object({}).optional(),
 	/** Local listeners are managed only by the local desktop, independently of browsers. */
 	"portForward.open": z.object({
@@ -269,7 +277,9 @@ export const MethodParamsSchemas = {
 	}),
 	/**
 	 * Read up to `length` bytes of a workspace file from `offset` (1.21), base64-encoded, e.g.
-	 * to download it in chunks.
+	 * to download it in chunks. With `preview` (1.44), accept Markdown references using the
+	 * same workspace/temporary roots as `workspace.previewFile`. `expectedRealPath` permits
+	 * the exact outside target explicitly confirmed by the user, checked on every chunk.
 	 */
 	"workspace.readBytes": z.object({
 		workspaceId: Id,
@@ -280,6 +290,8 @@ export const MethodParamsSchemas = {
 			.int()
 			.min(1)
 			.max(4 * 1024 * 1024),
+		expectedRealPath: z.string().min(1).max(4096).optional(),
+		preview: z.boolean().optional(),
 	}),
 	/**
 	 * Begin uploading a file of `size` bytes to `path` in a workspace (1.21). Missing parent
@@ -460,6 +472,8 @@ export const MethodParamsSchemas = {
 		.optional(),
 	"model.set": z.object({ ...SessionRef, provider: Id, modelId: Id, persist: z.boolean().optional() }),
 	"thinking.set": z.object({ ...SessionRef, level: ThinkingLevelSchema, persist: z.boolean().optional() }),
+	/** Codex Fast mode (1.43). Omit `enabled` to toggle the current thread setting. */
+	"fast.set": z.object({ ...SessionRef, enabled: z.boolean().optional() }),
 	"model.setDefault": z.object({ provider: Id, modelId: Id }),
 
 	"provider.list": z.object({}).optional(),
@@ -853,6 +867,9 @@ export interface SubscribeResult {
 }
 
 export interface MethodResults {
+	"host.processes": HostProcesses;
+	/** A signal was sent; the process may still be shutting down. */
+	"host.killProcess": { signalled: true };
 	"host.ports": HostPorts;
 	"portForward.open": PortForward;
 	"portForward.list": { forwards: PortForward[] };
@@ -960,6 +977,7 @@ export interface MethodResults {
 	"model.list": { models: ModelInfo[]; current?: ModelInfo; thinkingLevel?: ThinkingLevel };
 	"model.set": { model: ModelInfo };
 	"thinking.set": { level: string };
+	"fast.set": { enabled: boolean };
 	"model.setDefault": { defaultModel: DefaultModelRef };
 	"provider.list": ProviderListResult;
 	"provider.login": { flowId: string };
