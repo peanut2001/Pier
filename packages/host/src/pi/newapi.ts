@@ -317,6 +317,13 @@ export interface NewApiManagerOptions {
 	log?: (message: string) => void;
 	/** Sent with every request to the site, e.g. so its login sessions list names Pier. */
 	userAgent?: string;
+	/**
+	 * Where browser authorizations listen for the redirect. Defaults to a random port on
+	 * 127.0.0.1; a fixed port on 0.0.0.0 lets a host in a container publish it (the redirect
+	 * still goes to `http://127.0.0.1:<port>/callback`). With a fixed port, a new
+	 * authorization ends the one that holds the port.
+	 */
+	authorizeCallback?: { host?: string; port?: number };
 	/** Override for tests. */
 	fetch?: typeof fetch;
 	now?: () => number;
@@ -968,7 +975,10 @@ export class NewApiManager {
 		return this.startFlow(connectionId, baseUrl, "account", redirectUri);
 	}
 
-	/** Listen on a loopback port (unless the client catches the redirect) and build the consent page URL. */
+	/**
+	 * Listen for the redirect (see `authorizeCallback`) unless the client catches it, and build
+	 * the consent page URL.
+	 */
 	private async startFlow(
 		connectionId: string,
 		baseUrl: string,
@@ -993,16 +1003,8 @@ export class NewApiManager {
 		let server: Server | undefined;
 		let redirectUri = clientRedirect;
 		if (redirectUri === undefined) {
-			const listening = createServer();
-			await new Promise<void>((resolve, reject) => {
-				listening.once("error", reject);
-				listening.listen(0, "127.0.0.1", () => {
-					listening.off("error", reject);
-					resolve();
-				});
-			});
-			const { port } = listening.address() as AddressInfo;
-			server = listening;
+			server = await this.listenForCallback();
+			const { port } = server.address() as AddressInfo;
 			redirectUri = `http://127.0.0.1:${port}/callback`;
 		}
 		const verifier = randomBytes(32).toString("base64url");
@@ -1052,6 +1054,36 @@ export class NewApiManager {
 			site: this.siteInfo(origin, status),
 			expiresAt: new Date(this.now() + AUTHORIZE_TTL_MS).toISOString(),
 		};
+	}
+
+	private async listenForCallback(): Promise<Server> {
+		const { host = "127.0.0.1", port = 0 } = this.options.authorizeCallback ?? {};
+		if (port) {
+			for (const flow of this.flows.values()) {
+				if (!flow.server) continue;
+				this.endFlow(flow, new PierProtocolError("CONFLICT", "已开始新的浏览器授权，请在新打开的页面中完成授权"));
+			}
+		}
+		const listen = () =>
+			new Promise<Server>((resolve, reject) => {
+				const server = createServer();
+				server.once("error", reject);
+				server.listen(port, host, () => {
+					server.off("error", reject);
+					resolve(server);
+				});
+			});
+		// A fixed port closed just above is released on the next turn of the event loop.
+		for (let attempt = 1; ; attempt++) {
+			try {
+				return await listen();
+			} catch (error) {
+				if (!port || attempt >= 5 || (error as NodeJS.ErrnoException).code !== "EADDRINUSE") {
+					throw port ? new PierProtocolError("CONFLICT", `无法监听授权回调端口 ${port}：${errorText(error)}`) : error;
+				}
+				await new Promise((resolve) => setTimeout(resolve, 50 * attempt));
+			}
+		}
 	}
 
 	/** A redirect that reached this host's own loopback port. */

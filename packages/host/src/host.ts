@@ -64,7 +64,7 @@ import { PeerManager, type PeerManagerOptions } from "./peers/peers.ts";
 import { AccountManager } from "./pi/account.ts";
 import { PI_VERSION, PiEnvironment, type PiEnvironmentOptions } from "./pi/environment.ts";
 import { ExtensionManager, type ExtensionTarget } from "./pi/extensions.ts";
-import { NewApiManager } from "./pi/newapi.ts";
+import { NewApiManager, type NewApiManagerOptions } from "./pi/newapi.ts";
 import { PackageCatalog, type PackageCatalogOptions } from "./pi/package-catalog.ts";
 import { PiRuntime } from "./pi/pi-runtime.ts";
 import { ProviderManager } from "./pi/providers.ts";
@@ -130,6 +130,8 @@ export interface PierHostOptions {
 	accountLines?: AccountLine[];
 	/** Where `extension.search` looks (tests). Defaults to pi.dev with the npm registry as fallback. */
 	packageCatalog?: PackageCatalogOptions;
+	/** Where browser authorizations listen for the redirect (e.g. in a container). */
+	authorizeCallback?: NewApiManagerOptions["authorizeCallback"];
 	/** The desktop app the host runs in (its updater and terminals), when there is one. */
 	shell?: AppShell;
 	/**
@@ -588,7 +590,11 @@ export class PierHost implements RequestHandler {
 			},
 			log,
 		});
-		this.newapi = new NewApiManager({ log, userAgent: pierUserAgent() });
+		this.newapi = new NewApiManager({
+			log,
+			userAgent: pierUserAgent(),
+			authorizeCallback: options.authorizeCallback,
+		});
 		this.account = new AccountManager(this.newapi, {
 			lines:
 				options.accountLines ??

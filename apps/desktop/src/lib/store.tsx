@@ -2519,10 +2519,11 @@ export class PierStore {
 
 	/**
 	 * Pick a directory on a computer: the system dialog for this computer, or Pier's directory
-	 * browser for a paired one. Resolves to `null` when cancelled.
+	 * browser for a paired one (and in browser mode, where the host may be in a container).
+	 * Resolves to `null` when cancelled.
 	 */
 	pickNodeDirectory(node = LOCAL_NODE, title = "选择工作区目录"): Promise<string | null> {
-		if (node === LOCAL_NODE) return this.pickDirectory();
+		if (node === LOCAL_NODE && this.bridge.kind !== "browser") return this.pickDirectory();
 		this.directoryPickerResolve?.(null);
 		return new Promise((resolve) => {
 			this.directoryPickerResolve = resolve;
