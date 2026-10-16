@@ -47,7 +47,7 @@ describe("pi update script", () => {
 	});
 
 	it("reads and rewrites the pinned version, keeping formatting", () => {
-		const text = `{\n\t"dependencies": {\n\t\t"@earendil-works/pi-ai": "0.87.1",\n\t\t"@earendil-works/pi-coding-agent": "0.87.1",\n\t\t"ws": "^8.22.0"\n\t}\n}\n`;
+		const text = `{\n\t"dependencies": {\n\t\t"@earendil-works/pi-ai": "0.87.1",\n\t\t"@earendil-works/pi-codemode": "0.87.1",\n\t\t"@earendil-works/pi-coding-agent": "0.87.1",\n\t\t"ws": "^8.22.0"\n\t}\n}\n`;
 		expect(pinnedVersion(JSON.parse(text))).toBe("0.87.1");
 		const updated = pinVersion(text, "1.1.0");
 		expect(updated).toBe(text.replaceAll('"0.87.1"', '"1.1.0"'));
@@ -56,11 +56,20 @@ describe("pi update script", () => {
 	});
 
 	it("rejects mismatched or ranged pins", () => {
-		expect(PI_PACKAGES).toEqual(["@earendil-works/pi-coding-agent", "@earendil-works/pi-ai"]);
+		expect(PI_PACKAGES).toEqual([
+			"@earendil-works/pi-coding-agent",
+			"@earendil-works/pi-ai",
+			"@earendil-works/pi-codemode",
+		]);
 		const agent = "@earendil-works/pi-coding-agent";
 		const ai = "@earendil-works/pi-ai";
-		expect(() => pinnedVersion({ dependencies: { [agent]: "1.1.0", [ai]: "1.0.0" } })).toThrow(/one version/);
-		expect(() => pinnedVersion({ dependencies: { [agent]: "^1.1.0", [ai]: "^1.1.0" } })).toThrow(/exact/);
+		const codemode = "@earendil-works/pi-codemode";
+		expect(() => pinnedVersion({ dependencies: { [agent]: "1.1.0", [ai]: "1.1.0", [codemode]: "1.0.0" } })).toThrow(
+			/one version/,
+		);
+		expect(() => pinnedVersion({ dependencies: { [agent]: "^1.1.0", [ai]: "^1.1.0", [codemode]: "^1.1.0" } })).toThrow(
+			/exact/,
+		);
 	});
 
 	it("selects changelog entries after the current version up to the target", () => {

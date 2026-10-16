@@ -24,8 +24,11 @@ const hostRoot = resolve(here, "..");
 const repoRoot = resolve(hostRoot, "../..");
 const MANIFEST = join(hostRoot, "package.json");
 
-/** pi packages Pier depends on directly; they are released together under one version. */
-export const PI_PACKAGES = ["@earendil-works/pi-coding-agent", "@earendil-works/pi-ai"];
+/**
+ * pi packages Pier depends on directly; they are released together under one version. Pier
+ * compiles its own codemode worker from pi-codemode, so it must match pi-coding-agent's copy.
+ */
+export const PI_PACKAGES = ["@earendil-works/pi-coding-agent", "@earendil-works/pi-ai", "@earendil-works/pi-codemode"];
 const REGISTRY = (process.env.NPM_REGISTRY ?? "https://registry.npmjs.org").replace(/\/+$/, "");
 const STABLE = /^(\d+)\.(\d+)\.(\d+)$/;
 
