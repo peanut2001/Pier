@@ -4,6 +4,14 @@ Pier 的所有重要变更都记录在这里。版本号规则：日常发版只
 
 ## 未发布
 
+## v0.2.46 — 2026-10-16
+
+内置的 pi 从 1.1.0 升级到 1.3.0。
+
+- **pi 1.3.0**：Pier Host 内置的 pi SDK 升级到 1.3.0，带来各服务商的修复（如 Anthropic / Bedrock 工具结果含图片时的 400 错误、网关与服务暂不可用错误的自动重试、Claude Haiku 5.5 / Opus 5 的 `off` 思考等级），切换模型时不再把上一个模型的思考内容当作正文发给新模型，codemode 的超时与中止也更可靠。详见 pi 的 CHANGELOG。
+- **Kimi Code**：pi 的 `kimi-coding` 服务商改用 Chat Completions 协议；如果在 `models.json` 中覆盖了它的 base URL，需要在末尾加上 `/v1`。
+- **codemode 版本一致**：Pier 自带的 codemode worker 与 pi 使用同一版本的 pi-codemode，`pi update` 工作流之后也会一并升级它。
+
 ## v0.2.45 — 2026-10-15
 
 - **Codex Fast 模式**：桌面端与手机端支持 `/fast` 切换、`/fast on` 开启、`/fast off` 关闭和 `/fast status` 查看状态；开启后输入栏显示 Fast。设置保存在 Codex 会话中，运行中切换从下一轮生效，不改变思考等级。目标 Host 需要支持协议 1.43，Codex CLI 需要支持线程设置更新。
