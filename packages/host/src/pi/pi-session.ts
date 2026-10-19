@@ -10,6 +10,7 @@ import {
 	PierProtocolError,
 	type QueueState,
 	type SessionCommandInfo,
+	type SessionContextInfo,
 	type SessionRunState,
 	type SessionSummary,
 	type StreamingBehavior,
@@ -113,6 +114,21 @@ export class PiManagedSession extends ManagedSession {
 					{ kind: "approval", title: `Allow ${details.toolName}?`, message: details.reason, approval: details },
 					signal ? { signal } : {},
 				),
+		};
+	}
+
+	private contextInfo(model = this.runtime.session.model): SessionContextInfo {
+		const settings = this.runtime.session.settingsManager.getCompactionSettings(model);
+		const contextWindow =
+			typeof model?.contextWindow === "number" && model.contextWindow > 0 ? model.contextWindow : undefined;
+		return {
+			autoCompaction: settings.enabled ? "configured" : "disabled",
+			...(contextWindow !== undefined ? { contextWindow } : {}),
+			...(settings.enabled && contextWindow !== undefined
+				? { compactionThreshold: Math.max(0, contextWindow - settings.reserveTokens) }
+				: {}),
+			reserveTokens: settings.reserveTokens,
+			keepRecentTokens: settings.keepRecentTokens,
 		};
 	}
 
@@ -226,6 +242,7 @@ export class PiManagedSession extends ManagedSession {
 			...(state.streamingMessage ? { streamingMessage: state.streamingMessage } : {}),
 			pendingToolCalls: [...state.pendingToolCalls],
 			...(model ? { model: toModelInfo(model) } : {}),
+			contextInfo: this.contextInfo(model),
 			thinkingLevel: session.thinkingLevel as ThinkingLevel,
 			...(state.errorMessage ? { errorMessage: state.errorMessage } : {}),
 		};
@@ -338,7 +355,12 @@ export class PiManagedSession extends ManagedSession {
 		await this.runtime.session.setModel(model, { persist });
 		this.guard.record();
 		const info = toModelInfo(model);
-		this.emit({ type: "session.model", model: info, thinkingLevel: this.runtime.session.thinkingLevel });
+		this.emit({
+			type: "session.model",
+			model: info,
+			contextInfo: this.contextInfo(model),
+			thinkingLevel: this.runtime.session.thinkingLevel,
+		});
 		return info;
 	}
 
@@ -375,7 +397,12 @@ export class PiManagedSession extends ManagedSession {
 		}
 		const info = toModelInfo(refreshed);
 		if (JSON.stringify(info) === before && session.thinkingLevel === levelBefore) return;
-		this.emit({ type: "session.model", model: info, thinkingLevel: session.thinkingLevel });
+		this.emit({
+			type: "session.model",
+			model: info,
+			contextInfo: this.contextInfo(refreshed),
+			thinkingLevel: session.thinkingLevel,
+		});
 	}
 
 	setThinking(level: ThinkingLevel, persist: boolean): string {

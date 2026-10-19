@@ -50,7 +50,7 @@ export async function startTestHost(
 	const faux = fauxProvider({
 		provider: "faux",
 		models: [
-			{ id: "faux-1", name: "Faux One", reasoning: true },
+			{ id: "faux-1", name: "Faux One", reasoning: true, contextWindow: 128_000 },
 			{ id: "faux-2", name: "Faux Two" },
 		],
 		...(options.tokensPerSecond ? { tokensPerSecond: options.tokensPerSecond, tokenSize: { min: 1, max: 1 } } : {}),

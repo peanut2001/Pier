@@ -480,7 +480,7 @@ Claude Code 与 Codex 会话（1.22）发出同样形态的事件与 `AgentMessa
 |---|---|---|
 | `session.snapshot` | `snapshot` | 仅在订阅 / 恢复时单独发给该连接，**不带 seq**，不写入日志 |
 | `session.status` | `state: idle\|streaming\|compacting\|retrying` | 状态变化时发送 |
-| `session.model` | `model?, thinkingLevel` | `model.set` 之后 |
+| `session.model` | `model?, contextInfo?, thinkingLevel` | `model.set` 之后 |
 | `session.fast` | `enabled: boolean` | Codex Fast 状态变化时发送（1.43），包括原生 `thread/settings/updated` 通知 |
 | `session.replaced` | `previousSessionId, session` | 扩展命令（如 `/new`）替换了底层 pi 会话；帧的 `sessionId` 为旧 ID，随后会收到新会话的 `session.snapshot` |
 | `session.closed` | `reason: idle\|closed\|deleted\|host_shutdown` | 会话离开活跃池；`deleted` 表示会话已被 `session.delete` 删除（1.6） |
@@ -562,7 +562,7 @@ Claude Code 与 Codex 会话（1.22）发出同样形态的事件与 `AgentMessa
   pendingToolCalls: string[];
   pendingUi: UiRequest[];      // 仍待回答的对话框 / 审批
   queue: { steering: string[]; followUp: string[] };
-  model?: ModelInfo; thinkingLevel: string;
+  model?: ModelInfo; contextInfo?: SessionContextInfo; thinkingLevel: string;
   fastMode?: boolean;          // Codex Fast 模式（1.43），其他运行时与旧 Host 省略
   statuses: Record<string, string>; widgets: Record<string, { lines: string[]; placement?: string }>;
   title?: string; errorMessage?: string;
@@ -573,6 +573,8 @@ Claude Code 与 Codex 会话（1.22）发出同样形态的事件与 `AgentMessa
 `SessionSummary.runtime`（1.22）是会话的 Agent 运行时；旧版 Host 不返回该字段，视为 `pi`。
 
 `ModelInfo = { provider, id, name, reasoning, input: string[], contextWindow?, thinkingLevels? }`。`thinkingLevels`（1.19）是模型支持的思考等级，从低到高（`off`、`minimal`、`low`、`medium`、`high`，模型支持时还有 `xhigh`、`max`、`ultra`），不支持推理的模型为 `["off"]`；`thinking.set` 会把不支持的等级钳制到其中之一。`ultra` 自协议 1.34 起支持，只在运行时明确报告模型支持它时显示，并作为原生等级传给运行时。
+
+`SessionContextInfo = { contextWindow?, autoCompaction, compactionThreshold?, reserveTokens?, keepRecentTokens? }`。`autoCompaction` 为 `configured` 时，`compactionThreshold` 是自动压缩触发的上下文 token 数，`reserveTokens` 是为回复预留的 token 数，`keepRecentTokens` 是压缩后原样保留的最近内容；`disabled` 表示自动压缩关闭；`runtime` 表示由 Claude Code / Codex 等运行时决定。字段是可选的，旧版 Host 不返回时客户端应隐藏或显示未知状态。
 
 ## 6. UI 请求与审批
 

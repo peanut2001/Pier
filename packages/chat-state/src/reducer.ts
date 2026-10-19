@@ -3,6 +3,7 @@ import type {
 	EventFrame,
 	ModelInfo,
 	QueueState,
+	SessionContextInfo,
 	SessionRunState,
 	SessionSnapshot,
 	SessionSummary,
@@ -53,6 +54,7 @@ export interface ChatState {
 	pendingUi: UiRequest[];
 	queue: QueueState;
 	model?: ModelInfo;
+	contextInfo?: SessionContextInfo;
 	thinkingLevel: string;
 	fastMode?: boolean;
 	statuses: Record<string, string>;
@@ -137,6 +139,7 @@ export function applySnapshot(state: ChatState, snapshot: SessionSnapshot): Chat
 	};
 	if (streaming && streaming.role === "assistant") next.streaming = cloneAssistant(streaming);
 	if (snapshot.model) next.model = snapshot.model;
+	if (snapshot.contextInfo) next.contextInfo = snapshot.contextInfo;
 	if (snapshot.title) next.title = snapshot.title;
 	if (snapshot.errorMessage) next.errorMessage = snapshot.errorMessage;
 	if (snapshot.capabilities) next.capabilities = snapshot.capabilities;
@@ -421,6 +424,7 @@ export function reduceChat(state: ChatState, frame: EventFrame): ChatState {
 		case "session.model": {
 			const next: ChatState = { ...state, thinkingLevel: String(event.thinkingLevel ?? state.thinkingLevel) };
 			if (event.model) next.model = event.model as ModelInfo;
+			if (event.contextInfo) next.contextInfo = event.contextInfo as SessionContextInfo;
 			return next;
 		}
 		case "session.replaced": {

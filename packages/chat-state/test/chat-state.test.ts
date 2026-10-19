@@ -87,6 +87,27 @@ describe("reduceChat", () => {
 		expect(other).toBe(state);
 	});
 
+	it("keeps context window and compaction limits from snapshots and model changes", () => {
+		const info = {
+			autoCompaction: "configured" as const,
+			contextWindow: 128_000,
+			compactionThreshold: 111_616,
+			reserveTokens: 16_384,
+			keepRecentTokens: 20_000,
+		};
+		let state = loaded({ contextInfo: info });
+		expect(state.contextInfo).toEqual(info);
+		state = run(state, [
+			{
+				type: "session.model",
+				model: { provider: "p", id: "next", name: "Next", reasoning: false, input: ["text"] },
+				contextInfo: { autoCompaction: "disabled", contextWindow: 64_000 },
+				thinkingLevel: "off",
+			},
+		]);
+		expect(state.contextInfo).toEqual({ autoCompaction: "disabled", contextWindow: 64_000 });
+	});
+
 	it("rebuilds a streamed assistant message from deltas", () => {
 		let state = loaded();
 		state = run(state, [

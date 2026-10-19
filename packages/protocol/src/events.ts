@@ -11,6 +11,7 @@ import type {
 	PairingRequest,
 	PairingResolution,
 	RemoteAccessStatus,
+	SessionContextInfo,
 	SessionRunState,
 	SessionSnapshot,
 	SessionSummary,
@@ -66,7 +67,7 @@ export type PierSessionEvent =
 	| { type: "session.status"; state: SessionRunState }
 	| { type: "session.replaced"; previousSessionId: string; session: SessionSummary }
 	| { type: "session.closed"; reason: "idle" | "closed" | "deleted" | "host_shutdown" }
-	| { type: "session.model"; model?: ModelInfo; thinkingLevel: string }
+	| { type: "session.model"; model?: ModelInfo; contextInfo?: SessionContextInfo; thinkingLevel: string }
 	| { type: "session.fast"; enabled: boolean }
 	| { type: "ui.request"; request: UiRequest }
 	| {

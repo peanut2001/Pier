@@ -5,6 +5,7 @@ import {
 	type ModelInfo,
 	PierProtocolError,
 	type QueueState,
+	type SessionContextInfo,
 	type SessionSummary,
 	type StreamingBehavior,
 	type ThinkingLevel,
@@ -122,6 +123,8 @@ export class CodexSession extends ManagedSession {
 	private compacting = false;
 	private compactWaiters: Array<() => void> = [];
 	private lastUsage: Json | undefined;
+	/** Reported by Codex after the first turn; model/list does not always include it. */
+	private contextWindow: number | undefined;
 	private offNotifications: (() => void) | undefined;
 	private offExit: (() => void) | undefined;
 	private unregister: (() => void) | undefined;
@@ -180,6 +183,14 @@ export class CodexSession extends ManagedSession {
 
 	private currentModel(): ModelInfo | undefined {
 		return this.modelId ? this.host.model(this.modelId) : this.host.defaultModel();
+	}
+
+	private contextInfo(model = this.currentModel()): SessionContextInfo {
+		const contextWindow = model?.contextWindow ?? this.contextWindow;
+		return {
+			autoCompaction: "runtime",
+			...(contextWindow ? { contextWindow } : {}),
+		};
 	}
 
 	// ---------------------------------------------------------------- app-server events
@@ -327,6 +338,17 @@ export class CodexSession extends ManagedSession {
 			case "thread/tokenUsage/updated": {
 				const usage = (params.tokenUsage ?? {}) as Json;
 				this.lastUsage = (usage.last ?? usage.total) as Json | undefined;
+				const contextWindow = Number(usage.modelContextWindow);
+				if (Number.isSafeInteger(contextWindow) && contextWindow > 0 && contextWindow !== this.contextWindow) {
+					this.contextWindow = contextWindow;
+					const model = this.currentModel();
+					this.emit({
+						type: "session.model",
+						...(model ? { model } : {}),
+						contextInfo: this.contextInfo(model),
+						thinkingLevel: this.thinkingLevel,
+					});
+				}
 				return;
 			}
 			case "thread/name/updated": {
@@ -538,6 +560,7 @@ export class CodexSession extends ManagedSession {
 			messages: t.publicMessages(),
 			...(t.streaming ? { streamingMessage: structuredClone(t.streaming) } : {}),
 			pendingToolCalls: t.pendingToolCalls,
+			contextInfo: this.contextInfo(model),
 			...(model
 				? { model }
 				: this.modelId
@@ -723,7 +746,12 @@ export class CodexSession extends ManagedSession {
 		if (!levels.includes(this.thinkingLevel)) {
 			this.thinkingLevel = levels.includes("medium") ? "medium" : (levels.at(-1) ?? "off");
 		}
-		this.emit({ type: "session.model", model: info, thinkingLevel: this.thinkingLevel });
+		this.emit({
+			type: "session.model",
+			model: info,
+			contextInfo: this.contextInfo(info),
+			thinkingLevel: this.thinkingLevel,
+		});
 		return info;
 	}
 

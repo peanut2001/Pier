@@ -1,6 +1,6 @@
 import type { ChatController } from "@pier/chat-state";
 import { type ChatState, sessionUsage, userText } from "@pier/chat-state";
-import type { SessionSummary } from "@pier/protocol";
+import type { SessionContextInfo, SessionSummary } from "@pier/protocol";
 import { useState } from "react";
 import { formatCost, formatPercent, formatTokens, RUN_STATE_LABEL, sessionTitle } from "../lib/format.ts";
 import { LOCAL_NODE, useAppState, useChatView, useStore } from "../lib/store.tsx";
@@ -163,9 +163,26 @@ function Queue({ chat }: { chat: ChatState }) {
 	);
 }
 
+function contextUsageTitle(info: SessionContextInfo | undefined, contextWindow: number | undefined): string {
+	const lines = ["最近一次请求的上下文大小"];
+	if (contextWindow) lines.push(`窗口上限：${formatTokens(contextWindow)}`);
+	if (!info) {
+		lines.push("自动压缩：运行时未报告阈值");
+	} else if (info.autoCompaction === "disabled") {
+		lines.push("自动压缩：已关闭");
+	} else if (info.autoCompaction === "runtime") {
+		lines.push("自动压缩：由运行时决定");
+	} else if (info.compactionThreshold !== undefined) {
+		lines.push(`自动压缩：达到 ${formatTokens(info.compactionThreshold)} 时触发`);
+	}
+	if (info?.reserveTokens !== undefined) lines.push(`回复预留：${formatTokens(info.reserveTokens)}`);
+	if (info?.keepRecentTokens !== undefined) lines.push(`压缩后保留最近内容：${formatTokens(info.keepRecentTokens)}`);
+	return lines.join("\n");
+}
+
 function StatusBar({ chat }: { chat: ChatState }) {
 	const usage = sessionUsage(chat);
-	const contextWindow = chat.model?.contextWindow;
+	const contextWindow = chat.contextInfo?.contextWindow ?? chat.model?.contextWindow;
 	const percent =
 		contextWindow && usage.lastContext ? Math.round((usage.lastContext / contextWindow) * 100) : undefined;
 	return (
@@ -181,14 +198,14 @@ function StatusBar({ chat }: { chat: ChatState }) {
 			))}
 			<span className="spacer" />
 			<span className="status-usage">
-				{usage.lastContext ? (
-					<span className="context-usage" title="最近一次请求的上下文大小">
+				{usage.lastContext || contextWindow ? (
+					<span className="context-usage" title={contextUsageTitle(chat.contextInfo, contextWindow)}>
 						{percent !== undefined ? (
 							<span className={`context-meter${percent >= 80 ? " high" : percent >= 50 ? " mid" : ""}`}>
 								<span style={{ width: `${Math.min(100, Math.max(2, percent))}%` }} />
 							</span>
 						) : null}
-						上下文 {formatTokens(usage.lastContext)}
+						上下文 {usage.lastContext ? formatTokens(usage.lastContext) : "—"}
 						{contextWindow ? ` / ${formatTokens(contextWindow)}` : ""}
 						{percent !== undefined ? `（${percent}%）` : ""}
 					</span>

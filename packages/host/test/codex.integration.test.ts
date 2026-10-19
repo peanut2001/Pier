@@ -173,6 +173,15 @@ describe("Codex runtime", () => {
 		return { rec, state: () => state };
 	}
 
+	it("reports the context window returned with token usage", async () => {
+		const { session } = await client.request("session.create", { workspaceId: workspace.id, runtime: "codex" });
+		const { rec } = await open(session);
+		await client.request("session.prompt", { sessionId: session.id, text: "hello" });
+		await rec.waitForType("agent_settled");
+		const snapshot = await client.request("session.snapshot", { sessionId: session.id });
+		expect(snapshot.contextInfo).toMatchObject({ autoCompaction: "runtime", contextWindow: 100_000 });
+	});
+
 	it("preserves Ultra in the model catalog and sends it as the native turn effort", async () => {
 		const models = await client.request("model.list", { workspaceId: workspace.id, runtime: "codex" });
 		expect(models.models.find((m) => m.id === "gpt-test")?.thinkingLevels).toEqual([

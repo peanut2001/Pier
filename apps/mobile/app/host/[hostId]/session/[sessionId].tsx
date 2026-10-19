@@ -7,7 +7,7 @@ import {
 	supportedThinkingLevels,
 	userText,
 } from "@pier/chat-state";
-import type { ApprovalPolicy, ForkPoint, ModelInfo, SessionSummary } from "@pier/protocol";
+import type { ApprovalPolicy, ForkPoint, ModelInfo, SessionContextInfo, SessionSummary } from "@pier/protocol";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
@@ -273,12 +273,20 @@ function ModelSheet({ chat, onClose }: { chat: ChatController; onClose: () => vo
 /** Share of the model's context window the last request used, when both are known. */
 function contextShare(chat: ChatState): { used: number; window?: number; ratio?: number } {
 	const usage = sessionUsage(chat);
-	const window = chat.model?.contextWindow;
+	const window = chat.contextInfo?.contextWindow ?? chat.model?.contextWindow;
 	return {
 		used: usage.lastContext,
 		...(window ? { window } : {}),
 		...(window && usage.lastContext ? { ratio: Math.min(1, usage.lastContext / window) } : {}),
 	};
+}
+
+function contextDetails(info: SessionContextInfo | undefined): string | undefined {
+	if (!info) return "自动压缩：运行时未报告阈值";
+	if (info.autoCompaction === "disabled") return "自动压缩：已关闭";
+	if (info.autoCompaction === "runtime") return "自动压缩：由运行时决定";
+	if (info.compactionThreshold !== undefined) return `自动压缩：达到 ${formatTokens(info.compactionThreshold)} 时触发`;
+	return undefined;
 }
 
 function contextColor(p: Palette, ratio: number): string {
@@ -290,7 +298,7 @@ function UsageCard({ chat }: { chat: ChatState }) {
 	const p = usePalette();
 	const usage = sessionUsage(chat);
 	const context = contextShare(chat);
-	if (!usage.lastContext && !usage.input && !usage.output) return null;
+	if (!usage.lastContext && !usage.input && !usage.output && !context.window) return null;
 	const stats: [string, string][] = [];
 	if (usage.input || usage.output) {
 		stats.push(["输入", formatTokens(usage.input)], ["输出", formatTokens(usage.output)]);
@@ -299,12 +307,12 @@ function UsageCard({ chat }: { chat: ChatState }) {
 	if (usage.cacheHitRate !== undefined) stats.push(["缓存命中", formatPercent(usage.cacheHitRate)]);
 	return (
 		<View style={[styles.usage, { backgroundColor: p.bg }]}>
-			{usage.lastContext ? (
+			{usage.lastContext || context.window ? (
 				<View style={styles.usageContext}>
 					<View style={styles.usageHead}>
 						<Text style={[styles.usageLabel, { color: p.muted }]}>上下文</Text>
 						<Text style={[styles.usageValue, { color: p.text }]}>
-							{formatTokens(context.used)}
+							{context.used ? formatTokens(context.used) : "—"}
 							{context.window ? ` / ${formatTokens(context.window)}` : ""}
 							{context.ratio !== undefined ? `（${formatPercent(context.ratio)}）` : ""}
 						</Text>
@@ -334,7 +342,10 @@ function UsageCard({ chat }: { chat: ChatState }) {
 					))}
 				</View>
 			) : null}
-			<Muted style={styles.usageNote}>上下文为最近一次请求的大小，其余为本会话累计</Muted>
+			<Muted style={styles.usageNote}>
+				上下文为最近一次请求的大小，其余为本会话累计
+				{contextDetails(chat.contextInfo) ? ` · ${contextDetails(chat.contextInfo)}` : ""}
+			</Muted>
 		</View>
 	);
 }
