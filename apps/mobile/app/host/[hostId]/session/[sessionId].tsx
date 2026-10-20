@@ -40,6 +40,7 @@ import {
 } from "../../../../src/format.ts";
 import { useChatView, useMobileState, useStore } from "../../../../src/store.ts";
 import { type Palette, RADIUS, usePalette } from "../../../../src/theme.ts";
+import { createTranscriptScroll } from "../../../../src/transcript-scroll.ts";
 
 function placeholderSummary(sessionId: string, workspaceId: string): SessionSummary {
 	const now = new Date().toISOString();
@@ -590,7 +591,12 @@ export default function SessionScreen() {
 	useMobileState((s) => s.chatsVersion);
 	const [sheet, setSheet] = useState<"policy" | "model" | "actions" | SubSheet>();
 	const scroller = useRef<ScrollView>(null);
-	const nearBottom = useRef(true);
+	// biome-ignore lint/correctness/useExhaustiveDependencies: each session starts by following its latest message.
+	const transcriptScroll = useMemo(
+		() => createTranscriptScroll(() => scroller.current?.scrollToEnd({ animated: false })),
+		[hostId, sessionId],
+	);
+	useEffect(() => () => transcriptScroll.dispose(), [transcriptScroll]);
 
 	useEffect(() => {
 		if (hostId) store.openHost(hostId);
@@ -688,21 +694,12 @@ export default function SessionScreen() {
 				) : null}
 			</View>
 			<ScrollView
+				key={`${hostId}/${sessionId}`}
 				ref={scroller}
 				style={styles.flex}
 				keyboardDismissMode="interactive"
-				onScroll={(e) => {
-					const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
-					nearBottom.current = contentOffset.y + layoutMeasurement.height >= contentSize.height - 80;
-				}}
 				scrollEventThrottle={100}
-				onLayout={() => {
-					// Keep the latest messages in view when the keyboard shrinks the transcript.
-					if (nearBottom.current) scroller.current?.scrollToEnd({ animated: false });
-				}}
-				onContentSizeChange={() => {
-					if (nearBottom.current) scroller.current?.scrollToEnd({ animated: false });
-				}}
+				{...transcriptScroll.props}
 			>
 				{view?.error ? (
 					<View style={[styles.error, { backgroundColor: p.dangerSoft }]}>
