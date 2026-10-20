@@ -138,6 +138,10 @@ jobs:
         working-directory: apps/desktop/src-tauri
         run: cargo fmt --check
 
+      - name: Updater regression tests
+        working-directory: apps/desktop/src-tauri
+        run: cargo test --lib --locked updater::tests
+
       - name: NVIDIA renderer regression tests
         if: runner.os == 'Linux'
         working-directory: apps/desktop/src-tauri

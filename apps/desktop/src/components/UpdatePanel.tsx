@@ -255,22 +255,28 @@ function PeerUpdateRow({ peer }: { peer: PeerInfo }) {
 		action = <IconLoader size={16} className="spin" />;
 	} else if (pending) {
 		action = (
-			<button
-				type="button"
-				className={confirm ? "danger" : "primary"}
-				onClick={() => {
-					if (busySessions && !confirm) {
-						setConfirm(true);
-						return;
-					}
-					setConfirm(false);
-					void store.installPeerUpdate(peer.id);
-				}}
-				onBlur={() => setConfirm(false)}
-			>
-				<IconDownload size={14} />
-				{confirm ? "仍然更新" : status?.state === "error" ? "重试安装" : `更新到 v${status?.version ?? ""}`}
-			</button>
+			<>
+				<button type="button" onClick={() => void store.checkPeerUpdate(peer.id)}>
+					<IconRefresh size={14} />
+					重新检查
+				</button>
+				<button
+					type="button"
+					className={confirm ? "danger" : "primary"}
+					onClick={() => {
+						if (busySessions && !confirm) {
+							setConfirm(true);
+							return;
+						}
+						setConfirm(false);
+						void store.installPeerUpdate(peer.id);
+					}}
+					onBlur={() => setConfirm(false)}
+				>
+					<IconDownload size={14} />
+					{confirm ? "仍然更新" : status?.state === "error" ? "重试安装" : `更新到 v${status?.version ?? ""}`}
+				</button>
+			</>
 		);
 	} else if (status && !entry?.tooOld && status.state !== "unsupported") {
 		action = (
@@ -399,10 +405,10 @@ export function UpdateSettings() {
 	const pending = updatePending(update);
 	const working = update.state === "downloading" || update.state === "installing";
 
-	// Opening the page checks for updates unless one is already known or in progress.
+	// Refresh cached releases when opening the page, including an already pending update.
 	// biome-ignore lint/correctness/useExhaustiveDependencies: only when the page opens.
 	useEffect(() => {
-		if (update.state === "idle" || update.state === "upToDate" || (update.state === "error" && !update.version)) {
+		if (!working && update.state !== "unsupported" && update.state !== "checking") {
 			void store.checkForUpdates();
 		}
 	}, []);
@@ -486,10 +492,16 @@ export function UpdateSettings() {
 
 	const action =
 		pending && !working ? (
-			<button type="button" className={confirm ? "danger" : "primary"} onClick={install}>
-				<IconDownload size={14} />
-				{confirm ? "仍然更新" : update.state === "error" ? "重试安装" : "更新并重启"}
-			</button>
+			<>
+				<button type="button" onClick={() => void store.checkForUpdates()}>
+					<IconRefresh size={14} />
+					重新检查
+				</button>
+				<button type="button" className={confirm ? "danger" : "primary"} onClick={install}>
+					<IconDownload size={14} />
+					{confirm ? "仍然更新" : update.state === "error" ? "重试安装" : "更新并重启"}
+				</button>
+			</>
 		) : working || update.state === "unsupported" ? null : update.state === "checking" ? (
 			<button type="button" onClick={() => void store.cancelUpdateCheck()}>
 				取消检查

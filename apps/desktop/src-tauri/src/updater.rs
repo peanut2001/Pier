@@ -57,6 +57,15 @@ pub enum UpdateState {
     Error,
 }
 
+impl UpdateState {
+    fn can_check(self) -> bool {
+        matches!(
+            self,
+            Self::Idle | Self::UpToDate | Self::Available | Self::Error
+        )
+    }
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateStatus {
@@ -111,6 +120,10 @@ struct CheckOperation {
 }
 
 impl Inner {
+    fn auto_check_due(&self, now: Instant) -> bool {
+        self.status.auto_check && now >= self.next_auto_check && self.status.state.can_check()
+    }
+
     fn cancel_check(&mut self) {
         if let Some(check) = self.checking.take() {
             if let Some(abort) = check.abort {
@@ -152,11 +165,8 @@ impl Inner {
                 status.last_checked = Some(now_ms());
             }
             Err(error) => {
-                self.pending = None;
+                // A failed refresh must not discard an update that can still be installed.
                 status.state = UpdateState::Error;
-                status.version = None;
-                status.notes = None;
-                status.date = None;
                 status.error = Some(format!("检查更新失败：{error}"));
             }
         }
@@ -328,12 +338,8 @@ impl UpdateManager {
     pub async fn check(&self) -> UpdateStatus {
         let id = {
             let mut inner = self.lock();
-            match inner.status.state {
-                UpdateState::Unsupported
-                | UpdateState::Checking
-                | UpdateState::Downloading
-                | UpdateState::Installing => return inner.status.clone(),
-                _ => {}
+            if !inner.status.state.can_check() {
+                return inner.status.clone();
             }
             inner.next_check_id = inner.next_check_id.wrapping_add(1);
             let id = inner.next_check_id;
@@ -540,7 +546,7 @@ impl UpdateManager {
             .map_err(|e| e.to_string())
     }
 
-    /// Background checks: shortly after launch, then every `CHECK_INTERVAL` while enabled.
+    /// Background checks continue every `CHECK_INTERVAL`, even with a pending update.
     pub fn start_scheduler(&self) {
         if !supported() {
             return;
@@ -548,15 +554,7 @@ impl UpdateManager {
         let manager = self.clone();
         thread::spawn(move || loop {
             thread::sleep(SCHEDULER_TICK);
-            let due = {
-                let inner = manager.lock();
-                inner.status.auto_check
-                    && Instant::now() >= inner.next_auto_check
-                    && matches!(
-                        inner.status.state,
-                        UpdateState::Idle | UpdateState::UpToDate | UpdateState::Error
-                    )
-            };
+            let due = manager.lock().auto_check_due(Instant::now());
             if due {
                 tauri::async_runtime::block_on(manager.check());
             }
@@ -653,6 +651,55 @@ mod tests {
                 abort: None,
             }),
         }
+    }
+
+    #[test]
+    fn pending_updates_remain_eligible_for_periodic_checks() {
+        let mut inner = checking_inner();
+        inner.cancel_check();
+        inner.status.auto_check = true;
+        let due = inner.next_auto_check;
+        for state in [
+            UpdateState::Idle,
+            UpdateState::UpToDate,
+            UpdateState::Available,
+            UpdateState::Error,
+        ] {
+            inner.status.state = state;
+            assert!(!inner.auto_check_due(due - Duration::from_secs(1)));
+            assert!(inner.auto_check_due(due), "{state:?} must keep checking");
+            inner.status.auto_check = false;
+            assert!(!inner.auto_check_due(due));
+            inner.status.auto_check = true;
+        }
+        for state in [
+            UpdateState::Unsupported,
+            UpdateState::Checking,
+            UpdateState::Downloading,
+            UpdateState::Installing,
+        ] {
+            inner.status.state = state;
+            assert!(!inner.auto_check_due(due));
+        }
+    }
+
+    #[test]
+    fn failed_refresh_keeps_known_update_details_and_last_successful_check() {
+        let mut inner = checking_inner();
+        inner.status.date = Some("2026-10-20T00:00:00Z".into());
+        inner.finish_check(1, Err("network unavailable".into()));
+        assert!(inner.checking.is_none());
+        assert_eq!(inner.status.state, UpdateState::Error);
+        assert_eq!(inner.status.version.as_deref(), Some("1.2.3"));
+        assert_eq!(inner.status.notes.as_deref(), Some("known update"));
+        assert_eq!(inner.status.date.as_deref(), Some("2026-10-20T00:00:00Z"));
+        assert_eq!(inner.status.last_checked, Some(123));
+        assert!(inner
+            .status
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("network unavailable"));
     }
 
     #[test]
