@@ -411,6 +411,7 @@ describe("Codex runtime", () => {
 		await expect.poll(() => runtime().server().request("fake/lastTurn", { threadId: session.id })).not.toBeNull();
 		await client.request("session.abort", { sessionId: session.id });
 		await rec.waitForType("agent_settled");
+		await rec.waitFor((frame) => frame.event.type === "session.status" && frame.event.state === "idle");
 		expect(state().runState).toBe("idle");
 		expect(state().errorMessage).toBeUndefined();
 	});
