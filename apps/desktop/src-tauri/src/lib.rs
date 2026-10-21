@@ -4,6 +4,8 @@ mod host;
 #[cfg(target_os = "linux")]
 mod linux_graphics;
 mod speech;
+#[cfg(target_os = "macos")]
+mod system_speech;
 mod terminal;
 mod transfer;
 mod tray;
@@ -62,6 +64,12 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
+            #[cfg(target_os = "macos")]
+            system_speech::system_speech_authorize,
+            #[cfg(target_os = "macos")]
+            system_speech::system_speech_transcribe,
+            #[cfg(target_os = "macos")]
+            system_speech::system_speech_cancel,
             autostart::autostart_status,
             autostart::autostart_set_enabled,
             host::host_status,

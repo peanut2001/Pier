@@ -2,8 +2,66 @@ import { requireSpeechClient } from "@pier/chat-state";
 import { SpeechMethodSchemas, type SpeechStatus } from "@pier/protocol";
 import { useEffect, useState } from "react";
 import { LOCAL_NODE, useStore } from "../lib/store.tsx";
+import {
+	setSpeechProvider,
+	setSystemSpeechLanguage,
+	supportsSystemSpeech,
+	systemSpeechLanguage,
+	useSpeechProvider,
+} from "../lib/system-speech.ts";
 
 export function SpeechSettings() {
+	const provider = useSpeechProvider();
+	const [language, setLanguage] = useState(systemSpeechLanguage);
+	return (
+		<div className="speech-settings">
+			{supportsSystemSpeech() ? (
+				<label>
+					语音识别方式
+					<select
+						aria-label="语音识别方式"
+						value={provider}
+						onChange={(event) => setSpeechProvider(event.target.value === "system" ? "system" : "service")}
+					>
+						<option value="system">macOS 系统语音识别（无需配置）</option>
+						<option value="service">自定义转写服务</option>
+					</select>
+				</label>
+			) : null}
+			{provider === "system" ? (
+				<>
+					<p className="muted">
+						直接使用 Mac 的语音识别，无需接口地址、模型或 API Key。首次使用请允许麦克风和语音识别权限。
+						支持时在设备上识别，否则可能使用 Apple 在线服务。每次最多录音 1 分钟，识别后可编辑再发送。
+					</p>
+					<label>
+						识别语言
+						<select
+							aria-label="系统语音识别语言"
+							value={language}
+							onChange={(event) => {
+								setLanguage(event.target.value);
+								setSystemSpeechLanguage(event.target.value);
+							}}
+						>
+							<option value="">跟随系统</option>
+							<option value="zh-CN">普通话（简体中文）</option>
+							<option value="zh-TW">普通话（繁体中文）</option>
+							<option value="yue-HK">粤语</option>
+							<option value="en-US">英语</option>
+							<option value="ja-JP">日语</option>
+						</select>
+					</label>
+					<p className="muted">选择后自动保存，仅影响这台 Mac。</p>
+				</>
+			) : (
+				<ServiceSpeechSettings />
+			)}
+		</div>
+	);
+}
+
+function ServiceSpeechSettings() {
 	const store = useStore();
 	const client = store.nodeClient(LOCAL_NODE);
 	const [settings, setSettings] = useState<SpeechStatus>();

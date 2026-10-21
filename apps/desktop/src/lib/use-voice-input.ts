@@ -1,10 +1,12 @@
-import { startBrowserRecording, VoiceInput, type VoicePhase } from "@pier/chat-state";
+import { startBrowserRecording, startSystemSpeechRecording, VoiceInput, type VoicePhase } from "@pier/chat-state";
 import { useEffect, useRef, useState } from "react";
 import { LOCAL_NODE, useStore } from "./store.tsx";
+import { systemSpeech, useSpeechProvider } from "./system-speech.ts";
 
 export function useVoiceInput(scope: string, onText: (text: string) => void, disabled = false) {
 	const store = useStore();
 	const client = store.nodeClient(LOCAL_NODE);
+	const provider = useSpeechProvider();
 	const [phase, setPhase] = useState<VoicePhase>("idle");
 	const callback = useRef(onText);
 	callback.current = onText;
@@ -13,7 +15,8 @@ export function useVoiceInput(scope: string, onText: (text: string) => void, dis
 	useEffect(() => {
 		const voice = new VoiceInput({
 			client,
-			record: startBrowserRecording,
+			deviceSpeech: provider === "system" ? systemSpeech : undefined,
+			record: provider === "system" ? startSystemSpeechRecording : startBrowserRecording,
 			onPhase: setPhase,
 			onText: (text) => callback.current(text),
 			onError: (message) => store.toast("error", message),
@@ -33,7 +36,7 @@ export function useVoiceInput(scope: string, onText: (text: string) => void, dis
 		document.addEventListener("visibilitychange", hide);
 		document.addEventListener("keydown", handleEscape, true);
 		const off = client?.onState((state) => {
-			if (state !== "open") void voice.cancel();
+			if (provider === "service" && state !== "open") void voice.cancel();
 		});
 		return () => {
 			voice.dispose();
@@ -41,7 +44,7 @@ export function useVoiceInput(scope: string, onText: (text: string) => void, dis
 			document.removeEventListener("visibilitychange", hide);
 			document.removeEventListener("keydown", handleEscape, true);
 		};
-	}, [client, scope, store]);
+	}, [client, scope, store, provider]);
 	useEffect(() => {
 		if (disabled) void current.current?.cancel();
 	}, [disabled]);

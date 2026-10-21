@@ -1,6 +1,6 @@
 import type { PierClient } from "@pier/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { appendDictation, VoiceInput, type VoiceRecording } from "../src/voice-input.ts";
+import { appendDictation, type DeviceSpeech, VoiceInput, type VoiceRecording } from "../src/voice-input.ts";
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
@@ -12,7 +12,7 @@ function deferred<T>() {
 	return { promise, resolve, reject };
 }
 
-function setup() {
+function setup(deviceSpeech?: DeviceSpeech) {
 	const request = vi.fn(async (method: string, _params?: unknown) =>
 		method === "speech.status" ? { configured: true } : { text: "你好，Pier" },
 	);
@@ -24,7 +24,7 @@ function setup() {
 	const record = vi.fn(async (_signal: AbortSignal) => recording);
 	const onText = vi.fn();
 	const onError = vi.fn();
-	const voice = new VoiceInput({ client, record, onText, onError, onPhase: vi.fn() });
+	const voice = new VoiceInput({ client, deviceSpeech, record, onText, onError, onPhase: vi.fn() });
 	return { voice, client, record, recording, request, onText, onError };
 }
 
@@ -126,5 +126,76 @@ describe("voice input lifecycle", () => {
 		);
 		expect(appendDictation("typing\n", "  hello\uE000world\uE001  ")).toBe("typing\nhelloworld");
 		expect(appendDictation("keep", "  ")).toBe("keep");
+	});
+});
+
+describe("device speech", () => {
+	function device() {
+		return {
+			prepare: vi.fn(async (_signal: AbortSignal) => {}),
+			transcribe: vi.fn(async (_clip: unknown, _signal: AbortSignal) => "系统识别文字"),
+			maxSeconds: 60,
+		};
+	}
+
+	it("works without a Host connection or service configuration", async () => {
+		const speech = device();
+		const t = setup(speech);
+		Object.assign(t.client, { state: "closed", host: undefined });
+		await t.voice.start();
+		expect(t.voice.phase).toBe("recording");
+		await t.voice.stop();
+		expect(t.onText).toHaveBeenCalledExactlyOnceWith("系统识别文字");
+		expect(t.request).not.toHaveBeenCalled();
+		expect(t.voice.phase).toBe("idle");
+	});
+
+	it("does not acquire the microphone if system recognition permission is denied", async () => {
+		const speech = device();
+		speech.prepare.mockRejectedValueOnce(new Error("语音识别权限被拒绝"));
+		const t = setup(speech);
+		await t.voice.start();
+		expect(t.onError).toHaveBeenCalledWith("语音识别权限被拒绝");
+		expect(t.record).not.toHaveBeenCalled();
+		expect(t.request).not.toHaveBeenCalled();
+		expect(t.voice.phase).toBe("idle");
+	});
+
+	it("does not start recording after a cancelled system permission dialog resolves", async () => {
+		const speech = device();
+		const permission = deferred<void>();
+		speech.prepare.mockReturnValueOnce(permission.promise);
+		const t = setup(speech);
+		const starting = t.voice.start();
+		await t.voice.cancel();
+		permission.resolve();
+		await starting;
+		expect(t.record).not.toHaveBeenCalled();
+		expect(t.voice.phase).toBe("idle");
+	});
+
+	it("aborts native recognition and discards late text after switching sessions", async () => {
+		const speech = device();
+		const result = deferred<string>();
+		speech.transcribe.mockReturnValueOnce(result.promise);
+		const t = setup(speech);
+		await t.voice.start();
+		const stopping = t.voice.stop();
+		await vi.waitFor(() => expect(speech.transcribe).toHaveBeenCalled());
+		t.voice.dispose();
+		expect(speech.transcribe.mock.calls[0]?.[1].aborted).toBe(true);
+		result.resolve("旧会话的文字");
+		await stopping;
+		expect(t.onText).not.toHaveBeenCalled();
+		expect(t.request).not.toHaveBeenCalled();
+	});
+
+	it("honors the system provider's one-minute recording limit", async () => {
+		vi.useFakeTimers();
+		const t = setup(device());
+		await t.voice.start();
+		await vi.advanceTimersByTimeAsync(60_000);
+		expect(t.recording.stop).toHaveBeenCalledOnce();
+		expect(t.onText).toHaveBeenCalledOnce();
 	});
 });

@@ -16,5 +16,7 @@
 		<true/>
 		<key>NSMicrophoneUsageDescription</key>
 		<string>Pier 需要使用麦克风，将你的语音转换为可编辑的消息文字。</string>
+		<key>NSSpeechRecognitionUsageDescription</key>
+		<string>Pier 使用系统语音识别将录音转换为可编辑的消息文字。部分语言可能需要 Apple 在线识别服务。</string>
 	</dict>
 </plist>

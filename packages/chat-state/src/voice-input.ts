@@ -8,6 +8,12 @@ export interface VoiceRecording {
 	cancel(): Promise<void>;
 }
 export type StartRecording = (signal: AbortSignal, onError: (error: Error) => void) => Promise<VoiceRecording>;
+/** Recognition on the device running the UI, independent of the connected Host. */
+export interface DeviceSpeech {
+	prepare(signal: AbortSignal): Promise<void>;
+	transcribe(clip: AudioClip, signal: AbortSignal): Promise<string>;
+	maxSeconds?: number;
+}
 export const VOICE_LABELS: Record<VoicePhase, string> = {
 	idle: "语音输入",
 	preparing: "正在准备麦克风…",
@@ -41,6 +47,7 @@ export class VoiceInput {
 	constructor(
 		private readonly options: {
 			client: PierClient | undefined;
+			deviceSpeech?: DeviceSpeech;
 			record: StartRecording;
 			onPhase: (phase: VoicePhase) => void;
 			onText: (text: string) => void;
@@ -59,10 +66,15 @@ export class VoiceInput {
 		this.operation = operation;
 		this.setPhase("preparing");
 		try {
-			const client = requireSpeechClient(this.options.client);
-			const status = await client.request("speech.status");
+			if (this.options.deviceSpeech) {
+				await this.options.deviceSpeech.prepare(operation.signal);
+			} else {
+				const client = requireSpeechClient(this.options.client);
+				const status = await client.request("speech.status");
+				if (operation.signal.aborted) return;
+				if (!status.configured) throw new Error("请先打开语音设置，填写语音转文字服务的地址与模型");
+			}
 			if (operation.signal.aborted) return;
-			if (!status.configured) throw new Error("请先打开语音设置，填写语音转文字服务的地址与模型");
 			const preparing = this.options.record(operation.signal, (error) => {
 				if (!operation.signal.aborted) {
 					this.options.onError(error.message);
@@ -78,7 +90,10 @@ export class VoiceInput {
 			}
 			this.recording = recording;
 			this.setPhase("recording");
-			this.timer = setTimeout(() => void this.stop(), MAX_SPEECH_SECONDS * 1000);
+			this.timer = setTimeout(
+				() => void this.stop(),
+				(this.options.deviceSpeech?.maxSeconds ?? MAX_SPEECH_SECONDS) * 1000,
+			);
 		} catch (error) {
 			if (!operation.signal.aborted) {
 				this.options.onError(error instanceof Error ? error.message : "无法开始录音");
@@ -97,12 +112,22 @@ export class VoiceInput {
 			const clip = await recording.stop();
 			if (operation.signal.aborted) return;
 			this.recording = undefined;
-			const client = requireSpeechClient(this.options.client);
-			this.requestId = `voice-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-			const result = await client.request("speech.transcribe", { ...clip, id: this.requestId }, { timeoutMs: 70_000 });
+			let text: string;
+			if (this.options.deviceSpeech) {
+				text = await this.options.deviceSpeech.transcribe(clip, operation.signal);
+			} else {
+				const client = requireSpeechClient(this.options.client);
+				this.requestId = `voice-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+				const result = await client.request(
+					"speech.transcribe",
+					{ ...clip, id: this.requestId },
+					{ timeoutMs: 70_000 },
+				);
+				text = result.text;
+			}
 			if (operation.signal.aborted) return;
-			if (!result.text.trim()) throw new Error("没有识别到文字，请重新录音");
-			this.options.onText(result.text);
+			if (!text.trim()) throw new Error("没有识别到文字，请重新录音");
+			this.options.onText(text);
 		} catch (error) {
 			if (!operation.signal.aborted) this.options.onError(error instanceof Error ? error.message : "语音识别失败");
 		} finally {

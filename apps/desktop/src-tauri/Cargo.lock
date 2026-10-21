@@ -2722,6 +2722,7 @@ name = "pier-desktop"
 version = "0.2.50"
 dependencies = [
  "base64 0.22.1",
+ "cc",
  "portable-pty",
  "serde",
  "serde_json",
@@ -2732,6 +2733,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-single-instance",
  "tauri-plugin-updater",
+ "tempfile",
  "tokio",
  "winreg 0.10.1",
 ]

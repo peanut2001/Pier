@@ -3,7 +3,17 @@ import type { AudioClip, StartRecording } from "./voice-input.ts";
 
 const FORMATS = ["audio/webm;codecs=opus", "audio/mp4", "audio/webm", "audio/ogg;codecs=opus"];
 
-export const startBrowserRecording: StartRecording = async (signal, onError) => {
+export const startBrowserRecording: StartRecording = (signal, onError) => recordBrowserAudio(signal, onError);
+
+/** Apple Speech reads MPEG-4 audio; modern WebKit can also offer WebM, so choose explicitly. */
+export const startSystemSpeechRecording: StartRecording = (signal, onError) =>
+	recordBrowserAudio(signal, onError, ["audio/mp4"]);
+
+async function recordBrowserAudio(
+	signal: AbortSignal,
+	onError: (error: Error) => void,
+	formats?: string[],
+): ReturnType<StartRecording> {
 	if (!globalThis.navigator?.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
 		throw new Error("当前环境无法录音，请使用支持麦克风的 Pier 客户端或 HTTPS / localhost 浏览器");
 	}
@@ -24,7 +34,11 @@ export const startBrowserRecording: StartRecording = async (signal, onError) => 
 		release();
 		throw new Error("录音已取消");
 	}
-	const mimeType = FORMATS.find((type) => MediaRecorder.isTypeSupported(type));
+	const mimeType = (formats ?? FORMATS).find((type) => MediaRecorder.isTypeSupported(type));
+	if (formats && !mimeType) {
+		release();
+		throw new Error("当前环境不支持所需录音格式，请更新系统或切换自定义语音服务");
+	}
 	let recorder: MediaRecorder;
 	try {
 		recorder = new MediaRecorder(stream, mimeType ? { mimeType, audioBitsPerSecond: 64_000 } : undefined);
@@ -113,4 +127,4 @@ export const startBrowserRecording: StartRecording = async (signal, onError) => 
 			chunks.length = 0;
 		},
 	};
-};
+}
