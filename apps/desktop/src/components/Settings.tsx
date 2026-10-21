@@ -47,6 +47,7 @@ import { Select } from "./Select.tsx";
 import { useOutsideClick } from "./SessionControls.tsx";
 import { SettingRow, SettingsCard, SettingsGroup, Switch } from "./SettingsUi.tsx";
 import { addWorkspaceBlocker } from "./Sidebar.tsx";
+import { SpeechSettings } from "./SpeechSettings.tsx";
 import { UpdateSettings, updatePending } from "./UpdatePanel.tsx";
 
 type IconComponent = ComponentType<{ size?: number; className?: string }>;
@@ -312,6 +313,13 @@ function GeneralSettings() {
 	return (
 		<>
 			<AppearanceSettings />
+			<SettingsGroup title="语音输入（本机）">
+				<SettingsCard>
+					<SettingRow title="语音识别服务" stack>
+						<SpeechSettings />
+					</SettingRow>
+				</SettingsCard>
+			</SettingsGroup>
 			{remote ? <RemoteGeneralSettings /> : <LocalGeneralSettings />}
 		</>
 	);

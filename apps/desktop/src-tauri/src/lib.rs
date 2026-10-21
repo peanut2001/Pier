@@ -3,6 +3,7 @@ mod autostart;
 mod host;
 #[cfg(target_os = "linux")]
 mod linux_graphics;
+mod speech;
 mod terminal;
 mod transfer;
 mod tray;
@@ -56,6 +57,7 @@ pub fn run() {
             }
         }));
     let app = autostart::configure(builder)
+        .on_permission_request(speech::permission)
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())

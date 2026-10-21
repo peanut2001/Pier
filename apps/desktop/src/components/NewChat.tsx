@@ -1,8 +1,9 @@
-import { agentRuntimeLabel, parseSlash } from "@pier/chat-state";
+import { agentRuntimeLabel, appendDictation, parseSlash } from "@pier/chat-state";
 import type { AgentRuntimeInfo, WorkspaceInfo } from "@pier/protocol";
 import { useEffect, useRef, useState } from "react";
 import { draftToPrompt } from "../lib/composer-text.ts";
 import { type Draft, LOCAL_NODE, NEW_CHAT_DRAFT, useAppState, useComputers, useStore } from "../lib/store.tsx";
+import { useVoiceInput } from "../lib/use-voice-input.ts";
 import { AgentIcon } from "./AgentIcons.tsx";
 import { BrowserButton } from "./BrowserPanel.tsx";
 import { readImages, useComposerInsert } from "./Composer.tsx";
@@ -28,6 +29,7 @@ import { PolicyPicker, useOutsideClick } from "./SessionControls.tsx";
 import { AddWorkspaceItems, SidebarToggle, useAddWorkspace } from "./Sidebar.tsx";
 import { SlashMenu, type SlashMenuEntry } from "./SlashMenu.tsx";
 import { TerminalToggle } from "./TerminalPanel.tsx";
+import { VoiceControls } from "./VoiceControls.tsx";
 
 /** Chip that picks the workspace (on any computer) the new chat will be created in. */
 function WorkspacePicker({ workspace, disabled }: { workspace?: WorkspaceInfo; disabled?: boolean }) {
@@ -243,6 +245,11 @@ export function NewChatView({ workspaceId }: { workspaceId?: string }) {
 	const [draft, setDraft] = useState<Draft>(() => store.draft(NEW_CHAT_DRAFT));
 	const [sending, setSending] = useState(false);
 	const [dragging, setDragging] = useState(false);
+	const voice = useVoiceInput(
+		workspaceId ?? "new-chat",
+		(text) => setDraft((draft) => ({ ...draft, text: appendDictation(draft.text, text) })),
+		sending,
+	);
 	const input = useRef<ComposerInputHandle>(null);
 	const fileInput = useRef<HTMLInputElement>(null);
 
@@ -261,7 +268,7 @@ export function NewChatView({ workspaceId }: { workspaceId?: string }) {
 	const runtimes = useNewChatRuntimes(workspaceId);
 	const menu = useNewChatSlashMenu(workspaceId, prompt, runtimes);
 	const hasContent = prompt.trim().length > 0 || draft.images.length > 0;
-	const canSend = online && !!workspace && !sending && hasContent;
+	const canSend = !voice.busy && online && !!workspace && !sending && hasContent;
 
 	async function send(override?: string) {
 		if (!canSend) return;
@@ -415,6 +422,7 @@ export function NewChatView({ workspaceId }: { workspaceId?: string }) {
 					/>
 					<div className="composer-toolbar">
 						<div className="composer-toolbar-left">
+							<VoiceControls voice={voice} disabled={sending} />
 							<button
 								type="button"
 								className="ghost icon composer-attach"

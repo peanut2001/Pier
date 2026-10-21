@@ -14,5 +14,7 @@
 		<!-- Let AppKit localize native dialogs using the system language independently of Pier's UI. -->
 		<key>CFBundleAllowMixedLocalizations</key>
 		<true/>
+		<key>NSMicrophoneUsageDescription</key>
+		<string>Pier 需要使用麦克风，将你的语音转换为可编辑的消息文字。</string>
 	</dict>
 </plist>

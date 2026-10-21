@@ -1,13 +1,22 @@
-import { type ChatController, type ChatState, resolveSlash, runBuiltin, type SlashActions } from "@pier/chat-state";
+import {
+	appendDictation,
+	type ChatController,
+	type ChatState,
+	resolveSlash,
+	runBuiltin,
+	type SlashActions,
+} from "@pier/chat-state";
 import type { WorkspaceInfo } from "@pier/protocol";
 import { type RefObject, useEffect, useRef, useState } from "react";
 import { draftToPrompt } from "../lib/composer-text.ts";
 import { type Draft, useStore } from "../lib/store.tsx";
+import { useVoiceInput } from "../lib/use-voice-input.ts";
 import { ComposerInput, type ComposerInputHandle } from "./ComposerInput.tsx";
 import { IconArrowUp, IconImage, IconStop, IconX } from "./Icons.tsx";
 import { SessionModelPicker } from "./ModelPicker.tsx";
 import { PolicyPicker } from "./SessionControls.tsx";
 import { SlashMenu, type SlashMenuEntry, useSlashMenu } from "./SlashMenu.tsx";
+import { VoiceControls } from "./VoiceControls.tsx";
 
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 
@@ -65,6 +74,11 @@ export function Composer({
 	const fileInput = useRef<HTMLInputElement>(null);
 	const [sending, setSending] = useState(false);
 	const [dragging, setDragging] = useState(false);
+	const voice = useVoiceInput(
+		sessionId,
+		(text) => setDraft((draft) => ({ ...draft, text: appendDictation(draft.text, text) })),
+		sending || !!chat.closed,
+	);
 
 	// The parent remounts the composer per session (`key={sessionId}`), so the draft state
 	// always belongs to `sessionId`.
@@ -91,7 +105,8 @@ export function Composer({
 	const running = chat.runState === "streaming" || chat.runState === "retrying" || chat.runState === "compacting";
 	const closed = !!chat.closed;
 	const prompt = draftToPrompt(draft.text);
-	const canSend = !closed && chat.loaded && !sending && (prompt.trim().length > 0 || draft.images.length > 0);
+	const canSend =
+		!voice.busy && !closed && chat.loaded && !sending && (prompt.trim().length > 0 || draft.images.length > 0);
 	const menu = useSlashMenu(controller, prompt);
 
 	const actions: SlashActions = {
@@ -106,7 +121,7 @@ export function Composer({
 
 	async function send(mode: "auto" | "steer" | "followUp", override?: string) {
 		const text = draftToPrompt(override ?? draft.text).trim();
-		if (closed || !chat.loaded || sending || (!text && !draft.images.length)) return;
+		if (voice.busy || closed || !chat.loaded || sending || (!text && !draft.images.length)) return;
 		const images = draft.images.map(({ data, mimeType }) => ({ type: "image" as const, data, mimeType }));
 		const previous = { ...draft, text: override ?? draft.text };
 		const cleared = { text: "", images: [] };
@@ -252,6 +267,7 @@ export function Composer({
 			/>
 			<div className="composer-toolbar">
 				<div className="composer-toolbar-left">
+					<VoiceControls voice={voice} disabled={sending || !!chat.closed} />
 					<button
 						type="button"
 						className="ghost icon composer-attach"

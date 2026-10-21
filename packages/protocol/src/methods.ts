@@ -87,6 +87,8 @@ import {
 } from "./resources.ts";
 import { type ScheduledTask, ScheduledTaskInputSchema, type ScheduledTaskRun } from "./scheduled-tasks.ts";
 
+import { SpeechMethodSchemas, type SpeechStatus } from "./speech.ts";
+
 const Id = z.string().min(1).max(256);
 /** Repository-relative paths for `git.*` (1.28). */
 const GitPaths = z.array(z.string().min(1).max(4096)).min(1).max(20_000);
@@ -124,6 +126,7 @@ export const ClientInfoSchema = z.object({
  */
 export const MethodParamsSchemas = {
 	...ResourceMethodSchemas,
+	...SpeechMethodSchemas,
 	"host.processes": z.object({}).optional(),
 	/** Signal one process, after verifying that its PID still has the listed start identity. */
 	"host.killProcess": z.object({
@@ -867,6 +870,10 @@ export interface SubscribeResult {
 }
 
 export interface MethodResults {
+	"speech.status": SpeechStatus;
+	"speech.configure": SpeechStatus;
+	"speech.transcribe": { text: string };
+	"speech.cancel": { cancelled: boolean };
 	"host.processes": HostProcesses;
 	/** A signal was sent; the process may still be shutting down. */
 	"host.killProcess": { signalled: true };

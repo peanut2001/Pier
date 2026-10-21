@@ -1,4 +1,4 @@
-# Pier 协议 v1.45
+# Pier 协议 v1.46
 
 > 实现：`packages/protocol`（zod schema + TS 类型，Host 与所有客户端共享）。
 > 本文档描述线上格式与语义；字段的权威定义以 `packages/protocol/src` 为准。
@@ -690,3 +690,9 @@ Linux 读取 `/proc`，macOS 执行固定 `ps` 查询，Windows 使用 PowerShel
 所有 TCP 流属于创建它的连接，其他连接访问时为 `NOT_FOUND`，关闭返回 `false`。每台 Host 最多 128 流，每条连接最多 64 流；每流读缓冲达到 512 KiB 后暂停套接字读取，低于 256 KiB 后继续。写入等待 Node 流回调后确认。客户端通过流背压按需读取，保持 HTTP(S)、WebSocket 和半关闭语义。连接断开 / Host 关闭时销毁所有所属套接字；目标连接断开或设备吊销时，本地回环监听器和独立浏览器也被清理。
 
 浏览器仅由本地客户端显式启动，`controlled` 默认关闭；网络方式启动独立浏览器本身不授予 Agent 操作权限。独立浏览器配置按主机保存在本机 `browser-profiles`，配置目录由主机 ID 的 SHA-256 派生，浏览器控制不监听 TCP 调试端口。代理保持目标 origin，由远程 Host 解析域名与连接目标；关闭 QUIC 并限制 WebRTC 的非代理 UDP，覆盖 HTTP(S) / WebSocket 流量，不承诺系统级 VPN 语义。审计只记录连接目标 / 端口、工作区和动作名，不记录网页数据、输入、脚本或截图。
+
+### 语音输入（1.46）
+
+`speech.status` 返回转写服务的 `url`（完整接口地址）、`model`、`language`、`hasApiKey` 和 `configured`，不返回密钥。`speech.configure` 保存这三个设置及可选 `apiKey`；省略密钥保留原值，空字符串删除，更换 URL 时省略则清除原密钥。空 URL 停用。已配对设备可读取与修改，配置变更的审计不包含内容。
+
+`speech.transcribe { id, data, mimeType }` 接受不超过 4 MiB 的 base64 音频（WebM / MP4 / WAV / Ogg / MP3），转发为兼容 `/audio/transcriptions` 的 multipart `file`、`model`、`response_format=json` 及可选 `language`，返回 `{ text }`。请求最多 60 秒，同一连接只允许一个，全 Host 最多四个；不落盘，不转发服务的原始错误。`speech.cancel { id }` 只取消该连接的匹配请求，返回 `{ cancelled }`；连接关闭会取消其请求。UI 每次录音限制 120 秒，仅把结果填入草稿，不自动发送。

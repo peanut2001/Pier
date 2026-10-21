@@ -81,6 +81,7 @@ import { ScheduledTasks } from "./scheduled-tasks.ts";
 import { SessionArchiveStore } from "./session-archive.ts";
 import { SessionPool } from "./session-pool.ts";
 import type { AppShell, ShellMethod } from "./shell.ts";
+import { SpeechService } from "./speech.ts";
 import { HostTerminals } from "./terminals.ts";
 import {
 	authorizeWorkspaceFilePreview,
@@ -223,6 +224,7 @@ const AUDITED_METHODS = new Set<MethodName>([
 	"extension.delete",
 	"update.install",
 	"runtime.install",
+	"speech.configure",
 	"settings.update",
 	"settings.write",
 	"agentConfig.update",
@@ -448,6 +450,7 @@ function toProtocolError(error: unknown): PierProtocolError {
  * to any number of connections, independent of the transport.
  */
 export class PierHost implements RequestHandler {
+	readonly speech: SpeechService;
 	readonly pierDir: string;
 	readonly config: ConfigStore;
 	readonly env: PiEnvironment;
@@ -491,6 +494,7 @@ export class PierHost implements RequestHandler {
 		this.pierDir = options.pierDir ?? defaultPierDir();
 		mkdirSync(this.pierDir, { recursive: true, mode: 0o700 });
 		this.config = new ConfigStore(configPath(this.pierDir));
+		this.speech = new SpeechService(join(this.pierDir, "speech.json"));
 		this.env = env;
 		this.localToken = options.localToken;
 		const log = options.log ?? (() => {});
@@ -716,6 +720,7 @@ export class PierHost implements RequestHandler {
 	}
 
 	disconnected(connection: Connection): void {
+		this.speech.cancel(connection.connectionId);
 		this.portForwards.connectionClosed(connection);
 		this.browsers.connectionClosed(connection);
 		this.browserControllers.connectionClosed(connection);
@@ -1360,6 +1365,10 @@ export class PierHost implements RequestHandler {
 				defaultModel: await this.providers.setDefault(params.provider, params.modelId),
 			}),
 
+			"speech.status": () => this.speech.status(),
+			"speech.configure": (_ctx, params) => this.speech.configure(params),
+			"speech.transcribe": (ctx, params) => this.speech.transcribe(ctx.connection.connectionId, params),
+			"speech.cancel": (ctx, params) => ({ cancelled: this.speech.cancel(ctx.connection.connectionId, params.id) }),
 			"provider.list": () => this.providers.list(),
 			"provider.login": (ctx, params) => {
 				const { flowId, start } = this.providers.login(ctx.connection, params.providerId, params.method);
@@ -1585,6 +1594,7 @@ export class PierHost implements RequestHandler {
 	async shutdown(): Promise<void> {
 		if (this.shuttingDown) return;
 		this.shuttingDown = true;
+		this.speech.shutdown();
 		this.portForwards.shutdown();
 		await this.browsers.shutdown();
 		this.browserControllers.shutdown();

@@ -10,4 +10,5 @@ export * from "./ports.ts";
 export * from "./processes.ts";
 export * from "./resources.ts";
 export * from "./scheduled-tasks.ts";
+export * from "./speech.ts";
 export * from "./version.ts";
