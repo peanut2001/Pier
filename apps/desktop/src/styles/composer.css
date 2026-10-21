@@ -1092,13 +1092,14 @@
 	gap: 12px;
 	width: 100%;
 }
-.speech-settings label {
+.speech-settings label,
+.speech-setting-field {
 	display: flex;
 	flex-wrap: wrap;
 	gap: 8px;
 	align-items: center;
 }
 .speech-settings input:not([type="checkbox"]),
-.speech-settings select {
+.speech-settings .select {
 	width: 100%;
 }

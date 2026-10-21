@@ -9,6 +9,7 @@ import {
 	systemSpeechLanguage,
 	useSpeechProvider,
 } from "../lib/system-speech.ts";
+import { Select } from "./Select.tsx";
 
 export function SpeechSettings() {
 	const provider = useSpeechProvider();
@@ -16,17 +17,18 @@ export function SpeechSettings() {
 	return (
 		<div className="speech-settings">
 			{supportsSystemSpeech() ? (
-				<label>
+				<div className="speech-setting-field">
 					语音识别方式
-					<select
-						aria-label="语音识别方式"
+					<Select
+						ariaLabel="语音识别方式"
 						value={provider}
-						onChange={(event) => setSpeechProvider(event.target.value === "system" ? "system" : "service")}
-					>
-						<option value="system">macOS 系统语音识别（无需配置）</option>
-						<option value="service">自定义转写服务</option>
-					</select>
-				</label>
+						onChange={setSpeechProvider}
+						options={[
+							{ value: "system", label: "macOS 系统语音识别（无需配置）" },
+							{ value: "service", label: "自定义转写服务" },
+						]}
+					/>
+				</div>
 			) : null}
 			{provider === "system" ? (
 				<>
@@ -34,24 +36,25 @@ export function SpeechSettings() {
 						直接使用 Mac 的语音识别，无需接口地址、模型或 API Key。首次使用请允许麦克风和语音识别权限。
 						支持时在设备上识别，否则可能使用 Apple 在线服务。每次最多录音 1 分钟，识别后可编辑再发送。
 					</p>
-					<label>
+					<div className="speech-setting-field">
 						识别语言
-						<select
-							aria-label="系统语音识别语言"
+						<Select
+							ariaLabel="系统语音识别语言"
 							value={language}
-							onChange={(event) => {
-								setLanguage(event.target.value);
-								setSystemSpeechLanguage(event.target.value);
+							onChange={(value) => {
+								setLanguage(value);
+								setSystemSpeechLanguage(value);
 							}}
-						>
-							<option value="">跟随系统</option>
-							<option value="zh-CN">普通话（简体中文）</option>
-							<option value="zh-TW">普通话（繁体中文）</option>
-							<option value="yue-HK">粤语</option>
-							<option value="en-US">英语</option>
-							<option value="ja-JP">日语</option>
-						</select>
-					</label>
+							options={[
+								{ value: "", label: "跟随系统" },
+								{ value: "zh-CN", label: "普通话（简体中文）" },
+								{ value: "zh-TW", label: "普通话（繁体中文）" },
+								{ value: "yue-HK", label: "粤语" },
+								{ value: "en-US", label: "英语" },
+								{ value: "ja-JP", label: "日语" },
+							]}
+						/>
+					</div>
 					<p className="muted">选择后自动保存，仅影响这台 Mac。</p>
 				</>
 			) : (
