@@ -1030,6 +1030,20 @@
 	color: var(--text-faint);
 }
 
+.model-menu-fast {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	padding: 8px 10px;
+	font-size: 12.5px;
+}
+
+.model-menu-fast-hint {
+	font-size: 11px;
+	color: var(--text-faint);
+}
+
 .model-menu-header {
 	display: flex;
 	align-items: center;
