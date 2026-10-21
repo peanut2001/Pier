@@ -8,10 +8,15 @@ import { join } from "node:path";
 import type { Readable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 import type { IceServer } from "@pier/crypto";
-import { type BrowserCommand, type BrowserTransport, PierProtocolError } from "@pier/protocol";
-import { findExecutable } from "../runtimes/executable.ts";
+import {
+	type BrowserCommand,
+	type BrowserPreparationProgress,
+	type BrowserTransport,
+	PierProtocolError,
+} from "@pier/protocol";
 import type { BrowserProcess } from "./browsers.ts";
-import { ChromiumBrowser, findChromium } from "./chromium.ts";
+import { ChromiumBrowser } from "./chromium.ts";
+import { BrowserRuntimeInstaller } from "./installation.ts";
 
 export interface RemoteBrowserProcess extends BrowserProcess {
 	port: number;
@@ -24,6 +29,8 @@ export interface RemoteBrowserLaunch {
 	transport: BrowserTransport;
 	iceServers: IceServer[];
 	signal?: AbortSignal;
+	installer?: BrowserRuntimeInstaller;
+	onProgress?: (progress: BrowserPreparationProgress) => void;
 	onExit(): void;
 }
 
@@ -86,19 +93,16 @@ export class SelkiesBrowser implements RemoteBrowserProcess {
 	static async start(options: RemoteBrowserLaunch): Promise<SelkiesBrowser> {
 		if (process.platform !== "linux")
 			throw new PierProtocolError("UNSUPPORTED", "远程浏览器目前支持 Linux 主机；本机浏览器支持所有桌面平台");
-		const selkies = findExecutable(
-			"selkies",
-			process.env.PIER_SELKIES_BIN,
-			join(homedir(), ".local/share/pier/selkies-2.1.0/AppRun"),
+		const {
+			selkies,
+			xvfb,
+			chromium: executable,
+		} = await (options.installer ?? new BrowserRuntimeInstaller(join(homedir(), ".pier", "browser-runtime"))).ensure(
+			options.onProgress,
+			options.signal,
 		);
-		const xvfb = findExecutable("Xvfb", process.env.PIER_XVFB_BIN);
-		if (!selkies || !xvfb)
-			throw new PierProtocolError(
-				"UNSUPPORTED",
-				"远程主机需要 Selkies 2.1.0 或更新版本、Xvfb 和 Chromium。请按 README 的远程浏览器安装步骤配置；可用 PIER_SELKIES_BIN 指定 Selkies 路径。",
-			);
 		options.signal?.throwIfAborted();
-		const executable = findChromium();
+		options.onProgress?.({ stage: "starting", message: "正在启动远程浏览器…" });
 		const session = new SelkiesBrowser(mkdtempSync(join(tmpdir(), "pier-browser-")), options.onExit);
 		const abort = () => {
 			void session.close();
@@ -269,7 +273,9 @@ export class SelkiesBrowser implements RemoteBrowserProcess {
 		if (this.closing) return this.closing;
 		this.closed = true;
 		this.closing = Promise.resolve().then(async () => {
-			await Promise.allSettled([this.browser?.close(), ...this.children.map(stop)]);
+			// Let Chromium flush cookies and local storage before its X server disappears.
+			await this.browser?.close().catch(() => {});
+			await Promise.allSettled(this.children.map(stop));
 			rmSync(this.runtime, { recursive: true, force: true });
 		});
 		this.onExit();

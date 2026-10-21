@@ -37,6 +37,13 @@ describe("browsers running on the workspace host", () => {
 			remoteBrowser: {
 				launch: async (options) => {
 					launches.push(options);
+					options.onProgress?.({
+						stage: "downloading",
+						component: "selkies",
+						message: "正在下载远程画面组件…",
+						downloadedBytes: 25,
+						totalBytes: 100,
+					});
 					await launchGate;
 					if (failLaunch) throw new Error("streamer failed");
 					const server = createServer((_req, res) => res.end("remote browser viewer"));
@@ -185,6 +192,37 @@ describe("browsers running on the workspace host", () => {
 		await open();
 		expect(launches[1]?.profile).toBe(launches[0]?.profile);
 	});
+	it("forwards private setup progress and can cancel before a remote browser is ready", async () => {
+		launchGate = new Promise<void>((resolve) => {
+			releaseLaunch = resolve;
+		});
+		const events = new Recorder();
+		local.onEvent(events.handler);
+		const pending = open().catch(() => undefined);
+		await events.waitFor(
+			(frame) =>
+				frame.event.type === "browser.preparing" &&
+				(frame.event.progress as { stage?: string } | undefined)?.stage === "downloading",
+		);
+		const result = await local.request("browser.list");
+		expect(result.browsers).toEqual([]);
+		expect(result.preparations).toHaveLength(1);
+		expect(result.preparations?.[0]).toMatchObject({
+			workspaceId: workspace.id,
+			peerId,
+			progress: { stage: "downloading", downloadedBytes: 25, totalBytes: 100 },
+		});
+		const stranger = await a.connect();
+		expect((await stranger.request("browser.list")).preparations).toEqual([]);
+		const id = result.preparations?.[0]?.browserId as string;
+		expect(await stranger.request("browser.close", { browserId: id })).toEqual({ closed: false });
+		expect(await local.request("browser.close", { browserId: id })).toEqual({ closed: true });
+		await pending;
+		await expect.poll(() => launches[0]?.signal?.aborted).toBe(true);
+		releaseLaunch?.();
+		await expect.poll(() => closed).toBe(1);
+		expect((await local.request("browser.list")).preparations).toEqual([]);
+	});
 	it("releases failed startup reservations and rejects invalid targets", async () => {
 		failLaunch = true;
 		await expect(open()).rejects.toThrow("streamer failed");
@@ -202,7 +240,7 @@ describe("browsers running on the workspace host", () => {
 	it("rejects an old remote host before trying to launch or proxy a local browser", async () => {
 		const original = b.host.info.bind(b.host);
 		vi.spyOn(b.host, "info").mockImplementation(() => ({ ...original(), protocolVersion: "1.46" }));
-		await expect(open()).rejects.toThrow("1.47");
+		await expect(open()).rejects.toThrow("1.48");
 		expect(launches).toHaveLength(0);
 		expect(localLaunch).not.toHaveBeenCalled();
 	});

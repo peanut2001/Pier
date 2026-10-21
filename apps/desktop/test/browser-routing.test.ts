@@ -6,7 +6,7 @@ import { LOCAL_NODE, PierStore } from "../src/lib/store.tsx";
 
 beforeEach(() => vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {} }));
 afterEach(() => vi.unstubAllGlobals());
-function setup(node: string, version = "1.47") {
+function setup(node: string, version = "1.48") {
 	const openExternal = vi.fn(async () => {});
 	const store = new PierStore({ kind: "browser", openExternal } as unknown as Bridge);
 	const request = vi.fn(async () => ({ browserId: "browser", mode: "remote" }));
@@ -34,7 +34,7 @@ describe("workspace browser routing", () => {
 				controlled: true,
 				transport: "webrtc",
 			},
-			{ timeoutMs: 60_000 },
+			{ timeoutMs: 900_000 },
 		);
 		expect(openExternal).not.toHaveBeenCalled();
 	});
@@ -51,7 +51,7 @@ describe("workspace browser routing", () => {
 		expect(remote.request.mock.calls[0]).toEqual([
 			"browser.open",
 			expect.objectContaining({ mode: "remote", transport: "websockets" }),
-			{ timeoutMs: 60_000 },
+			{ timeoutMs: 900_000 },
 		]);
 	});
 	it("rejects old hosts and unsafe URLs before launching anything", async () => {

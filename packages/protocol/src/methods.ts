@@ -1,6 +1,12 @@
 import { z } from "zod";
 import { PEER_ADDRESS } from "./addresses.ts";
-import { BrowserCommandSchema, type BrowserResult, type LocalBrowserInfo, type RemoteBrowserInfo } from "./browser.ts";
+import {
+	BrowserCommandSchema,
+	type BrowserPreparation,
+	type BrowserResult,
+	type LocalBrowserInfo,
+	type RemoteBrowserInfo,
+} from "./browser.ts";
 import {
 	type AccountAuthorizeStart,
 	type AccountLoginResult,
@@ -913,7 +919,7 @@ export interface MethodResults {
 	"browser.remoteOpen": RemoteBrowserInfo;
 	"browser.remoteClose": { closed: boolean };
 	"browser.remoteTransport": { transport: "webrtc" | "websockets" };
-	"browser.list": { browsers: LocalBrowserInfo[] };
+	"browser.list": { browsers: LocalBrowserInfo[]; preparations?: BrowserPreparation[] };
 	"browser.close": { closed: boolean };
 	"browser.attach": { attached: true };
 	"browser.detach": { detached: boolean };

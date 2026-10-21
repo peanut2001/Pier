@@ -4,10 +4,12 @@ import type { IceServer } from "@pier/crypto";
 import { type BrowserTransport, PierProtocolError, type RemoteBrowserInfo } from "@pier/protocol";
 import type { Connection } from "../connection.ts";
 import type { BrowserControllers } from "./controllers.ts";
+import { BrowserRuntimeInstaller, type BrowserRuntimeInstallerOptions } from "./installation.ts";
 import { webUrl } from "./network.ts";
 import { type RemoteBrowserLaunch, type RemoteBrowserProcess, SelkiesBrowser } from "./selkies.ts";
 
 export interface RemoteBrowserOptions {
+	installation?: BrowserRuntimeInstallerOptions;
 	launch?: (options: RemoteBrowserLaunch) => Promise<RemoteBrowserProcess>;
 }
 interface Session {
@@ -27,12 +29,15 @@ interface Session {
 export class RemoteBrowsers {
 	private readonly sessions = new Map<string, Session>();
 	private readonly closing = new Set<Promise<void>>();
+	private readonly installer: BrowserRuntimeInstaller;
 	constructor(
 		private readonly dir: string,
 		private readonly controllers: BrowserControllers,
 		private readonly iceServers: () => IceServer[],
 		private readonly options: RemoteBrowserOptions = {},
-	) {}
+	) {
+		this.installer = new BrowserRuntimeInstaller(join(dir, "browser-runtime"), options.installation);
+	}
 	async open(
 		owner: Connection,
 		params: {
@@ -67,6 +72,14 @@ export class RemoteBrowsers {
 				transport: session.transport,
 				iceServers: this.iceServers(),
 				signal: session.abort.signal,
+				installer: this.installer,
+				onProgress: (progress) => {
+					if (!session.closed && !owner.isClosed)
+						owner.send({
+							type: "evt",
+							event: { type: "browser.preparing", browserId: session.id, workspaceId: params.workspaceId, progress },
+						});
+				},
 				onExit: () => {
 					void this.closeSession(session);
 				},
@@ -135,5 +148,6 @@ export class RemoteBrowsers {
 	async shutdown(): Promise<void> {
 		for (const session of this.sessions.values()) void this.closeSession(session);
 		await Promise.all(this.closing);
+		await this.installer.shutdown();
 	}
 }

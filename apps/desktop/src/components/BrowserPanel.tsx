@@ -1,4 +1,5 @@
-import type { BrowserTransport, LocalBrowserInfo, WorkspaceInfo } from "@pier/protocol";
+import type { BrowserPreparation, BrowserTransport, LocalBrowserInfo, WorkspaceInfo } from "@pier/protocol";
+import { BrowserPreparationSchema } from "@pier/protocol";
 import { useEffect, useState } from "react";
 import { LOCAL_NODE, useAppState, useStore } from "../lib/store.tsx";
 import { IconExternal, IconGlobe, IconLoader, IconTrash } from "./Icons.tsx";
@@ -35,6 +36,7 @@ function BrowserPanel({ workspace, onClose }: { workspace: WorkspaceInfo; onClos
 	const [transport, setTransport] = useState<BrowserTransport>("webrtc");
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState("");
+	const [preparation, setPreparation] = useState<BrowserPreparation>();
 	const [browsers, setBrowsers] = useState<LocalBrowserInfo[]>([]);
 	const [activeId, setActiveId] = useState<string>();
 	const [reload, setReload] = useState(0);
@@ -43,10 +45,19 @@ function BrowserPanel({ workspace, onClose }: { workspace: WorkspaceInfo; onClos
 	const active = browsers.find((browser) => browser.browserId === activeId && browser.mode === "remote");
 	useEffect(() => {
 		let mounted = true;
+		const matches = (item: BrowserPreparation) =>
+			item.workspaceId === workspace.id && item.peerId === (remote ? node : undefined);
+		const off = local?.onEvent((frame) => {
+			if (mounted && frame.event.type === "browser.preparing") {
+				const parsed = BrowserPreparationSchema.safeParse(frame.event);
+				if (parsed.success && matches(parsed.data)) setPreparation(parsed.data);
+			}
+		});
 		const refresh = async () => {
 			try {
 				const result = await local?.request("browser.list");
 				if (!mounted || !result) return;
+				setPreparation(result.preparations?.find(matches));
 				const rows = result.browsers.filter(
 					(b) => b.workspaceId === workspace.id && b.peerId === (remote ? node : undefined),
 				);
@@ -64,6 +75,7 @@ function BrowserPanel({ workspace, onClose }: { workspace: WorkspaceInfo; onClos
 		}, 3000);
 		return () => {
 			mounted = false;
+			off?.();
 			clearInterval(timer);
 		};
 	}, [local, node, remote, workspace.id]);
@@ -80,6 +92,7 @@ function BrowserPanel({ workspace, onClose }: { workspace: WorkspaceInfo; onClos
 			setError(error instanceof Error ? error.message : String(error));
 		} finally {
 			setBusy(false);
+			setPreparation(undefined);
 		}
 	};
 	const switchTransport = async () => {
@@ -103,6 +116,20 @@ function BrowserPanel({ workspace, onClose }: { workspace: WorkspaceInfo; onClos
 			setBusy(false);
 		}
 	};
+	const preparing = Boolean(preparation);
+	const progress = preparation?.progress;
+	const percent = progress?.totalBytes
+		? Math.min(100, Math.floor(((progress.downloadedBytes ?? 0) / progress.totalBytes) * 100))
+		: undefined;
+	const cancelPreparation = async () => {
+		if (!preparation || !local) return;
+		try {
+			await local.request("browser.close", { browserId: preparation.browserId }, { timeoutMs: 30_000 });
+			setPreparation(undefined);
+		} catch (error) {
+			setError(error instanceof Error ? error.message : String(error));
+		}
+	};
 	return (
 		<Modal
 			title={`浏览器 · ${name}`}
@@ -113,6 +140,27 @@ function BrowserPanel({ workspace, onClose }: { workspace: WorkspaceInfo; onClos
 			{error ? (
 				<div className="banner error" role="alert">
 					{error}
+				</div>
+			) : null}
+			{progress ? (
+				<div className="browser-preparation" role="status" aria-live="polite">
+					<div>
+						<IconLoader size={16} className="spin" />
+						<span>{progress.message}</span>
+						{percent !== undefined ? <span>{percent}%</span> : null}
+					</div>
+					{progress.stage === "downloading" ? (
+						<progress aria-label="浏览器组件下载进度" max={100} value={percent} />
+					) : null}
+					<button
+						type="button"
+						className="ghost"
+						onClick={() => {
+							void cancelPreparation();
+						}}
+					>
+						取消准备
+					</button>
 				</div>
 			) : null}
 			{active ? (
@@ -173,20 +221,22 @@ function BrowserPanel({ workspace, onClose }: { workspace: WorkspaceInfo; onClos
 						网页地址
 						<input
 							value={url}
-							disabled={busy}
+							disabled={busy || preparing}
 							placeholder="http://localhost:3000"
 							onChange={(event) => setUrl(event.target.value)}
 							required
 						/>
 					</label>
-					<p className="muted small">localhost 指{remote ? name : "这台电脑"}。</p>
+					<p className="muted small">
+						localhost 指{remote ? name : "这台电脑"}。{remote ? "首次使用会自动安装所需组件，之后直接启动。" : ""}
+					</p>
 					{remote ? (
 						<div className="browser-field">
 							<span>连接方式</span>
 							<Select
 								value={transport}
 								onChange={setTransport}
-								disabled={busy}
+								disabled={busy || preparing}
 								title="连接方式"
 								options={[
 									{ value: "webrtc", label: "低延迟 · WebRTC" },
@@ -199,7 +249,7 @@ function BrowserPanel({ workspace, onClose }: { workspace: WorkspaceInfo; onClos
 						<input
 							type="checkbox"
 							checked={controlled}
-							disabled={busy}
+							disabled={busy || preparing}
 							onChange={(event) => setControlled(event.target.checked)}
 						/>
 						允许这个工作区的 pi 操作浏览器
@@ -210,9 +260,13 @@ function BrowserPanel({ workspace, onClose }: { workspace: WorkspaceInfo; onClos
 							可读取页面、点击、输入和截图，沿用工作区审批策略。
 						</p>
 					) : null}
-					<button type="submit" className="primary" disabled={busy || !online || ((remote || controlled) && !local)}>
+					<button
+						type="submit"
+						className="primary"
+						disabled={busy || preparing || !online || ((remote || controlled) && !local)}
+					>
 						{busy ? <IconLoader size={15} className="spin" /> : <IconExternal size={15} />}
-						{busy ? "正在打开…" : remote ? "打开远程浏览器" : "在本机打开"}
+						{busy || preparing ? "正在准备…" : remote ? "打开远程浏览器" : "在本机打开"}
 					</button>
 				</form>
 			)}
@@ -238,7 +292,7 @@ function BrowserPanel({ workspace, onClose }: { workspace: WorkspaceInfo; onClos
 								type="button"
 								className="ghost icon"
 								title="关闭浏览器会话"
-								disabled={busy}
+								disabled={busy || preparing}
 								onClick={() => {
 									setBusy(true);
 									setError("");

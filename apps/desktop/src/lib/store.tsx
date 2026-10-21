@@ -58,7 +58,7 @@ import type {
 	WorkspacePathDeleteResult,
 	WorkspacePathTransferResult,
 } from "@pier/protocol";
-import { PierProtocolError, parseProtocolVersion } from "@pier/protocol";
+import { BROWSER_OPEN_TIMEOUT_MS, PierProtocolError, parseProtocolVersion } from "@pier/protocol";
 import { createContext, useContext, useMemo, useSyncExternalStore } from "react";
 import type { Bridge, HostStatus, LocalFileSink, UpdateStatus } from "./bridge.ts";
 import { remoteServiceUrl } from "./browser-url.ts";
@@ -3261,7 +3261,8 @@ export class PierStore {
 		if (!local) throw new Error("尚未连接到本机 Pier Host");
 		if (node !== LOCAL_NODE) {
 			const version = local.host?.protocolVersion?.split(".").map(Number);
-			if (version?.[0] !== 1 || (version[1] ?? 0) < 47) throw new Error("请先更新本机 Pier（远程浏览器需要协议 1.47）");
+			if (version?.[0] !== 1 || (version[1] ?? 0) < 48)
+				throw new Error("请先更新本机 Pier（自动准备远程浏览器需要协议 1.48）");
 		}
 		return local.request(
 			"browser.open",
@@ -3271,7 +3272,7 @@ export class PierStore {
 				controlled,
 				...(node === LOCAL_NODE ? { mode: "service" as const } : { mode: "remote" as const, peerId: node, transport }),
 			},
-			{ timeoutMs: 60_000 },
+			{ timeoutMs: node === LOCAL_NODE ? 60_000 : BROWSER_OPEN_TIMEOUT_MS },
 		);
 	}
 

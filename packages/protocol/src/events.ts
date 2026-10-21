@@ -1,4 +1,4 @@
-import type { BrowserCommand } from "./browser.ts";
+import type { BrowserCommand, BrowserPreparationProgress } from "./browser.ts";
 import type {
 	AgentConfigRuntime,
 	AgentConfigScope,
@@ -88,6 +88,13 @@ export type PierSessionEvent =
 /** Host-scoped events (no `sessionId`, no `seq`). */
 export type PierHostEvent =
 	| { type: "resources.changed"; runtime: ResourceRuntime; workspaceId?: string }
+	| {
+			type: "browser.preparing";
+			browserId: string;
+			workspaceId: string;
+			peerId?: string;
+			progress: BrowserPreparationProgress;
+	  }
 	| { type: "browser.remoteClosed"; browserId: string }
 	| { type: "browser.command"; browserId: string; requestId: string; command: BrowserCommand }
 	| { type: "task.changed" }

@@ -2,7 +2,10 @@ import { createHash, randomUUID } from "node:crypto";
 import { join } from "node:path";
 import type { PierClient } from "@pier/client";
 import {
+	BROWSER_OPEN_TIMEOUT_MS,
 	type BrowserCommand,
+	type BrowserPreparationProgress,
+	BrowserPreparationProgressSchema,
 	type BrowserResult,
 	type BrowserTransport,
 	type LocalBrowserInfo,
@@ -30,6 +33,7 @@ interface Record {
 	closed: boolean;
 	ready?: boolean;
 	remoteId?: string;
+	preparation?: BrowserPreparationProgress;
 	closing?: Promise<void>;
 }
 
@@ -45,6 +49,30 @@ export class LocalBrowsers {
 
 	list(owner: Connection): LocalBrowserInfo[] {
 		return [...this.browsers.values()].filter((r) => r.owner === owner && r.ready).map((r) => r.info);
+	}
+	preparations(owner: Connection) {
+		return [...this.browsers.values()]
+			.filter((record) => record.owner === owner && record.preparation && !record.ready && !record.closed)
+			.map((record) => ({
+				browserId: record.info.browserId,
+				workspaceId: record.info.workspaceId,
+				peerId: record.info.peerId,
+				progress: record.preparation as BrowserPreparationProgress,
+			}));
+	}
+	private progress(record: Record, progress: BrowserPreparationProgress): void {
+		if (record.closed || record.owner.isClosed) return;
+		record.preparation = progress;
+		record.owner.send({
+			type: "evt",
+			event: {
+				type: "browser.preparing",
+				browserId: record.info.browserId,
+				workspaceId: record.info.workspaceId,
+				peerId: record.info.peerId,
+				progress,
+			},
+		});
 	}
 	async open(
 		owner: Connection,
@@ -109,6 +137,7 @@ export class LocalBrowsers {
 			},
 		};
 		this.browsers.set(browserId, record);
+		if (params.mode === "remote") this.progress(record, { stage: "checking", message: "正在准备远程浏览器…" });
 		try {
 			if (params.peerId) {
 				record.client = await this.connect(params.peerId);
@@ -123,10 +152,14 @@ export class LocalBrowsers {
 					if (state !== "open") this.closeRecord(record);
 				});
 				if (params.mode === "remote") {
-					if (version.major === 1 && version.minor < 47)
-						throw new PierProtocolError("UNSUPPORTED", "请先更新远程主机的 Pier（远程浏览器需要协议 1.47）");
+					if (version.major === 1 && version.minor < 48)
+						throw new PierProtocolError("UNSUPPORTED", "请先更新远程主机的 Pier（自动准备远程浏览器需要协议 1.48）");
 					const client = record.client;
 					client.onEvent((frame) => {
+						if (frame.event.type === "browser.preparing" && frame.event.workspaceId === params.workspaceId) {
+							const parsed = BrowserPreparationProgressSchema.safeParse(frame.event.progress);
+							if (parsed.success) this.progress(record, parsed.data);
+						}
 						if (
 							frame.event.type === "browser.remoteClosed" &&
 							(!record.remoteId || frame.event.browserId === record.remoteId)
@@ -141,7 +174,7 @@ export class LocalBrowsers {
 							controlled,
 							transport: params.transport,
 						},
-						{ timeoutMs: 60_000 },
+						{ timeoutMs: BROWSER_OPEN_TIMEOUT_MS },
 					);
 					record.remoteId = remote.browserId;
 					if (record.closed || owner.isClosed) {

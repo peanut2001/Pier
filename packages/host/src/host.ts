@@ -1041,7 +1041,10 @@ export class PierHost implements RequestHandler {
 				this.remoteBrowsers.setTransport(ctx.connection, params.browserId, params.transport),
 			"browser.setTransport": (ctx, params) =>
 				this.browsers.setTransport(ctx.connection, params.browserId, params.transport),
-			"browser.list": (ctx) => ({ browsers: this.browsers.list(ctx.connection) }),
+			"browser.list": (ctx) => ({
+				browsers: this.browsers.list(ctx.connection),
+				preparations: this.browsers.preparations(ctx.connection),
+			}),
 			"browser.close": async (ctx, params) => ({ closed: await this.browsers.close(ctx.connection, params.browserId) }),
 			"browser.attach": (ctx, params) => {
 				this.requireWorkspace(params.workspaceId);

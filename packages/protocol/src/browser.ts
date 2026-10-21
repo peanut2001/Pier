@@ -38,3 +38,31 @@ export interface RemoteBrowserInfo {
 	token: string;
 	transport: BrowserTransport;
 }
+
+/** Initial setup can download several hundred MiB on the workspace host. */
+export const BROWSER_OPEN_TIMEOUT_MS = 15 * 60_000;
+export const BrowserPreparationProgressSchema = z.object({
+	stage: z.enum(["checking", "downloading", "verifying", "installing", "starting"]),
+	component: z.enum(["selkies", "chromium", "system"]).optional(),
+	message: z.string().max(500),
+	downloadedBytes: z
+		.number()
+		.int()
+		.nonnegative()
+		.max(600 * 1024 * 1024)
+		.optional(),
+	totalBytes: z
+		.number()
+		.int()
+		.positive()
+		.max(600 * 1024 * 1024)
+		.optional(),
+});
+export type BrowserPreparationProgress = z.infer<typeof BrowserPreparationProgressSchema>;
+export const BrowserPreparationSchema = z.object({
+	browserId: z.string(),
+	workspaceId: z.string(),
+	peerId: z.string().optional(),
+	progress: BrowserPreparationProgressSchema,
+});
+export type BrowserPreparation = z.infer<typeof BrowserPreparationSchema>;
