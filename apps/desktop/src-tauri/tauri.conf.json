@@ -25,6 +25,7 @@
 		"security": {
 			"csp": {
 				"default-src": "'self'",
+				"frame-src": "'self' pier-preview: http://pier-preview.localhost",
 				"connect-src": "'self' ipc: http://ipc.localhost ws://127.0.0.1:*",
 				"img-src": "'self' data: blob:",
 				"style-src": "'self' 'unsafe-inline'",

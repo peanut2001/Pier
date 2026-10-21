@@ -13,6 +13,7 @@ import {
 	useCanManageWorkspace,
 	useStore,
 } from "../lib/store.tsx";
+import { HtmlPreview } from "./HtmlPreview.tsx";
 import {
 	IconAlert,
 	IconDownload,
@@ -124,6 +125,7 @@ function TextEditor({
 }
 
 const MARKDOWN = /\.(md|markdown|mdx)$/i;
+const HTML = /\.html?$/i;
 
 function TextView({ file }: { file: WorkspaceFileContent }) {
 	const text = file.text ?? "";
@@ -146,7 +148,7 @@ function TextView({ file }: { file: WorkspaceFileContent }) {
 
 /**
  * Preview of one workspace file: text with line numbers and syntax highlighting, rendered
- * Markdown, or an image. Text files that were read in full can be edited and saved back.
+ * Markdown / HTML, or an image. Text files that were read in full can be edited and saved back.
  * `onInsert` inserts the path into the composer when present.
  */
 export function FileViewer({
@@ -236,6 +238,7 @@ export function FileViewer({
 
 	const name = path.split("/").pop() ?? path;
 	const isMarkdown = MARKDOWN.test(path) && file?.kind === "text";
+	const isHtml = HTML.test(path) && file?.kind === "text" && !file.truncated;
 	// Paired computers on protocol 1.10+ accept edits; older ones are read-only from here.
 	const local = useCanManageWorkspace(workspaceId);
 	const editable = !fromMarkdown && local && file?.kind === "text" && !file.truncated;
@@ -422,7 +425,9 @@ export function FileViewer({
 				{file.truncated ? (
 					<div className="file-viewer-banner">文件较大（{formatBytes(file.size)}），仅显示开头部分</div>
 				) : null}
-				{isMarkdown && rendered ? (
+				{isHtml && rendered ? (
+					<HtmlPreview html={file.text ?? ""} title={name} />
+				) : isMarkdown && rendered ? (
 					<div className="file-viewer-markdown">
 						<MarkdownFiles
 							workspaceId={workspaceId}
@@ -482,7 +487,7 @@ export function FileViewer({
 						</>
 					) : (
 						<>
-							{isMarkdown ? (
+							{isMarkdown || isHtml ? (
 								<span className="segmented" role="tablist" aria-label="显示方式">
 									<button
 										type="button"

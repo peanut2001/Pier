@@ -142,6 +142,10 @@ jobs:
         working-directory: apps/desktop/src-tauri
         run: cargo test --lib --locked updater::tests
 
+      - name: HTML preview regression tests
+        working-directory: apps/desktop/src-tauri
+        run: cargo test --lib --locked html_preview::tests
+
       - name: NVIDIA renderer regression tests
         if: runner.os == 'Linux'
         working-directory: apps/desktop/src-tauri

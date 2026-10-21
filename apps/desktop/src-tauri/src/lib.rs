@@ -1,6 +1,7 @@
 mod appimage_env;
 mod autostart;
 mod host;
+mod html_preview;
 #[cfg(target_os = "linux")]
 mod linux_graphics;
 mod speech;
@@ -59,6 +60,9 @@ pub fn run() {
             }
         }));
     let app = autostart::configure(builder)
+        .register_uri_scheme_protocol("pier-preview", |_context, request| {
+            html_preview::response(&request)
+        })
         .on_permission_request(speech::permission)
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
