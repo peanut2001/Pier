@@ -20,6 +20,7 @@ import {
 	IconZap,
 } from "./Icons.tsx";
 import { useOutsideClick } from "./SessionControls.tsx";
+import { Switch } from "./SettingsUi.tsx";
 
 /**
  * The thinking-level panel: a stepped slider, like a progress bar with one stop per level.
@@ -171,6 +172,8 @@ interface ModelMenuProps {
 	manageable?: boolean;
 	onModel: (model: ModelInfo) => void;
 	onThinking: (level: ThinkingLevel) => unknown;
+	/** Present only when the session supports Fast mode. */
+	onFast?: (enabled: boolean) => Promise<unknown>;
 }
 
 /**
@@ -188,6 +191,7 @@ function ModelMenu({
 	manageable = true,
 	onModel,
 	onThinking,
+	onFast,
 }: ModelMenuProps) {
 	const store = useStore();
 	const [open, setOpen] = useState(false);
@@ -200,11 +204,21 @@ function ModelMenu({
 	const [models, setModels] = useState<ModelInfo[] | undefined>();
 	const [error, setError] = useState<string | undefined>();
 	const [filter, setFilter] = useState("");
+	const [fastPending, setFastPending] = useState(false);
 	const close = () => setOpen(false);
 	const ref = useOutsideClick(open, close);
 	const levels = supportedThinkingLevels(model);
 	const canThink = levels.length > 1;
 	const level = clampThinking(thinkingLevel ?? "medium", levels);
+	const setFast = async (enabled: boolean) => {
+		if (!onFast || fastPending || disabled) return;
+		setFastPending(true);
+		try {
+			await onFast(enabled);
+		} finally {
+			setFastPending(false);
+		}
+	};
 
 	useLayoutEffect(() => {
 		const el = body.current;
@@ -272,7 +286,7 @@ function ModelMenu({
 				data-level={level}
 				disabled={disabled}
 				onClick={toggle}
-				title="切换模型与思考程度"
+				title={onFast ? "切换模型、思考程度与 Fast 模式" : "切换模型与思考程度"}
 			>
 				<span className="composer-model-name">
 					{model ? model.name || model.id : loading ? "加载模型…" : "选择模型"}
@@ -283,7 +297,7 @@ function ModelMenu({
 					</span>
 				) : null}
 				{fastMode ? (
-					<span className="composer-model-fast" title="Fast 模式已开启，输入 /fast off 关闭">
+					<span className="composer-model-fast" title="Fast 模式已开启">
 						<IconZap size={12} />
 						Fast
 					</span>
@@ -302,6 +316,28 @@ function ModelMenu({
 										) : (
 											<div className="thinking-panel-none muted">这个模型不支持调节思考程度</div>
 										)}
+										{onFast ? (
+											<>
+												<div className="dropdown-separator" />
+												<div className="model-menu-fast" aria-busy={fastPending}>
+													<div className="model-menu-current-text">
+														<span className="menu-label">
+															<IconZap size={14} />
+															Fast 模式
+														</span>
+														<span className="model-menu-fast-hint">
+															{fastPending ? "正在切换…" : "从下一轮请求生效"}
+														</span>
+													</div>
+													<Switch
+														checked={fastMode === true}
+														onChange={(enabled) => void setFast(enabled)}
+														disabled={disabled || fastPending}
+														label="Fast 模式"
+													/>
+												</div>
+											</>
+										) : null}
 										<div className="dropdown-separator" />
 										<button type="button" className="dropdown-item model-menu-current" onClick={() => go("models")}>
 											<span className="menu-label">
@@ -401,6 +437,7 @@ export function SessionModelPicker({ chat, controller }: { chat: ChatState; cont
 			loadModels={() => controller.listModels().then((r) => r.models)}
 			onModel={(m) => void controller.setModel(m.provider, m.id)}
 			onThinking={(level) => controller.setThinking(level)}
+			onFast={chat.capabilities?.fastMode ? (enabled) => controller.setFast(enabled) : undefined}
 		/>
 	);
 }
