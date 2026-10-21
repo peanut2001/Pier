@@ -23,7 +23,7 @@ import {
 } from "./Icons.tsx";
 import { NewChatModelPicker } from "./ModelPicker.tsx";
 import { NoModelsBanner } from "./ModelsPanel.tsx";
-import { useNewChatSlashMenu } from "./NewChatSlashMenu.ts";
+import { useNewChatRuntimes, useNewChatSlashMenu } from "./NewChatSlashMenu.ts";
 import { PolicyPicker, useOutsideClick } from "./SessionControls.tsx";
 import { AddWorkspaceItems, SidebarToggle, useAddWorkspace } from "./Sidebar.tsx";
 import { SlashMenu, type SlashMenuEntry } from "./SlashMenu.tsx";
@@ -140,33 +140,20 @@ function WorkspacePicker({ workspace, disabled }: { workspace?: WorkspaceInfo; d
  * Chip that picks the agent (pi, Claude Code, Codex) the new chat runs on. Shown when the
  * workspace's computer can run another agent than pi.
  */
-function AgentPicker({ workspace, disabled }: { workspace: WorkspaceInfo; disabled?: boolean }) {
+function AgentPicker({
+	workspace,
+	disabled,
+	runtimes,
+}: {
+	workspace: WorkspaceInfo;
+	disabled?: boolean;
+	runtimes: AgentRuntimeInfo[];
+}) {
 	const store = useStore();
 	const node = useAppState((s) => s.workspaceNodes[workspace.id] ?? LOCAL_NODE);
-	const online = useAppState((s) => s.nodes[node]?.connection === "open");
-	const hostInfo = useAppState((s) => s.nodes[node]?.hostInfo);
 	const runtime = useAppState((s) => s.newChatRuntime[node] ?? "pi");
-	const installationVersion = useAppState((s) => s.agentConfigVersion);
-	const [runtimes, setRuntimes] = useState<AgentRuntimeInfo[]>([]);
 	const [open, setOpen] = useState(false);
 	const ref = useOutsideClick(open, () => setOpen(false));
-
-	// biome-ignore lint/correctness/useExhaustiveDependencies: reload when the computer (re)connects.
-	useEffect(() => {
-		if (!online) return;
-		let live = true;
-		store
-			.listRuntimes(workspace.id)
-			.then((list) => {
-				if (live) setRuntimes(list);
-			})
-			.catch(() => {
-				if (live) setRuntimes([]);
-			});
-		return () => {
-			live = false;
-		};
-	}, [store, workspace.id, online, hostInfo, installationVersion]);
 
 	const current = runtimes.find((r) => r.id === runtime);
 	// A runtime that went away (CLI uninstalled, older host) falls back to pi.
@@ -271,7 +258,8 @@ export function NewChatView({ workspaceId }: { workspaceId?: string }) {
 	useComposerInsert(NEW_CHAT_DRAFT, input);
 
 	const prompt = draftToPrompt(draft.text);
-	const menu = useNewChatSlashMenu(workspaceId, prompt);
+	const runtimes = useNewChatRuntimes(workspaceId);
+	const menu = useNewChatSlashMenu(workspaceId, prompt, runtimes);
 	const hasContent = prompt.trim().length > 0 || draft.images.length > 0;
 	const canSend = online && !!workspace && !sending && hasContent;
 
@@ -449,7 +437,9 @@ export function NewChatView({ workspaceId }: { workspaceId?: string }) {
 								}}
 							/>
 							<WorkspacePicker workspace={workspace} disabled={sending} />
-							{workspace ? <AgentPicker workspace={workspace} disabled={sending || !online} /> : null}
+							{workspace ? (
+								<AgentPicker workspace={workspace} disabled={sending || !online} runtimes={runtimes} />
+							) : null}
 							{workspace ? <PolicyPicker workspace={workspace} /> : null}
 						</div>
 						<div className="composer-actions">
