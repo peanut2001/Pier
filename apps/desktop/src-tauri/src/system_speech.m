@@ -17,6 +17,12 @@ typedef void (*PierSpeechCallback)(void *, const char *, const char *);
 
 static NSMutableDictionary<NSString *, PierSpeechJob *> *jobs;
 
+static BOOL supports_system_speech(void) {
+    // Rust links with -nodefaultlibs, so @available's Clang runtime helper may
+    // be missing. Foundation provides the same check on our macOS 10.13 baseline.
+    return [NSProcessInfo.processInfo isOperatingSystemAtLeastVersion:(NSOperatingSystemVersion){10, 15, 0}];
+}
+
 static void finish(PierSpeechJob *job, NSString *text, NSString *error) {
     if (!job.callback) return;
     PierSpeechCallback callback = job.callback;
@@ -29,7 +35,7 @@ static void finish(PierSpeechJob *job, NSString *text, NSString *error) {
 
 void pier_speech_authorize(void *context, PierSpeechCallback callback) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (@available(macOS 10.15, *)) {
+        if (supports_system_speech()) {
             [SFSpeechRecognizer requestAuthorization:^(SFSpeechRecognizerAuthorizationStatus status) {
                 NSString *error = nil;
                 if (status == SFSpeechRecognizerAuthorizationStatusDenied) {
@@ -52,7 +58,7 @@ void pier_speech_transcribe(const char *identifier, const char *path, const char
     NSString *audioPath = [NSString stringWithUTF8String:path];
     NSString *localeID = [NSString stringWithUTF8String:language];
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (@available(macOS 10.15, *)) {
+        if (supports_system_speech()) {
             if (!jobs) jobs = [NSMutableDictionary dictionary];
             if (jobs.count) {
                 callback(context, NULL, "已有系统语音识别正在进行，请稍后重试");
