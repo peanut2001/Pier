@@ -201,6 +201,8 @@ bun run --cwd apps/desktop build              # 打包安装包（deb / AppImage
 
 **Windows 安装程序语言**：NSIS 安装 / 卸载程序内置英文、简体中文和繁体中文（`bundle.windows.nsis.languages`），按 Windows 的界面语言自动选择，不弹出语言选择框；系统语言不在列表中时使用英文。
 
+**macOS 文件对话框语言**：文件与目录选择窗口的系统按钮、搜索框和侧栏按 macOS 首选语言显示，支持英文、简体中文和繁体中文；如果在「系统设置 → 通用 → 语言与地区 → 应用程序」中为 Pier 单独指定了语言，则以该设置为准。更改语言后，需要从托盘或「设置 → 常规 → 退出 Pier」完整退出并重新打开；关闭窗口只会隐藏到托盘。
+
 **macOS 首次打开**：安装包目前只做了本机签名（ad-hoc，`bundle.macOS.signingIdentity: "-"`），没有 Apple Developer ID 签名和公证。从浏览器下载后第一次打开时，macOS 会提示“无法验证开发者”（或“Apple 无法检查其是否包含恶意软件”）：把 Pier 拖进「应用程序」，双击打开一次后到「系统设置 → 隐私与安全性」底部点「仍要打开」并确认即可，之后正常启动；应用内自动更新不会再触发该提示。v0.2.2 及更早的安装包完全未签名，macOS 会误报“已损坏，无法打开”，这时在终端执行 `xattr -dr com.apple.quarantine /Applications/Pier.app` 后再打开（仍不行时再执行 `codesign --force --deep --sign - /Applications/Pier.app`）。
 
 只调界面时可以不启动 Tauri：用假模型（faux）起一个 Host，再在浏览器里打开 Vite 开发服务器：

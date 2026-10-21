@@ -143,7 +143,7 @@ jobs:
       # The app is ad-hoc signed (bundle.macOS.signingIdentity "-"), not notarized: Gatekeeper
       # then offers "Open Anyway" instead of reporting the download as damaged. Check that the
       # signature covers the sidecar and that the hardened runtime still lets Bun's JIT run.
-      - name: Verify macOS signature
+      - name: Verify macOS signature and native languages
         if: runner.os == 'macOS'
         run: |
           app=$(ls -d apps/desktop/src-tauri/target/release/bundle/macos/*.app | head -1)
@@ -154,6 +154,29 @@ jobs:
             echo "$info" | grep -E '^(Executable|Identifier|Signature|CodeDirectory)'
             echo "$info" | grep -q '^Signature=adhoc' || { echo "::error::$exe is not ad-hoc signed"; exit 1; }
           done
+          # Check Cocoa's language matching against the shipped bundle, including regional
+          # Chinese preferences. AllowMixedLocalizations alone leaves the app English-only.
+          swift - "$app" <<'SWIFT'
+          import Foundation
+
+          guard let bundle = Bundle(path: CommandLine.arguments[1]) else {
+              fatalError("Cannot read the packaged Pier.app")
+          }
+          let cases: [([String], String)] = [
+              (["zh-Hans-CN", "en-US"], "zh-Hans"),
+              (["zh-CN", "en-US"], "zh-Hans"),
+              (["zh-Hant-TW", "en-US"], "zh-Hant"),
+              (["zh-HK", "en-US"], "zh-Hant"),
+              (["en-US", "zh-Hans-CN"], "en"),
+          ]
+          for (preferences, expected) in cases {
+              let selected = Bundle.preferredLocalizations(from: bundle.localizations, forPreferences: preferences)
+              guard selected.first == expected else {
+                  fatalError("Native language mismatch for \(preferences): \(selected), expected \(expected)")
+              }
+              print("Native language: \(preferences) -> \(expected)")
+          }
+          SWIFT
           # Pier.app ships pi's assets as a resource; the desktop passes them through PI_PACKAGE_DIR.
           PI_PACKAGE_DIR="$app/Contents/Resources/pi-assets" \
             node packages/host/scripts/smoke-sidecar.mjs "$app/Contents/MacOS/pier-host" "${{ needs.verify.outputs.version }}"
