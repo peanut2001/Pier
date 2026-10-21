@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { IconX } from "./Icons.tsx";
 
 /**
@@ -19,7 +20,8 @@ export function Modal({
 	wide?: boolean;
 	className?: string;
 }) {
-	return (
+	// Keep the backdrop and dialog in viewport coordinates, outside panels that clip or transform descendants.
+	return createPortal(
 		<div className="modal-backdrop">
 			<div className={`modal${wide ? " wide" : ""}${className ? ` ${className}` : ""}`}>
 				<div className="modal-header">
@@ -30,6 +32,7 @@ export function Modal({
 				</div>
 				<div className="modal-body">{children}</div>
 			</div>
-		</div>
+		</div>,
+		document.body,
 	);
 }
