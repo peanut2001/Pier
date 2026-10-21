@@ -9,6 +9,7 @@ const threads = new Map();
 const pendingServer = new Map();
 let nextServerId = 1;
 let seq = 0;
+let experimentalApi = false;
 const id = (prefix) => `${prefix}-${++seq}`;
 const now = () => Math.floor(Date.now() / 1000);
 
@@ -182,7 +183,10 @@ async function runTurn(thread, turn, text) {
 }
 
 const handlers = {
-	initialize: () => ({ userAgent: "fake", codexHome: dir, platformFamily: "unix", platformOs: "linux" }),
+	initialize: (params) => {
+		experimentalApi = params.capabilities?.experimentalApi === true;
+		return { userAgent: "fake", codexHome: dir, platformFamily: "unix", platformOs: "linux" };
+	},
 	"model/list": () => ({ data: MODELS, nextCursor: null }),
 	"thread/start": (params) => {
 		const thread = newThread(params.cwd);
@@ -224,6 +228,7 @@ const handlers = {
 		return { thread: threadView(thread), model: thread.model, reasoningEffort: null, serviceTier: thread.serviceTier };
 	},
 	"thread/settings/update": (params) => {
+		if (!experimentalApi) throw new Error("thread/settings/update requires experimentalApi capability");
 		const thread = threads.get(params.threadId);
 		if (thread.rejectSettings) {
 			thread.rejectSettings = false;

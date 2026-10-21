@@ -125,7 +125,8 @@ export class CodexAppServer {
 		const initialized = (async () => {
 			await this.send("initialize", {
 				clientInfo: { name: this.options.clientName, title: "Pier", version: this.options.clientVersion },
-				capabilities: { experimentalApi: false, requestAttestation: false },
+				// Fast mode persists serviceTier through the experimental thread/settings/update API.
+				capabilities: { experimentalApi: true, requestAttestation: false },
 			});
 			this.write({ method: "initialized" });
 		})();
