@@ -1,12 +1,8 @@
 import { VOICE_LABELS } from "@pier/chat-state";
-import { useState } from "react";
 import type { useVoiceInput } from "../lib/use-voice-input.ts";
-import { IconLoader, IconMic, IconSettings, IconStop, IconX } from "./Icons.tsx";
-import { Modal } from "./Modal.tsx";
-import { SpeechSettings } from "./SpeechSettings.tsx";
+import { IconLoader, IconMic, IconStop, IconX } from "./Icons.tsx";
 
 export function VoiceControls({ voice, disabled }: { voice: ReturnType<typeof useVoiceInput>; disabled?: boolean }) {
-	const [settings, setSettings] = useState(false);
 	const recording = voice.phase === "recording";
 	const label = VOICE_LABELS[voice.phase];
 	return (
@@ -43,21 +39,6 @@ export function VoiceControls({ voice, disabled }: { voice: ReturnType<typeof us
 						<IconX size={14} />
 					</button>
 				</>
-			) : (
-				<button
-					type="button"
-					className="ghost icon"
-					title="语音设置"
-					aria-label="语音设置"
-					onClick={() => setSettings(true)}
-				>
-					<IconSettings size={13} />
-				</button>
-			)}
-			{settings ? (
-				<Modal title="语音输入设置（本机）" onClose={() => setSettings(false)}>
-					<SpeechSettings />
-				</Modal>
 			) : null}
 		</div>
 	);
