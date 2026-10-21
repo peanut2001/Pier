@@ -241,7 +241,10 @@ export interface SlashTarget {
 }
 
 /** Options for the argument of `/model`, `/thinking`, or `/fork`. */
-export async function loadArgumentOptions(target: SlashTarget, command: string): Promise<SlashOption[]> {
+export async function loadArgumentOptions(
+	target: Pick<SlashTarget, "chat" | "listModels" | "forkPoints">,
+	command: string,
+): Promise<SlashOption[]> {
 	switch (command) {
 		case "fast":
 			return [

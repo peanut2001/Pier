@@ -8,7 +8,7 @@ import {
 	type SlashOption,
 	slashMenu,
 } from "@pier/chat-state";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 const SOURCE_LABEL: Record<SlashCommand["source"], string> = {
 	builtin: "内置",
@@ -64,9 +64,6 @@ function optionEntry(command: string, option: SlashOption): Entry {
 /** Slash-command menu state for the composer text. */
 export function useSlashMenu(controller: ChatController, text: string): SlashMenuModel {
 	const [list, setList] = useState<CommandList>(() => controller.commands);
-	const [dismissedFor, setDismissedFor] = useState<string | undefined>();
-	const [active, setActive] = useState(0);
-	const [args, setArgs] = useState<{ command: string; options?: SlashOption[]; error?: string }>();
 	const slashing = text.startsWith("/");
 	const sessionId = controller.sessionId;
 	const runtime = controller.chat.session?.runtime;
@@ -86,6 +83,25 @@ export function useSlashMenu(controller: ChatController, text: string): SlashMen
 		};
 	}, [slashing, controller, sessionId, runtime, capabilities]);
 
+	const loadOptions = useCallback((command: string) => loadArgumentOptions(controller, command), [controller]);
+	return useSlashMenuState(text, list, loadOptions);
+}
+
+/** Shared menu interaction for existing sessions and the new-chat draft. */
+export function useSlashMenuState(
+	text: string,
+	list: CommandList,
+	loadOptions: (command: string) => Promise<SlashOption[]>,
+): SlashMenuModel {
+	const [dismissedFor, setDismissedFor] = useState<string | undefined>();
+	const [active, setActive] = useState(0);
+	const [args, setArgs] = useState<{ command: string; options?: SlashOption[]; error?: string }>();
+
+	// Esc dismisses this query; deleting and typing it again should reopen the menu.
+	useEffect(() => {
+		if (dismissedFor !== text) setDismissedFor(undefined);
+	}, [dismissedFor, text]);
+
 	const state = dismissedFor === text ? undefined : slashMenu(text, list.commands);
 	const argCommand = state?.kind === "arguments" ? state.command : undefined;
 
@@ -96,7 +112,7 @@ export function useSlashMenu(controller: ChatController, text: string): SlashMen
 		}
 		let alive = true;
 		setArgs({ command: argCommand });
-		loadArgumentOptions(controller, argCommand)
+		loadOptions(argCommand)
 			.then((options) => {
 				if (alive) setArgs({ command: argCommand, options });
 			})
@@ -106,7 +122,7 @@ export function useSlashMenu(controller: ChatController, text: string): SlashMen
 		return () => {
 			alive = false;
 		};
-	}, [argCommand, controller]);
+	}, [argCommand, loadOptions]);
 
 	let entries: Entry[] = [];
 	let status: string | undefined;

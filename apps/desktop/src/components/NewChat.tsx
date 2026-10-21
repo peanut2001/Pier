@@ -1,4 +1,4 @@
-import { agentRuntimeLabel } from "@pier/chat-state";
+import { agentRuntimeLabel, parseSlash } from "@pier/chat-state";
 import type { AgentRuntimeInfo, WorkspaceInfo } from "@pier/protocol";
 import { useEffect, useRef, useState } from "react";
 import { draftToPrompt } from "../lib/composer-text.ts";
@@ -23,8 +23,10 @@ import {
 } from "./Icons.tsx";
 import { NewChatModelPicker } from "./ModelPicker.tsx";
 import { NoModelsBanner } from "./ModelsPanel.tsx";
+import { useNewChatSlashMenu } from "./NewChatSlashMenu.ts";
 import { PolicyPicker, useOutsideClick } from "./SessionControls.tsx";
 import { AddWorkspaceItems, SidebarToggle, useAddWorkspace } from "./Sidebar.tsx";
+import { SlashMenu, type SlashMenuEntry } from "./SlashMenu.tsx";
 import { TerminalToggle } from "./TerminalPanel.tsx";
 
 /** Chip that picks the workspace (on any computer) the new chat will be created in. */
@@ -268,18 +270,39 @@ export function NewChatView({ workspaceId }: { workspaceId?: string }) {
 
 	useComposerInsert(NEW_CHAT_DRAFT, input);
 
-	const hasContent = draftToPrompt(draft.text).trim().length > 0 || draft.images.length > 0;
+	const prompt = draftToPrompt(draft.text);
+	const menu = useNewChatSlashMenu(workspaceId, prompt);
+	const hasContent = prompt.trim().length > 0 || draft.images.length > 0;
 	const canSend = online && !!workspace && !sending && hasContent;
 
-	async function send() {
+	async function send(override?: string) {
 		if (!canSend) return;
+		const text = (override ?? draft.text).trim();
+		const command = parseSlash(draftToPrompt(text));
+		if (
+			command &&
+			(command.name === "new" || command.name === "clear") &&
+			menu.list.commands.some((entry) => entry.name === command.name && entry.source === "builtin")
+		) {
+			// Already on the new-chat screen: clear the text without leaving an empty session.
+			setDraft((d) => ({ ...d, text: "" }));
+			input.current?.focus();
+			return;
+		}
 		setSending(true);
-		const created = await store.sendNewChat({ ...draft, text: draft.text.trim() });
+		const created = await store.sendNewChat({ ...draft, text });
 		// On success this view unmounts (the new session opens and sends the draft itself).
 		if (!created) {
 			setSending(false);
 			input.current?.focus();
 		}
+	}
+
+	function pick(entry: SlashMenuEntry, tab = false) {
+		const next = entry.pick(tab);
+		if (next.run) void send(next.text);
+		else setDraft((d) => ({ ...d, text: next.text }));
+		input.current?.focus();
 	}
 
 	async function addFiles(files: Iterable<File>) {
@@ -353,13 +376,14 @@ export function NewChatView({ workspaceId }: { workspaceId?: string }) {
 							))}
 						</div>
 					) : null}
+					<SlashMenu menu={menu} onPick={(entry) => pick(entry)} />
 					<ComposerInput
 						ref={input}
 						value={draft.text}
 						disabled={sending}
 						placeholder={
 							workspace
-								? `在「${workspace.name}」中描述你的任务…（Enter 发送，Shift+Enter 换行）`
+								? `在「${workspace.name}」中描述你的任务…（Enter 发送，Shift+Enter 换行，/ 使用命令）`
 								: "先选择工作区，再描述你的任务…"
 						}
 						onChange={(text) => setDraft((d) => ({ ...d, text }))}
@@ -375,6 +399,26 @@ export function NewChatView({ workspaceId }: { workspaceId?: string }) {
 						}}
 						onKeyDown={(e) => {
 							if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+							if (menu.open) {
+								const entry = menu.entries[menu.active];
+								if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+									if (menu.entries.length) {
+										e.preventDefault();
+										menu.move(e.key === "ArrowDown" ? 1 : -1);
+									}
+									return;
+								}
+								if (e.key === "Escape") {
+									e.preventDefault();
+									menu.dismiss();
+									return;
+								}
+								if (entry && (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey && !e.altKey))) {
+									e.preventDefault();
+									pick(entry, e.key === "Tab");
+									return;
+								}
+							}
 							if (e.key === "Enter" && !e.shiftKey) {
 								e.preventDefault();
 								void send();
