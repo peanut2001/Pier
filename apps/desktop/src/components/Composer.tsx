@@ -4,7 +4,7 @@ import { type RefObject, useEffect, useRef, useState } from "react";
 import { draftToPrompt } from "../lib/composer-text.ts";
 import { type Draft, useStore } from "../lib/store.tsx";
 import { ComposerInput, type ComposerInputHandle } from "./ComposerInput.tsx";
-import { IconArrowUp, IconImage, IconStop, IconX, IconZap } from "./Icons.tsx";
+import { IconArrowUp, IconImage, IconStop, IconX } from "./Icons.tsx";
 import { SessionModelPicker } from "./ModelPicker.tsx";
 import { PolicyPicker } from "./SessionControls.tsx";
 import { SlashMenu, type SlashMenuEntry, useSlashMenu } from "./SlashMenu.tsx";
@@ -277,12 +277,6 @@ export function Composer({
 				</div>
 				<div className="composer-actions">
 					<SessionModelPicker chat={chat} controller={controller} />
-					{chat.fastMode ? (
-						<span className="composer-fast-badge" title="Fast 模式已开启，输入 /fast off 关闭">
-							<IconZap size={12} />
-							Fast
-						</span>
-					) : null}
 					{running ? (
 						<>
 							<span className="composer-hint">Enter 引导 · Alt+Enter 排队</span>

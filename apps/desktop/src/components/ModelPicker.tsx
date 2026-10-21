@@ -17,6 +17,7 @@ import {
 	IconSearch,
 	IconSettings,
 	IconSparkles,
+	IconZap,
 } from "./Icons.tsx";
 import { useOutsideClick } from "./SessionControls.tsx";
 
@@ -161,6 +162,7 @@ interface ModelMenuProps {
 	node: string;
 	model?: ModelInfo;
 	thinkingLevel?: string;
+	fastMode?: boolean;
 	/** Still resolving which model will be used (the chip shows a placeholder). */
 	loading?: boolean;
 	disabled?: boolean;
@@ -179,6 +181,7 @@ function ModelMenu({
 	node,
 	model,
 	thinkingLevel,
+	fastMode,
 	loading,
 	disabled,
 	loadModels,
@@ -277,6 +280,12 @@ function ModelMenu({
 				{model && canThink ? (
 					<span key={level} className="composer-model-thinking">
 						{thinkingLabel(level)}
+					</span>
+				) : null}
+				{fastMode ? (
+					<span className="composer-model-fast" title="Fast 模式已开启，输入 /fast off 关闭">
+						<IconZap size={12} />
+						Fast
 					</span>
 				) : null}
 				<IconChevronUp size={13} className="chip-caret" />
@@ -385,6 +394,7 @@ export function SessionModelPicker({ chat, controller }: { chat: ChatState; cont
 			node={store.nodeOf(controller.workspaceId)}
 			model={chat.model}
 			thinkingLevel={chat.thinkingLevel}
+			fastMode={chat.fastMode}
 			loading={!chat.loaded}
 			disabled={!!chat.closed || chat.capabilities?.setModel === false}
 			manageable={(chat.session?.runtime ?? "pi") === "pi"}
