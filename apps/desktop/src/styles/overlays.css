@@ -449,3 +449,29 @@
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
+
+.browser-viewer-modal.wide {
+	width: min(1500px, 96vw);
+	max-width: 96vw;
+}
+.browser-viewer-modal .modal-body {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
+.browser-viewer-toolbar {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+}
+.browser-viewer-toolbar > span {
+	flex: 1;
+}
+.browser-viewer {
+	width: 100%;
+	height: min(65vh, 900px);
+	min-height: 300px;
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	background: #111;
+}

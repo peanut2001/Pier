@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-/** Local rendering with a paired computer supplying the network (1.37). */
+/** Actions shared by local windows and browsers running on the workspace host. */
 export const BrowserCommandSchema = z.object({
 	action: z.enum(["tabs", "navigate", "snapshot", "click", "fill", "press", "evaluate", "screenshot"]),
 	tabId: z.string().max(256).optional(),
@@ -23,6 +23,18 @@ export interface LocalBrowserInfo {
 	peerId?: string;
 	url: string;
 	localUrl: string;
-	mode: "service" | "network";
+	mode: "service" | "network" | "remote";
 	controllable: boolean;
+	transport?: BrowserTransport;
+}
+
+export type BrowserTransport = "webrtc" | "websockets";
+
+/** A session on the workspace host. Only its owning connection receives the access token. */
+export interface RemoteBrowserInfo {
+	browserId: string;
+	workspaceId: string;
+	port: number;
+	token: string;
+	transport: BrowserTransport;
 }

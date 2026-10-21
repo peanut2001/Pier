@@ -13,7 +13,7 @@ export function createBrowserExtension(
 				name: "pier_browser",
 				label: "浏览器",
 				description:
-					"Operate the local-rendered browser the user opened from the workspace browser button. Browser pages render on the client computer and use the workspace host network when configured. Actions: tabs lists tabId values; navigate requires url; snapshot reads text and controls; click/fill require a CSS selector; fill requires text; press requires key; evaluate requires expression; screenshot returns an image. No browser is opened automatically.",
+					"Operate the browser the user opened from the workspace browser button and allowed this workspace to control. Remote browser sessions run on the workspace host; their pages, files, and login state stay there. Local sessions run on the local computer. Actions: tabs lists tabId values; navigate requires url; snapshot reads text and controls; click/fill require a CSS selector; fill requires text; press requires key; evaluate requires expression; screenshot returns an image. No browser is opened automatically.",
 				parameters: Type.Object({
 					action: Type.Union(
 						["tabs", "navigate", "snapshot", "click", "fill", "press", "evaluate", "screenshot"].map((a) =>

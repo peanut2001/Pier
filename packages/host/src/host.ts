@@ -31,6 +31,7 @@ import {
 } from "@pier/protocol";
 import { type BrowserOptions, LocalBrowsers } from "./browser/browsers.ts";
 import { BrowserControllers } from "./browser/controllers.ts";
+import { type RemoteBrowserOptions, RemoteBrowsers } from "./browser/remote-browsers.ts";
 import { HostTunnels } from "./browser/tunnels.ts";
 import { ClaudeCodeRuntime, type ClaudeCodeRuntimeOptions, claudeConfigDir } from "./claude/claude-runtime.ts";
 import { CodexRuntime, type CodexRuntimeOptions, codexHome } from "./codex/codex-runtime.ts";
@@ -151,6 +152,7 @@ export interface PierHostOptions {
 	/** Installer dependencies for tests; production always downloads official native releases. */
 	agentInstaller?: Pick<AgentInstallerOptions, "fetch" | "probe" | "homeDirectory" | "configurePath">;
 	browser?: BrowserOptions;
+	remoteBrowser?: RemoteBrowserOptions;
 }
 
 /** Remote methods recorded in the audit log. */
@@ -165,6 +167,9 @@ const AUDITED_METHODS = new Set<MethodName>([
 	"mcp.delete",
 	"mcp.test",
 	"tunnel.open",
+	"browser.remoteOpen",
+	"browser.remoteClose",
+	"browser.remoteTransport",
 	"browser.attach",
 	"browser.action",
 	"task.create",
@@ -260,6 +265,9 @@ function auditDetail(method: MethodName, params: Record<string, unknown>): Recor
 			return { runtime: params.runtime, scope: params.scope, name: params.name, workspaceId: params.workspaceId };
 		case "tunnel.open":
 			return { host: params.host, port: params.port };
+		case "browser.remoteOpen":
+		case "browser.remoteClose":
+		case "browser.remoteTransport":
 		case "browser.attach":
 			return { workspaceId: params.workspaceId, browserId: params.browserId };
 		case "browser.action":
@@ -464,6 +472,7 @@ export class PierHost implements RequestHandler {
 	readonly browserControllers = new BrowserControllers();
 	readonly tunnels = new HostTunnels();
 	readonly browsers: LocalBrowsers;
+	readonly remoteBrowsers: RemoteBrowsers;
 	readonly portForwards: LocalPortForwards;
 	readonly ports = new HostPortSampler();
 	readonly processes = new HostProcessManager();
@@ -635,6 +644,12 @@ export class PierHost implements RequestHandler {
 			this.browserControllers,
 			options.browser,
 		);
+		this.remoteBrowsers = new RemoteBrowsers(
+			this.pierDir,
+			this.browserControllers,
+			() => this.remote.browserIceServers(),
+			options.remoteBrowser,
+		);
 		this.terminals = new HostTerminals(this.shell, { log });
 		this.uploads = new WorkspaceUploads({ log });
 		this.offShellStatus = this.shell?.onUpdateStatus((status) => this.broadcast({ type: "update.status", status }));
@@ -723,6 +738,7 @@ export class PierHost implements RequestHandler {
 		this.speech.cancel(connection.connectionId);
 		this.portForwards.connectionClosed(connection);
 		this.browsers.connectionClosed(connection);
+		this.remoteBrowsers.connectionClosed(connection);
 		this.browserControllers.connectionClosed(connection);
 		this.tunnels.connectionClosed(connection);
 		this.connections.delete(connection);
@@ -1014,6 +1030,17 @@ export class PierHost implements RequestHandler {
 				if (!params.peerId) this.requireWorkspace(params.workspaceId);
 				return this.browsers.open(ctx.connection, params);
 			},
+			"browser.remoteOpen": (ctx, params) => {
+				this.requireWorkspace(params.workspaceId);
+				return this.remoteBrowsers.open(ctx.connection, params);
+			},
+			"browser.remoteClose": async (ctx, params) => ({
+				closed: await this.remoteBrowsers.close(ctx.connection, params.browserId),
+			}),
+			"browser.remoteTransport": (ctx, params) =>
+				this.remoteBrowsers.setTransport(ctx.connection, params.browserId, params.transport),
+			"browser.setTransport": (ctx, params) =>
+				this.browsers.setTransport(ctx.connection, params.browserId, params.transport),
 			"browser.list": (ctx) => ({ browsers: this.browsers.list(ctx.connection) }),
 			"browser.close": async (ctx, params) => ({ closed: await this.browsers.close(ctx.connection, params.browserId) }),
 			"browser.attach": (ctx, params) => {
@@ -1597,6 +1624,7 @@ export class PierHost implements RequestHandler {
 		this.speech.shutdown();
 		this.portForwards.shutdown();
 		await this.browsers.shutdown();
+		await this.remoteBrowsers.shutdown();
 		this.browserControllers.shutdown();
 		this.tunnels.shutdown();
 		this.offShellStatus?.();

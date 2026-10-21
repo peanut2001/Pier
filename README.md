@@ -146,17 +146,36 @@ MCP 测试会连接目标电脑上的服务器，stdio 测试会启动配置的�
 
 本机需要协议 **1.39+**；查看端口的目标主机需要 **1.39+**，手动映射已有 TCP 服务只要求目标主机 **1.37+**。旧版主机会显示升级提示。
 
-### 在本地操作远程网页
+### 工作区浏览器
 
-在工作区首页、新建会话页或会话标题栏点击「浏览器」：网页始终在当前电脑渲染，远程电脑不需要安装或运行浏览器（两端 Host 需要协议 1.37）。
+在工作区首页、新建会话页或会话标题栏点击「浏览器」，运行位置跟随工作区主机：
 
-- **开发服务**：输入远程电脑上的 `http://localhost:3000` 等地址，Pier 建立加密 TCP 端口转发，在本地默认浏览器打开。支持 HTTP、WebSocket 和热更新；远程聊天和终端中的回环网页链接也会自动转发。地址中的路径、查询和锚点保留。
-- **远程网络**：启动本地 Chrome / Chromium / Edge 独立窗口，通过所选电脑连接网站和解析目标域名，使用它的出口 IP，并保留网页原始域名。适用于多个端口、依赖原始域名、HTTPS 证书或登录流程的网站。本地需要已安装 Chromium 系浏览器；未自动找到时设置本地 Host 的 `PIER_BROWSER_BIN` 为浏览器可执行文件。不开启无沙箱模式。
-- **Agent 操作**：默认关闭，勾选「允许这个工作区的 pi 操作独立浏览器」后，内置 pi 的 `pier_browser` 工具可列出标签页、导航、读取页面、点击、输入、按键、执行页面脚本和截图。「询问」「智能」策略对交互操作请求审批，只读操作直接执行；「自动」直接执行。Claude Code / Codex 尚未内置这个工具，外部集成可调用协议的 `browser.action`。
+- **本机工作区**：在系统默认浏览器打开网页。勾选「允许这个工作区的 pi 操作浏览器」时，启动独立的 Chrome / Chromium / Edge 窗口。
+- **远程工作区**：在远程 Linux 主机启动真实 Chromium 浏览器，画面嵌入 Pier，可以操作标签页、地址栏和网页，也可在独立窗口显示。`localhost`、网站出口 IP、登录状态和下载都属于远程主机。
+- **连接方式**：默认 WebRTC，优先使用 H.264，客户端不支持时可协商 VP8；编码支持 GPU 和 CPU。没有画面或直连受限时点击「切换兼容连接」，切换到经过 Pier 配对加密通道的 WebSocket 串流，浏览器进程和标签页保留。兼容连接也可在启动前选择。
+- **Agent 操作**：默认关闭；开启后，内置 pi 的 `pier_browser` 工具操作用户看到的同一个浏览器，可列出标签页、导航、读取页面、点击、输入、按键、执行页面脚本和截图。沿用工作区审批策略。Claude Code / Codex 尚未内置此工具，外部集成可调用 `browser.action`。
 
-独立浏览器的配置和登录状态按所选主机保存在**本地** `~/.pier/browser-profiles`（或 `PIER_DIR` 下），不继承远程浏览器已有的标签页或登录。每台目标主机同时只开一个独立浏览器，可在窗口中增加标签页；不同主机使用不同配置目录。关闭「浏览器」面板不影响已打开的连接，可在面板的连接列表关闭；退出 Pier、浏览器进程退出、设备被吊销或远程连接断开时清理相关连接，重新连接后需重新打开。
+远程浏览器需要两端 Host 协议 **1.47+**；远程运行端目前支持 Linux x86_64 / aarch64，本机默认浏览器支持 Windows、macOS、Linux。每个远程工作区同时运行一个浏览器，每台远程主机最多四个。登录状态按工作区保存在远程 `~/.pier/browser-profiles/remote-<workspace-hash>`（或 `PIER_DIR` 下），下载保存在其中的 `Downloads`。使用独立配置，不接管已有桌面浏览器。关闭面板可再次打开继续使用；退出 Pier、关闭会话、主机断连、设备被吊销或进程退出时清理浏览器和虚拟显示，保留登录状态及下载。
 
-转发端口和代理仅监听本地 `127.0.0.1`，浏览器控制通过私有进程管道，不开放调试端口。浏览器流量使用独立的配对加密连接，可经现有直连 / Relay / P2P 路径传输，不与聊天订阅共用协议连接。开发服务模式会把地址改为本地随机端口，原始域名、绝对地址或 HTTPS 证书依赖请使用远程网络模式；后者代理浏览器的 HTTP(S) / WebSocket 流量，不是系统 VPN。
+#### 远程 Linux 主机准备
+
+在**运行远程 Pier Host 的同一用户**下安装 Selkies **2.1.0+**、Xvfb 和 Chrome / Chromium。无需 Docker 或完整桌面环境。Debian 示例：
+
+```bash
+sudo apt-get update
+sudo apt-get install -y xvfb chromium libgbm1 libegl1
+bash scripts/install-browser-linux.sh
+```
+
+安装脚本从 Selkies 官方 release 下载固定版本 2.1.0，核对 `SHA256SUMS` 后解包到用户目录 `~/.local/share/pier/selkies-2.1.0`，无需 FUSE。Pier 会自动发现。也可按 [Selkies 官方安装说明](https://github.com/selkies-project/selkies/blob/main/docs/native.md) 安装原生包。Ubuntu 的 Chromium 可能是 Snap 包，也可安装官方 Chrome。
+
+可在远程 Host 的启动环境设置 `PIER_SELKIES_BIN`、`PIER_BROWSER_BIN`、`PIER_XVFB_BIN` 指定可执行文件的绝对路径。浏览器保留 Chromium 沙箱；请使用支持 Chromium 沙箱的普通用户运行 Host。缺少依赖或远程系统不受支持时，面板会显示具体提示。
+
+画面默认为 1440×900、30 fps，嵌入视图按可用空间显示；Selkies 提供键鼠、剪贴板和文件传输。自动剪贴板同步与音频默认关闭。Selkies HTTP 服务及本地查看入口只监听 `127.0.0.1`；页面及连接协商通过独立的 Pier 加密连接转发，WebRTC 媒体由 DTLS-SRTP 加密。每个会话使用随机访问令牌，令牌只在拥有该会话的连接中传递，并放在查看 URL 的 fragment 中；不记录到审计日志。Agent 控制继续使用私有 CDP 管道，不开放调试端口。
+
+WebRTC 优先复用远程 Host 已连接 Relay 提供的 ICE 配置；无 ICE 服务时仍可在可直连的网络使用。跨 NAT 时，可在远程 Host 设置 `PIER_BROWSER_RTC_CONFIG` 指向权限为 `0600` 的 JSON 文件（标准 `{"iceServers":[...]}`，支持自建 STUN / TURN）。这份文件由 Selkies 读取，不在 UI 或日志中展示。Pier Relay 的 WebSocket 转发不等同于 TURN；UDP / ICE 不通时使用兼容连接。
+
+「端口与映射」及聊天、终端中的远程开发服务链接仍可通过端口转发在本机预览。旧协议的 `service` / `network` 浏览器接口保留兼容，新浏览器面板按主机位置选择运行方式。
 
 ### 定时任务
 

@@ -3242,6 +3242,39 @@ export class PierStore {
 		return this.bridge.saveFile(name);
 	}
 
+	/** Browser location follows the workspace host. Default local browsing needs no managed session. */
+	async openBrowser(
+		workspaceId: string,
+		url: string,
+		controlled = false,
+		transport: "webrtc" | "websockets" = "webrtc",
+	) {
+		const parsed = new URL(url);
+		if (!["http:", "https:"].includes(parsed.protocol) || parsed.username || parsed.password)
+			throw new Error("请输入不带用户名和密码的 HTTP 或 HTTPS 地址");
+		const node = this.nodeOf(workspaceId);
+		if (node === LOCAL_NODE && !controlled) {
+			await this.bridge.openExternal(parsed.href);
+			return undefined;
+		}
+		const local = this.nodeClient(LOCAL_NODE);
+		if (!local) throw new Error("尚未连接到本机 Pier Host");
+		if (node !== LOCAL_NODE) {
+			const version = local.host?.protocolVersion?.split(".").map(Number);
+			if (version?.[0] !== 1 || (version[1] ?? 0) < 47) throw new Error("请先更新本机 Pier（远程浏览器需要协议 1.47）");
+		}
+		return local.request(
+			"browser.open",
+			{
+				workspaceId,
+				url: parsed.href,
+				controlled,
+				...(node === LOCAL_NODE ? { mode: "service" as const } : { mode: "remote" as const, peerId: node, transport }),
+			},
+			{ timeoutMs: 60_000 },
+		);
+	}
+
 	/** Resolve localhost against the conversation/terminal's host before opening it locally. */
 	async openWorkspaceUrl(url: string, workspaceId?: string): Promise<void> {
 		const node = workspaceId ? this.nodeOf(workspaceId) : LOCAL_NODE;

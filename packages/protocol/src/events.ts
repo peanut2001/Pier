@@ -88,6 +88,7 @@ export type PierSessionEvent =
 /** Host-scoped events (no `sessionId`, no `seq`). */
 export type PierHostEvent =
 	| { type: "resources.changed"; runtime: ResourceRuntime; workspaceId?: string }
+	| { type: "browser.remoteClosed"; browserId: string }
 	| { type: "browser.command"; browserId: string; requestId: string; command: BrowserCommand }
 	| { type: "task.changed" }
 	| { type: "host.notice"; level: "info" | "warning" | "error"; message: string; sessionId?: string }

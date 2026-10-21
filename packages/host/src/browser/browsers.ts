@@ -4,6 +4,7 @@ import type { PierClient } from "@pier/client";
 import {
 	type BrowserCommand,
 	type BrowserResult,
+	type BrowserTransport,
 	type LocalBrowserInfo,
 	PierProtocolError,
 	parseProtocolVersion,
@@ -28,6 +29,8 @@ interface Record {
 	browser?: BrowserProcess;
 	closed: boolean;
 	ready?: boolean;
+	remoteId?: string;
+	closing?: Promise<void>;
 }
 
 export class LocalBrowsers {
@@ -41,16 +44,24 @@ export class LocalBrowsers {
 	) {}
 
 	list(owner: Connection): LocalBrowserInfo[] {
-		return [...this.browsers.values()].filter((r) => r.owner === owner).map((r) => r.info);
+		return [...this.browsers.values()].filter((r) => r.owner === owner && r.ready).map((r) => r.info);
 	}
 	async open(
 		owner: Connection,
-		params: { workspaceId: string; peerId?: string; url: string; mode: "service" | "network"; controlled?: boolean },
+		params: {
+			workspaceId: string;
+			peerId?: string;
+			url: string;
+			mode: "service" | "network" | "remote";
+			controlled?: boolean;
+			transport?: BrowserTransport;
+		},
 	): Promise<LocalBrowserInfo> {
 		const url = webUrl(params.url);
+		if (params.mode === "remote" && !params.peerId) throw new PierProtocolError("BAD_REQUEST", "请选择远程主机");
 		const controlled = params.controlled === true;
-		const dedicated = params.mode === "network" || controlled;
-		if (!dedicated) {
+		const dedicated = params.mode !== "remote" && (params.mode === "network" || controlled);
+		if (!dedicated && params.mode !== "remote") {
 			const existing = [...this.browsers.values()].find(
 				(r) =>
 					r.ready &&
@@ -74,7 +85,10 @@ export class LocalBrowsers {
 		if (
 			dedicated &&
 			[...this.browsers.values()].some(
-				(r) => (r.info.mode === "network" || r.info.controllable) && r.info.peerId === params.peerId,
+				(r) =>
+					r.info.mode !== "remote" &&
+					(r.info.mode === "network" || r.info.controllable) &&
+					r.info.peerId === params.peerId,
 			)
 		) {
 			throw new PierProtocolError("CONFLICT", "这台主机已有独立浏览器，请在现有窗口打开标签页，或先在浏览器列表关闭它");
@@ -98,12 +112,53 @@ export class LocalBrowsers {
 		try {
 			if (params.peerId) {
 				record.client = await this.connect(params.peerId);
+				if (record.closed || owner.isClosed) {
+					record.client.close();
+					throw new Error("Browser connection closed");
+				}
 				const version = parseProtocolVersion(record.client.host?.protocolVersion ?? "");
 				if (!version || (version.major === 1 && version.minor < 37))
 					throw new PierProtocolError("UNSUPPORTED", "请先更新远程主机的 Pier（需要协议 1.37）");
 				record.client.onState((state) => {
 					if (state !== "open") this.closeRecord(record);
 				});
+				if (params.mode === "remote") {
+					if (version.major === 1 && version.minor < 47)
+						throw new PierProtocolError("UNSUPPORTED", "请先更新远程主机的 Pier（远程浏览器需要协议 1.47）");
+					const client = record.client;
+					client.onEvent((frame) => {
+						if (
+							frame.event.type === "browser.remoteClosed" &&
+							(!record.remoteId || frame.event.browserId === record.remoteId)
+						)
+							void this.closeRecord(record);
+					});
+					const remote = await client.request(
+						"browser.remoteOpen",
+						{
+							workspaceId: params.workspaceId,
+							url: url.href,
+							controlled,
+							transport: params.transport,
+						},
+						{ timeoutMs: 60_000 },
+					);
+					record.remoteId = remote.browserId;
+					if (record.closed || owner.isClosed) {
+						client.close();
+						throw new Error("Browser connection closed");
+					}
+					record.network = await forwardService(client, new URL(`http://127.0.0.1:${remote.port}`));
+					if (record.closed || owner.isClosed) {
+						record.network.close();
+						client.close();
+						throw new Error("Browser connection closed");
+					}
+					record.info.localUrl = `http://127.0.0.1:${record.network.port}/#token=${encodeURIComponent(remote.token)}`;
+					record.info.transport = remote.transport;
+					record.ready = true;
+					return record.info;
+				}
 				if (params.mode === "network") record.network = await remoteProxy(record.client);
 				else {
 					record.network = await forwardService(record.client, url);
@@ -127,7 +182,9 @@ export class LocalBrowsers {
 					profile,
 					record.info.localUrl,
 					params.mode === "network" ? record.network?.port : undefined,
-					() => this.closeRecord(record),
+					() => {
+						void this.closeRecord(record);
+					},
 				);
 				if (record.closed || owner.isClosed) {
 					record.browser.close();
@@ -164,6 +221,7 @@ export class LocalBrowsers {
 		}
 	}
 	private closeRecord(record: Record): Promise<void> {
+		if (record.closing) return record.closing;
 		record.closed = true;
 		this.browsers.delete(record.info.browserId);
 		this.controllers.detach(record.info.browserId);
@@ -172,11 +230,32 @@ export class LocalBrowsers {
 		record.browser = undefined;
 		record.client = undefined;
 		network?.close();
-		client?.close();
-		const done = Promise.resolve(browser?.close()).catch(() => {});
+		const done = Promise.resolve()
+			.then(async () => {
+				if (record.remoteId && client?.state === "open")
+					await client
+						.request("browser.remoteClose", { browserId: record.remoteId }, { timeoutMs: 10_000 })
+						.catch(() => {});
+				client?.close();
+				await browser?.close();
+			})
+			.catch(() => {});
+		record.closing = done;
 		this.closing.add(done);
 		void done.finally(() => this.closing.delete(done));
 		return done;
+	}
+	async setTransport(owner: Connection, id: string, transport: BrowserTransport): Promise<LocalBrowserInfo> {
+		const record = this.browsers.get(id);
+		if (!record || record.owner !== owner || record.closed || !record.client || !record.remoteId)
+			throw new PierProtocolError("NOT_FOUND", "远程浏览器连接已关闭");
+		await record.client.request(
+			"browser.remoteTransport",
+			{ browserId: record.remoteId, transport },
+			{ timeoutMs: 30_000 },
+		);
+		record.info = { ...record.info, transport };
+		return record.info;
 	}
 	async close(owner: Connection, id: string): Promise<boolean> {
 		const record = this.browsers.get(id);
