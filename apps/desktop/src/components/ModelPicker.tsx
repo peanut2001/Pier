@@ -5,7 +5,7 @@ import {
 	supportedThinkingLevels,
 	thinkingLabel,
 } from "@pier/chat-state";
-import type { ModelInfo, ThinkingLevel, WorkspaceInfo } from "@pier/protocol";
+import type { AgentRuntimeInfo, ModelInfo, ThinkingLevel, WorkspaceInfo } from "@pier/protocol";
 import { type KeyboardEvent, type PointerEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { LOCAL_NODE, useAppState, useStore } from "../lib/store.tsx";
 import {
@@ -164,6 +164,7 @@ interface ModelMenuProps {
 	model?: ModelInfo;
 	thinkingLevel?: string;
 	fastMode?: boolean;
+	fastHint?: string;
 	/** Still resolving which model will be used (the chip shows a placeholder). */
 	loading?: boolean;
 	disabled?: boolean;
@@ -172,7 +173,7 @@ interface ModelMenuProps {
 	manageable?: boolean;
 	onModel: (model: ModelInfo) => void;
 	onThinking: (level: ThinkingLevel) => unknown;
-	/** Present only when the session supports Fast mode. */
+	/** Present only when the selected runtime supports Fast mode. */
 	onFast?: (enabled: boolean) => Promise<unknown>;
 }
 
@@ -185,6 +186,7 @@ function ModelMenu({
 	model,
 	thinkingLevel,
 	fastMode,
+	fastHint = "从下一轮请求生效",
 	loading,
 	disabled,
 	loadModels,
@@ -325,9 +327,7 @@ function ModelMenu({
 															<IconZap size={14} />
 															Fast 模式
 														</span>
-														<span className="model-menu-fast-hint">
-															{fastPending ? "正在切换…" : "从下一轮请求生效"}
-														</span>
+														<span className="model-menu-fast-hint">{fastPending ? "正在切换…" : fastHint}</span>
 													</div>
 													<Switch
 														checked={fastMode === true}
@@ -443,15 +443,25 @@ export function SessionModelPicker({ chat, controller }: { chat: ChatState; cont
 }
 
 /**
- * Model and thinking level for the chat the new-chat screen will create: starts from what the
+ * Model, thinking level and Fast mode for the chat the new-chat screen will create: starts from what the
  * workspace's computer would use, and is applied to the session before its first message.
  */
-export function NewChatModelPicker({ workspace, disabled }: { workspace: WorkspaceInfo; disabled?: boolean }) {
+export function NewChatModelPicker({
+	workspace,
+	runtimes,
+	disabled,
+}: {
+	workspace: WorkspaceInfo;
+	runtimes: readonly AgentRuntimeInfo[];
+	disabled?: boolean;
+}) {
 	const store = useStore();
 	const node = useAppState((s) => s.workspaceNodes[workspace.id] ?? s.node ?? LOCAL_NODE);
 	const online = useAppState((s) => s.nodes[node]?.connection === "open");
 	const choice = useAppState((s) => s.newChatModel[node]);
 	const runtime = useAppState((s) => s.newChatRuntime[node] ?? "pi");
+	const canFast =
+		runtime === "codex" && runtimes.some((r) => r.id === runtime && r.available && r.capabilities.fastMode);
 	// Reload the defaults when this computer's providers or default model change.
 	const providers = useAppState((s) => s.providers);
 	const [defaults, setDefaults] = useState<
@@ -499,6 +509,8 @@ export function NewChatModelPicker({ workspace, disabled }: { workspace: Workspa
 			node={node}
 			{...(model ? { model } : {})}
 			thinkingLevel={level}
+			fastMode={canFast ? choice?.fastMode : undefined}
+			fastHint="从首条消息生效"
 			loading={!defaults}
 			{...(disabled ? { disabled } : {})}
 			manageable={runtime === "pi"}
@@ -520,6 +532,7 @@ export function NewChatModelPicker({ workspace, disabled }: { workspace: Workspa
 				})
 			}
 			onThinking={(l) => store.setNewChatModel(workspace.id, { ...(model ? { model } : {}), thinkingLevel: l })}
+			onFast={canFast ? async (enabled) => store.setNewChatModel(workspace.id, { fastMode: enabled }) : undefined}
 		/>
 	);
 }

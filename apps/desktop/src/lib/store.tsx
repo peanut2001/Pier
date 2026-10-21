@@ -225,10 +225,11 @@ export interface Draft {
 	images: Array<{ data: string; mimeType: string; name: string }>;
 }
 
-/** A model / thinking level picked for new chats (see `AppState.newChatModel`). */
+/** Model, thinking level and Fast mode picked for new chats (see `AppState.newChatModel`). */
 export interface NewChatModelChoice {
 	model?: ModelInfo | undefined;
 	thinkingLevel?: ThinkingLevel | undefined;
+	fastMode?: boolean | undefined;
 }
 
 /** An interactive provider sign-in shown in the login dialog. */
@@ -325,7 +326,7 @@ export interface AppState {
 	 */
 	newChat?: { workspaceId?: string };
 	/**
-	 * The model and thinking level picked on the new-chat screen, per computer (`LOCAL_NODE` or a
+	 * The model, thinking level and Fast mode picked on the new-chat screen, per computer (`LOCAL_NODE` or a
 	 * paired computer's id). Unset fields use what the host would pick for a new session. Kept
 	 * for later new chats until the app restarts.
 	 */
@@ -2579,7 +2580,7 @@ export class PierStore {
 		if (this.state.newChat) this.set({ newChat: { workspaceId } });
 	}
 
-	/** Remember the model / thinking level for new chats on the computer of `workspaceId`. */
+	/** Remember model, thinking level and Fast mode for new chats on the computer of `workspaceId`. */
 	setNewChatModel(workspaceId: string, choice: NewChatModelChoice): void {
 		const node = this.nodeOf(workspaceId);
 		this.set((s) => ({ newChatModel: { ...s.newChatModel, [node]: { ...s.newChatModel[node], ...choice } } }));
@@ -2638,24 +2639,26 @@ export class PierStore {
 		}
 		const client = this.clientFor(workspaceId);
 		const runtime = this.newChatRuntime(workspaceId);
+		const choice = this.state.newChatModel[this.nodeOf(workspaceId)];
+		const fastMode = runtime === "codex" ? choice?.fastMode : undefined;
 		const result = await this.callWith(client, "新建会话", (c) =>
 			c.request("session.create", { workspaceId, ...(runtime !== "pi" ? { runtime } : {}) }),
 		);
 		if (!result) return false;
 		const session = result.session;
-		const choice = this.state.newChatModel[this.nodeOf(workspaceId)];
-		if (client && choice && (choice.model || choice.thinkingLevel)) {
-			// Apply the model picked on the new-chat screen before the first message is sent.
+		if (client && choice && (choice.model || choice.thinkingLevel || fastMode !== undefined)) {
+			// Apply the new-chat choices before the first message is sent.
 			const sessionId = session.id;
-			const applied = await this.callWith(client, "设置模型", async (c) => {
+			const applied = await this.callWith(client, "设置会话选项", async (c) => {
 				if (choice.model) {
 					await c.request("model.set", { sessionId, provider: choice.model.provider, modelId: choice.model.id });
 				}
 				if (choice.thinkingLevel) await c.request("thinking.set", { sessionId, level: choice.thinkingLevel });
+				if (fastMode !== undefined) await c.request("fast.set", { sessionId, enabled: fastMode });
 				return true;
 			});
 			// The session exists either way; open it but keep the draft unsent so nothing runs
-			// with a model the user did not pick.
+			// with settings the user did not pick.
 			if (!applied) {
 				this.drafts.delete(NEW_CHAT_DRAFT);
 				this.saveDraft(session.id, draft);

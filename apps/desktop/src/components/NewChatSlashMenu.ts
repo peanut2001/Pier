@@ -71,6 +71,7 @@ export function useNewChatSlashMenu(
 					chat: {
 						model: choice?.model ?? result?.current,
 						thinkingLevel: choice?.thinkingLevel ?? result?.thinkingLevel ?? "medium",
+						fastMode: choice?.fastMode,
 						runState: "idle",
 					},
 					listModels: async () => result ?? { models: [] },

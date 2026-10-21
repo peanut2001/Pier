@@ -451,7 +451,9 @@ export function NewChatView({ workspaceId }: { workspaceId?: string }) {
 							{workspace ? <PolicyPicker workspace={workspace} /> : null}
 						</div>
 						<div className="composer-actions">
-							{workspace ? <NewChatModelPicker workspace={workspace} disabled={sending || !online} /> : null}
+							{workspace ? (
+								<NewChatModelPicker workspace={workspace} runtimes={runtimes} disabled={sending || !online} />
+							) : null}
 							<button
 								type="button"
 								className="round-button send"
