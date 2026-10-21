@@ -39,6 +39,21 @@ interface Options {
 	configs: AgentConfigFiles;
 }
 
+function readFailure(error: unknown): string {
+	switch ((error as NodeJS.ErrnoException)?.code) {
+		case "ENOENT":
+		case "ENOTDIR":
+			return "路径不存在或符号链接目标已失效";
+		case "ELOOP":
+			return "符号链接循环或层级过深";
+		case "EACCES":
+		case "EPERM":
+			return "没有读取权限";
+		default:
+			return error instanceof Error ? error.message : String(error);
+	}
+}
+
 function metadata(text: string, fallback: string): { name: string; description: string } {
 	try {
 		const { frontmatter } = parseFrontmatter(text);
@@ -182,10 +197,15 @@ export class SkillManager {
 					}
 					for (const entry of readdirSync(dir)) {
 						const next = join(dir, entry);
-						if (statSync(next).isDirectory()) walk(next, depth + 1);
+						// One inaccessible entry must not hide the remaining sibling skills.
+						try {
+							if (statSync(next).isDirectory()) walk(next, depth + 1);
+						} catch (error) {
+							errors.push(`已跳过无法读取的技能路径：${next}（${readFailure(error)}）`);
+						}
 					}
-				} catch {
-					errors.push(`无法读取技能目录：${dir}`);
+				} catch (error) {
+					errors.push(`无法读取技能目录：${dir}（${readFailure(error)}）`);
 				}
 			};
 			walk(root.path, 0);
