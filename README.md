@@ -163,9 +163,11 @@ MCP 测试会连接目标电脑上的服务器，stdio 测试会启动配置的�
 
 Selkies 2.1.0 和 Chrome for Testing 稳定版从官方 HTTPS 地址下载，安装到远程运行 Host 用户的 `~/.pier/browser-runtime`（或 `PIER_DIR/browser-runtime`），无需 Docker、FUSE 或完整桌面。Selkies 在执行 AppImage 解包前核对固定 SHA-256；Chrome 下载核对 Google Storage 的 MD5 和文件长度，解压后校验版本。只在安装成功后记录可执行文件位置，失败或取消会清理本次临时文件。已有系统浏览器、Selkies 或显式指定的程序会优先复用，不修改浏览器登录配置。
 
-缺少 Xvfb、unzip 或浏览器系统运行库时，会通过 APT（Debian / Ubuntu）、DNF（Fedora 系）或 Pacman（Arch）自动补齐。此步骤需要 root 或运行 Host 用户具备免密 sudo；没有权限时显示具体错误，不弹出隐藏的密码提示，也不读取或保存管理员密码。软件包管理器正在操作时，取消会等待当前步骤完成，避免中断系统包安装。APT 不升级已安装的软件包。系统依赖已经齐全时，整个用户目录安装过程无需管理员权限。
+远程浏览器会随查看区域调整分辨率，窗口自动铺满；高分屏按页面逻辑尺寸显示，保持文字和控件大小。打开独立窗口时会关闭内嵌查看面板。
 
-可用 `PIER_SELKIES_BIN`、`PIER_BROWSER_BIN`、`PIER_XVFB_BIN` 指定已有程序的绝对路径；无效的显式路径会提示修正。浏览器仍保留 Chromium 沙箱，请使用支持 Chromium 沙箱的普通用户运行 Host。需要离线预装时，可使用 `scripts/install-browser-linux.sh` 安装 Selkies，并由管理员预装 Xvfb 和 Chrome / Chromium；原有手动安装路径继续支持。
+缺少 Xvfb、Openbox、unzip 或浏览器系统运行库时，会通过 APT（Debian / Ubuntu）、DNF（Fedora 系）或 Pacman（Arch）自动补齐。此步骤需要 root 或运行 Host 用户具备免密 sudo；没有权限时显示具体错误，不弹出隐藏的密码提示，也不读取或保存管理员密码。软件包管理器正在操作时，取消会等待当前步骤完成，避免中断系统包安装。APT 不升级已安装的软件包。系统依赖已经齐全时，整个用户目录安装过程无需管理员权限。
+
+可用 `PIER_SELKIES_BIN`、`PIER_BROWSER_BIN`、`PIER_XVFB_BIN`、`PIER_OPENBOX_BIN` 指定已有程序的绝对路径；无效的显式路径会提示修正。浏览器仍保留 Chromium 沙箱，请使用支持 Chromium 沙箱的普通用户运行 Host。需要离线预装时，可使用 `scripts/install-browser-linux.sh` 安装 Selkies，并由管理员预装 Xvfb、Openbox 和 Chrome / Chromium；原有手动安装路径继续支持。
 
 画面默认为 1440×900、30 fps，嵌入视图按可用空间显示；Selkies 提供键鼠、剪贴板和文件传输。自动剪贴板同步与音频默认关闭。Selkies HTTP 服务及本地查看入口只监听 `127.0.0.1`；页面及连接协商通过独立的 Pier 加密连接转发，WebRTC 媒体由 DTLS-SRTP 加密。每个会话使用随机访问令牌，令牌只在拥有该会话的连接中传递，并放在查看 URL 的 fragment 中；不记录到审计日志。Agent 控制继续使用私有 CDP 管道，不开放调试端口。
 

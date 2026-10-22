@@ -1,7 +1,7 @@
 /** A private X11 display, a host-native browser, and a token-protected Selkies stream. */
-import { type ChildProcess, spawn } from "node:child_process";
+import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -96,6 +96,7 @@ export class SelkiesBrowser implements RemoteBrowserProcess {
 		const {
 			selkies,
 			xvfb,
+			openbox,
 			chromium: executable,
 		} = await (options.installer ?? new BrowserRuntimeInstaller(join(homedir(), ".pier", "browser-runtime"))).ensure(
 			options.onProgress,
@@ -109,7 +110,7 @@ export class SelkiesBrowser implements RemoteBrowserProcess {
 		};
 		options.signal?.addEventListener("abort", abort, { once: true });
 		try {
-			await session.start(selkies, xvfb, executable, options);
+			await session.start(selkies, xvfb, openbox, executable, options);
 			if (session.closed) throw new Error("远程浏览器启动过程中已关闭");
 			return session;
 		} catch (error) {
@@ -137,7 +138,13 @@ export class SelkiesBrowser implements RemoteBrowserProcess {
 		return child;
 	}
 
-	private async start(selkies: string, xvfb: string, executable: string, options: RemoteBrowserLaunch): Promise<void> {
+	private async start(
+		selkies: string,
+		xvfb: string,
+		openbox: string,
+		executable: string,
+		options: RemoteBrowserLaunch,
+	): Promise<void> {
 		const auth = join(this.runtime, "Xauthority");
 		writeFileSync(auth, xAuthority(randomBytes(16)), { mode: 0o600 });
 		const display = this.launch(
@@ -149,7 +156,8 @@ export class SelkiesBrowser implements RemoteBrowserProcess {
 				auth,
 				"-screen",
 				"0",
-				"1440x900x24",
+				// Xvfb cannot grow past its initial framebuffer. Selkies caps each dimension at 4080.
+				"4096x4096x24",
 				"-nolisten",
 				"tcp",
 				"-noreset",
@@ -183,6 +191,33 @@ export class SelkiesBrowser implements RemoteBrowserProcess {
 		if (this.closed) throw new Error("远程显示已关闭");
 		const env: NodeJS.ProcessEnv = { ...process.env, DISPLAY: `:${number}`, XAUTHORITY: auth };
 		delete env.WAYLAND_DISPLAY;
+		// Start small, retaining headroom for the viewer's subsequent RandR resizes.
+		await new Promise<void>((resolve, reject) => {
+			execFile(selkies, ["resize", "1440x900"], { env, timeout: 10_000 }, (error) =>
+				error ? reject(new Error("远程显示无法调整分辨率，请检查 Xvfb 和 Selkies")) : resolve(),
+			);
+		});
+		if (this.closed) throw new Error("远程显示已关闭");
+		// A maximized window follows RandR changes only when a window manager owns the display.
+		// Use a private config, without the host desktop's shortcuts, decorations or autostart.
+		const config = join(this.runtime, "openbox.xml");
+		writeFileSync(
+			config,
+			`<?xml version="1.0"?>
+<openbox_config xmlns="http://openbox.org/3.4/rc">
+  <desktops><number>1</number></desktops>
+  <applications><application class="*" type="normal">
+    <decor>no</decor><maximized>yes</maximized>
+  </application></applications>
+</openbox_config>`,
+			{ mode: 0o600 },
+		);
+		const startup = join(this.runtime, "wm-ready");
+		writeFileSync(startup, '#!/bin/sh\n: > "$0.ready"\n', { mode: 0o700 });
+		this.launch(openbox, ["--sm-disable", "--config-file", config, "--startup", startup], env);
+		const wmDeadline = Date.now() + 10_000;
+		while (!this.closed && !existsSync(`${startup}.ready`) && Date.now() < wmDeadline) await delay(50);
+		if (this.closed || !existsSync(`${startup}.ready`)) throw new Error("远程窗口管理器启动失败，请检查 Openbox");
 		mkdirSync(options.profile, { recursive: true, mode: 0o700 });
 		const downloads = join(options.profile, "Downloads");
 		mkdirSync(downloads, { recursive: true, mode: 0o700 });
@@ -197,7 +232,13 @@ export class SelkiesBrowser implements RemoteBrowserProcess {
 				executable,
 				env,
 				downloadDir: downloads,
-				args: ["--ozone-platform=x11", "--window-position=0,0", "--window-size=1440,900"],
+				args: [
+					"--ozone-platform=x11",
+					"--window-position=0,0",
+					"--window-size=1440,900",
+					"--start-maximized",
+					"--force-device-scale-factor=1",
+				],
 			},
 		);
 		if (this.closed) {
@@ -219,9 +260,13 @@ export class SelkiesBrowser implements RemoteBrowserProcess {
 				"--enable-dual-mode=true",
 				"--encoder=h264enc,vp8enc,jpeg",
 				"--framerate=30",
-				"--manual-resolution=true",
-				"--manual-width=1440",
-				"--manual-height=900",
+				"--enable-resize=true",
+				"--manual-resolution=false|locked",
+				"--manual-width=0",
+				"--manual-height=0",
+				// Match CSS pixels, including Retina clients, so Chrome controls retain their usable size.
+				"--use-css-scaling=true|locked",
+				"--scaling-dpi=96",
 				"--audio-enabled=false",
 				"--command-enabled=false",
 				"--clipboard-seamless=false",

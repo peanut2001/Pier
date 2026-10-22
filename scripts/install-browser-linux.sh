@@ -43,4 +43,4 @@ curl --fail --location --proto '=https' --proto-redir '=https' --retry 2 --outpu
   mv -T -- squashfs-root "$browser_target"
 )
 printf 'Installed Selkies %s: %s\n' "$browser_version" "$browser_target/AppRun"
-printf '%s\n' 'Pier will find it automatically. Install Xvfb and Chrome/Chromium on this host as described in README.'
+printf '%s\n' 'Pier will find it automatically. Install Xvfb, Openbox and Chrome/Chromium on this host as described in README.'

@@ -14,7 +14,8 @@ describe("automatic remote browser preparation", () => {
 	const installers: BrowserRuntimeInstaller[] = [];
 	beforeEach(() => {
 		root = mkdtempSync(join(tmpdir(), "pier-browser-install-"));
-		for (const key of ["PIER_SELKIES_BIN", "PIER_BROWSER_BIN", "PIER_XVFB_BIN"]) vi.stubEnv(key, "");
+		for (const key of ["PIER_SELKIES_BIN", "PIER_BROWSER_BIN", "PIER_XVFB_BIN", "PIER_OPENBOX_BIN"])
+			vi.stubEnv(key, "");
 	});
 	afterEach(async () => {
 		await Promise.all(installers.splice(0).map((i) => i.shutdown()));
@@ -26,7 +27,7 @@ describe("automatic remote browser preparation", () => {
 		const find = vi.fn((name: string, override?: string, managed?: string): string | undefined => {
 			if (override) return undefined;
 			if (managed && existsSync(managed)) return managed;
-			return ["selkies", "Xvfb", "unzip"].includes(name) ? join(root, name) : undefined;
+			return ["selkies", "Xvfb", "openbox", "unzip"].includes(name) ? join(root, name) : undefined;
 		});
 		const fetch = vi.fn<typeof globalThis.fetch>(async (url) =>
 			String(url).endsWith(".json")
@@ -89,7 +90,7 @@ describe("automatic remote browser preparation", () => {
 	it("refuses corrupt Selkies bytes before executing them and removes temporary files", async () => {
 		const { installer, run } = setup({
 			chromium: () => "/existing/chrome",
-			find: (name) => (name === "Xvfb" ? "/bin/Xvfb" : undefined),
+			find: (name) => (["Xvfb", "openbox"].includes(name) ? `/bin/${name}` : undefined),
 		});
 		await expect(installer.ensure()).rejects.toThrow("校验失败");
 		expect(run).not.toHaveBeenCalled();
@@ -178,7 +179,7 @@ describe("automatic remote browser preparation", () => {
 			find: (name) =>
 				name === "Xvfb" && !installed
 					? undefined
-					: ["Xvfb", "selkies", "apt-get"].includes(name)
+					: ["Xvfb", "openbox", "selkies", "apt-get"].includes(name)
 						? `/bin/${name}`
 						: undefined,
 			run,
@@ -189,6 +190,45 @@ describe("automatic remote browser preparation", () => {
 			["install", "-y", "--no-install-recommends", "--no-upgrade", "xvfb"],
 			{ system: true },
 		);
+	});
+	it("adds window management to an existing browser installation without downloading it again", async () => {
+		let installed = false;
+		const run = vi.fn<NonNullable<BrowserRuntimeInstallerOptions["run"]>>(async (_file, args) => {
+			if (args.includes("install")) installed = true;
+			return "";
+		});
+		const { installer, fetch } = setup({
+			chromium: () => "/existing/chrome",
+			find: (name) =>
+				name === "openbox" && !installed
+					? undefined
+					: ["Xvfb", "openbox", "selkies", "apt-get", "sudo"].includes(name)
+						? `/bin/${name}`
+						: undefined,
+			run,
+		});
+		expect((await installer.ensure()).openbox).toBe("/bin/openbox");
+		expect(run).toHaveBeenCalledWith("/bin/sudo", ["-n", "true"], expect.anything());
+		expect(run).toHaveBeenCalledWith(
+			"/bin/sudo",
+			[
+				"-n",
+				"--",
+				"env",
+				"DEBIAN_FRONTEND=noninteractive",
+				"/bin/apt-get",
+				"install",
+				"-y",
+				"--no-install-recommends",
+				"--no-upgrade",
+				"openbox",
+			],
+			{ system: true },
+		);
+		expect(fetch).not.toHaveBeenCalled();
+		run.mockClear();
+		await installer.ensure();
+		expect(run).not.toHaveBeenCalled();
 	});
 	it("reports missing privileges without opening a password prompt or downloading components", async () => {
 		const { installer, fetch, run } = setup({

@@ -116,6 +116,20 @@ function BrowserPanel({ workspace, onClose }: { workspace: WorkspaceInfo; onClos
 			setBusy(false);
 		}
 	};
+	const closeBrowser = async (browserId: string) => {
+		if (!local) return;
+		setBusy(true);
+		setError("");
+		try {
+			await local.request("browser.close", { browserId }, { timeoutMs: 20_000 });
+			setBrowsers((rows) => rows.filter((row) => row.browserId !== browserId));
+			setActiveId((id) => (id === browserId ? undefined : id));
+		} catch (error) {
+			setError(error instanceof Error ? error.message : String(error));
+		} finally {
+			setBusy(false);
+		}
+	};
 	const preparing = Boolean(preparation);
 	const progress = preparation?.progress;
 	const percent = progress?.totalBytes
@@ -183,9 +197,24 @@ function BrowserPanel({ workspace, onClose }: { workspace: WorkspaceInfo; onClos
 							type="button"
 							className="ghost icon"
 							title="在独立窗口中显示远程浏览器"
-							onClick={() => store.openExternal(active.localUrl)}
+							onClick={() => {
+								store.openExternal(active.localUrl);
+								// Release the embedded controller before the external viewer chooses its size.
+								onClose();
+							}}
 						>
 							<IconExternal size={15} />
+						</button>
+						<button
+							type="button"
+							className="ghost icon"
+							title="关闭浏览器会话"
+							disabled={busy || preparing}
+							onClick={() => {
+								void closeBrowser(active.browserId);
+							}}
+						>
+							<IconTrash size={15} />
 						</button>
 					</div>
 					{online ? (
@@ -202,7 +231,6 @@ function BrowserPanel({ workspace, onClose }: { workspace: WorkspaceInfo; onClos
 					) : (
 						<div className="banner">主机连接已断开，请重新连接后打开浏览器。</div>
 					)}
-					<p className="muted small">若一直没有画面，请切换兼容连接。登录状态和下载文件保存在 {name}。</p>
 				</>
 			) : (
 				<form
@@ -271,8 +299,8 @@ function BrowserPanel({ workspace, onClose }: { workspace: WorkspaceInfo; onClos
 				</form>
 			)}
 			{browsers.length ? (
-				<div className="browser-connections">
-					<h4>已打开的浏览器</h4>
+				<details key={active ? "viewer" : "form"} className="browser-connections" open={active ? undefined : true}>
+					<summary>已打开的浏览器（{browsers.length}）</summary>
 					{browsers.map((browser) => (
 						<div key={browser.browserId} className="browser-connection">
 							<div>
@@ -294,29 +322,20 @@ function BrowserPanel({ workspace, onClose }: { workspace: WorkspaceInfo; onClos
 								title="关闭浏览器会话"
 								disabled={busy || preparing}
 								onClick={() => {
-									setBusy(true);
-									setError("");
-									void local
-										?.request("browser.close", { browserId: browser.browserId }, { timeoutMs: 20_000 })
-										.then(
-											() => {
-												setBrowsers((rows) => rows.filter((row) => row.browserId !== browser.browserId));
-												setActiveId((id) => (id === browser.browserId ? undefined : id));
-											},
-											(error) => setError(error instanceof Error ? error.message : String(error)),
-										)
-										.finally(() => setBusy(false));
+									void closeBrowser(browser.browserId);
 								}}
 							>
 								<IconTrash size={15} />
 							</button>
 						</div>
 					))}
-				</div>
+				</details>
 			) : null}
-			<p className="muted small">
-				关闭面板后可再次打开并继续操作。退出 Pier 或连接断开会结束受管理的浏览器会话，登录状态保留。
-			</p>
+			{!active ? (
+				<p className="muted small">
+					关闭面板后可再次打开并继续操作。退出 Pier 或连接断开会结束受管理的浏览器会话，登录状态保留。
+				</p>
+			) : null}
 		</Modal>
 	);
 }

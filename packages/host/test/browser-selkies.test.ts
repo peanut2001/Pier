@@ -5,6 +5,7 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { ChromiumBrowser } from "../src/browser/chromium.ts";
 import { SelkiesBrowser } from "../src/browser/selkies.ts";
 
 const selkies = process.env.PIER_TEST_SELKIES;
@@ -64,4 +65,80 @@ describe.skipIf(process.platform !== "linux" || !selkies || !chromium)("real Sel
 			rmSync(root, { recursive: true, force: true });
 		}
 	}, 90_000);
+	it("fits the display and browser to a Retina viewer across sizes and transports", async () => {
+		vi.stubEnv("PIER_SELKIES_BIN", selkies);
+		vi.stubEnv("PIER_BROWSER_BIN", chromium);
+		const root = mkdtempSync(join(tmpdir(), "pier-browser-size-test-"));
+		let remote: SelkiesBrowser | undefined;
+		let viewer: ChromiumBrowser | undefined;
+		try {
+			remote = await SelkiesBrowser.start({
+				profile: join(root, "remote"),
+				url: "about:blank",
+				transport: "webrtc",
+				iceServers: [],
+				onExit() {},
+			});
+			for (const transport of ["webrtc", "websockets"] as const) {
+				await remote.setTransport(transport);
+				viewer = await ChromiumBrowser.start(
+					join(root, "viewer"),
+					`http://127.0.0.1:${remote.port}/#token=${remote.token}`,
+					undefined,
+					() => {},
+					{
+						executable: chromium,
+						args: [
+							"--headless=new",
+							"--window-size=1280,820",
+							"--force-device-scale-factor=2",
+							"--autoplay-policy=no-user-gesture-required",
+						],
+					},
+				);
+				// Drive the real viewer's window through CDP without adding a test-only public API.
+				// biome-ignore lint/complexity/useLiteralKeys: Access CDP for integration testing.
+				const targets = await viewer["targets"]();
+				// biome-ignore lint/complexity/useLiteralKeys: Access CDP for integration testing.
+				const { windowId } = await viewer["send"]("Browser.getWindowForTarget", { targetId: targets[0]?.targetId });
+				for (const [width, height] of [
+					[1280, 820],
+					[1800, 1000],
+					[900, 650],
+				]) {
+					// biome-ignore lint/complexity/useLiteralKeys: Access CDP for integration testing.
+					await viewer["send"]("Browser.setWindowBounds", { windowId, bounds: { width, height } });
+					const size = JSON.parse(
+						(await viewer.action({ action: "evaluate", expression: "[innerWidth,innerHeight]" })).text ?? "[]",
+					) as number[];
+					await expect
+						.poll(
+							async () => {
+								const actual = JSON.parse(
+									(
+										await remote?.action({
+											action: "evaluate",
+											expression: "[screen.width,screen.height,outerWidth,outerHeight,devicePixelRatio]",
+										})
+									)?.text ?? "[]",
+								) as number[];
+								return (
+									actual.length === 5 &&
+									actual[4] === 1 &&
+									actual.slice(0, 4).every((value, index) => Math.abs(value - (size[index % 2] ?? 0)) < 8)
+								);
+							},
+							{ timeout: 20_000 },
+						)
+						.toBe(true);
+				}
+				await viewer.close();
+				viewer = undefined;
+			}
+		} finally {
+			await viewer?.close();
+			await remote?.close();
+			rmSync(root, { recursive: true, force: true });
+		}
+	}, 120_000);
 });

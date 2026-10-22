@@ -25,6 +25,7 @@ export interface BrowserRuntimePaths {
 	selkies: string;
 	chromium: string;
 	xvfb: string;
+	openbox: string;
 }
 export interface BrowserRuntimeInstallerOptions {
 	fetch?: typeof fetch;
@@ -235,6 +236,7 @@ export class BrowserRuntimeInstaller {
 				join(homedir(), `.local/share/pier/selkies-${SELKIES_VERSION}/AppRun`),
 		);
 		const xvfb = this.find("Xvfb", process.env.PIER_XVFB_BIN);
+		const openbox = this.find("openbox", process.env.PIER_OPENBOX_BIN);
 		let chromium: string | undefined;
 		try {
 			chromium = process.env.PIER_BROWSER_BIN
@@ -260,13 +262,14 @@ export class BrowserRuntimeInstaller {
 		for (const [key, value] of [
 			["PIER_SELKIES_BIN", selkies],
 			["PIER_XVFB_BIN", xvfb],
+			["PIER_OPENBOX_BIN", openbox],
 			["PIER_BROWSER_BIN", chromium],
 		])
 			if (key && process.env[key] && !value) throw new Error(`${key} 指定的程序不可用，请修正路径后重试`);
-		return { selkies, xvfb, chromium };
+		return { selkies, xvfb, chromium, openbox };
 	}
 	private async systemPackages(
-		needs: { xvfb?: boolean; unzip?: boolean; libraries?: boolean },
+		needs: { xvfb?: boolean; openbox?: boolean; unzip?: boolean; libraries?: boolean },
 		progress: Progress,
 		signal: AbortSignal,
 	): Promise<void> {
@@ -276,7 +279,7 @@ export class BrowserRuntimeInstaller {
 		const pacman = this.find("pacman");
 		if (!apt && !dnf && !pacman)
 			throw new Error(
-				"这台主机的软件包管理器暂不支持自动补齐系统依赖，请安装 Xvfb、unzip 和 Chromium 所需运行库后重试",
+				"这台主机的软件包管理器暂不支持自动补齐系统依赖，请安装 Xvfb、Openbox、unzip 和 Chromium 所需运行库后重试",
 			);
 		const root = (this.options.uid ?? process.getuid?.()) === 0;
 		const sudo = root ? undefined : this.find("sudo");
@@ -300,7 +303,11 @@ export class BrowserRuntimeInstaller {
 		if (apt) {
 			await run(apt, ["update"]);
 			signal.throwIfAborted();
-			const packages = [...(needs.xvfb ? ["xvfb"] : []), ...(needs.unzip ? ["unzip"] : [])];
+			const packages = [
+				...(needs.xvfb ? ["xvfb"] : []),
+				...(needs.openbox ? ["openbox"] : []),
+				...(needs.unzip ? ["unzip"] : []),
+			];
 			if (needs.libraries) {
 				packages.push(
 					"libgbm1",
@@ -342,6 +349,7 @@ export class BrowserRuntimeInstaller {
 				"install",
 				"-y",
 				...(needs.xvfb ? ["xorg-x11-server-Xvfb"] : []),
+				...(needs.openbox ? ["openbox"] : []),
 				...(needs.unzip ? ["unzip"] : []),
 				...(needs.libraries
 					? [
@@ -375,6 +383,7 @@ export class BrowserRuntimeInstaller {
 				"--needed",
 				"--noconfirm",
 				...(needs.xvfb ? ["xorg-server-xvfb"] : []),
+				...(needs.openbox ? ["openbox"] : []),
 				...(needs.unzip ? ["unzip"] : []),
 				...(needs.libraries
 					? [
@@ -409,7 +418,7 @@ export class BrowserRuntimeInstaller {
 			throw new PierProtocolError("UNSUPPORTED", "远程浏览器自动安装目前支持 Linux x86_64 和 ARM64");
 		const ready = this.discover();
 		const probe = this.options.probe ?? probeVersion;
-		if (ready.selkies && ready.chromium && ready.xvfb) return ready as BrowserRuntimePaths;
+		if (ready.selkies && ready.chromium && ready.xvfb && ready.openbox) return ready as BrowserRuntimePaths;
 		await mkdir(this.root, { recursive: true, mode: 0o700 });
 		let unlock: (() => Promise<void>) | undefined;
 		let staging: string | undefined;
@@ -426,14 +435,21 @@ export class BrowserRuntimeInstaller {
 				}
 			}
 			const paths = this.discover();
-			if (!paths.xvfb || (!paths.chromium && !this.find("unzip")))
+			if (!paths.xvfb || !paths.openbox || (!paths.chromium && !this.find("unzip")))
 				await this.systemPackages(
-					{ xvfb: !paths.xvfb, unzip: !paths.chromium && !this.find("unzip"), libraries: !paths.chromium },
+					{
+						xvfb: !paths.xvfb,
+						openbox: !paths.openbox,
+						unzip: !paths.chromium && !this.find("unzip"),
+						libraries: !paths.chromium,
+					},
 					progress,
 					signal,
 				);
 			paths.xvfb = this.find("Xvfb", process.env.PIER_XVFB_BIN);
 			if (!paths.xvfb) throw new Error("安装后仍未找到 Xvfb，请检查系统软件源");
+			paths.openbox = this.find("openbox", process.env.PIER_OPENBOX_BIN);
+			if (!paths.openbox) throw new Error("安装后仍未找到 Openbox，请检查系统软件源");
 			staging = await mkdtemp(join(this.root, ".install-"));
 			if (!paths.selkies) {
 				const filename = `selkies-${SELKIES_VERSION}-${arch === "x64" ? "x86_64" : "aarch64"}.AppImage`;
