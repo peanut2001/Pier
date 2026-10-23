@@ -90,9 +90,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Keep native Windows builds on VS 2022. The windows-latest VS 2026
-        # image currently fails to load the test executable (0xc0000139).
-        os: [ubuntu-latest, ubuntu-22.04-arm, macos-latest, windows-2022]
+        os: [ubuntu-latest, ubuntu-22.04-arm, macos-latest, windows-latest]
     defaults:
       run:
         shell: bash
@@ -114,6 +112,7 @@ jobs:
           workspaces: apps/desktop/src-tauri
           # GTK-linked Rust artifacts cannot be shared between Ubuntu runner images.
           key: ${{ matrix.os }}
+          cache-on-failure: true
 
       - name: Linux system dependencies
         if: runner.os == 'Linux'
@@ -161,6 +160,13 @@ jobs:
       - name: cargo clippy
         working-directory: apps/desktop/src-tauri
         run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: Diagnose Windows test loader
+        if: failure() && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          python -m pip install --quiet pefile
+          python apps/desktop/scripts/check-windows-imports.py
 
   mobile:
     name: mobile bundle (${{ matrix.platform }})

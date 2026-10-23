@@ -76,7 +76,7 @@ jobs:
           # `app` produces the signed updater archive (.app.tar.gz) next to the dmg.
           - { platform: darwin-arm64, runner: macos-latest, bundles: "app,dmg" }
           - { platform: darwin-x64, runner: macos-15-intel, bundles: "app,dmg" }
-          - { platform: windows-x64, runner: windows-2022, bundles: nsis }
+          - { platform: windows-x64, runner: windows-latest, bundles: nsis }
     env:
       NAME: pier-desktop-${{ github.ref_name }}-${{ matrix.platform }}
     defaults:
