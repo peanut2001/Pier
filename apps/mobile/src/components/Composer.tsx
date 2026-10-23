@@ -171,7 +171,7 @@ export function Composer({
 				/>
 				{voice.busy ? (
 					<View style={styles.modes}>
-						<Text accessibilityLiveRegion="polite" style={[styles.hint, { color: p.muted }]}>
+						<Text accessibilityLiveRegion="polite" style={[styles.hint, styles.flex, { color: p.muted }]}>
 							{VOICE_LABELS[voice.phase]}
 						</Text>
 						<Pressable accessibilityRole="button" accessibilityLabel="取消语音输入" onPress={voice.cancel}>
@@ -263,7 +263,7 @@ export function Composer({
 			{busy && canSend ? (
 				<View style={styles.modes}>
 					<Icon name="flash-outline" size={13} color={p.muted} />
-					<Text style={[styles.hint, { color: p.muted }]}>运行中：发送即引导</Text>
+					<Text style={[styles.hint, styles.flex, { color: p.muted }]}>运行中：发送即引导</Text>
 					<Pressable hitSlop={6} onPress={() => void send("followUp")}>
 						<Text style={[styles.link, { color: p.accentText }]}>排队到结束后</Text>
 					</Pressable>
@@ -314,7 +314,8 @@ const styles = StyleSheet.create({
 	},
 	pressed: { opacity: 0.75 },
 	modes: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 6, paddingHorizontal: 12 },
-	hint: { fontSize: 12, flex: 1 },
+	// Only row hints should flex; growing the voice-settings label vertically collapses the transcript.
+	hint: { fontSize: 12 },
 	link: { fontSize: 13, fontWeight: "600", marginLeft: 8 },
 	images: { maxHeight: 80, marginTop: 4 },
 	imagesContent: { gap: 8, paddingHorizontal: 4, paddingTop: 4 },
