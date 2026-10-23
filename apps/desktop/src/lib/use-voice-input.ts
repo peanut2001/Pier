@@ -1,7 +1,13 @@
-import { startBrowserRecording, startSystemSpeechRecording, VoiceInput, type VoicePhase } from "@pier/chat-state";
+import {
+	startBrowserRecording,
+	startPcmRecording,
+	startSystemSpeechRecording,
+	VoiceInput,
+	type VoicePhase,
+} from "@pier/chat-state";
 import { useEffect, useRef, useState } from "react";
 import { LOCAL_NODE, useStore } from "./store.tsx";
-import { systemSpeech, useSpeechProvider } from "./system-speech.ts";
+import { systemSpeech, systemSpeechPlatform, useSpeechProvider } from "./system-speech.ts";
 
 export function useVoiceInput(scope: string, onText: (text: string) => void, disabled = false) {
 	const store = useStore();
@@ -16,7 +22,12 @@ export function useVoiceInput(scope: string, onText: (text: string) => void, dis
 		const voice = new VoiceInput({
 			client,
 			deviceSpeech: provider === "system" ? systemSpeech : undefined,
-			record: provider === "system" ? startSystemSpeechRecording : startBrowserRecording,
+			record:
+				provider === "system"
+					? systemSpeechPlatform() === "macos"
+						? startSystemSpeechRecording
+						: startPcmRecording
+					: startBrowserRecording,
 			onPhase: setPhase,
 			onText: (text) => callback.current(text),
 			onError: (message) => store.toast("error", message),

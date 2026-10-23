@@ -7,6 +7,9 @@ mod linux_graphics;
 mod speech;
 #[cfg(target_os = "macos")]
 mod system_speech;
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+#[path = "local_speech.rs"]
+mod system_speech;
 mod terminal;
 mod transfer;
 mod tray;
@@ -68,11 +71,11 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
             system_speech::system_speech_authorize,
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
             system_speech::system_speech_transcribe,
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
             system_speech::system_speech_cancel,
             autostart::autostart_status,
             autostart::autostart_set_enabled,
@@ -101,6 +104,8 @@ pub fn run() {
             app.manage(manager.clone());
             app.manage(TerminalManager::default());
             app.manage(DownloadManager::default());
+            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            app.manage(system_speech::SpeechJobs::default());
             let updates = UpdateManager::new(app.handle().clone());
             app.manage(updates.clone());
             let update_item = tray::create(app.handle())?;
@@ -127,6 +132,8 @@ pub fn run() {
             code: None, api, ..
         } => api.prevent_exit(),
         RunEvent::Exit => {
+            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            app.state::<system_speech::SpeechJobs>().shutdown();
             app.state::<TerminalManager>().kill_all();
             app.state::<HostManager>().shutdown();
         }
