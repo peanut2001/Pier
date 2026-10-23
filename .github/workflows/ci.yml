@@ -90,7 +90,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, ubuntu-22.04-arm, macos-latest, windows-latest]
+        # Keep native Windows builds on VS 2022. The windows-latest VS 2026
+        # image currently fails to load the test executable (0xc0000139).
+        os: [ubuntu-latest, ubuntu-22.04-arm, macos-latest, windows-2022]
     defaults:
       run:
         shell: bash

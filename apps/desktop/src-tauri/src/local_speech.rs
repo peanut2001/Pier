@@ -104,6 +104,13 @@ fn run_process(
         .stdin(Stdio::null())
         .stdout(stdout.reopen().map_err(|_| "无法准备本机识别输出")?)
         .stderr(stderr.reopen().map_err(|_| "无法准备本机识别输出")?);
+    // External recognizers must load system libraries, including from AppImage.
+    for (key, value) in crate::appimage_env::child_env() {
+        match value {
+            Some(value) => command.env(key, value),
+            None => command.env_remove(key),
+        };
+    }
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
