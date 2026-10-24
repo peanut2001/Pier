@@ -83,9 +83,14 @@ export interface AppUpdateStatus {
 	notes?: string;
 	/** Publication date of `version` (ISO 8601). */
 	date?: string;
-	/** Bytes downloaded so far while `downloading`. */
+	/**
+	 * Bytes downloaded so far while `downloading`; also in `available` / `error` when part of
+	 * `version` is already downloaded (a paused or interrupted download, which installing
+	 * continues). Older desktop apps report 0 there.
+	 */
 	downloaded: number;
 	total?: number;
+	/** Why the last check or install failed; while `downloading`, why the download is being retried. */
 	error?: string;
 	/** Unix time (ms) of the last successful check. */
 	lastChecked?: number;

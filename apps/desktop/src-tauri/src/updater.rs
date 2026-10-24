@@ -7,6 +7,11 @@
 //! no agent is cut off halfway through writing a file and the Windows installer can replace
 //! the sidecar), installs, and relaunches Pier.
 //!
+//! The bundle is downloaded by `update_download` into the app cache, not by the plugin: a
+//! dropped or stalled connection is retried from where it stopped, a download can be paused
+//! (`update_cancel_install`) and continued later, also after Pier restarts, and a finished
+//! bundle whose installation failed is not downloaded again.
+//!
 //! Paired computers and phones can drive the same flow through the Pier Host (`update.*` in
 //! the protocol, relayed over the sidecar's stdio by `host.rs`); every status change is also
 //! pushed to the host.
@@ -21,12 +26,16 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use semver::Version;
 use serde::{Deserialize, Serialize};
 use tauri::menu::MenuItem;
 use tauri::{AppHandle, Emitter, Manager, Wry};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
 use crate::host::HostManager;
+use crate::update_download::{
+    Cache, Downloader, Event as DownloadEvent, Package, Policy, Verifier,
+};
 use crate::update_route::{download_url, normalize_mirror};
 
 pub const STATUS_EVENT: &str = "pier://update-status";
@@ -39,6 +48,8 @@ const SCHEDULER_TICK: Duration = Duration::from_secs(15);
 const CHECK_TIMEOUT: Duration = Duration::from_secs(30);
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(200);
 const SETTINGS_FILE: &str = "updater.json";
+/// Under the app cache directory.
+const DOWNLOAD_DIR: &str = "updates";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -78,8 +89,11 @@ pub struct UpdateStatus {
     pub version: Option<String>,
     pub notes: Option<String>,
     pub date: Option<String>,
+    /// Bytes downloaded so far: while `downloading`, and for a paused or interrupted download
+    /// of the pending update that installing continues.
     pub downloaded: u64,
     pub total: Option<u64>,
+    /// While `downloading`: why the download is being retried.
     pub error: Option<String>,
     /// Unix time (ms) of the last successful check.
     pub last_checked: Option<u64>,
@@ -111,6 +125,14 @@ struct Inner {
     next_auto_check: Instant,
     next_check_id: u64,
     checking: Option<CheckOperation>,
+    next_install_id: u64,
+    /// The running download (state `downloading`).
+    installing: Option<InstallOperation>,
+}
+
+struct InstallOperation {
+    id: u64,
+    abort: Option<tokio::task::AbortHandle>,
 }
 
 struct CheckOperation {
@@ -231,6 +253,8 @@ impl UpdateManager {
                 next_auto_check: Instant::now() + FIRST_CHECK_DELAY,
                 next_check_id: 0,
                 checking: None,
+                next_install_id: 0,
+                installing: None,
             })),
         }
     }
@@ -382,15 +406,64 @@ impl UpdateManager {
             Err(error) => Err(error),
         };
         self.lock().finish_check(id, result);
+        self.sync_download_cache();
         self.update(|_| {});
         self.status()
+    }
+
+    fn download_cache(&self) -> Option<Cache> {
+        let dir = self.app.path().app_cache_dir().ok()?;
+        Some(Cache::new(dir.join(DOWNLOAD_DIR)))
+    }
+
+    /// After a successful check: drop downloads of other releases, and show how much of the
+    /// pending one is already downloaded.
+    fn sync_download_cache(&self) {
+        let keep = {
+            let inner = self.lock();
+            match inner.status.state {
+                UpdateState::Available => inner
+                    .pending
+                    .as_ref()
+                    .map(|update| (update.version.clone(), update.signature.clone())),
+                UpdateState::UpToDate => None,
+                _ => return,
+            }
+        };
+        let Some(cache) = self.download_cache() else {
+            return;
+        };
+        cache.prune(|version, signature| {
+            keep.as_ref()
+                .is_some_and(|(v, s)| v == version && s == signature)
+        });
+        let Some((version, signature)) = keep else {
+            return;
+        };
+        let partial = cache.partial(&version, &signature);
+        let mut inner = self.lock();
+        let current = inner
+            .pending
+            .as_ref()
+            .is_some_and(|update| update.version == version && update.signature == signature);
+        if inner.status.state == UpdateState::Available && current {
+            let (downloaded, total) = partial.unwrap_or((0, None));
+            inner.status.downloaded = downloaded;
+            inner.status.total = total;
+        }
+    }
+
+    fn downloader(&self) -> Result<Downloader, String> {
+        let cache = self.download_cache().ok_or("无法定位更新缓存目录")?;
+        let verifier = Verifier::from_config(self.app.config().plugins.0.get("updater"))?;
+        Downloader::new(cache, verifier, Policy::default())
     }
 
     /// Download, verify, and install the pending update, then relaunch Pier.
     /// Returns only on failure (the host is started again in that case).
     pub async fn install(&self) -> Result<(), String> {
-        let update = self.begin_install()?;
-        self.run_install(update).await
+        let (update, id) = self.begin_install()?;
+        self.run_install(update, id).await
     }
 
     /// Install the newest release for a remote request: check first unless an update is
@@ -415,19 +488,19 @@ impl UpdateManager {
             }
         }
         // Fails only when another install claimed the update meanwhile.
-        if let Ok(update) = self.begin_install() {
+        if let Ok((update, id)) = self.begin_install() {
             let manager = self.clone();
             tauri::async_runtime::spawn(async move {
                 // Failures are reported through the status (state `error`).
-                let _ = manager.run_install(update).await;
+                let _ = manager.run_install(update, id).await;
             });
         }
         self.status()
     }
 
     /// Claim the pending update for installing (state `downloading`).
-    fn begin_install(&self) -> Result<Update, String> {
-        let update = {
+    fn begin_install(&self) -> Result<(Update, u64), String> {
+        let claimed = {
             let mut inner = self.lock();
             match inner.status.state {
                 UpdateState::Available | UpdateState::Error => {}
@@ -441,45 +514,144 @@ impl UpdateManager {
             };
             // Keep the pending URL original so changing routes never stacks mirror prefixes.
             update.download_url = download_url(&update.download_url, &inner.status.mirror_prefix)?;
+            inner.next_install_id = inner.next_install_id.wrapping_add(1);
+            let id = inner.next_install_id;
+            inner.installing = Some(InstallOperation { id, abort: None });
+            // `downloaded` keeps what an earlier download left; the download reports it again.
             inner.status.state = UpdateState::Downloading;
-            inner.status.downloaded = 0;
-            inner.status.total = None;
             inner.status.error = None;
-            update
+            (update, id)
         };
         self.update(|_| {});
-        Ok(update)
+        Ok(claimed)
     }
 
-    async fn run_install(&self, update: Update) -> Result<(), String> {
-        let mut downloaded: u64 = 0;
-        let mut last_emit = Instant::now();
-        let bytes = update
-            .download(
-                |chunk, total| {
-                    downloaded += chunk as u64;
-                    if last_emit.elapsed() >= PROGRESS_INTERVAL {
-                        last_emit = Instant::now();
-                        let done = downloaded;
-                        self.update(|status| {
-                            status.downloaded = done;
-                            status.total = total;
-                        });
+    /// Pause the running download; installing again continues where it stopped.
+    pub fn cancel_install(&self) -> UpdateStatus {
+        {
+            let mut inner = self.lock();
+            if inner.status.state == UpdateState::Downloading {
+                if let Some(operation) = inner.installing.take() {
+                    if let Some(abort) = operation.abort {
+                        abort.abort();
                     }
-                },
-                || {},
-            )
-            .await;
+                    inner.status.state = UpdateState::Available;
+                    inner.status.error = None;
+                }
+            }
+        }
+        self.update(|_| {});
+        self.status()
+    }
+
+    fn on_download_event(&self, id: u64, event: DownloadEvent, last_emit: &mut Option<Instant>) {
+        {
+            let mut inner = self.lock();
+            let current = inner.installing.as_ref().map(|operation| operation.id) == Some(id);
+            if !current || inner.status.state != UpdateState::Downloading {
+                return;
+            }
+            let status = &mut inner.status;
+            match event {
+                DownloadEvent::Progress { downloaded, total } => {
+                    let due = status.error.is_some()
+                        || total == Some(downloaded)
+                        || last_emit.is_none_or(|at| at.elapsed() >= PROGRESS_INTERVAL);
+                    status.downloaded = downloaded;
+                    status.total = total;
+                    if !due {
+                        return;
+                    }
+                    status.error = None;
+                }
+                DownloadEvent::Retrying {
+                    attempt,
+                    of,
+                    delay,
+                    error,
+                } => {
+                    status.error = Some(format!(
+                        "{error}，{} 秒后自动重试（第 {attempt}/{of} 次）",
+                        delay.as_secs().max(1)
+                    ));
+                }
+            }
+        }
+        *last_emit = Some(Instant::now());
+        self.update(|_| {});
+    }
+
+    async fn run_install(&self, update: Update, id: u64) -> Result<(), String> {
+        let downloader = match self.downloader() {
+            Ok(downloader) => downloader,
+            Err(error) => {
+                self.lock().installing = None;
+                return Err(self.fail(format!("下载更新失败：{error}")));
+            }
+        };
+        let package = Package {
+            url: update.download_url.clone(),
+            version: update.version.clone(),
+            signature: update.signature.clone(),
+            headers: update.headers.clone(),
+        };
+        let manager = self.clone();
+        let task = tauri::async_runtime::spawn(async move {
+            let mut last_emit = None;
+            downloader
+                .download(&package, |event| {
+                    manager.on_download_event(id, event, &mut last_emit)
+                })
+                .await
+        });
+        {
+            let mut inner = self.lock();
+            match inner.installing.as_mut() {
+                Some(operation) if operation.id == id => {
+                    operation.abort = Some(task.inner().abort_handle())
+                }
+                _ => {
+                    task.abort();
+                    return Ok(());
+                }
+            }
+        }
+        let result = task.await;
+        let bytes = {
+            let mut inner = self.lock();
+            if inner.installing.as_ref().map(|operation| operation.id) != Some(id) {
+                // Paused (`cancel_install`); the downloaded part stays in the cache.
+                return Ok(());
+            }
+            inner.installing = None;
+            match result {
+                Ok(Ok(bytes)) => {
+                    let size = bytes.len() as u64;
+                    inner.status.state = UpdateState::Installing;
+                    inner.status.downloaded = size;
+                    inner.status.total = Some(size);
+                    inner.status.error = None;
+                    Ok(bytes)
+                }
+                Ok(Err(error)) => Err(error),
+                Err(error) => Err(format!("下载更新失败：{error}")),
+            }
+        };
         let bytes = match bytes {
             Ok(bytes) => bytes,
-            Err(error) => return Err(self.fail(format!("下载或校验更新失败：{error}"))),
+            Err(error) => {
+                // Show what is still cached: a failed verification drops the file.
+                let partial = self
+                    .download_cache()
+                    .and_then(|cache| cache.partial(&update.version, &update.signature));
+                {
+                    let status = &mut self.lock().status;
+                    (status.downloaded, status.total) = partial.unwrap_or((0, None));
+                }
+                return Err(self.fail(error));
+            }
         };
-        let size = bytes.len() as u64;
-        self.update(|status| {
-            status.state = UpdateState::Installing;
-            status.downloaded = size;
-            status.total = Some(size);
-        });
+        self.update(|_| {});
 
         // Stop the host first: running agents are ended cleanly, and on Windows the
         // installer (which exits this process) must be able to replace pier-host.exe.
@@ -552,13 +724,32 @@ impl UpdateManager {
             return;
         }
         let manager = self.clone();
-        thread::spawn(move || loop {
-            thread::sleep(SCHEDULER_TICK);
-            let due = manager.lock().auto_check_due(Instant::now());
-            if due {
-                tauri::async_runtime::block_on(manager.check());
-            }
+        thread::spawn(move || {
+            manager.prune_installed_downloads();
+            manager.run_scheduler();
         });
+    }
+
+    /// Downloads of this version or older ones are no longer needed.
+    fn prune_installed_downloads(&self) {
+        let Ok(current) = Version::parse(&self.status().current_version) else {
+            return;
+        };
+        if let Some(cache) = self.download_cache() {
+            cache.prune(|version, _| {
+                Version::parse(version.trim_start_matches('v')).is_ok_and(|v| v > current)
+            });
+        }
+    }
+
+    fn run_scheduler(&self) -> ! {
+        loop {
+            thread::sleep(SCHEDULER_TICK);
+            let due = self.lock().auto_check_due(Instant::now());
+            if due {
+                tauri::async_runtime::block_on(self.check());
+            }
+        }
     }
 }
 
@@ -606,6 +797,11 @@ pub async fn update_install(manager: tauri::State<'_, UpdateManager>) -> Result<
 }
 
 #[tauri::command]
+pub fn update_cancel_install(manager: tauri::State<'_, UpdateManager>) -> UpdateStatus {
+    manager.cancel_install()
+}
+
+#[tauri::command]
 pub fn update_set_auto_check(
     manager: tauri::State<'_, UpdateManager>,
     enabled: bool,
@@ -650,6 +846,8 @@ mod tests {
                 previous_state: UpdateState::Available,
                 abort: None,
             }),
+            next_install_id: 0,
+            installing: None,
         }
     }
 

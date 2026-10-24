@@ -119,8 +119,13 @@ export interface UpdateStatus {
 	version?: string | null;
 	notes?: string | null;
 	date?: string | null;
+	/**
+	 * Bytes downloaded so far: while `downloading`, and for a paused or interrupted download of
+	 * the pending update, which installing continues.
+	 */
 	downloaded: number;
 	total?: number | null;
+	/** While `downloading`: why the download is being retried. */
 	error?: string | null;
 	/** Unix time (ms) of the last successful check. */
 	lastChecked?: number | null;
@@ -135,8 +140,13 @@ export interface UpdateBridge {
 	onOpen(listener: () => void): () => void;
 	check(): Promise<UpdateStatus>;
 	cancelCheck(): Promise<UpdateStatus>;
-	/** Download, install, and relaunch. Rejects with the reason when it fails. */
+	/**
+	 * Download, install, and relaunch. Rejects with the reason when it fails; resolves without
+	 * relaunching when the download is paused.
+	 */
 	install(): Promise<void>;
+	/** Pause the running download; installing again continues where it stopped. */
+	cancelInstall(): Promise<UpdateStatus>;
 	setAutoCheck(enabled: boolean): Promise<UpdateStatus>;
 	setMirror(prefix: string): Promise<UpdateStatus>;
 }
@@ -204,6 +214,7 @@ function tauriBridge(): Bridge {
 			check: async () => (await core).invoke<UpdateStatus>("update_check"),
 			cancelCheck: async () => (await core).invoke<UpdateStatus>("update_cancel_check"),
 			install: async () => (await core).invoke("update_install"),
+			cancelInstall: async () => (await core).invoke<UpdateStatus>("update_cancel_install"),
 			setAutoCheck: async (enabled) => (await core).invoke<UpdateStatus>("update_set_auto_check", { enabled }),
 			setMirror: async (prefix) => (await core).invoke<UpdateStatus>("update_set_mirror", { prefix }),
 		},
@@ -350,6 +361,7 @@ const unsupportedUpdates: UpdateBridge = {
 	install: async () => {
 		throw new Error("浏览器模式不支持自动更新");
 	},
+	cancelInstall: async () => unsupported,
 	setAutoCheck: async () => unsupported,
 	setMirror: async () => unsupported,
 };
@@ -365,6 +377,8 @@ function demoUpdates(): UpdateBridge {
 	};
 	const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 	let checkId = 0;
+	let installId = 0;
+	let dropped = false;
 	let previousState: UpdateState = "idle";
 	const cancelCheck = () => {
 		checkId++;
@@ -395,12 +409,28 @@ function demoUpdates(): UpdateBridge {
 			});
 		},
 		cancelCheck: async () => cancelCheck(),
+		cancelInstall: async () => {
+			if (status.state !== "downloading") return status;
+			installId++;
+			return set({ state: "available", error: null });
+		},
 		install: async () => {
+			if (status.state === "downloading" || status.state === "installing") return;
+			const id = ++installId;
 			const total = 48 * 1024 * 1024;
-			for (let downloaded = 0; downloaded <= total; downloaded += total / 20) {
-				set({ state: "downloading", downloaded, total });
+			// Continue a paused download, with one simulated connection drop at 40%.
+			for (let downloaded = status.total ? status.downloaded : 0; downloaded < total; downloaded += total / 20) {
+				set({ state: "downloading", downloaded, total, error: null });
 				await sleep(120);
+				if (id !== installId) return;
+				if (!dropped && downloaded >= total * 0.4) {
+					dropped = true;
+					set({ error: "网络连接中断，1 秒后自动重试（第 1/5 次）" });
+					await sleep(1000);
+					if (id !== installId) return;
+				}
 			}
+			set({ state: "downloading", downloaded: total, total, error: null });
 			set({ state: "installing" });
 			await sleep(1000);
 			const error = "安装更新失败：浏览器演示模式不会真正安装";

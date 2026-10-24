@@ -143,6 +143,10 @@ jobs:
         working-directory: apps/desktop/src-tauri
         run: cargo test --lib --locked updater::tests
 
+      - name: Resumable update download tests
+        working-directory: apps/desktop/src-tauri
+        run: cargo test --lib --locked update_download::tests
+
       - name: HTML preview regression tests
         working-directory: apps/desktop/src-tauri
         run: cargo test --lib --locked html_preview::tests

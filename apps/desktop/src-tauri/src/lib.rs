@@ -13,6 +13,7 @@ mod system_speech;
 mod terminal;
 mod transfer;
 mod tray;
+mod update_download;
 mod update_route;
 mod updater;
 
@@ -86,6 +87,7 @@ pub fn run() {
             updater::update_check,
             updater::update_cancel_check,
             updater::update_install,
+            updater::update_cancel_install,
             updater::update_set_auto_check,
             updater::update_set_mirror,
             terminal::terminal_spawn,

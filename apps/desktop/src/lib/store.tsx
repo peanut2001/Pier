@@ -3072,6 +3072,17 @@ export class PierStore {
 		}
 	}
 
+	/** Pause the running download; installing again continues where it stopped. */
+	async pauseUpdate(): Promise<void> {
+		const request = ++this.updateRequest;
+		try {
+			const status = await this.bridge.updates.cancelInstall();
+			if (request === this.updateRequest) this.set({ update: status });
+		} catch (error) {
+			this.toast("error", `暂停下载失败：${errorText(error)}`);
+		}
+	}
+
 	async setUpdateAutoCheck(enabled: boolean): Promise<void> {
 		const request = ++this.updateRequest;
 		try {

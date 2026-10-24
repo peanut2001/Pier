@@ -2723,7 +2723,11 @@ version = "0.2.53"
 dependencies = [
  "base64 0.22.1",
  "cc",
+ "minisign-verify",
  "portable-pty",
+ "reqwest",
+ "rustls",
+ "semver",
  "serde",
  "serde_json",
  "tauri",
