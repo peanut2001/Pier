@@ -167,7 +167,7 @@ function ServiceSpeechSettings() {
 	}, [client]);
 	return (
 		<form
-			className="speech-settings"
+			className="speech-settings speech-service-form"
 			onSubmit={async (event) => {
 				event.preventDefault();
 				if (!settings || pending) return;
@@ -209,7 +209,7 @@ function ServiceSpeechSettings() {
 						/>
 					</label>
 					<span className="muted">填写完整的 OpenAI 兼容转写地址；更换地址时请重新填写 API Key。留空可停用。</span>
-					<label>
+					<label className="speech-field-half">
 						模型
 						<input
 							aria-label="语音模型"
@@ -217,6 +217,16 @@ function ServiceSpeechSettings() {
 							required
 							disabled={pending}
 							onChange={(event) => setSettings({ ...settings, model: event.target.value })}
+						/>
+					</label>
+					<label className="speech-field-half">
+						识别语言
+						<input
+							aria-label="识别语言"
+							value={settings.language}
+							placeholder="自动检测（或 zh / en）"
+							disabled={pending}
+							onChange={(event) => setSettings({ ...settings, language: event.target.value })}
 						/>
 					</label>
 					<label>
@@ -242,16 +252,6 @@ function ServiceSpeechSettings() {
 							移除已保存的 API Key
 						</label>
 					) : null}
-					<label>
-						识别语言
-						<input
-							aria-label="识别语言"
-							value={settings.language}
-							placeholder="自动检测（或 zh / en）"
-							disabled={pending}
-							onChange={(event) => setSettings({ ...settings, language: event.target.value })}
-						/>
-					</label>
 					<button type="submit" disabled={pending}>
 						{pending ? "保存中…" : "保存语音设置"}
 					</button>

@@ -190,6 +190,21 @@ function navItemOf(page: SettingsSection): SectionDef | undefined {
 function sectionMatches(item: SectionDef, q: string): boolean {
 	return !q || `${item.label} ${item.keywords}`.toLowerCase().includes(q);
 }
+const PAGE_DESCRIPTIONS: Record<SettingsSection, string> = {
+	account: "管理云链API 账号、额度与令牌，连接你的 Agent。",
+	general: "让 Pier 更合你的习惯，调整外观、语音与启动方式。",
+	models: "连接模型服务，选择适合你的默认模型。",
+	workspaces: "管理项目目录，为每个工作区选择合适的工具审批策略。",
+	extensions: "发现与管理 pi 扩展，为工作流程添加更多能力。",
+	resources: "统一管理 Agent 的技能与 MCP 服务器。",
+	pi: "调整 pi 的模型、工具与运行偏好。",
+	claude: "管理 Claude Code 的模型、权限与运行偏好。",
+	codex: "管理 Codex 的服务商、审批与运行偏好。",
+	remote: "连接其他电脑与手机，随时继续你的工作。",
+	logs: "查看 Host 的运行记录，定位连接与启动问题。",
+	about: "了解 Pier，获取最新版本与更新信息。",
+};
+
 const GENERAL = SECTIONS.find((item) => item.id === "general") as SectionDef;
 
 // ---- pages -----------------------------------------------------------------------------
@@ -286,24 +301,45 @@ const THEME_OPTIONS: Array<{ value: ThemePreference; label: string }> = [
 function AppearanceSettings() {
 	const preference = useThemePreference();
 	return (
-		<SettingsGroup title="外观">
-			<SettingsCard>
-				<SettingRow title="主题" description="界面使用浅色或深色配色，只对这台设备生效。">
-					<div className="segmented">
-						{THEME_OPTIONS.map((option) => (
-							<button
-								type="button"
-								key={option.value}
-								aria-pressed={preference === option.value}
-								className={preference === option.value ? "active" : undefined}
-								onClick={() => setThemePreference(option.value)}
-							>
-								{option.label}
-							</button>
-						))}
-					</div>
-				</SettingRow>
-			</SettingsCard>
+		<SettingsGroup title="外观" description="选择舒适的界面主题，仅对这台设备生效。">
+			<div className="settings-theme-options" role="radiogroup" aria-label="界面主题">
+				{THEME_OPTIONS.map((option) => (
+					<label
+						key={option.value}
+						className={`settings-theme-option${preference === option.value ? " selected" : ""}`}
+					>
+						<input
+							type="radio"
+							name="appearance-theme"
+							value={option.value}
+							checked={preference === option.value}
+							onChange={() => setThemePreference(option.value)}
+							className="settings-theme-input"
+						/>
+						<span className={`settings-theme-preview ${option.value}`} aria-hidden="true">
+							<span className="settings-theme-sidebar">
+								<i />
+								<i />
+								<i />
+							</span>
+							<span className="settings-theme-window">
+								<i />
+								<i />
+								<span>
+									<i />
+									<i />
+								</span>
+							</span>
+						</span>
+						<span className="settings-theme-label">
+							{option.label}
+							<span className="settings-theme-check" aria-hidden="true">
+								{preference === option.value ? <IconCheck size={12} /> : null}
+							</span>
+						</span>
+					</label>
+				))}
+			</div>
 		</SettingsGroup>
 	);
 }
@@ -313,7 +349,7 @@ function GeneralSettings() {
 	return (
 		<>
 			<AppearanceSettings />
-			<SettingsGroup title="语音输入（本机）">
+			<SettingsGroup title="语音输入" description="在本机设置识别方式，让想法更快变成文字。">
 				<SettingsCard>
 					<SettingRow title="语音识别服务" stack>
 						<SpeechSettings />
@@ -832,11 +868,18 @@ function NavBadge({ id }: { id: SettingsSection }): ReactNode {
 export function SettingsPage({ section }: { section: SettingsSection }) {
 	const store = useStore();
 	const [query, setQuery] = useState("");
+	const scrollRef = useRef<HTMLDivElement>(null);
+	const version = useAppState((s) => s.update.currentVersion);
 	const { online } = useHostStatus();
 	const target = useSettingsTarget();
 	const sync = useAppState((s) => s.settingsSync);
 	// Re-render when the managed computer's info (protocol version) changes.
 	useAppState((s) => s.nodes[s.settingsNode]?.hostInfo);
+
+	// biome-ignore lint/correctness/useExhaustiveDependencies: each page and managed host starts at the top
+	useEffect(() => {
+		scrollRef.current?.scrollTo(0, 0);
+	}, [section, target.node]);
 
 	// Esc leaves the settings screen unless a dialog on top of it handles the key.
 	useEffect(() => {
@@ -896,18 +939,32 @@ export function SettingsPage({ section }: { section: SettingsSection }) {
 						返回应用
 					</button>
 				</div>
-				<h1 className="settings-nav-title">设置</h1>
+				<div className="settings-nav-heading">
+					<span className="settings-nav-eyebrow">PIER / PREFERENCES</span>
+					<h1 className="settings-nav-title">设置</h1>
+				</div>
 				<HostSwitcher />
 				<div className="settings-search">
 					<IconSearch size={14} />
-					<input placeholder="搜索设置" value={query} onChange={(e) => setQuery(e.target.value)} />
+					<input
+						aria-label="搜索设置"
+						placeholder="搜索设置…"
+						value={query}
+						onChange={(e) => setQuery(e.target.value)}
+						onKeyDown={(event) => {
+							if (event.key === "Escape" && query) {
+								event.stopPropagation();
+								setQuery("");
+							}
+						}}
+					/>
 					{query ? (
 						<button type="button" className="ghost icon" title="清除" onClick={() => setQuery("")}>
 							<IconX size={13} />
 						</button>
 					) : null}
 				</div>
-				<nav className="settings-nav-list">
+				<nav className="settings-nav-list" aria-label="设置分类">
 					{groups.map((group) => (
 						<div key={group.title} className="settings-nav-group">
 							<div className="settings-nav-group-title">{group.title}</div>
@@ -916,6 +973,7 @@ export function SettingsPage({ section }: { section: SettingsSection }) {
 									type="button"
 									key={item.id}
 									className={`settings-nav-item${item.id === nav.id ? " selected" : ""}`}
+									aria-current={item.id === nav.id ? "page" : undefined}
 									onClick={() => openNav(item)}
 								>
 									<item.icon size={15} />
@@ -925,14 +983,52 @@ export function SettingsPage({ section }: { section: SettingsSection }) {
 							))}
 						</div>
 					))}
-					{!groups.length ? <div className="settings-nav-empty">没有匹配的设置</div> : null}
+					{!groups.length ? (
+						<div className="settings-nav-empty" role="status">
+							没有匹配的设置，试试“模型”或“主题”。
+						</div>
+					) : null}
 				</nav>
+				<div className="settings-nav-footer">
+					<span>
+						Pier <span className="mono">v{version}</span>
+					</span>
+					<kbd title="返回应用">Esc</kbd>
+				</div>
 			</aside>
 			<main className="main settings-main">
+				<div className="settings-topbar">
+					<div className="settings-breadcrumb">
+						<IconSettings size={15} />
+						<span>设置</span>
+						<span aria-hidden="true">/</span>
+						<strong>{nav.label}</strong>
+					</div>
+					<span className="settings-scope" title={followsHost ? target.name : undefined}>
+						<IconMonitor size={13} />
+						<span>
+							{followsHost
+								? `${target.local ? "本机" : "远程"} · ${target.name}`
+								: current.id === "workspaces" || current.id === "about"
+									? "所有电脑"
+									: "本机设置"}
+						</span>
+					</span>
+				</div>
 				<HostBanner onShowLogs={() => store.openSettings("logs")} />
-				<div className="settings-scroll">
+				<div className="settings-scroll" ref={scrollRef}>
 					<div className="settings-content">
-						<h1 className="settings-title">{nav.label}</h1>
+						<header className="settings-page-heading">
+							<div className="settings-page-icon">
+								<nav.icon size={24} />
+							</div>
+							<div>
+								<h1 className="settings-title" id="settings-page-title">
+									{nav.label}
+								</h1>
+								<p className="settings-subtitle">{PAGE_DESCRIPTIONS[current.id]}</p>
+							</div>
+						</header>
 						{nav.tabs ? (
 							<div className="settings-tabs" role="tablist" aria-label={nav.label}>
 								{nav.tabs.map((tab) => (
@@ -941,6 +1037,28 @@ export function SettingsPage({ section }: { section: SettingsSection }) {
 										role="tab"
 										key={tab.id}
 										aria-selected={tab.id === current.id}
+										id={`settings-tab-${tab.id}`}
+										aria-controls="settings-page-body"
+										tabIndex={tab.id === current.id ? 0 : -1}
+										onKeyDown={(event) => {
+											const tabs = nav.tabs ?? [];
+											const index = tabs.indexOf(tab);
+											const next =
+												event.key === "ArrowRight"
+													? (index + 1) % tabs.length
+													: event.key === "ArrowLeft"
+														? (index - 1 + tabs.length) % tabs.length
+														: event.key === "Home"
+															? 0
+															: event.key === "End"
+																? tabs.length - 1
+																: -1;
+											const nextTab = tabs[next];
+											if (!nextTab) return;
+											event.preventDefault();
+											store.openSettings(nextTab.id);
+											document.getElementById(`settings-tab-${nextTab.id}`)?.focus();
+										}}
 										className={`settings-tab${tab.id === current.id ? " active" : ""}`}
 										onClick={() => store.openSettings(tab.id)}
 									>
@@ -956,7 +1074,20 @@ export function SettingsPage({ section }: { section: SettingsSection }) {
 								这一页只针对本机（{store.nodeName(LOCAL_NODE)}），不受上方所选电脑影响。
 							</p>
 						) : null}
-						{body}
+						{nav.tabs ? (
+							<div
+								id="settings-page-body"
+								className="settings-page-body"
+								role="tabpanel"
+								aria-labelledby={`settings-tab-${current.id}`}
+							>
+								{body}
+							</div>
+						) : (
+							<section id="settings-page-body" className="settings-page-body" aria-labelledby="settings-page-title">
+								{body}
+							</section>
+						)}
 					</div>
 				</div>
 			</main>

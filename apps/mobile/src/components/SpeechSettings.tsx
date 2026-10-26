@@ -4,7 +4,7 @@ import { SpeechMethodSchemas, type SpeechStatus } from "@pier/protocol";
 import { useEffect, useState } from "react";
 import { ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 import { usePalette } from "../theme.ts";
-import { Button, Muted, Sheet } from "./ui.tsx";
+import { Button, CardHeader, Muted, Sheet } from "./ui.tsx";
 
 export function SpeechSettings({ client, onClose }: { client: PierClient | undefined; onClose: () => void }) {
 	const p = usePalette();
@@ -30,7 +30,7 @@ export function SpeechSettings({ client, onClose }: { client: PierClient | undef
 	return (
 		<Sheet onClose={onClose}>
 			<ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.form}>
-				<Text style={[styles.title, { color: p.text }]}>语音输入设置</Text>
+				<CardHeader icon="mic-outline" title="语音输入" subtitle="配置当前电脑的语音识别服务" />
 				<Muted>录音发送到你配置的语音转文字服务，设置保存在当前连接的电脑。每次最多 2 分钟，识别后可编辑再发送。</Muted>
 				{settings ? (
 					<>
@@ -51,7 +51,7 @@ export function SpeechSettings({ client, onClose }: { client: PierClient | undef
 									autoCapitalize="none"
 									autoCorrect={false}
 									editable={!pending}
-									style={[styles.input, { color: p.text, borderColor: p.border }]}
+									style={[styles.input, { color: p.text, borderColor: p.border, backgroundColor: p.elevated }]}
 									onChangeText={(value) => setSettings({ ...settings, [field.key]: value })}
 								/>
 							</View>
@@ -67,7 +67,7 @@ export function SpeechSettings({ client, onClose }: { client: PierClient | undef
 							editable={!pending && !removeKey}
 							placeholder={settings.hasApiKey ? "已保存，留空保留" : "本地服务可留空"}
 							placeholderTextColor={p.faint}
-							style={[styles.input, { color: p.text, borderColor: p.border }]}
+							style={[styles.input, { color: p.text, borderColor: p.border, backgroundColor: p.elevated }]}
 							onChangeText={setKey}
 						/>
 						{settings.hasApiKey ? (
@@ -83,6 +83,7 @@ export function SpeechSettings({ client, onClose }: { client: PierClient | undef
 						) : null}
 						<Button
 							title="保存语音设置"
+							variant="primary"
 							loading={pending}
 							onPress={async () => {
 								setPending(true);
@@ -113,16 +114,15 @@ export function SpeechSettings({ client, onClose }: { client: PierClient | undef
 						{message}
 					</Text>
 				) : null}
-				<Button title="关闭" onPress={onClose} />
+				<Button title="关闭" variant="ghost" onPress={onClose} />
 			</ScrollView>
 		</Sheet>
 	);
 }
 
 const styles = StyleSheet.create({
-	form: { padding: 20, gap: 12 },
-	title: { fontSize: 18, fontWeight: "600" },
-	field: { gap: 6 },
+	form: { padding: 24, gap: 18 },
+	field: { gap: 8 },
 	input: { borderWidth: 1, borderRadius: 10, padding: 12, fontSize: 15 },
-	row: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+	row: { flexDirection: "row", flexWrap: "wrap", gap: 12, justifyContent: "space-between", alignItems: "center" },
 });
