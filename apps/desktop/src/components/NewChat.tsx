@@ -5,10 +5,8 @@ import { draftToPrompt } from "../lib/composer-text.ts";
 import { type Draft, LOCAL_NODE, NEW_CHAT_DRAFT, useAppState, useComputers, useStore } from "../lib/store.tsx";
 import { useVoiceInput } from "../lib/use-voice-input.ts";
 import { AgentIcon } from "./AgentIcons.tsx";
-import { BrowserButton } from "./BrowserPanel.tsx";
 import { readImages, useComposerInsert } from "./Composer.tsx";
 import { ComposerInput, type ComposerInputHandle } from "./ComposerInput.tsx";
-import { FilesPanelToggle } from "./FilesPanel.tsx";
 import { useNodeStatus } from "./HostPanels.tsx";
 import {
 	IconArrowUp,
@@ -21,18 +19,18 @@ import {
 	IconLoader,
 	IconMonitor,
 	IconSearch,
+	IconSparkles,
 	IconWrench,
 	IconX,
-	Logo,
 } from "./Icons.tsx";
 import { NewChatModelPicker } from "./ModelPicker.tsx";
 import { NoModelsBanner } from "./ModelsPanel.tsx";
 import { useNewChatRuntimes, useNewChatSlashMenu } from "./NewChatSlashMenu.ts";
 import { PolicyPicker, useOutsideClick } from "./SessionControls.tsx";
-import { AddWorkspaceItems, SidebarToggle, useAddWorkspace } from "./Sidebar.tsx";
+import { AddWorkspaceItems, useAddWorkspace } from "./Sidebar.tsx";
 import { SlashMenu, type SlashMenuEntry } from "./SlashMenu.tsx";
-import { TerminalToggle } from "./TerminalPanel.tsx";
 import { VoiceControls } from "./VoiceControls.tsx";
+import { WorkbenchHeader } from "./WorkbenchHeader.tsx";
 
 const STARTERS = [
 	{
@@ -330,190 +328,201 @@ export function NewChatView({ workspaceId }: { workspaceId?: string }) {
 	}
 
 	return (
-		<div className="new-chat">
-			<SidebarToggle floating />
-			{workspace ? (
-				<div className="home-toolbar">
-					<BrowserButton workspace={workspace} />
-					<TerminalToggle workspace={workspace} />
-					<FilesPanelToggle />
-				</div>
-			) : null}
-			<div className="new-chat-hero">
-				<Logo size={48} />
-				<div className="home-eyebrow">从这里开始</div>
-				{workspace ? <h1>今天，想构建些什么？</h1> : <h1>选择一个工作区，开始新的对话</h1>}
-				<p className="muted">
-					{workspace
-						? node && node !== LOCAL_NODE
-							? `在 ${store.nodeName(node)} 的 ${workspace.name} 中，与 Agent 一起推进工作。`
-							: `在 ${workspace.name} 中，把想法交给 Agent，一起推进工作。`
-						: workspaces.length
-							? "在输入框下方选择对话所在的工作区。"
-							: "先添加一个项目目录作为工作区。"}
-				</p>
-				<div className="new-chat-banner">
-					<NoModelsBanner />
-				</div>
-			</div>
-			<div className="session-bottom new-chat-bottom">
-				{/* biome-ignore lint/a11y/noStaticElementInteractions: drop target for pasted/dragged images. */}
-				<div
-					className={`composer${dragging ? " dragging" : ""}`}
-					onDragOver={(e) => {
-						if ([...e.dataTransfer.items].some((i) => i.type.startsWith("image/"))) {
-							e.preventDefault();
-							setDragging(true);
-						}
-					}}
-					onDragLeave={() => setDragging(false)}
-					onDrop={(e) => {
-						e.preventDefault();
-						setDragging(false);
-						void addFiles(e.dataTransfer.files);
-					}}
-				>
-					{draft.images.length ? (
-						<div className="composer-images">
-							{draft.images.map((image, i) => (
-								// biome-ignore lint/suspicious/noArrayIndexKey: positional attachments.
-								<div key={i} className="composer-image">
-									<img src={`data:${image.mimeType};base64,${image.data}`} alt={image.name} />
-									<button
-										type="button"
-										title="移除"
-										onClick={() => setDraft((d) => ({ ...d, images: d.images.filter((_, j) => j !== i) }))}
-									>
-										<IconX size={11} />
-									</button>
-								</div>
-							))}
-						</div>
-					) : null}
-					<SlashMenu menu={menu} onPick={(entry) => pick(entry)} />
-					<ComposerInput
-						ref={input}
-						value={draft.text}
-						disabled={sending}
-						placeholder={workspace ? "描述你的任务，也可以粘贴图片或输入 / 使用命令…" : "先选择工作区，再描述你的任务…"}
-						onChange={(text) => setDraft((d) => ({ ...d, text }))}
-						onOpenFile={(path) => {
-							if (workspace) store.openFilePreview(workspace.id, path);
-						}}
-						onPaste={(e) => {
-							const files = [...e.clipboardData.files].filter((f) => f.type.startsWith("image/"));
-							if (files.length) {
-								e.preventDefault();
-								void addFiles(files);
-							}
-						}}
-						onKeyDown={(e) => {
-							if (e.nativeEvent.isComposing || e.keyCode === 229) return;
-							if (menu.open) {
-								const entry = menu.entries[menu.active];
-								if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-									if (menu.entries.length) {
-										e.preventDefault();
-										menu.move(e.key === "ArrowDown" ? 1 : -1);
-									}
-									return;
-								}
-								if (e.key === "Escape") {
-									e.preventDefault();
-									menu.dismiss();
-									return;
-								}
-								if (entry && (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey && !e.altKey))) {
-									e.preventDefault();
-									pick(entry, e.key === "Tab");
-									return;
-								}
-							}
-							if (e.key === "Enter" && !e.shiftKey) {
-								e.preventDefault();
-								void send();
-							}
-						}}
-					/>
-					<div className="composer-toolbar">
-						<div className="composer-toolbar-left">
-							<VoiceControls voice={voice} disabled={sending} />
-							<button
-								type="button"
-								className="ghost icon composer-attach"
-								title="添加图片（也可以粘贴或拖入）"
-								disabled={sending}
-								onClick={() => fileInput.current?.click()}
-							>
-								<IconImage size={16} />
-							</button>
-							<input
-								ref={fileInput}
-								type="file"
-								accept="image/*"
-								multiple
-								hidden
-								onChange={(e) => {
-									const files = [...(e.target.files ?? [])];
-									e.target.value = "";
-									void addFiles(files);
-								}}
-							/>
-							<WorkspacePicker workspace={workspace} disabled={sending} />
-							{workspace ? (
-								<AgentPicker workspace={workspace} disabled={sending || !online} runtimes={runtimes} />
-							) : null}
-							{workspace ? <PolicyPicker workspace={workspace} /> : null}
-						</div>
-						<div className="composer-actions">
-							{workspace ? (
-								<NewChatModelPicker workspace={workspace} runtimes={runtimes} disabled={sending || !online} />
-							) : null}
-							<button
-								type="button"
-								className="round-button send"
-								disabled={!canSend}
-								onClick={() => void send()}
-								title={workspace ? "发送并创建会话（Enter）" : "请先选择工作区"}
-							>
-								{sending ? <IconLoader size={16} className="spin" /> : <IconArrowUp size={17} />}
-							</button>
-						</div>
+		<div className="workbench-page-shell">
+			<WorkbenchHeader workspace={workspace} title="新建会话" />
+			<div className="new-chat">
+				<div className="new-chat-hero">
+					<div className="new-chat-symbol" aria-hidden="true">
+						<IconSparkles size={25} />
+					</div>
+					<div className="home-eyebrow">一个新想法 · 一段新会话</div>
+					{workspace ? (
+						<h1>
+							让想法，
+							<br />
+							<span className="new-chat-title-secondary">从这里开始。</span>
+						</h1>
+					) : (
+						<h1>
+							选一个工作区，
+							<br />
+							<span className="new-chat-title-secondary">开始新的构建。</span>
+						</h1>
+					)}
+					<p className="muted">
+						{workspace
+							? node && node !== LOCAL_NODE
+								? `在 ${store.nodeName(node)} 的 ${workspace.name} 中，与 Agent 一起推进工作。`
+								: `在 ${workspace.name} 中，把想法交给 Agent，一起推进工作。`
+							: workspaces.length
+								? "在输入框下方选择对话所在的工作区。"
+								: "先添加一个项目目录作为工作区。"}
+					</p>
+					<div className="new-chat-banner">
+						<NoModelsBanner />
 					</div>
 				</div>
-				{workspace ? (
-					<section className="prompt-starters" aria-label="任务灵感">
-						{STARTERS.map((starter) => (
-							<button
-								type="button"
-								className="prompt-starter"
-								key={starter.title}
-								disabled={hasContent || sending || voice.busy}
-								title={hasContent ? "清空当前草稿后可使用任务灵感" : starter.prompt}
-								onClick={() => {
-									setDraft((current) => ({ ...current, text: starter.prompt }));
-									input.current?.focus();
-								}}
-							>
-								<starter.icon size={17} />
-								<span>
-									<strong>{starter.title}</strong>
-									<small>{starter.description}</small>
-								</span>
-							</button>
-						))}
-					</section>
-				) : null}
-				<div className="new-chat-hint">
-					<span>
-						<kbd>Enter</kbd> 发送
-					</span>
-					<span>
-						<kbd>Shift + Enter</kbd> 换行
-					</span>
-					<span>
-						<kbd>/</kbd> 命令
-					</span>
+				<div className="session-bottom new-chat-bottom">
+					{/* biome-ignore lint/a11y/noStaticElementInteractions: drop target for pasted/dragged images. */}
+					<div
+						className={`composer${dragging ? " dragging" : ""}`}
+						onDragOver={(e) => {
+							if ([...e.dataTransfer.items].some((i) => i.type.startsWith("image/"))) {
+								e.preventDefault();
+								setDragging(true);
+							}
+						}}
+						onDragLeave={() => setDragging(false)}
+						onDrop={(e) => {
+							e.preventDefault();
+							setDragging(false);
+							void addFiles(e.dataTransfer.files);
+						}}
+					>
+						{draft.images.length ? (
+							<div className="composer-images">
+								{draft.images.map((image, i) => (
+									// biome-ignore lint/suspicious/noArrayIndexKey: positional attachments.
+									<div key={i} className="composer-image">
+										<img src={`data:${image.mimeType};base64,${image.data}`} alt={image.name} />
+										<button
+											type="button"
+											title="移除"
+											onClick={() => setDraft((d) => ({ ...d, images: d.images.filter((_, j) => j !== i) }))}
+										>
+											<IconX size={11} />
+										</button>
+									</div>
+								))}
+							</div>
+						) : null}
+						<SlashMenu menu={menu} onPick={(entry) => pick(entry)} />
+						<ComposerInput
+							ref={input}
+							value={draft.text}
+							disabled={sending}
+							placeholder={
+								workspace ? "描述你的任务，也可以粘贴图片或输入 / 使用命令…" : "先选择工作区，再描述你的任务…"
+							}
+							onChange={(text) => setDraft((d) => ({ ...d, text }))}
+							onOpenFile={(path) => {
+								if (workspace) store.openFilePreview(workspace.id, path);
+							}}
+							onPaste={(e) => {
+								const files = [...e.clipboardData.files].filter((f) => f.type.startsWith("image/"));
+								if (files.length) {
+									e.preventDefault();
+									void addFiles(files);
+								}
+							}}
+							onKeyDown={(e) => {
+								if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+								if (menu.open) {
+									const entry = menu.entries[menu.active];
+									if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+										if (menu.entries.length) {
+											e.preventDefault();
+											menu.move(e.key === "ArrowDown" ? 1 : -1);
+										}
+										return;
+									}
+									if (e.key === "Escape") {
+										e.preventDefault();
+										menu.dismiss();
+										return;
+									}
+									if (entry && (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey && !e.altKey))) {
+										e.preventDefault();
+										pick(entry, e.key === "Tab");
+										return;
+									}
+								}
+								if (e.key === "Enter" && !e.shiftKey) {
+									e.preventDefault();
+									void send();
+								}
+							}}
+						/>
+						<div className="composer-toolbar">
+							<div className="composer-toolbar-left">
+								<VoiceControls voice={voice} disabled={sending} />
+								<button
+									type="button"
+									className="ghost icon composer-attach"
+									title="添加图片（也可以粘贴或拖入）"
+									disabled={sending}
+									onClick={() => fileInput.current?.click()}
+								>
+									<IconImage size={16} />
+								</button>
+								<input
+									ref={fileInput}
+									type="file"
+									accept="image/*"
+									multiple
+									hidden
+									onChange={(e) => {
+										const files = [...(e.target.files ?? [])];
+										e.target.value = "";
+										void addFiles(files);
+									}}
+								/>
+								<WorkspacePicker workspace={workspace} disabled={sending} />
+								{workspace ? (
+									<AgentPicker workspace={workspace} disabled={sending || !online} runtimes={runtimes} />
+								) : null}
+								{workspace ? <PolicyPicker workspace={workspace} /> : null}
+							</div>
+							<div className="composer-actions">
+								{workspace ? (
+									<NewChatModelPicker workspace={workspace} runtimes={runtimes} disabled={sending || !online} />
+								) : null}
+								<button
+									type="button"
+									className="round-button send"
+									disabled={!canSend}
+									onClick={() => void send()}
+									title={workspace ? "发送并创建会话（Enter）" : "请先选择工作区"}
+								>
+									{sending ? <IconLoader size={16} className="spin" /> : <IconArrowUp size={17} />}
+								</button>
+							</div>
+						</div>
+					</div>
+					{workspace ? (
+						<section className="prompt-starters" aria-label="任务灵感">
+							{STARTERS.map((starter) => (
+								<button
+									type="button"
+									className="prompt-starter"
+									key={starter.title}
+									disabled={hasContent || sending || voice.busy}
+									title={hasContent ? "清空当前草稿后可使用任务灵感" : starter.prompt}
+									onClick={() => {
+										setDraft((current) => ({ ...current, text: starter.prompt }));
+										input.current?.focus();
+									}}
+								>
+									<starter.icon size={17} />
+									<span>
+										<strong>{starter.title}</strong>
+										<small>{starter.description}</small>
+									</span>
+								</button>
+							))}
+						</section>
+					) : null}
+					<div className="new-chat-hint">
+						<span>
+							<kbd>Enter</kbd> 发送
+						</span>
+						<span>
+							<kbd>Shift + Enter</kbd> 换行
+						</span>
+						<span>
+							<kbd>/</kbd> 命令
+						</span>
+					</div>
 				</div>
 			</div>
 		</div>

@@ -4,19 +4,19 @@
 	display: flex;
 	flex-direction: column;
 	min-height: 0;
-	padding-top: 6px;
+	padding-top: 8px;
 }
 
 .brand {
 	display: flex;
 	align-items: center;
 	gap: 10px;
-	padding: 12px 18px 18px;
+	padding: 12px 18px 24px;
 }
 
 .brand-name {
 	font-weight: 700;
-	font-size: 17px;
+	font-size: 19px;
 	letter-spacing: -0.025em;
 }
 
@@ -31,7 +31,7 @@
 }
 
 .sidebar-actions {
-	padding: 4px 10px 12px;
+	padding: 4px 14px 20px;
 }
 
 /* The primary workspace action stays visible above the project tree. */
@@ -41,28 +41,28 @@
 	gap: 10px;
 	height: 40px;
 	padding: 0 12px;
-	border: 1px solid var(--accent-ring);
+	border: 1px solid transparent;
 	border-radius: 10px;
-	background: var(--accent-soft);
-	color: var(--accent-text);
+	background: var(--text);
+	color: var(--bg);
 	font-size: 14px;
 	font-weight: 500;
 	transition: background 0.12s;
 }
 
 .new-session-button .icon-svg {
-	color: var(--accent-text);
+	color: inherit;
 }
 
 .new-session-button:hover:not(:disabled) {
-	background: var(--accent-soft);
-	border-color: var(--accent);
+	background: var(--text-muted);
+	border-color: transparent;
 }
 
 .new-session-button.selected,
 .new-session-button.selected:hover:not(:disabled) {
-	background: var(--accent-soft);
-	border-color: var(--accent);
+	background: var(--text);
+	border-color: transparent;
 }
 
 .running-agents {
@@ -191,7 +191,7 @@
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	padding: 4px 12px 4px 18px;
+	padding: 8px 12px 8px 18px;
 	font-size: 11.5px;
 	font-weight: 600;
 	color: var(--text-faint);
@@ -381,8 +381,8 @@
 	border: none;
 	background: transparent;
 	text-align: left;
-	padding: 7px 8px;
-	border-radius: 8px;
+	padding: 10px 8px;
+	border-radius: 9px;
 	color: var(--text-muted);
 	font-weight: 400;
 }
@@ -394,8 +394,8 @@
 }
 
 .session-row.selected {
-	background: var(--accent-soft);
-	box-shadow: var(--highlight);
+	background: var(--bg);
+	box-shadow: var(--shadow-sm);
 	color: var(--text);
 	font-weight: 500;
 }
@@ -419,9 +419,11 @@
 	top: 50%;
 	right: 4px;
 	transform: translateY(-50%);
-	display: none;
+	display: inline-flex;
 	align-items: center;
 	gap: 2px;
+	opacity: 0;
+	pointer-events: none;
 }
 
 .session-action {
@@ -442,13 +444,8 @@
 .session-item:hover .session-actions,
 .session-item:has(:focus-visible) .session-actions,
 .session-item.confirming .session-actions {
-	display: inline-flex;
-}
-
-.session-item:hover .session-row-time,
-.session-item:has(:focus-visible) .session-row-time,
-.session-item.confirming .session-row-time {
-	display: none;
+	opacity: 1;
+	pointer-events: auto;
 }
 
 /* Room for the action buttons over the end of the title. */
@@ -823,7 +820,35 @@ button.sidebar-update-action {
 }
 
 .brand-caption {
+	color: var(--text-faint);
+	font-size: 10px;
+	letter-spacing: 0.06em;
+}
+
+.session-row-agent {
+	flex: none;
+	align-self: flex-start;
+	padding-top: 3px;
 	color: var(--text-muted);
-	font-size: 11px;
-	letter-spacing: 0.04em;
+}
+
+.session-row-text {
+	display: flex;
+	flex: 1;
+	flex-direction: column;
+	min-width: 0;
+	gap: 5px;
+}
+
+.session-row-detail {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 6px;
+	font-size: 10px;
+	color: var(--text-faint);
+}
+
+.session-row-detail .session-row-time {
+	font-size: 10px;
 }

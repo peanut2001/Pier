@@ -1,0 +1,78 @@
+/* Shared page chrome. The toolbar remains outside scrolling content. */
+.workbench-page-shell {
+	display: flex;
+	flex: 1;
+	flex-direction: column;
+	min-width: 0;
+	min-height: 0;
+}
+
+.workbench-header {
+	display: flex;
+	flex: none;
+	align-items: center;
+	gap: 12px;
+	min-height: 62px;
+	padding: 10px 22px;
+	border-bottom: 1px solid var(--border);
+	background: var(--bg);
+}
+
+.workbench-breadcrumb {
+	display: flex;
+	flex: 1;
+	align-items: center;
+	gap: 12px;
+	min-width: 0;
+	font-size: 12px;
+	color: var(--text-faint);
+}
+
+.workbench-workspace {
+	justify-content: flex-start;
+	gap: 8px;
+	min-width: 0;
+	max-width: 240px;
+	padding: 5px 0;
+	border: none;
+	border-radius: 4px;
+	background: transparent;
+	font-size: 12px;
+	font-weight: 400;
+	color: var(--text-muted);
+}
+
+.workbench-workspace span,
+.workbench-page {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.workbench-page {
+	flex-shrink: 0;
+	font-weight: 500;
+	color: var(--text);
+}
+
+.workbench-tools {
+	display: flex;
+	flex: none;
+	align-items: center;
+	gap: 4px;
+}
+
+.workbench-tools .icon-chip {
+	width: 30px;
+	height: 30px;
+}
+
+@media (max-width: 1000px) {
+	.workbench-header {
+		gap: 8px;
+		padding-inline: 14px;
+	}
+	.workbench-breadcrumb {
+		gap: 6px;
+	}
+}

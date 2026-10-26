@@ -56,6 +56,12 @@ const AssistantMessageView = memo(
 			.join("\n\n");
 		return (
 			<div className={`message assistant${streaming ? " streaming" : ""}`}>
+				<div className="assistant-label">
+					<span>
+						<IconSparkles size={13} />
+					</span>
+					Agent
+				</div>
 				{blocks.map((block, i) => {
 					if (block.kind === "text") {
 						// biome-ignore lint/suspicious/noArrayIndexKey: blocks are positional content parts.
