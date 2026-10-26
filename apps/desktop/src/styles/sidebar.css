@@ -43,8 +43,8 @@
 	padding: 0 12px;
 	border: 1px solid transparent;
 	border-radius: 10px;
-	background: var(--text);
-	color: var(--bg);
+	background: var(--accent);
+	color: var(--accent-contrast);
 	font-size: 14px;
 	font-weight: 500;
 	transition: background 0.12s;
@@ -55,13 +55,13 @@
 }
 
 .new-session-button:hover:not(:disabled) {
-	background: var(--text-muted);
+	background: var(--accent-strong);
 	border-color: transparent;
 }
 
 .new-session-button.selected,
 .new-session-button.selected:hover:not(:disabled) {
-	background: var(--text);
+	background: var(--accent-strong);
 	border-color: transparent;
 }
 
