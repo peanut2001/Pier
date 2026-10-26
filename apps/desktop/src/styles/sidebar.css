@@ -11,7 +11,7 @@
 	display: flex;
 	align-items: center;
 	gap: 10px;
-	padding: 12px 18px;
+	padding: 12px 18px 18px;
 }
 
 .brand-name {
@@ -34,33 +34,35 @@
 	padding: 4px 10px 12px;
 }
 
-/* A flat row like the workspace rows below it. */
+/* The primary workspace action stays visible above the project tree. */
 .new-session-button {
 	width: 100%;
 	justify-content: flex-start;
 	gap: 10px;
-	height: 34px;
-	padding: 0 10px;
-	border: none;
-	border-radius: 8px;
-	background: transparent;
-	color: var(--text);
+	height: 40px;
+	padding: 0 12px;
+	border: 1px solid var(--accent-ring);
+	border-radius: 10px;
+	background: var(--accent-soft);
+	color: var(--accent-text);
 	font-size: 14px;
 	font-weight: 500;
 	transition: background 0.12s;
 }
 
 .new-session-button .icon-svg {
-	color: var(--text-muted);
+	color: var(--accent-text);
 }
 
 .new-session-button:hover:not(:disabled) {
-	background: var(--bg-hover);
+	background: var(--accent-soft);
+	border-color: var(--accent);
 }
 
 .new-session-button.selected,
 .new-session-button.selected:hover:not(:disabled) {
-	background: var(--bg-active);
+	background: var(--accent-soft);
+	border-color: var(--accent);
 }
 
 .running-agents {
@@ -204,7 +206,7 @@
 
 .workspace-group {
 	position: relative;
-	margin-bottom: 2px;
+	margin-bottom: 8px;
 }
 
 .workspace-group.dragging {
@@ -235,7 +237,7 @@
 	position: relative;
 	display: flex;
 	align-items: center;
-	height: 32px;
+	height: 36px;
 	padding-right: 3px;
 	border-radius: 8px;
 	transition: background 0.12s;
@@ -379,7 +381,7 @@
 	border: none;
 	background: transparent;
 	text-align: left;
-	padding: 5px 8px;
+	padding: 7px 8px;
 	border-radius: 8px;
 	color: var(--text-muted);
 	font-weight: 400;
@@ -392,13 +394,14 @@
 }
 
 .session-row.selected {
-	background: var(--bg-active);
+	background: var(--accent-soft);
 	box-shadow: var(--highlight);
 	color: var(--text);
 	font-weight: 500;
 }
 
 .session-row-title {
+	white-space: nowrap;
 	flex: 1;
 	min-width: 0;
 	overflow: hidden;
@@ -811,4 +814,16 @@ button.sidebar-update-action {
 .session-agent.agent-codex {
 	color: #3b82f6;
 	background: color-mix(in srgb, #3b82f6 14%, transparent);
+}
+
+.sidebar-brand-text {
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+}
+
+.brand-caption {
+	color: var(--text-muted);
+	font-size: 11px;
+	letter-spacing: 0.04em;
 }

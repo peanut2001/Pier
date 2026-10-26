@@ -1,11 +1,14 @@
+import { agentRuntimeLabel } from "@pier/chat-state";
 import { POLICY_LABEL, relativeTime, sessionTitle } from "../lib/format.ts";
 import { LOCAL_NODE, useAppState, useStore } from "../lib/store.tsx";
+import { AgentIcon } from "./AgentIcons.tsx";
 import { BrowserButton } from "./BrowserPanel.tsx";
 import { FilesPanelToggle } from "./FilesPanel.tsx";
 import {
 	IconChevronRight,
 	IconFolder,
 	IconFolderPlus,
+	IconGitBranch,
 	IconMessage,
 	IconMessagePlus,
 	IconMonitor,
@@ -33,11 +36,9 @@ export function Welcome() {
 			<div className="home-inner">
 				<div className="hero">
 					<Logo size={56} />
-					<h1>欢迎使用 Pier</h1>
-					<p className="hero-text">
-						编码 Agent 的跨设备工作台。统一使用 pi、Claude Code 与 Codex，管理多台电脑上的工作区与会话。 Agent
-						常驻在电脑上运行，你可以从桌面端或手机端查看进度、发送指令和审批操作。
-					</p>
+					<div className="home-eyebrow">你的 Agent 工作台</div>
+					<h1>从一个想法，开始构建。</h1>
+					<p className="hero-text">在一个地方使用 pi、Claude Code 与 Codex。连接项目，让想法落地，再从任意设备继续。</p>
 				</div>
 				<div className="steps">
 					{STEPS.map((step, i) => (
@@ -92,6 +93,7 @@ export function WorkspaceHome({ workspaceId }: { workspaceId: string }) {
 				<FilesPanelToggle />
 			</div>
 			<div className="home-inner">
+				<div className="home-eyebrow">工作区概览</div>
 				<div className="workspace-hero">
 					<div className="workspace-hero-icon">
 						<IconFolder size={26} />
@@ -99,28 +101,54 @@ export function WorkspaceHome({ workspaceId }: { workspaceId: string }) {
 					<div className="workspace-hero-text">
 						<h1>{workspace.name}</h1>
 						<div className="workspace-meta">
-							{node === LOCAL_NODE ? null : (
-								<span className="pill node-pill" title="Agent 在这台电脑上运行">
-									<IconMonitor size={12} />
-									{store.nodeName(node)}
-								</span>
-							)}
 							<code title={workspace.path}>{workspace.path}</code>
+						</div>
+						<div className="workspace-badges">
+							<span className="pill node-pill" title="Agent 在这台电脑上运行">
+								<IconMonitor size={12} />
+								{node === LOCAL_NODE ? "本机工作区" : store.nodeName(node)}
+							</span>
 							<span className={`pill policy-pill ${workspace.policy}`}>
 								<IconShield size={12} />
 								{POLICY_LABEL[workspace.policy]}
 							</span>
 						</div>
 					</div>
-					<button type="button" className="primary large" onClick={() => store.startNewChat(workspace.id)}>
-						<IconMessagePlus size={17} />
-						新建会话
-					</button>
 				</div>
 				<NoModelsBanner />
+				<section className="workspace-shortcuts" aria-label="工作区快捷操作">
+					<button
+						type="button"
+						className="workspace-shortcut featured"
+						onClick={() => store.startNewChat(workspace.id)}
+					>
+						<IconMessagePlus size={20} />
+						<span>
+							<strong>新建会话</strong>
+							<small>和 Agent 一起开始任务</small>
+						</span>
+						<IconChevronRight size={15} />
+					</button>
+					<button type="button" className="workspace-shortcut" onClick={() => store.showRightPanel("files")}>
+						<IconFolder size={20} />
+						<span>
+							<strong>浏览文件</strong>
+							<small>查看项目目录与源码</small>
+						</span>
+						<IconChevronRight size={15} />
+					</button>
+					<button type="button" className="workspace-shortcut" onClick={() => store.showRightPanel("git")}>
+						<IconGitBranch size={20} />
+						<span>
+							<strong>查看更改</strong>
+							<small>检查差异与提交记录</small>
+						</span>
+						<IconChevronRight size={15} />
+					</button>
+				</section>
 				<div className="recent">
 					<div className="section-heading">
-						<h3>最近的会话</h3>
+						<h3>继续最近的工作</h3>
 						{sessions?.length ? (
 							<span className="muted small">
 								共 {recent?.length ?? 0} 个{archivedCount ? `，另有 ${archivedCount} 个已归档` : ""}
@@ -141,7 +169,8 @@ export function WorkspaceHome({ workspaceId }: { workspaceId: string }) {
 					{sessions && !sessions.length ? (
 						<div className="recent-empty">
 							<IconMessage size={22} />
-							<span>还没有会话，点击「新建会话」开始第一个任务。</span>
+							<strong>准备好开始第一个任务了</strong>
+							<span>新建会话，描述你想实现的功能或要解决的问题。</span>
 						</div>
 					) : null}
 					{recent?.length ? (
@@ -151,15 +180,19 @@ export function WorkspaceHome({ workspaceId }: { workspaceId: string }) {
 									type="button"
 									key={session.id}
 									className="recent-row"
+									title={sessionTitle(session)}
 									onClick={() => store.selectSession(session)}
 								>
 									<span className="recent-icon">
-										<IconMessage size={15} />
+										<AgentIcon runtime={session.runtime ?? "pi"} size={18} />
 									</span>
-									<span className="recent-title">{sessionTitle(session)}</span>
-									<span className="recent-meta">
-										{session.messageCount} 条消息 · {relativeTime(session.modifiedAt)}
+									<span className="recent-content">
+										<span className="recent-title">{sessionTitle(session)}</span>
+										<span className="recent-meta">
+											{agentRuntimeLabel(session.runtime ?? "pi")} · {session.messageCount} 条消息
+										</span>
 									</span>
+									<span className="recent-time">{relativeTime(session.modifiedAt)}</span>
 									<IconChevronRight size={15} className="recent-chevron" />
 								</button>
 							))}

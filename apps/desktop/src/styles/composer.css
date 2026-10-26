@@ -253,7 +253,7 @@
 	display: flex;
 	flex-direction: column;
 	gap: 6px;
-	padding: 13px 10px 9px 16px;
+	padding: 16px 12px 10px 18px;
 	border: 1px solid var(--border-strong);
 	border-radius: var(--radius-xl);
 	background: var(--bg-input);
@@ -281,8 +281,8 @@
 .composer-input {
 	position: relative;
 	width: 100%;
-	min-height: 26px;
-	max-height: 320px;
+	min-height: 48px;
+	max-height: min(320px, 35vh);
 	padding: 2px 6px 2px 0;
 	overflow-y: auto;
 	outline: none;
@@ -371,6 +371,7 @@
 
 .composer-toolbar {
 	display: flex;
+	flex-wrap: wrap;
 	align-items: center;
 	justify-content: space-between;
 	gap: 8px;
@@ -379,6 +380,7 @@
 
 .composer-toolbar-left {
 	display: flex;
+	flex-wrap: wrap;
 	align-items: center;
 	gap: 4px;
 	min-width: 0;
@@ -423,6 +425,9 @@
 
 .composer-actions {
 	display: flex;
+	min-width: 0;
+	max-width: 100%;
+	margin-left: auto;
 	align-items: center;
 	gap: 6px;
 }
@@ -451,7 +456,7 @@
 
 .round-button.send {
 	background: var(--accent);
-	color: #fff;
+	color: var(--accent-contrast);
 	box-shadow:
 		0 3px 10px -2px var(--brand-glow),
 		inset 0 1px 0 rgba(255, 255, 255, 0.22);
@@ -1098,7 +1103,7 @@
 }
 .voice-status {
 	font-size: 12px;
-	color: var(--muted);
+	color: var(--text-muted);
 }
 .speech-settings {
 	display: flex;

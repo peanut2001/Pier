@@ -12,6 +12,7 @@ import { FilesPanelToggle } from "./FilesPanel.tsx";
 import { useNodeStatus } from "./HostPanels.tsx";
 import {
 	IconArrowUp,
+	IconBraces,
 	IconCheck,
 	IconChevronUp,
 	IconFolder,
@@ -19,6 +20,8 @@ import {
 	IconImage,
 	IconLoader,
 	IconMonitor,
+	IconSearch,
+	IconWrench,
 	IconX,
 	Logo,
 } from "./Icons.tsx";
@@ -30,6 +33,27 @@ import { AddWorkspaceItems, SidebarToggle, useAddWorkspace } from "./Sidebar.tsx
 import { SlashMenu, type SlashMenuEntry } from "./SlashMenu.tsx";
 import { TerminalToggle } from "./TerminalPanel.tsx";
 import { VoiceControls } from "./VoiceControls.tsx";
+
+const STARTERS = [
+	{
+		icon: IconBraces,
+		title: "了解这个项目",
+		description: "梳理结构与关键模块",
+		prompt: "帮我梳理这个项目的目录结构、技术栈和关键模块，介绍从哪里开始阅读代码。",
+	},
+	{
+		icon: IconWrench,
+		title: "排查一个问题",
+		description: "定位原因，找到解决方案",
+		prompt: "帮我排查一个问题，请先了解项目并询问具体的错误现象，再一起定位原因。",
+	},
+	{
+		icon: IconSearch,
+		title: "审查代码",
+		description: "发现风险与改进机会",
+		prompt: "请审查当前工作区的代码更改，重点关注潜在缺陷、边界情况和测试覆盖，并给出具体建议。",
+	},
+];
 
 /** Chip that picks the workspace (on any computer) the new chat will be created in. */
 function WorkspacePicker({ workspace, disabled }: { workspace?: WorkspaceInfo; disabled?: boolean }) {
@@ -316,19 +340,14 @@ export function NewChatView({ workspaceId }: { workspaceId?: string }) {
 				</div>
 			) : null}
 			<div className="new-chat-hero">
-				<Logo size={44} />
-				{workspace ? (
-					<h1>
-						我们应该在<span className="new-chat-target">{workspace.name}</span>中做些什么？
-					</h1>
-				) : (
-					<h1>选择一个工作区，开始新的对话</h1>
-				)}
+				<Logo size={48} />
+				<div className="home-eyebrow">从这里开始</div>
+				{workspace ? <h1>今天，想构建些什么？</h1> : <h1>选择一个工作区，开始新的对话</h1>}
 				<p className="muted">
 					{workspace
 						? node && node !== LOCAL_NODE
-							? `这个工作区在 ${store.nodeName(node)} 上：发送第一条消息后会在那里创建会话，Agent 只在其中读写文件、运行命令。`
-							: "发送第一条消息后会在这个工作区中创建会话，Agent 只在其中读写文件、运行命令。"
+							? `在 ${store.nodeName(node)} 的 ${workspace.name} 中，与 Agent 一起推进工作。`
+							: `在 ${workspace.name} 中，把想法交给 Agent，一起推进工作。`
 						: workspaces.length
 							? "在输入框下方选择对话所在的工作区。"
 							: "先添加一个项目目录作为工作区。"}
@@ -376,11 +395,7 @@ export function NewChatView({ workspaceId }: { workspaceId?: string }) {
 						ref={input}
 						value={draft.text}
 						disabled={sending}
-						placeholder={
-							workspace
-								? `在「${workspace.name}」中描述你的任务…（Enter 发送，Shift+Enter 换行，/ 使用命令）`
-								: "先选择工作区，再描述你的任务…"
-						}
+						placeholder={workspace ? "描述你的任务，也可以粘贴图片或输入 / 使用命令…" : "先选择工作区，再描述你的任务…"}
 						onChange={(text) => setDraft((d) => ({ ...d, text }))}
 						onOpenFile={(path) => {
 							if (workspace) store.openFilePreview(workspace.id, path);
@@ -465,6 +480,40 @@ export function NewChatView({ workspaceId }: { workspaceId?: string }) {
 							</button>
 						</div>
 					</div>
+				</div>
+				{workspace ? (
+					<section className="prompt-starters" aria-label="任务灵感">
+						{STARTERS.map((starter) => (
+							<button
+								type="button"
+								className="prompt-starter"
+								key={starter.title}
+								disabled={hasContent || sending || voice.busy}
+								title={hasContent ? "清空当前草稿后可使用任务灵感" : starter.prompt}
+								onClick={() => {
+									setDraft((current) => ({ ...current, text: starter.prompt }));
+									input.current?.focus();
+								}}
+							>
+								<starter.icon size={17} />
+								<span>
+									<strong>{starter.title}</strong>
+									<small>{starter.description}</small>
+								</span>
+							</button>
+						))}
+					</section>
+				) : null}
+				<div className="new-chat-hint">
+					<span>
+						<kbd>Enter</kbd> 发送
+					</span>
+					<span>
+						<kbd>Shift + Enter</kbd> 换行
+					</span>
+					<span>
+						<kbd>/</kbd> 命令
+					</span>
 				</div>
 			</div>
 		</div>

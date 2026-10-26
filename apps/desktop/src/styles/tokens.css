@@ -5,15 +5,15 @@
 	color-scheme: dark;
 
 	/* surfaces */
-	--bg-app: #08090c;
-	--bg: #0f1014;
-	--bg-elevated: #15161b;
-	--bg-raised: #1b1c22;
-	--bg-input: #15161b;
+	--bg-app: #111516;
+	--bg: #171b1d;
+	--bg-elevated: #1d2224;
+	--bg-raised: #252b2d;
+	--bg-input: #1d2224;
 	--bg-code: #0a0b0e;
 	--bg-hover: rgba(255, 255, 255, 0.045);
 	--bg-active: rgba(255, 255, 255, 0.08);
-	--bubble: #1d2027;
+	--bubble: #242e30;
 
 	/* lines */
 	--border: rgba(255, 255, 255, 0.065);
@@ -23,16 +23,17 @@
 
 	/* text */
 	--text: #ededf0;
-	--text-muted: #9a9ca8;
-	--text-faint: #62646f;
+	--text-muted: #a6afb0;
+	--text-faint: #899294;
 
 	/* brand & semantic */
-	--accent: #2ab5aa;
-	--accent-strong: #239c93;
+	--accent: #42c8b4;
+	--accent-contrast: #102b26;
+	--accent-strong: #65d5c3;
 	--accent-text: #5fd6cb;
 	--accent-soft: rgba(42, 181, 170, 0.13);
 	--accent-ring: rgba(42, 181, 170, 0.45);
-	--brand-glow: rgba(39, 140, 170, 0.32);
+	--brand-glow: rgba(42, 181, 170, 0.16);
 	--success: #3fb96f;
 	--success-soft: rgba(63, 185, 111, 0.13);
 	--danger: #f06464;
@@ -54,7 +55,7 @@
 	--radius-sm: 7px;
 	--radius: 11px;
 	--radius-lg: 16px;
-	--radius-xl: 22px;
+	--radius-xl: 18px;
 	--shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
 	--shadow-md: 0 10px 30px -6px rgba(0, 0, 0, 0.45), 0 2px 6px rgba(0, 0, 0, 0.25);
 	--shadow-composer: 0 4px 14px -6px rgba(0, 0, 0, 0.35), 0 1px 2px rgba(0, 0, 0, 0.2);
@@ -90,27 +91,28 @@
 
 :root[data-theme="light"] {
 	color-scheme: light;
-	--bg-app: #eef0f4;
+	--bg-app: #eff2f1;
 	--bg: #ffffff;
-	--bg-elevated: #f7f8fa;
+	--bg-elevated: #f7f9f8;
 	--bg-raised: #ffffff;
 	--bg-input: #ffffff;
 	--bg-code: #0f1116;
 	--bg-hover: rgba(15, 23, 42, 0.045);
 	--bg-active: rgba(15, 23, 42, 0.07);
-	--bubble: #f0f2f6;
+	--bubble: #edf4f1;
 	--border: rgba(15, 23, 42, 0.075);
 	--border-strong: rgba(15, 23, 42, 0.13);
 	--highlight: inset 0 1px 0 rgba(255, 255, 255, 0.9);
-	--text: #13161c;
-	--text-muted: #5a6170;
-	--text-faint: #9aa0ac;
-	--accent: #11968c;
-	--accent-strong: #0d7f77;
-	--accent-text: #0d7f77;
+	--text: #202a29;
+	--text-muted: #596967;
+	--text-faint: #62716c;
+	--accent: #117d70;
+	--accent-contrast: #ffffff;
+	--accent-strong: #0b695f;
+	--accent-text: #0b7468;
 	--accent-soft: rgba(17, 150, 140, 0.1);
 	--accent-ring: rgba(17, 150, 140, 0.4);
-	--brand-glow: rgba(39, 140, 170, 0.25);
+	--brand-glow: rgba(17, 125, 112, 0.12);
 	--success: #1f9d55;
 	--success-soft: rgba(31, 157, 85, 0.1);
 	--danger: #d93b3b;

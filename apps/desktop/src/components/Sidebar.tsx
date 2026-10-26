@@ -656,7 +656,10 @@ export function Sidebar({ open = true }: { open?: boolean }) {
 	return (
 		<aside id="workspace-sidebar" className="sidebar">
 			<div className="brand">
-				<span className="brand-name">Pier</span>
+				<div className="sidebar-brand-text">
+					<span className="brand-name">Pier</span>
+					<span className="brand-caption">Agent 工作台</span>
+				</div>
 				<button
 					type="button"
 					className="ghost icon sidebar-collapse"
