@@ -177,21 +177,23 @@ button.settings-nav-item.selected:hover:not(:disabled) {
 /* ---- managed computer (host switcher) --------------------------------------------- */
 
 .settings-host {
-	margin: 0 16px 12px;
+	min-width: 0;
+	max-width: 260px;
 }
 
-/* The managed computer: a quiet two-line button (its name, then where it is and its status). */
+/* Compact host context in the top bar; full connection details remain in the menu. */
 button.settings-host-trigger {
 	justify-content: flex-start;
-	gap: 10px;
+	gap: 8px;
 	width: 100%;
-	height: auto;
-	padding: 10px;
+	height: 32px;
+	padding: 0 10px;
 	border: 1px solid var(--border);
-	border-radius: 12px;
-	background: var(--bg-input);
+	border-radius: 8px;
+	background: var(--bg-elevated);
 	box-shadow: none;
-	color: var(--text);
+	color: var(--text-muted);
+	font-size: 12px;
 	font-weight: 400;
 	text-align: left;
 	transition:
@@ -201,7 +203,8 @@ button.settings-host-trigger {
 
 button.settings-host-trigger:hover:not(:disabled) {
 	border-color: var(--border-strong);
-	background: var(--bg-input);
+	background: var(--bg-hover);
+	color: var(--text);
 }
 
 button.settings-host-trigger.open,
@@ -215,23 +218,27 @@ button.settings-host-trigger.open:hover:not(:disabled) {
 	display: grid;
 	flex: none;
 	place-items: center;
-	width: 32px;
-	height: 32px;
-	border-radius: 9px;
-	background: var(--bg-active);
-	color: var(--text-muted);
+	width: 18px;
+	height: 18px;
 }
 
-/* The status dot sits on the avatar's corner, cut out from it by a ring of the card colour. */
+/* The status dot stays visible even when a long host name is truncated. */
 .settings-host-avatar .status-dot {
 	position: absolute;
-	right: -3px;
-	bottom: -3px;
-	width: 8px;
-	height: 8px;
-	border: 2px solid var(--bg-input);
+	right: -2px;
+	bottom: -2px;
+	width: 6px;
+	height: 6px;
+	border: 2px solid var(--bg-elevated);
 	box-shadow: none;
 	box-sizing: content-box;
+}
+
+.settings-host-label {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .settings-host-text {
@@ -271,8 +278,13 @@ button.settings-host-trigger.open:hover:not(:disabled) {
 }
 
 .dropdown-menu.settings-host-menu {
+	left: auto;
 	right: 0;
+	width: 280px;
 	min-width: 0;
+	max-width: calc(100vw - 32px);
+	max-height: min(420px, calc(100dvh - 120px));
+	overflow-y: auto;
 	font-size: 13px;
 }
 
@@ -676,9 +688,20 @@ button.switch.on .switch-thumb {
 }
 
 .settings-breadcrumb strong {
+	overflow: hidden;
 	color: var(--text);
 	font-weight: 500;
+	text-overflow: ellipsis;
 	white-space: nowrap;
+}
+
+.settings-topbar-actions {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 8px;
+	min-width: 0;
+	max-width: 60%;
 }
 
 .settings-scope {
@@ -686,7 +709,7 @@ button.switch.on .switch-thumb {
 	align-items: center;
 	gap: 7px;
 	min-width: 0;
-	max-width: 45%;
+	max-width: 100%;
 	padding: 4px 10px;
 	border: 1px solid var(--border);
 	border-radius: 8px;
@@ -1129,7 +1152,6 @@ button.switch.on .switch-thumb {
 		padding-inline: 8px;
 	}
 
-	.settings-host,
 	.settings-search {
 		margin-inline: 10px;
 	}
@@ -1150,10 +1172,6 @@ button.switch.on .switch-thumb {
 
 	.settings-title {
 		font-size: 23px;
-	}
-
-	.settings-scope {
-		max-width: 55%;
 	}
 
 	.settings-content .speech-service-form,

@@ -7,6 +7,7 @@ import {
 	type SettingsSection,
 	useAppState,
 	useComputers,
+	useHasPeers,
 	useSettingsTarget,
 	useStore,
 } from "../lib/store.tsx";
@@ -674,17 +675,16 @@ function HostSwitcher() {
 				className={`settings-host-trigger${open ? " open" : ""}`}
 				aria-haspopup="menu"
 				aria-expanded={open}
-				aria-label={`正在设置 ${target.name} 上的 Pier，点击切换电脑`}
-				title={`正在设置 ${target.name} 上的 Pier`}
+				aria-label={`正在设置 ${target.name} 上的 Pier，${status.text}，点击切换电脑`}
+				title={`正在设置 ${target.name} 上的 Pier · ${status.text}`}
 				onClick={() => setOpen(!open)}
 			>
 				<span className="settings-host-avatar">
-					<IconMonitor size={16} />
+					<IconMonitor size={14} />
 					<span className={`status-dot ${status.tone}`} />
 				</span>
-				<span className="settings-host-text">
-					<span className="settings-host-name">{target.name}</span>
-					<span className="settings-host-detail">{status.text}</span>
+				<span className="settings-host-label">
+					{target.local ? "本机" : "远程"} · {target.name}
 				</span>
 				{syncing ? (
 					<IconLoader size={14} className="spin settings-host-chevron" />
@@ -867,6 +867,7 @@ function NavBadge({ id }: { id: SettingsSection }): ReactNode {
 
 export function SettingsPage({ section }: { section: SettingsSection }) {
 	const store = useStore();
+	const hasPeers = useHasPeers();
 	const [query, setQuery] = useState("");
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const version = useAppState((s) => s.update.currentVersion);
@@ -943,7 +944,6 @@ export function SettingsPage({ section }: { section: SettingsSection }) {
 					<span className="settings-nav-eyebrow">PIER / PREFERENCES</span>
 					<h1 className="settings-nav-title">设置</h1>
 				</div>
-				<HostSwitcher />
 				<div className="settings-search">
 					<IconSearch size={14} />
 					<input
@@ -1004,16 +1004,21 @@ export function SettingsPage({ section }: { section: SettingsSection }) {
 						<span aria-hidden="true">/</span>
 						<strong>{nav.label}</strong>
 					</div>
-					<span className="settings-scope" title={followsHost ? target.name : undefined}>
-						<IconMonitor size={13} />
-						<span>
-							{followsHost
-								? `${target.local ? "本机" : "远程"} · ${target.name}`
-								: current.id === "workspaces" || current.id === "about"
-									? "所有电脑"
-									: "本机设置"}
-						</span>
-					</span>
+					<div className="settings-topbar-actions">
+						{!followsHost || !hasPeers ? (
+							<span className="settings-scope" title={followsHost ? target.name : undefined}>
+								<IconMonitor size={13} />
+								<span>
+									{followsHost
+										? `${target.local ? "本机" : "远程"} · ${target.name}`
+										: current.id === "workspaces" || current.id === "about"
+											? "所有电脑"
+											: "本机设置"}
+								</span>
+							</span>
+						) : null}
+						<HostSwitcher />
+					</div>
 				</div>
 				<HostBanner onShowLogs={() => store.openSettings("logs")} />
 				<div className="settings-scroll" ref={scrollRef}>
