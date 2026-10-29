@@ -83,9 +83,14 @@ export interface AppUpdateStatus {
 	notes?: string;
 	/** Publication date of `version` (ISO 8601). */
 	date?: string;
-	/** Bytes downloaded so far while `downloading`. */
+	/**
+	 * Bytes downloaded so far while `downloading`; also in `available` / `error` when part of
+	 * `version` is already downloaded (a paused or interrupted download, which installing
+	 * continues). Older desktop apps report 0 there.
+	 */
 	downloaded: number;
 	total?: number;
+	/** Why the last check or install failed; while `downloading`, why the download is being retried. */
 	error?: string;
 	/** Unix time (ms) of the last successful check. */
 	lastChecked?: number;
@@ -468,6 +473,20 @@ export interface ModelInfo {
 	thinkingLevels?: ThinkingLevel[];
 }
 
+/** Context and automatic compaction limits for the active agent runtime. */
+export interface SessionContextInfo {
+	/** Model context window, when the runtime knows it. */
+	contextWindow?: number;
+	/** Whether the automatic compaction policy is configured here or by the runtime. */
+	autoCompaction: "configured" | "disabled" | "runtime";
+	/** Context size at which the configured automatic compaction starts. */
+	compactionThreshold?: number;
+	/** Tokens reserved for the next model response by the configured policy. */
+	reserveTokens?: number;
+	/** Recent tokens retained verbatim by the configured compaction policy. */
+	keepRecentTokens?: number;
+}
+
 /** Where a slash command offered by the host comes from (1.5). */
 export type SessionCommandSource = "extension" | "prompt" | "skill";
 
@@ -597,6 +616,7 @@ export interface SessionSnapshot {
 	pendingUi: UiRequest[];
 	queue: QueueState;
 	model?: ModelInfo;
+	contextInfo?: SessionContextInfo;
 	thinkingLevel: ThinkingLevel;
 	/** Whether Codex Fast mode is enabled (1.43). Absent for other runtimes/older hosts. */
 	fastMode?: boolean;

@@ -112,6 +112,7 @@ jobs:
           workspaces: apps/desktop/src-tauri
           # GTK-linked Rust artifacts cannot be shared between Ubuntu runner images.
           key: ${{ matrix.os }}
+          cache-on-failure: true
 
       - name: Linux system dependencies
         if: runner.os == 'Linux'
@@ -138,6 +139,23 @@ jobs:
         working-directory: apps/desktop/src-tauri
         run: cargo fmt --check
 
+      - name: Updater regression tests
+        working-directory: apps/desktop/src-tauri
+        run: cargo test --lib --locked updater::tests
+
+      - name: Resumable update download tests
+        working-directory: apps/desktop/src-tauri
+        run: cargo test --lib --locked update_download::tests
+
+      - name: HTML preview regression tests
+        working-directory: apps/desktop/src-tauri
+        run: cargo test --lib --locked html_preview::tests
+
+      - name: System speech regression tests
+        if: runner.os != 'macOS'
+        working-directory: apps/desktop/src-tauri
+        run: cargo test --lib --locked system_speech::tests
+
       - name: NVIDIA renderer regression tests
         if: runner.os == 'Linux'
         working-directory: apps/desktop/src-tauri
@@ -146,6 +164,13 @@ jobs:
       - name: cargo clippy
         working-directory: apps/desktop/src-tauri
         run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: Diagnose Windows test loader
+        if: failure() && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          python -m pip install --quiet pefile
+          python apps/desktop/scripts/check-windows-imports.py
 
   mobile:
     name: mobile bundle (${{ matrix.platform }})

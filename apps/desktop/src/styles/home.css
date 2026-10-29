@@ -1,24 +1,43 @@
-/* Welcome screen and workspace home. */
-
+/* Welcome and project overview: a quiet canvas with one prominent starting point. */
 .home {
 	flex: 1;
+	min-width: 0;
+	min-height: 0;
 	overflow-y: auto;
+	container-type: inline-size;
 	background: var(--bg);
 }
 
 .home-inner {
-	max-width: 760px;
+	max-width: 1100px;
 	margin: 0 auto;
-	padding: 72px 40px 48px;
+	padding: 42px 48px 48px;
 	animation: rise-in 0.3s var(--ease);
 }
 
 .home h1 {
-	font-size: 30px;
-	font-weight: 700;
-	letter-spacing: -0.03em;
-	line-height: 1.2;
 	margin: 0 0 12px;
+	font-size: clamp(28px, 3vw, 38px);
+	font-weight: 650;
+	letter-spacing: -0.045em;
+	line-height: 1.25;
+}
+
+.home-eyebrow {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 16px;
+	font-size: 11px;
+	font-weight: 500;
+	letter-spacing: 0.08em;
+	color: var(--text-muted);
+}
+
+.eyebrow-line {
+	width: 16px;
+	height: 2px;
+	background: var(--accent);
 }
 
 .hero {
@@ -26,46 +45,40 @@
 	flex-direction: column;
 	align-items: center;
 	text-align: center;
+	padding-top: 28px;
 }
 
 .hero .logo {
 	border-radius: 14px;
-	box-shadow: 0 12px 36px var(--brand-glow);
-	margin-bottom: 22px;
+	box-shadow: var(--shadow-md);
+	margin-bottom: 24px;
+}
+
+.hero .home-eyebrow {
+	color: var(--accent-text);
 }
 
 .hero-text {
-	max-width: 520px;
+	max-width: 480px;
 	margin: 0;
 	color: var(--text-muted);
-	font-size: 15px;
-	line-height: 1.7;
+	font-size: 14px;
+	line-height: 1.9;
 }
 
 .steps {
 	display: grid;
 	grid-template-columns: repeat(3, minmax(0, 1fr));
-	gap: 12px;
+	gap: 16px;
 	margin: 40px 0 32px;
 }
 
 .step-card {
 	position: relative;
-	padding: 18px 18px 20px;
+	padding: 24px;
 	border-radius: var(--radius-lg);
 	background: var(--bg-elevated);
 	border: 1px solid var(--border);
-	box-shadow: var(--highlight);
-	transition:
-		border-color 0.2s var(--ease),
-		box-shadow 0.2s var(--ease),
-		transform 0.2s var(--ease);
-}
-
-.step-card:hover {
-	border-color: var(--border-strong);
-	box-shadow: var(--shadow-md), var(--highlight);
-	transform: translateY(-2px);
 }
 
 .step-icon {
@@ -74,30 +87,29 @@
 	width: 36px;
 	height: 36px;
 	border-radius: 10px;
-	background: var(--accent-soft);
+	background: var(--bg);
 	color: var(--accent-text);
-	margin-bottom: 14px;
+	margin-bottom: 24px;
 }
 
 .step-index {
 	position: absolute;
-	top: 16px;
-	right: 18px;
-	font-size: 12px;
-	font-weight: 600;
+	top: 24px;
+	right: 24px;
+	font-family: var(--mono);
+	font-size: 11px;
 	color: var(--text-faint);
-	font-variant-numeric: tabular-nums;
 }
 
 .step-title {
 	font-weight: 600;
-	margin-bottom: 4px;
+	margin-bottom: 6px;
 }
 
 .step-text {
 	color: var(--text-muted);
-	font-size: 12.5px;
-	line-height: 1.6;
+	font-size: 12px;
+	line-height: 1.8;
 }
 
 .hero-actions {
@@ -111,32 +123,24 @@
 	line-height: 1.8;
 }
 
-.hero-note code {
-	background: var(--bg-active);
-	padding: 1px 6px;
-	border-radius: 5px;
-}
-
-/* ---- workspace home -------------------------------------------------------------- */
-
+/* Project identity and quick actions. */
 .workspace-hero {
 	display: flex;
 	align-items: center;
 	gap: 18px;
 	padding-bottom: 28px;
-	border-bottom: 1px solid var(--border);
 }
 
 .workspace-hero-icon {
 	display: grid;
 	place-items: center;
-	width: 56px;
-	height: 56px;
-	border-radius: 16px;
+	width: 52px;
+	height: 52px;
+	border-radius: 14px;
 	flex: none;
-	background: var(--accent);
-	color: #fff;
-	box-shadow: 0 10px 28px var(--brand-glow);
+	background: var(--bg-elevated);
+	color: var(--text-muted);
+	border: 1px solid var(--border);
 }
 
 .workspace-hero-text {
@@ -145,7 +149,6 @@
 }
 
 .home .workspace-hero-text h1 {
-	font-size: 26px;
 	margin: 0 0 6px;
 	overflow: hidden;
 	text-overflow: ellipsis;
@@ -155,10 +158,9 @@
 .workspace-meta {
 	display: flex;
 	align-items: center;
-	gap: 10px;
 	min-width: 0;
-	color: var(--text-muted);
-	font-size: 12.5px;
+	color: var(--text-faint);
+	font-size: 11px;
 }
 
 .workspace-meta code {
@@ -168,77 +170,255 @@
 	white-space: nowrap;
 }
 
+.workspace-badges {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	margin-top: 12px;
+}
+
+.workspace-session-total {
+	display: flex;
+	flex: none;
+	flex-direction: column;
+	align-items: flex-end;
+	gap: 2px;
+	padding-left: 24px;
+	border-left: 1px solid var(--border);
+}
+
+.workspace-session-total strong {
+	font-size: 32px;
+	font-weight: 500;
+	line-height: 1.3;
+	letter-spacing: -0.04em;
+	font-variant-numeric: tabular-nums;
+}
+
+.workspace-session-total span {
+	color: var(--text-faint);
+	font-size: 11px;
+}
+
+.workspace-shortcuts {
+	display: grid;
+	grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr);
+	gap: 12px;
+	margin: 4px 0 36px;
+}
+
+.workspace-shortcut {
+	justify-content: flex-start;
+	gap: 14px;
+	min-width: 0;
+	padding: 22px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-lg);
+	background: var(--bg-elevated);
+	text-align: left;
+	white-space: normal;
+}
+
+.workspace-shortcut > .icon-svg {
+	color: var(--text-muted);
+}
+
+.workspace-shortcut > .icon-svg:last-child {
+	margin-left: auto;
+	width: 14px;
+}
+
+.workspace-shortcut > span:not(.featured-art) {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	min-width: 0;
+}
+
+.workspace-shortcut strong {
+	font-size: 14px;
+	font-weight: 550;
+}
+
+.workspace-shortcut small {
+	font-size: 12px;
+	line-height: 1.8;
+	color: var(--text-muted);
+}
+
+.workspace-shortcut:hover:not(:disabled) {
+	border-color: var(--border-strong);
+	background: var(--bg-hover);
+	box-shadow: var(--shadow-sm);
+}
+
+.workspace-shortcut.featured {
+	position: relative;
+	grid-row: span 2;
+	align-items: stretch;
+	padding: 28px;
+	overflow: hidden;
+	border-color: transparent;
+	background: var(--feature-bg);
+	color: #f1faf7;
+	isolation: isolate;
+}
+
+.workspace-shortcut.featured:hover:not(:disabled) {
+	background: var(--feature-bg);
+	box-shadow: 0 8px 24px -14px var(--feature-bg);
+	border-color: #5a9b8c;
+}
+
+.workspace-shortcut .featured-copy {
+	position: relative;
+	z-index: 1;
+	gap: 14px;
+}
+
+.featured-eyebrow {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	font-size: 10.5px;
+	color: #a9c9c0;
+	letter-spacing: 0.04em;
+}
+
+.featured-copy strong {
+	font-size: clamp(20px, 2vw, 25px);
+	font-weight: 550;
+	letter-spacing: -0.03em;
+}
+
+.featured-copy small {
+	color: #c2d7d0;
+	font-size: 12px;
+}
+
+.featured-action {
+	display: inline-flex;
+	align-items: center;
+	align-self: flex-start;
+	gap: 8px;
+	margin-top: 10px;
+	padding: 8px 12px;
+	border-radius: 8px;
+	background: #dbf6eb;
+	color: #16392f;
+	font-size: 12px;
+	font-weight: 600;
+}
+
+.featured-action > .icon-svg:last-child {
+	margin-left: 12px;
+	transform: rotate(45deg);
+}
+
+.featured-art {
+	position: absolute;
+	z-index: -1;
+	right: -34px;
+	bottom: -32px;
+	display: grid;
+	place-items: center;
+	width: 170px;
+	height: 170px;
+	border: 1px solid rgba(188, 242, 218, 0.15);
+	border-radius: 42px;
+	transform: rotate(-18deg);
+	background: radial-gradient(ellipse at bottom right, rgba(110, 210, 178, 0.18), transparent 75%);
+	color: rgba(188, 242, 218, 0.16);
+	box-shadow:
+		0 0 0 24px rgba(188, 242, 218, 0.035),
+		0 0 0 48px rgba(188, 242, 218, 0.02);
+}
+
+/* Recent work is a compact list, with secondary details on their own line. */
 .recent {
-	margin-top: 28px;
+	margin-top: 32px;
 }
 
 .section-heading {
 	display: flex;
 	align-items: baseline;
 	justify-content: space-between;
-	margin-bottom: 10px;
+	gap: 12px;
+	margin-bottom: 18px;
 }
 
 .section-heading h3 {
 	margin: 0;
-	font-size: 13px;
+	font-size: 15px;
 	font-weight: 600;
-	color: var(--text-muted);
+	color: var(--text);
+}
+
+.section-heading p {
+	margin: 4px 0 0;
+	font-size: 12px;
+	color: var(--text-faint);
 }
 
 .recent-list {
-	border: 1px solid var(--border);
-	border-radius: var(--radius-lg);
-	background: var(--bg-elevated);
-	overflow: hidden;
+	border-top: 1px solid var(--border);
 }
 
 .recent-row {
 	display: flex;
 	align-items: center;
 	justify-content: flex-start;
-	gap: 12px;
+	gap: 14px;
 	width: 100%;
 	border: none;
 	border-bottom: 1px solid var(--border);
 	border-radius: 0;
 	background: transparent;
-	padding: 11px 14px;
+	padding: 16px 10px;
 	text-align: left;
 	font-weight: 400;
-	font-size: 13.5px;
-}
-
-.recent-row:last-child {
-	border-bottom: none;
+	font-size: 13px;
 }
 
 .recent-row:hover:not(:disabled) {
-	background: var(--bg-hover);
+	background: var(--bg-elevated);
 }
 
 .recent-icon {
 	display: grid;
 	place-items: center;
-	width: 30px;
-	height: 30px;
-	border-radius: 9px;
-	background: var(--bg-active);
+	width: 36px;
+	height: 36px;
+	border-radius: 10px;
+	background: var(--bg-elevated);
 	color: var(--text-muted);
 	flex: none;
 }
 
-.recent-title {
+.recent-content {
+	display: flex;
 	flex: 1;
+	flex-direction: column;
+	gap: 4px;
 	min-width: 0;
+}
+
+.recent-title {
+	display: block;
+	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	font-weight: 500;
 }
 
-.recent-meta {
+.recent-meta,
+.recent-time {
 	color: var(--text-faint);
-	font-size: 12px;
+	font-size: 11px;
+}
+
+.recent-time {
+	flex: none;
 }
 
 .recent-chevron {
@@ -248,7 +428,7 @@
 
 .recent-row:hover .recent-chevron {
 	transform: translateX(2px);
-	color: var(--text-muted);
+	color: var(--text);
 }
 
 .recent-empty {
@@ -256,15 +436,76 @@
 	flex-direction: column;
 	align-items: center;
 	gap: 10px;
-	padding: 36px 16px;
-	border: 1px dashed var(--border-strong);
+	padding: 36px 20px;
+	background: var(--bg-elevated);
+	text-align: center;
+	border: 1px solid var(--border);
 	border-radius: var(--radius-lg);
 	color: var(--text-muted);
-	font-size: 13px;
+	font-size: 12px;
 }
 
-@media (max-width: 980px) {
+.recent-empty > .icon-svg {
+	margin-bottom: 6px;
+	color: var(--text-faint);
+}
+
+.recent-empty strong {
+	font-weight: 500;
+	color: var(--text);
+}
+
+@container (max-width: 740px) {
+	.home-inner {
+		padding: 32px 28px;
+	}
+	.workspace-shortcuts {
+		grid-template-columns: 1fr 1fr;
+	}
+	.workspace-shortcut {
+		padding: 18px;
+		gap: 10px;
+	}
+	.workspace-shortcut.featured {
+		grid-column: 1 / -1;
+		grid-row: auto;
+	}
 	.steps {
 		grid-template-columns: 1fr;
+	}
+	.workspace-session-total {
+		display: none;
+	}
+}
+
+@container (max-width: 420px) {
+	.home-inner {
+		padding: 24px 18px;
+	}
+	.workspace-hero {
+		gap: 12px;
+	}
+	.workspace-hero-icon {
+		display: none;
+	}
+	.home .workspace-hero-text h1 {
+		font-size: 26px;
+	}
+	.workspace-shortcuts {
+		grid-template-columns: 1fr;
+	}
+	.workspace-shortcut.featured {
+		padding: 22px;
+	}
+	.recent-row {
+		gap: 10px;
+		padding: 14px 0;
+	}
+	.recent-chevron {
+		display: none;
+	}
+	.section-heading {
+		flex-wrap: wrap;
+		gap: 4px 12px;
 	}
 }

@@ -1,4 +1,4 @@
-# Pier 协议 v1.44
+# Pier 协议 v1.46
 
 > 实现：`packages/protocol`（zod schema + TS 类型，Host 与所有客户端共享）。
 > 本文档描述线上格式与语义；字段的权威定义以 `packages/protocol/src` 为准。
@@ -92,9 +92,9 @@ Host 在桌面端中运行时（Tauri 以 `--watch-stdin` 启动 sidecar），�
 
 | 方法 | 参数 | 结果 |
 |---|---|---|
-| `update.status` | – | `AppUpdateStatus`：`{ state, currentVersion, autoCheck, version?, notes?, date?, downloaded, total?, error?, lastChecked?, installNeedsAuth? }`。`state` 为 `unsupported`（开发版本、未打包的构建、独立运行的 `pier-host`，或桌面端没有上报更新器）\|`idle`\|`checking`\|`upToDate`\|`available`\|`downloading`\|`installing`\|`error`；`version` / `notes` / `date` 为可安装的新版本（安装失败后仍保留，可重试）；`installNeedsAuth` 表示安装时需要有人在那台电脑上输入管理员密码（Linux `.deb` / `.rpm`） |
+| `update.status` | – | `AppUpdateStatus`：`{ state, currentVersion, autoCheck, version?, notes?, date?, downloaded, total?, error?, lastChecked?, installNeedsAuth? }`。`state` 为 `unsupported`（开发版本、未打包的构建、独立运行的 `pier-host`，或桌面端没有上报更新器）\|`idle`\|`checking`\|`upToDate`\|`available`\|`downloading`\|`installing`\|`error`；`version` / `notes` / `date` 为可安装的新版本（安装失败后仍保留，可重试）；`downloaded` / `total` 为已下载字节数与更新包大小，`available` / `error` 时非 0 表示该版本已下载了一部分（暂停或中断后的下载，安装时从断点继续；旧版桌面端此时为 0）；`downloading` 时的 `error` 是正在自动重试的原因；`installNeedsAuth` 表示安装时需要有人在那台电脑上输入管理员密码（Linux `.deb` / `.rpm`） |
 | `update.check` | – | `AppUpdateStatus`：立即检查一次（最长约 30 秒，客户端请放宽超时）。检查失败时返回 `state: "error"` 而不是错误响应 |
-| `update.install` | – | `AppUpdateStatus`：还没有已知的新版本时先检查；有新版本时在后台开始下载，返回 `downloading`，之后 Host 与所有连接会随安装断开，桌面端安装完成后自动重启，客户端重连后在 `host.hello` 中看到新版本。已是最新版本时返回 `upToDate`，检查失败时返回 `error`，已在更新时返回当前状态。由远程设备发起时，Host 同时向本地连接发出 `host.notice`，告知谁在更新 |
+| `update.install` | – | `AppUpdateStatus`：还没有已知的新版本时先检查；有新版本时在后台开始下载（已下载过一部分时从断点继续），返回 `downloading`，之后 Host 与所有连接会随安装断开，桌面端安装完成后自动重启，客户端重连后在 `host.hello` 中看到新版本。已是最新版本时返回 `upToDate`，检查失败时返回 `error`，已在更新时返回当前状态。由远程设备发起时，Host 同时向本地连接发出 `host.notice`，告知谁在更新 |
 
 没有可驱动的更新器时，`update.check` / `update.install` 返回 `UNSUPPORTED`，`update.status` 返回 `state: "unsupported"`；桌面端无法回答时返回 `INTERNAL`。更新器的每次状态变化（下载进度约每 200ms 一次）都以 `update.status` 事件发给所有连接。
 
@@ -480,7 +480,7 @@ Claude Code 与 Codex 会话（1.22）发出同样形态的事件与 `AgentMessa
 |---|---|---|
 | `session.snapshot` | `snapshot` | 仅在订阅 / 恢复时单独发给该连接，**不带 seq**，不写入日志 |
 | `session.status` | `state: idle\|streaming\|compacting\|retrying` | 状态变化时发送 |
-| `session.model` | `model?, thinkingLevel` | `model.set` 之后 |
+| `session.model` | `model?, contextInfo?, thinkingLevel` | `model.set` 之后 |
 | `session.fast` | `enabled: boolean` | Codex Fast 状态变化时发送（1.43），包括原生 `thread/settings/updated` 通知 |
 | `session.replaced` | `previousSessionId, session` | 扩展命令（如 `/new`）替换了底层 pi 会话；帧的 `sessionId` 为旧 ID，随后会收到新会话的 `session.snapshot` |
 | `session.closed` | `reason: idle\|closed\|deleted\|host_shutdown` | 会话离开活跃池；`deleted` 表示会话已被 `session.delete` 删除（1.6） |
@@ -562,7 +562,7 @@ Claude Code 与 Codex 会话（1.22）发出同样形态的事件与 `AgentMessa
   pendingToolCalls: string[];
   pendingUi: UiRequest[];      // 仍待回答的对话框 / 审批
   queue: { steering: string[]; followUp: string[] };
-  model?: ModelInfo; thinkingLevel: string;
+  model?: ModelInfo; contextInfo?: SessionContextInfo; thinkingLevel: string;
   fastMode?: boolean;          // Codex Fast 模式（1.43），其他运行时与旧 Host 省略
   statuses: Record<string, string>; widgets: Record<string, { lines: string[]; placement?: string }>;
   title?: string; errorMessage?: string;
@@ -573,6 +573,8 @@ Claude Code 与 Codex 会话（1.22）发出同样形态的事件与 `AgentMessa
 `SessionSummary.runtime`（1.22）是会话的 Agent 运行时；旧版 Host 不返回该字段，视为 `pi`。
 
 `ModelInfo = { provider, id, name, reasoning, input: string[], contextWindow?, thinkingLevels? }`。`thinkingLevels`（1.19）是模型支持的思考等级，从低到高（`off`、`minimal`、`low`、`medium`、`high`，模型支持时还有 `xhigh`、`max`、`ultra`），不支持推理的模型为 `["off"]`；`thinking.set` 会把不支持的等级钳制到其中之一。`ultra` 自协议 1.34 起支持，只在运行时明确报告模型支持它时显示，并作为原生等级传给运行时。
+
+`SessionContextInfo = { contextWindow?, autoCompaction, compactionThreshold?, reserveTokens?, keepRecentTokens? }`（1.45）。`autoCompaction` 为 `configured` 时，`compactionThreshold` 是自动压缩触发的上下文 token 数，`reserveTokens` 是为回复预留的 token 数，`keepRecentTokens` 是压缩后原样保留的最近内容；`disabled` 表示自动压缩关闭；`runtime` 表示由 Claude Code / Codex 等运行时决定。字段是可选的，旧版 Host 不返回时客户端应隐藏或显示未知状态。
 
 ## 6. UI 请求与审批
 
@@ -688,3 +690,9 @@ Linux 读取 `/proc`，macOS 执行固定 `ps` 查询，Windows 使用 PowerShel
 所有 TCP 流属于创建它的连接，其他连接访问时为 `NOT_FOUND`，关闭返回 `false`。每台 Host 最多 128 流，每条连接最多 64 流；每流读缓冲达到 512 KiB 后暂停套接字读取，低于 256 KiB 后继续。写入等待 Node 流回调后确认。客户端通过流背压按需读取，保持 HTTP(S)、WebSocket 和半关闭语义。连接断开 / Host 关闭时销毁所有所属套接字；目标连接断开或设备吊销时，本地回环监听器和独立浏览器也被清理。
 
 浏览器仅由本地客户端显式启动，`controlled` 默认关闭；网络方式启动独立浏览器本身不授予 Agent 操作权限。独立浏览器配置按主机保存在本机 `browser-profiles`，配置目录由主机 ID 的 SHA-256 派生，浏览器控制不监听 TCP 调试端口。代理保持目标 origin，由远程 Host 解析域名与连接目标；关闭 QUIC 并限制 WebRTC 的非代理 UDP，覆盖 HTTP(S) / WebSocket 流量，不承诺系统级 VPN 语义。审计只记录连接目标 / 端口、工作区和动作名，不记录网页数据、输入、脚本或截图。
+
+### 语音输入（1.46）
+
+`speech.status` 返回转写服务的 `url`（完整接口地址）、`model`、`language`、`hasApiKey` 和 `configured`，不返回密钥。`speech.configure` 保存这三个设置及可选 `apiKey`；省略密钥保留原值，空字符串删除，更换 URL 时省略则清除原密钥。空 URL 停用。已配对设备可读取与修改，配置变更的审计不包含内容。
+
+`speech.transcribe { id, data, mimeType }` 接受不超过 4 MiB 的 base64 音频（WebM / MP4 / WAV / Ogg / MP3），转发为兼容 `/audio/transcriptions` 的 multipart `file`、`model`、`response_format=json` 及可选 `language`，返回 `{ text }`。请求最多 60 秒，同一连接只允许一个，全 Host 最多四个；不落盘，不转发服务的原始错误。`speech.cancel { id }` 只取消该连接的匹配请求，返回 `{ cancelled }`；连接关闭会取消其请求。UI 每次录音限制 120 秒，仅把结果填入草稿，不自动发送。

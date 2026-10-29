@@ -13,6 +13,7 @@ import {
 	useComputers,
 	useStore,
 } from "../lib/store.tsx";
+import { AgentIcon } from "./AgentIcons.tsx";
 import { AnchoredMenu } from "./AnchoredMenu.tsx";
 import { useHostStatus } from "./HostPanels.tsx";
 import {
@@ -289,12 +290,17 @@ function SessionItem({
 				onClick={() => store.selectSession(session)}
 				title={session.firstMessage || session.name || session.id}
 			>
-				<span className="session-row-title">{sessionTitle(session)}</span>
-				<span className={`session-agent agent-${runtime}`} title={`由 ${agentRuntimeLabel(runtime)} 运行`}>
-					{agentRuntimeLabel(runtime)}
+				<span className="session-row-agent">
+					<AgentIcon runtime={runtime} size={14} />
+				</span>
+				<span className="session-row-text">
+					<span className="session-row-title">{sessionTitle(session)}</span>
+					<span className="session-row-detail">
+						<span>{agentRuntimeLabel(runtime)}</span>
+						<span className="session-row-time">{relativeTime(session.modifiedAt)}</span>
+					</span>
 				</span>
 				<SessionBadge session={session} />
-				<span className="session-row-time">{relativeTime(session.modifiedAt)}</span>
 			</button>
 			<span className="session-actions">
 				{canArchive && !confirm ? (
@@ -656,7 +662,10 @@ export function Sidebar({ open = true }: { open?: boolean }) {
 	return (
 		<aside id="workspace-sidebar" className="sidebar">
 			<div className="brand">
-				<span className="brand-name">Pier</span>
+				<div className="sidebar-brand-text">
+					<span className="brand-name">Pier</span>
+					<span className="brand-caption">Agent 工作台</span>
+				</div>
 				<button
 					type="button"
 					className="ghost icon sidebar-collapse"

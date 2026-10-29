@@ -1,4 +1,4 @@
-/** A dedicated local Chromium process. CDP uses private stdio pipes, never an open debugging port. */
+/** A dedicated Chromium process. CDP uses private stdio pipes, never an open debugging port. */
 import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
@@ -37,9 +37,7 @@ export function findChromium(): string {
 					];
 	const found = candidates.find((path) => existsSync(path));
 	if (!found)
-		throw new Error(
-			"未找到本地 Chrome、Chromium 或 Edge。请安装其中一个，或用 PIER_BROWSER_BIN 指定可执行文件；开发服务也可用默认浏览器打开。",
-		);
+		throw new Error("这台主机未找到 Chrome、Chromium 或 Edge。请安装其中一个，或用 PIER_BROWSER_BIN 指定可执行文件。");
 	return found;
 }
 
@@ -93,7 +91,7 @@ export class ChromiumBrowser {
 		url: string,
 		proxyPort: number | undefined,
 		onExit: () => void,
-		testOptions?: { executable?: string; args?: string[] },
+		launchOptions?: { executable?: string; args?: string[]; env?: NodeJS.ProcessEnv; downloadDir?: string },
 	): Promise<ChromiumBrowser> {
 		mkdirSync(profile, { recursive: true, mode: 0o700 });
 		const args = [
@@ -102,23 +100,29 @@ export class ChromiumBrowser {
 			"--no-first-run",
 			"--no-default-browser-check",
 			"--disable-background-networking",
-			"--disable-quic",
-			"--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
 		];
 		if (proxyPort)
 			args.push(
+				"--disable-quic",
+				"--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
 				`--proxy-server=http://127.0.0.1:${proxyPort}`,
 				"--proxy-bypass-list=<-loopback>",
 				"--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1",
 			);
-		args.push(...(testOptions?.args ?? []), "about:blank");
-		const child = spawn(testOptions?.executable ?? findChromium(), args, {
+		args.push(...(launchOptions?.args ?? []), "about:blank");
+		const child = spawn(launchOptions?.executable ?? findChromium(), args, {
 			stdio: ["ignore", "ignore", "pipe", "pipe", "pipe"],
 			windowsHide: false,
+			env: launchOptions?.env,
 		});
 		const browser = new ChromiumBrowser(child, onExit);
 		try {
 			await browser.send("Browser.getVersion");
+			if (launchOptions?.downloadDir)
+				await browser.send("Browser.setDownloadBehavior", {
+					behavior: "allow",
+					downloadPath: launchOptions.downloadDir,
+				});
 			const tabs = await browser.targets();
 			const tab = tabs[0];
 			if (tab) await browser.send("Page.navigate", { url }, await browser.session(tab.targetId));

@@ -1,5 +1,6 @@
 import {
 	existsSync,
+	lstatSync,
 	mkdirSync,
 	mkdtempSync,
 	readdirSync,
@@ -155,6 +156,42 @@ describe("unified Skills and MCP", () => {
 			code: "BAD_REQUEST",
 		});
 		expect(existsSync(join(source, "SKILL.md"))).toBe(true);
+	});
+	it.each([
+		{ runtime: "claude-code" as const, directory: ".claude" },
+		{ runtime: "codex" as const, directory: ".codex" },
+		{ runtime: "codex" as const, directory: ".agents" },
+	])("keeps scanning $directory skills past broken links and recovers after repair", async ({ runtime, directory }) => {
+		const skills = join(root, directory, "skills");
+		const source = join(root, "external");
+		const missing = join(root, "missing");
+		mkdirSync(join(skills, "normal"), { recursive: true });
+		writeFileSync(join(skills, "normal", "SKILL.md"), body);
+		mkdirSync(source);
+		writeFileSync(join(source, "SKILL.md"), body);
+		const broken = [join(skills, "a-broken"), join(skills, "z-broken")];
+		for (const path of broken) symlinkSync(missing, path, "dir");
+		symlinkSync(source, join(skills, "linked"), "dir");
+		const listed = await client.request("skills.list", { runtime });
+		expect(listed.items.map((s) => s.path).sort()).toEqual(
+			[join(skills, "linked", "SKILL.md"), join(skills, "normal", "SKILL.md")].sort(),
+		);
+		expect(listed.items.find((s) => s.path === join(skills, "linked", "SKILL.md"))).toMatchObject({
+			editable: false,
+			deletable: false,
+		});
+		expect(listed.errors).toHaveLength(2);
+		for (const path of broken) {
+			expect(listed.errors.some((error) => error.includes(path) && error.includes("目标已失效"))).toBe(true);
+			expect(lstatSync(path).isSymbolicLink()).toBe(true);
+		}
+		// Restoring the shared target must make the skill discoverable on the next refresh.
+		mkdirSync(missing);
+		writeFileSync(join(missing, "SKILL.md"), body);
+		const repaired = await client.request("skills.list", { runtime });
+		expect(repaired.errors).toEqual([]);
+		expect(repaired.items).toHaveLength(3);
+		expect(repaired.items.some((s) => broken.some((path) => s.path === join(path, "SKILL.md")))).toBe(true);
 	});
 	it.each(runtimes)("preserves unrelated config while managing %s MCP servers", async (runtime) => {
 		const configPath =

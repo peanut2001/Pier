@@ -1,72 +1,75 @@
-/* New-chat screen: pick a workspace, then send the first message. */
-
+/* A focused start screen, aligned with the conversation reading column. */
 .new-chat {
 	display: flex;
-	flex-direction: column;
 	flex: 1;
+	flex-direction: column;
 	min-height: 0;
-	background: var(--bg);
+	overflow-y: auto;
+	container-type: inline-size;
+	background: radial-gradient(ellipse at 90% 0%, var(--hero-wash), transparent 55%), var(--bg);
 }
 
 .new-chat-hero {
-	flex: 1;
-	min-height: 0;
-	overflow-y: auto;
-	display: flex;
-	flex-direction: column;
-	align-items: center;
-	justify-content: center;
-	gap: 12px;
-	padding: 48px 32px 24px;
-	text-align: center;
+	flex: none;
+	width: 100%;
+	max-width: calc(var(--content-width) + 64px);
+	margin: auto auto 0;
+	padding: 40px 32px 28px;
 	animation: rise-in 0.3s var(--ease);
 }
 
-.new-chat-hero .logo {
-	border-radius: 13px;
-	box-shadow:
-		0 12px 36px var(--brand-glow),
-		0 0 0 1px rgba(255, 255, 255, 0.08);
-	margin-bottom: 8px;
+.new-chat-symbol {
+	display: grid;
+	place-items: center;
+	width: 46px;
+	height: 46px;
+	margin-bottom: 24px;
+	border-radius: 14px;
+	border: 1px solid var(--border);
+	background: var(--bg);
+	color: var(--accent-text);
+	box-shadow: var(--shadow-sm);
+}
+
+.new-chat-hero .home-eyebrow {
+	margin-bottom: 12px;
+	color: var(--text-muted);
+	font-size: 11px;
 }
 
 .new-chat-hero h1 {
 	margin: 0;
-	max-width: 720px;
-	font-size: 28px;
-	font-weight: 650;
-	letter-spacing: -0.025em;
+	font-size: clamp(32px, 3.5vw, 46px);
+	font-weight: 550;
+	letter-spacing: -0.05em;
 	line-height: 1.35;
 	overflow-wrap: anywhere;
 }
 
-.new-chat-target {
-	margin: 0 0.2em;
-	background: var(--accent);
-	-webkit-background-clip: text;
-	background-clip: text;
-	color: transparent;
+.new-chat-title-secondary {
+	color: var(--text-muted);
 }
 
 .new-chat-hero p {
-	margin: 0;
-	max-width: 520px;
-	font-size: 13.5px;
-	line-height: 1.6;
-}
-
-.new-chat-banner {
-	width: 100%;
-	max-width: var(--content-width);
-	margin-top: 12px;
+	max-width: 560px;
+	margin: 16px 0 0;
+	font-size: 13px;
+	line-height: 1.8;
+	overflow-wrap: anywhere;
 }
 
 .new-chat-banner .no-models {
-	margin: 0;
+	margin: 16px 0 0;
 }
 
 .new-chat-bottom {
-	padding-bottom: 24px;
+	flex: none;
+	margin-bottom: auto;
+	padding-bottom: 36px;
+}
+
+.new-chat-bottom .composer-input {
+	min-height: 92px;
 }
 
 .workspace-chip {
@@ -138,4 +141,106 @@
 	height: 1px;
 	margin: 4px 2px;
 	background: var(--border);
+}
+
+.prompt-starters {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 12px;
+	margin-top: 22px;
+}
+
+.prompt-starter {
+	align-items: flex-start;
+	justify-content: flex-start;
+	flex-direction: column;
+	gap: 16px;
+	min-width: 0;
+	padding: 18px;
+	border: 1px solid var(--border);
+	border-radius: 14px;
+	background: var(--bg);
+	text-align: left;
+	white-space: normal;
+}
+
+.prompt-starter > .icon-svg {
+	color: var(--text-muted);
+}
+
+.prompt-starter span {
+	display: flex;
+	flex-direction: column;
+	gap: 5px;
+}
+
+.prompt-starter strong {
+	font-weight: 500;
+	font-size: 12.5px;
+}
+
+.prompt-starter small {
+	font-size: 11px;
+	line-height: 1.5;
+	color: var(--text-faint);
+}
+
+.prompt-starter:hover:not(:disabled) {
+	border-color: var(--accent-ring);
+	background: var(--bg-elevated);
+	box-shadow: var(--shadow-sm);
+	transform: translateY(-2px);
+}
+
+.new-chat-hint {
+	display: flex;
+	justify-content: center;
+	flex-wrap: wrap;
+	gap: 8px 16px;
+	margin-top: 20px;
+	color: var(--text-faint);
+	font-size: 10px;
+}
+
+.new-chat-hint kbd {
+	padding: 2px 4px;
+	border: 1px solid var(--border);
+	border-radius: 4px;
+	font-family: var(--sans);
+	font-size: 9px;
+	color: var(--text-muted);
+}
+
+@container (max-width: 620px) {
+	.new-chat-hero {
+		padding: 28px 24px 24px;
+	}
+	.new-chat-hero h1 {
+		font-size: 32px;
+	}
+	.new-chat-symbol {
+		width: 38px;
+		height: 38px;
+		margin-bottom: 18px;
+	}
+	.new-chat-bottom {
+		padding: 0 20px 28px;
+	}
+	.prompt-starters {
+		grid-template-columns: 1fr;
+		gap: 6px;
+		margin-top: 14px;
+	}
+	.prompt-starter {
+		flex-direction: row;
+		align-items: center;
+		gap: 12px;
+		padding: 12px;
+	}
+	.prompt-starter span {
+		flex-direction: row;
+		flex-wrap: wrap;
+		align-items: baseline;
+		gap: 4px 12px;
+	}
 }

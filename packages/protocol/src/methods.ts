@@ -1,6 +1,12 @@
 import { z } from "zod";
 import { PEER_ADDRESS } from "./addresses.ts";
-import { BrowserCommandSchema, type BrowserResult, type LocalBrowserInfo } from "./browser.ts";
+import {
+	BrowserCommandSchema,
+	type BrowserPreparation,
+	type BrowserResult,
+	type LocalBrowserInfo,
+	type RemoteBrowserInfo,
+} from "./browser.ts";
 import {
 	type AccountAuthorizeStart,
 	type AccountLoginResult,
@@ -87,6 +93,8 @@ import {
 } from "./resources.ts";
 import { type ScheduledTask, ScheduledTaskInputSchema, type ScheduledTaskRun } from "./scheduled-tasks.ts";
 
+import { SpeechMethodSchemas, type SpeechStatus } from "./speech.ts";
+
 const Id = z.string().min(1).max(256);
 /** Repository-relative paths for `git.*` (1.28). */
 const GitPaths = z.array(z.string().min(1).max(4096)).min(1).max(20_000);
@@ -124,6 +132,7 @@ export const ClientInfoSchema = z.object({
  */
 export const MethodParamsSchemas = {
 	...ResourceMethodSchemas,
+	...SpeechMethodSchemas,
 	"host.processes": z.object({}).optional(),
 	/** Signal one process, after verifying that its PID still has the listed start identity. */
 	"host.killProcess": z.object({
@@ -150,14 +159,25 @@ export const MethodParamsSchemas = {
 	"tunnel.read": z.object({ tunnelId: Id }),
 	"tunnel.write": z.object({ tunnelId: Id, data: z.string().max(87_384), end: z.boolean().optional() }),
 	"tunnel.close": z.object({ tunnelId: Id }),
-	/** Launches a browser on this computer. Remote callers cannot launch one here. */
+	/** Local desktop entry point: open locally or coordinate a paired host browser. */
 	"browser.open": z.object({
 		workspaceId: Id,
 		peerId: Id.optional(),
 		url: z.string().min(1).max(8192),
-		mode: z.enum(["service", "network"]),
+		mode: z.enum(["service", "network", "remote"]),
+		transport: z.enum(["webrtc", "websockets"]).optional(),
 		controlled: z.boolean().optional(),
 	}),
+	"browser.setTransport": z.object({ browserId: Id, transport: z.enum(["webrtc", "websockets"]) }),
+	/** Launch a browser and streaming session on the workspace host (1.47). */
+	"browser.remoteOpen": z.object({
+		workspaceId: Id,
+		url: z.string().min(1).max(8192),
+		controlled: z.boolean().optional(),
+		transport: z.enum(["webrtc", "websockets"]).optional(),
+	}),
+	"browser.remoteClose": z.object({ browserId: Id }),
+	"browser.remoteTransport": z.object({ browserId: Id, transport: z.enum(["webrtc", "websockets"]) }),
 	"browser.list": z.object({}).optional(),
 	"browser.close": z.object({ browserId: Id }),
 	/** Register the browser this connection renders locally, for a workspace on this host. */
@@ -825,6 +845,7 @@ export const LOCAL_ONLY_METHODS: ReadonlySet<MethodName> = new Set([
 	"portForward.list",
 	"portForward.close",
 	"browser.open",
+	"browser.setTransport",
 	"browser.list",
 	"browser.close",
 	"device.list",
@@ -867,6 +888,10 @@ export interface SubscribeResult {
 }
 
 export interface MethodResults {
+	"speech.status": SpeechStatus;
+	"speech.configure": SpeechStatus;
+	"speech.transcribe": { text: string };
+	"speech.cancel": { cancelled: boolean };
 	"host.processes": HostProcesses;
 	/** A signal was sent; the process may still be shutting down. */
 	"host.killProcess": { signalled: true };
@@ -890,7 +915,11 @@ export interface MethodResults {
 	"tunnel.write": { written: number };
 	"tunnel.close": { closed: boolean };
 	"browser.open": LocalBrowserInfo;
-	"browser.list": { browsers: LocalBrowserInfo[] };
+	"browser.setTransport": LocalBrowserInfo;
+	"browser.remoteOpen": RemoteBrowserInfo;
+	"browser.remoteClose": { closed: boolean };
+	"browser.remoteTransport": { transport: "webrtc" | "websockets" };
+	"browser.list": { browsers: LocalBrowserInfo[]; preparations?: BrowserPreparation[] };
 	"browser.close": { closed: boolean };
 	"browser.attach": { attached: true };
 	"browser.detach": { detached: boolean };

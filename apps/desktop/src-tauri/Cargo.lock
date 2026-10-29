@@ -2719,10 +2719,15 @@ dependencies = [
 
 [[package]]
 name = "pier-desktop"
-version = "0.2.45"
+version = "0.2.56"
 dependencies = [
  "base64 0.22.1",
+ "cc",
+ "minisign-verify",
  "portable-pty",
+ "reqwest",
+ "rustls",
+ "semver",
  "serde",
  "serde_json",
  "tauri",
@@ -2732,6 +2737,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-single-instance",
  "tauri-plugin-updater",
+ "tempfile",
  "tokio",
  "winreg 0.10.1",
 ]

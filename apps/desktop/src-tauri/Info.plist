@@ -2,8 +2,21 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 	<dict>
+		<!-- The WebView UI has no .lproj folders, so declare languages for native panels explicitly. -->
+		<key>CFBundleDevelopmentRegion</key>
+		<string>en</string>
+		<key>CFBundleLocalizations</key>
+		<array>
+			<string>en</string>
+			<string>zh-Hans</string>
+			<string>zh-Hant</string>
+		</array>
 		<!-- Let AppKit localize native dialogs using the system language independently of Pier's UI. -->
 		<key>CFBundleAllowMixedLocalizations</key>
 		<true/>
+		<key>NSMicrophoneUsageDescription</key>
+		<string>Pier 需要使用麦克风，将你的语音转换为可编辑的消息文字。</string>
+		<key>NSSpeechRecognitionUsageDescription</key>
+		<string>Pier 使用系统语音识别将录音转换为可编辑的消息文字。部分语言可能需要 Apple 在线识别服务。</string>
 	</dict>
 </plist>

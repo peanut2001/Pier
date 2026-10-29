@@ -10,6 +10,7 @@ import {
 	type PierSessionEvent,
 	type QueueState,
 	type SessionCommandInfo,
+	type SessionContextInfo,
 	type SessionRunState,
 	type SessionSnapshot,
 	type SessionSummary,
@@ -75,6 +76,7 @@ export interface SessionContent {
 	streamingMessage?: unknown;
 	pendingToolCalls: string[];
 	model?: ModelInfo;
+	contextInfo?: SessionContextInfo;
 	thinkingLevel: ThinkingLevel;
 	fastMode?: boolean;
 	errorMessage?: string;
@@ -292,6 +294,7 @@ export abstract class ManagedSession {
 			pendingUi: this.bridge.pendingRequests,
 			queue: this.queue(),
 			...(c.model ? { model: c.model } : {}),
+			...(c.contextInfo ? { contextInfo: c.contextInfo } : {}),
 			thinkingLevel: c.thinkingLevel,
 			...(c.fastMode !== undefined ? { fastMode: c.fastMode } : {}),
 			statuses: Object.fromEntries(this.bridge.statuses),

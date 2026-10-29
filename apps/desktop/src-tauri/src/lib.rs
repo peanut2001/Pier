@@ -1,11 +1,19 @@
 mod appimage_env;
 mod autostart;
 mod host;
+mod html_preview;
 #[cfg(target_os = "linux")]
 mod linux_graphics;
+mod speech;
+#[cfg(target_os = "macos")]
+mod system_speech;
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+#[path = "local_speech.rs"]
+mod system_speech;
 mod terminal;
 mod transfer;
 mod tray;
+mod update_download;
 mod update_route;
 mod updater;
 
@@ -56,10 +64,20 @@ pub fn run() {
             }
         }));
     let app = autostart::configure(builder)
+        .register_uri_scheme_protocol("pier-preview", |_context, request| {
+            html_preview::response(&request)
+        })
+        .on_permission_request(speech::permission)
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
+            #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+            system_speech::system_speech_authorize,
+            #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+            system_speech::system_speech_transcribe,
+            #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+            system_speech::system_speech_cancel,
             autostart::autostart_status,
             autostart::autostart_set_enabled,
             host::host_status,
@@ -69,6 +87,7 @@ pub fn run() {
             updater::update_check,
             updater::update_cancel_check,
             updater::update_install,
+            updater::update_cancel_install,
             updater::update_set_auto_check,
             updater::update_set_mirror,
             terminal::terminal_spawn,
@@ -87,6 +106,8 @@ pub fn run() {
             app.manage(manager.clone());
             app.manage(TerminalManager::default());
             app.manage(DownloadManager::default());
+            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            app.manage(system_speech::SpeechJobs::default());
             let updates = UpdateManager::new(app.handle().clone());
             app.manage(updates.clone());
             let update_item = tray::create(app.handle())?;
@@ -113,6 +134,8 @@ pub fn run() {
             code: None, api, ..
         } => api.prevent_exit(),
         RunEvent::Exit => {
+            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            app.state::<system_speech::SpeechJobs>().shutdown();
             app.state::<TerminalManager>().kill_all();
             app.state::<HostManager>().shutdown();
         }

@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-/** Local rendering with a paired computer supplying the network (1.37). */
+/** Actions shared by local windows and browsers running on the workspace host. */
 export const BrowserCommandSchema = z.object({
 	action: z.enum(["tabs", "navigate", "snapshot", "click", "fill", "press", "evaluate", "screenshot"]),
 	tabId: z.string().max(256).optional(),
@@ -23,6 +23,46 @@ export interface LocalBrowserInfo {
 	peerId?: string;
 	url: string;
 	localUrl: string;
-	mode: "service" | "network";
+	mode: "service" | "network" | "remote";
 	controllable: boolean;
+	transport?: BrowserTransport;
 }
+
+export type BrowserTransport = "webrtc" | "websockets";
+
+/** A session on the workspace host. Only its owning connection receives the access token. */
+export interface RemoteBrowserInfo {
+	browserId: string;
+	workspaceId: string;
+	port: number;
+	token: string;
+	transport: BrowserTransport;
+}
+
+/** Initial setup can download several hundred MiB on the workspace host. */
+export const BROWSER_OPEN_TIMEOUT_MS = 15 * 60_000;
+export const BrowserPreparationProgressSchema = z.object({
+	stage: z.enum(["checking", "downloading", "verifying", "installing", "starting"]),
+	component: z.enum(["selkies", "chromium", "system"]).optional(),
+	message: z.string().max(500),
+	downloadedBytes: z
+		.number()
+		.int()
+		.nonnegative()
+		.max(600 * 1024 * 1024)
+		.optional(),
+	totalBytes: z
+		.number()
+		.int()
+		.positive()
+		.max(600 * 1024 * 1024)
+		.optional(),
+});
+export type BrowserPreparationProgress = z.infer<typeof BrowserPreparationProgressSchema>;
+export const BrowserPreparationSchema = z.object({
+	browserId: z.string(),
+	workspaceId: z.string(),
+	peerId: z.string().optional(),
+	progress: BrowserPreparationProgressSchema,
+});
+export type BrowserPreparation = z.infer<typeof BrowserPreparationSchema>;

@@ -1,13 +1,23 @@
-import { type ChatController, resolveSlash, runBuiltin, type SlashActions, thinkingLabel } from "@pier/chat-state";
+import {
+	appendDictation,
+	type ChatController,
+	resolveSlash,
+	runBuiltin,
+	type SlashActions,
+	thinkingLabel,
+	VOICE_LABELS,
+} from "@pier/chat-state";
 import type { ImageInput, ThinkingLevel } from "@pier/protocol";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { isBusy } from "../format.ts";
 import { useStore } from "../store.ts";
 import { FLOAT_SHADOW, PAGE, RADIUS, THINKING_COLOR, usePalette } from "../theme.ts";
+import { useVoiceInput } from "../use-voice-input.ts";
 import { type SlashEntry, SlashMenu, useSlashMenu } from "./SlashMenu.tsx";
+import { SpeechSettings } from "./SpeechSettings.tsx";
 import { Icon, IconButton } from "./ui.tsx";
 
 const MAX_IMAGES = 8;
@@ -33,8 +43,20 @@ export function Composer({
 	const [images, setImages] = useState<ImageInput[]>([]);
 	const [sending, setSending] = useState(false);
 	const [focused, setFocused] = useState(false);
+	const [speechSettings, setSpeechSettings] = useState(false);
+	const latestText = useRef(text);
+	latestText.current = text;
+	const voice = useVoiceInput(
+		store.activeClient,
+		chat.sessionId,
+		(value) => update(appendDictation(latestText.current, value)),
+		(message) => store.toast("error", message),
+	);
+	useEffect(() => {
+		if (sending || chat.chat.closed) voice.cancel();
+	}, [sending, chat.chat.closed, voice.cancel]);
 	const busy = isBusy(runState as never);
-	const canSend = (text.trim().length > 0 || images.length > 0) && !sending;
+	const canSend = !voice.busy && (text.trim().length > 0 || images.length > 0) && !sending;
 
 	const update = (value: string) => {
 		setText(value);
@@ -78,7 +100,7 @@ export function Composer({
 
 	const send = async (mode: "auto" | "steer" | "followUp", override?: string) => {
 		const body = (override ?? text).trim();
-		if (sending || (!body && !images.length)) return;
+		if (voice.busy || sending || (!body && !images.length)) return;
 		let resolution = resolveSlash(body, menu.list.commands, menu.list.known, chat.chat.session?.runtime);
 		if (resolution.kind === "unknown" || (resolution.kind === "host" && !menu.list.known)) {
 			const fresh = await chat.loadCommands();
@@ -147,7 +169,26 @@ export function Composer({
 					accessibilityLabel="消息输入框"
 					style={[styles.input, { color: p.text }]}
 				/>
+				{voice.busy ? (
+					<View style={styles.modes}>
+						<Text accessibilityLiveRegion="polite" style={[styles.hint, styles.flex, { color: p.muted }]}>
+							{VOICE_LABELS[voice.phase]}
+						</Text>
+						<Pressable accessibilityRole="button" accessibilityLabel="取消语音输入" onPress={voice.cancel}>
+							<Text style={{ color: p.danger }}>取消</Text>
+						</Pressable>
+					</View>
+				) : null}
 				<View style={styles.toolbar}>
+					<IconButton
+						icon={voice.phase === "recording" ? "stop" : "mic-outline"}
+						label={VOICE_LABELS[voice.phase]}
+						size={44}
+						tone={voice.phase === "recording" ? "danger" : "elevated"}
+						disabled={sending || !!chat.chat.closed || (voice.busy && voice.phase !== "recording")}
+						onPress={voice.phase === "recording" ? voice.stop : voice.start}
+						testID="voice-input-button"
+					/>
 					<IconButton
 						icon="image-outline"
 						label="添加图片"
@@ -208,10 +249,21 @@ export function Composer({
 					)}
 				</View>
 			</View>
+			{!voice.busy ? (
+				<Pressable
+					accessibilityRole="button"
+					accessibilityLabel="语音设置"
+					onPress={() => setSpeechSettings(true)}
+					style={styles.voiceSettings}
+				>
+					<Text style={[styles.hint, { color: p.muted }]}>语音设置</Text>
+				</Pressable>
+			) : null}
+			{speechSettings ? <SpeechSettings client={store.activeClient} onClose={() => setSpeechSettings(false)} /> : null}
 			{busy && canSend ? (
 				<View style={styles.modes}>
 					<Icon name="flash-outline" size={13} color={p.muted} />
-					<Text style={[styles.hint, { color: p.muted }]}>运行中：发送即引导</Text>
+					<Text style={[styles.hint, styles.flex, { color: p.muted }]}>运行中：发送即引导</Text>
 					<Pressable hitSlop={6} onPress={() => void send("followUp")}>
 						<Text style={[styles.link, { color: p.accentText }]}>排队到结束后</Text>
 					</Pressable>
@@ -225,6 +277,7 @@ export function Composer({
 }
 
 const styles = StyleSheet.create({
+	voiceSettings: { alignSelf: "flex-start", paddingHorizontal: 12, paddingVertical: 6 },
 	flex: { flex: 1 },
 	root: { ...PAGE, paddingHorizontal: 12, paddingTop: 6, paddingBottom: 8, gap: 6 },
 	box: { borderRadius: RADIUS.lg, borderWidth: 1, paddingTop: 4, paddingBottom: 8, paddingHorizontal: 8 },
@@ -261,7 +314,8 @@ const styles = StyleSheet.create({
 	},
 	pressed: { opacity: 0.75 },
 	modes: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 6, paddingHorizontal: 12 },
-	hint: { fontSize: 12, flex: 1 },
+	// Only row hints should flex; growing the voice-settings label vertically collapses the transcript.
+	hint: { fontSize: 12 },
 	link: { fontSize: 13, fontWeight: "600", marginLeft: 8 },
 	images: { maxHeight: 80, marginTop: 4 },
 	imagesContent: { gap: 8, paddingHorizontal: 4, paddingTop: 4 },

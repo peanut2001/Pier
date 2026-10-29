@@ -3,9 +3,10 @@
 	display: flex;
 	flex-direction: column;
 	align-items: center;
-	gap: 12px;
+	gap: 18px;
 	min-height: 0;
-	padding: 18px 7px 8px;
+	padding: 22px 8px 10px;
+	background: var(--bg-nav);
 	border-right: 1px solid var(--border);
 }
 
@@ -40,13 +41,13 @@
 button.navigation-button {
 	position: relative;
 	flex: none;
-	width: 38px;
-	height: 38px;
+	width: 40px;
+	height: 40px;
 	padding: 0;
 	border: none;
 	border-radius: 10px;
 	background: transparent;
-	color: var(--text-faint);
+	color: var(--text-muted);
 }
 
 button.navigation-button:hover:not(:disabled) {
@@ -56,9 +57,9 @@ button.navigation-button:hover:not(:disabled) {
 
 button.navigation-button.selected,
 button.navigation-button.selected:hover:not(:disabled) {
-	background: var(--bg-active);
-	color: var(--text);
-	box-shadow: var(--highlight);
+	background: var(--bg);
+	color: var(--accent-text);
+	box-shadow: var(--shadow-sm);
 }
 
 button.navigation-button.has-update {

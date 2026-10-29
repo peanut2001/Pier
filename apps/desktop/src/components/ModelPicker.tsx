@@ -5,7 +5,7 @@ import {
 	supportedThinkingLevels,
 	thinkingLabel,
 } from "@pier/chat-state";
-import type { ModelInfo, ThinkingLevel, WorkspaceInfo } from "@pier/protocol";
+import type { AgentRuntimeInfo, ModelInfo, ThinkingLevel, WorkspaceInfo } from "@pier/protocol";
 import { type KeyboardEvent, type PointerEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { LOCAL_NODE, useAppState, useStore } from "../lib/store.tsx";
 import {
@@ -17,8 +17,10 @@ import {
 	IconSearch,
 	IconSettings,
 	IconSparkles,
+	IconZap,
 } from "./Icons.tsx";
 import { useOutsideClick } from "./SessionControls.tsx";
+import { Switch } from "./SettingsUi.tsx";
 
 /**
  * The thinking-level panel: a stepped slider, like a progress bar with one stop per level.
@@ -161,6 +163,8 @@ interface ModelMenuProps {
 	node: string;
 	model?: ModelInfo;
 	thinkingLevel?: string;
+	fastMode?: boolean;
+	fastHint?: string;
 	/** Still resolving which model will be used (the chip shows a placeholder). */
 	loading?: boolean;
 	disabled?: boolean;
@@ -169,6 +173,8 @@ interface ModelMenuProps {
 	manageable?: boolean;
 	onModel: (model: ModelInfo) => void;
 	onThinking: (level: ThinkingLevel) => unknown;
+	/** Present only when the selected runtime supports Fast mode. */
+	onFast?: (enabled: boolean) => Promise<unknown>;
 }
 
 /**
@@ -179,12 +185,15 @@ function ModelMenu({
 	node,
 	model,
 	thinkingLevel,
+	fastMode,
+	fastHint = "从下一轮请求生效",
 	loading,
 	disabled,
 	loadModels,
 	manageable = true,
 	onModel,
 	onThinking,
+	onFast,
 }: ModelMenuProps) {
 	const store = useStore();
 	const [open, setOpen] = useState(false);
@@ -197,11 +206,21 @@ function ModelMenu({
 	const [models, setModels] = useState<ModelInfo[] | undefined>();
 	const [error, setError] = useState<string | undefined>();
 	const [filter, setFilter] = useState("");
+	const [fastPending, setFastPending] = useState(false);
 	const close = () => setOpen(false);
 	const ref = useOutsideClick(open, close);
 	const levels = supportedThinkingLevels(model);
 	const canThink = levels.length > 1;
 	const level = clampThinking(thinkingLevel ?? "medium", levels);
+	const setFast = async (enabled: boolean) => {
+		if (!onFast || fastPending || disabled) return;
+		setFastPending(true);
+		try {
+			await onFast(enabled);
+		} finally {
+			setFastPending(false);
+		}
+	};
 
 	useLayoutEffect(() => {
 		const el = body.current;
@@ -269,7 +288,7 @@ function ModelMenu({
 				data-level={level}
 				disabled={disabled}
 				onClick={toggle}
-				title="切换模型与思考程度"
+				title={onFast ? "切换模型、思考程度与 Fast 模式" : "切换模型与思考程度"}
 			>
 				<span className="composer-model-name">
 					{model ? model.name || model.id : loading ? "加载模型…" : "选择模型"}
@@ -277,6 +296,12 @@ function ModelMenu({
 				{model && canThink ? (
 					<span key={level} className="composer-model-thinking">
 						{thinkingLabel(level)}
+					</span>
+				) : null}
+				{fastMode ? (
+					<span className="composer-model-fast" title="Fast 模式已开启">
+						<IconZap size={12} />
+						Fast
 					</span>
 				) : null}
 				<IconChevronUp size={13} className="chip-caret" />
@@ -293,6 +318,26 @@ function ModelMenu({
 										) : (
 											<div className="thinking-panel-none muted">这个模型不支持调节思考程度</div>
 										)}
+										{onFast ? (
+											<>
+												<div className="dropdown-separator" />
+												<div className="model-menu-fast" aria-busy={fastPending}>
+													<div className="model-menu-current-text">
+														<span className="menu-label">
+															<IconZap size={14} />
+															Fast 模式
+														</span>
+														<span className="model-menu-fast-hint">{fastPending ? "正在切换…" : fastHint}</span>
+													</div>
+													<Switch
+														checked={fastMode === true}
+														onChange={(enabled) => void setFast(enabled)}
+														disabled={disabled || fastPending}
+														label="Fast 模式"
+													/>
+												</div>
+											</>
+										) : null}
 										<div className="dropdown-separator" />
 										<button type="button" className="dropdown-item model-menu-current" onClick={() => go("models")}>
 											<span className="menu-label">
@@ -385,26 +430,38 @@ export function SessionModelPicker({ chat, controller }: { chat: ChatState; cont
 			node={store.nodeOf(controller.workspaceId)}
 			model={chat.model}
 			thinkingLevel={chat.thinkingLevel}
+			fastMode={chat.fastMode}
 			loading={!chat.loaded}
 			disabled={!!chat.closed || chat.capabilities?.setModel === false}
 			manageable={(chat.session?.runtime ?? "pi") === "pi"}
 			loadModels={() => controller.listModels().then((r) => r.models)}
 			onModel={(m) => void controller.setModel(m.provider, m.id)}
 			onThinking={(level) => controller.setThinking(level)}
+			onFast={chat.capabilities?.fastMode ? (enabled) => controller.setFast(enabled) : undefined}
 		/>
 	);
 }
 
 /**
- * Model and thinking level for the chat the new-chat screen will create: starts from what the
+ * Model, thinking level and Fast mode for the chat the new-chat screen will create: starts from what the
  * workspace's computer would use, and is applied to the session before its first message.
  */
-export function NewChatModelPicker({ workspace, disabled }: { workspace: WorkspaceInfo; disabled?: boolean }) {
+export function NewChatModelPicker({
+	workspace,
+	runtimes,
+	disabled,
+}: {
+	workspace: WorkspaceInfo;
+	runtimes: readonly AgentRuntimeInfo[];
+	disabled?: boolean;
+}) {
 	const store = useStore();
 	const node = useAppState((s) => s.workspaceNodes[workspace.id] ?? s.node ?? LOCAL_NODE);
 	const online = useAppState((s) => s.nodes[node]?.connection === "open");
 	const choice = useAppState((s) => s.newChatModel[node]);
 	const runtime = useAppState((s) => s.newChatRuntime[node] ?? "pi");
+	const canFast =
+		runtime === "codex" && runtimes.some((r) => r.id === runtime && r.available && r.capabilities.fastMode);
 	// Reload the defaults when this computer's providers or default model change.
 	const providers = useAppState((s) => s.providers);
 	const [defaults, setDefaults] = useState<
@@ -452,6 +509,8 @@ export function NewChatModelPicker({ workspace, disabled }: { workspace: Workspa
 			node={node}
 			{...(model ? { model } : {})}
 			thinkingLevel={level}
+			fastMode={canFast ? choice?.fastMode : undefined}
+			fastHint="从首条消息生效"
 			loading={!defaults}
 			{...(disabled ? { disabled } : {})}
 			manageable={runtime === "pi"}
@@ -473,6 +532,7 @@ export function NewChatModelPicker({ workspace, disabled }: { workspace: Workspa
 				})
 			}
 			onThinking={(l) => store.setNewChatModel(workspace.id, { ...(model ? { model } : {}), thinkingLevel: l })}
+			onFast={canFast ? async (enabled) => store.setNewChatModel(workspace.id, { fastMode: enabled }) : undefined}
 		/>
 	);
 }

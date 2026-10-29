@@ -252,8 +252,8 @@
 	position: relative;
 	display: flex;
 	flex-direction: column;
-	gap: 6px;
-	padding: 13px 10px 9px 16px;
+	gap: 12px;
+	padding: 20px 14px 12px 20px;
 	border: 1px solid var(--border-strong);
 	border-radius: var(--radius-xl);
 	background: var(--bg-input);
@@ -264,11 +264,8 @@
 }
 
 .composer:focus-within {
-	border-color: var(--accent);
-	box-shadow:
-		0 0 0 3px var(--accent-soft),
-		var(--shadow-composer),
-		var(--highlight);
+	border-color: var(--accent-ring);
+	box-shadow: var(--shadow-composer), var(--highlight);
 }
 
 .composer.dragging {
@@ -281,8 +278,8 @@
 .composer-input {
 	position: relative;
 	width: 100%;
-	min-height: 26px;
-	max-height: 320px;
+	min-height: 48px;
+	max-height: min(320px, 35vh);
 	padding: 2px 6px 2px 0;
 	overflow-y: auto;
 	outline: none;
@@ -371,14 +368,18 @@
 
 .composer-toolbar {
 	display: flex;
+	flex-wrap: wrap;
 	align-items: center;
 	justify-content: space-between;
 	gap: 8px;
 	margin-left: -6px;
+	padding-top: 10px;
+	border-top: 1px solid var(--border);
 }
 
 .composer-toolbar-left {
 	display: flex;
+	flex-wrap: wrap;
 	align-items: center;
 	gap: 4px;
 	min-width: 0;
@@ -423,6 +424,9 @@
 
 .composer-actions {
 	display: flex;
+	min-width: 0;
+	max-width: 100%;
+	margin-left: auto;
 	align-items: center;
 	gap: 6px;
 }
@@ -444,14 +448,14 @@
 	width: 34px;
 	height: 34px;
 	padding: 0;
-	border-radius: 50%;
+	border-radius: 10px;
 	border: none;
 	flex: none;
 }
 
 .round-button.send {
 	background: var(--accent);
-	color: #fff;
+	color: var(--accent-contrast);
 	box-shadow:
 		0 3px 10px -2px var(--brand-glow),
 		inset 0 1px 0 rgba(255, 255, 255, 0.22);
@@ -744,6 +748,14 @@
 	animation: thinking-value-in 0.22s var(--ease);
 }
 
+.composer-model-fast {
+	display: inline-flex;
+	align-items: center;
+	gap: 3px;
+	flex: none;
+	color: var(--accent-text);
+}
+
 .dropdown-menu.model-menu {
 	width: 300px;
 	max-height: none;
@@ -1022,6 +1034,20 @@
 	color: var(--text-faint);
 }
 
+.model-menu-fast {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	padding: 8px 10px;
+	font-size: 12.5px;
+}
+
+.model-menu-fast-hint {
+	font-size: 11px;
+	color: var(--text-faint);
+}
+
 .model-menu-header {
 	display: flex;
 	align-items: center;
@@ -1062,4 +1088,36 @@
 .model-menu-list {
 	max-height: min(360px, 50vh);
 	overflow-y: auto;
+}
+
+.voice-controls {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	flex-wrap: wrap;
+}
+.voice-recording {
+	color: var(--danger);
+	background: var(--danger-soft);
+}
+.voice-status {
+	font-size: 12px;
+	color: var(--text-muted);
+}
+.speech-settings {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	width: 100%;
+}
+.speech-settings label,
+.speech-setting-field {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	align-items: center;
+}
+.speech-settings input:not([type="checkbox"]),
+.speech-settings .select {
+	width: 100%;
 }

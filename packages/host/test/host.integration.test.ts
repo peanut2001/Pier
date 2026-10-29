@@ -163,7 +163,18 @@ describe("sessions end to end", () => {
 		const { session, rec } = await newSession();
 		expect(rec.frames[0]?.event.type).toBe("session.snapshot");
 		const snapshot = rec.frames[0]?.event.snapshot as SessionSnapshot;
-		expect(snapshot).toMatchObject({ seq: 0, pendingUi: [], model: { provider: "faux", id: "faux-1" } });
+		expect(snapshot).toMatchObject({
+			seq: 0,
+			pendingUi: [],
+			model: { provider: "faux", id: "faux-1" },
+			contextInfo: {
+				autoCompaction: "configured",
+				contextWindow: 128_000,
+				compactionThreshold: 111_616,
+				reserveTokens: 16_384,
+				keepRecentTokens: 20_000,
+			},
+		});
 
 		const from = rec.mark();
 		expect(await client.request("session.prompt", { sessionId: session.id, text: "hi" })).toEqual({ accepted: true });

@@ -1,4 +1,4 @@
-import type { BrowserCommand } from "./browser.ts";
+import type { BrowserCommand, BrowserPreparationProgress } from "./browser.ts";
 import type {
 	AgentConfigRuntime,
 	AgentConfigScope,
@@ -11,6 +11,7 @@ import type {
 	PairingRequest,
 	PairingResolution,
 	RemoteAccessStatus,
+	SessionContextInfo,
 	SessionRunState,
 	SessionSnapshot,
 	SessionSummary,
@@ -66,7 +67,7 @@ export type PierSessionEvent =
 	| { type: "session.status"; state: SessionRunState }
 	| { type: "session.replaced"; previousSessionId: string; session: SessionSummary }
 	| { type: "session.closed"; reason: "idle" | "closed" | "deleted" | "host_shutdown" }
-	| { type: "session.model"; model?: ModelInfo; thinkingLevel: string }
+	| { type: "session.model"; model?: ModelInfo; contextInfo?: SessionContextInfo; thinkingLevel: string }
 	| { type: "session.fast"; enabled: boolean }
 	| { type: "ui.request"; request: UiRequest }
 	| {
@@ -87,6 +88,14 @@ export type PierSessionEvent =
 /** Host-scoped events (no `sessionId`, no `seq`). */
 export type PierHostEvent =
 	| { type: "resources.changed"; runtime: ResourceRuntime; workspaceId?: string }
+	| {
+			type: "browser.preparing";
+			browserId: string;
+			workspaceId: string;
+			peerId?: string;
+			progress: BrowserPreparationProgress;
+	  }
+	| { type: "browser.remoteClosed"; browserId: string }
 	| { type: "browser.command"; browserId: string; requestId: string; command: BrowserCommand }
 	| { type: "task.changed" }
 	| { type: "host.notice"; level: "info" | "warning" | "error"; message: string; sessionId?: string }

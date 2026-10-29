@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
-import type { AddressInfo } from "node:net";
+import { type AddressInfo, connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
@@ -301,8 +301,17 @@ describe("NewAPI sign-in", () => {
 		});
 		expect(JSON.stringify(result)).not.toContain(created?.key);
 
-		// The code was used once; the port is closed.
-		await expect(fetch(`${redirect.origin}/callback`)).rejects.toThrow();
+		// The callback stops listening; fetch may reuse a connection serving the last page.
+		await expect(
+			new Promise<void>((resolve, reject) => {
+				const socket = connect(Number(redirect.port), redirect.hostname);
+				socket.once("error", reject);
+				socket.once("connect", () => {
+					socket.destroy();
+					resolve();
+				});
+			}),
+		).rejects.toMatchObject({ code: "ECONNREFUSED" });
 		const saved = await t.client.request("provider.saveCustom", {
 			provider: { id: "browser", api: "openai-completions", baseUrl: `${site.url}/v1`, models: [{ id: "m-a" }] },
 			apiKeyRef: result.keyRef,

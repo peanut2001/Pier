@@ -31,6 +31,7 @@ import {
 } from "@pier/protocol";
 import { type BrowserOptions, LocalBrowsers } from "./browser/browsers.ts";
 import { BrowserControllers } from "./browser/controllers.ts";
+import { type RemoteBrowserOptions, RemoteBrowsers } from "./browser/remote-browsers.ts";
 import { HostTunnels } from "./browser/tunnels.ts";
 import { ClaudeCodeRuntime, type ClaudeCodeRuntimeOptions, claudeConfigDir } from "./claude/claude-runtime.ts";
 import { CodexRuntime, type CodexRuntimeOptions, codexHome } from "./codex/codex-runtime.ts";
@@ -81,6 +82,7 @@ import { ScheduledTasks } from "./scheduled-tasks.ts";
 import { SessionArchiveStore } from "./session-archive.ts";
 import { SessionPool } from "./session-pool.ts";
 import type { AppShell, ShellMethod } from "./shell.ts";
+import { SpeechService } from "./speech.ts";
 import { HostTerminals } from "./terminals.ts";
 import {
 	authorizeWorkspaceFilePreview,
@@ -97,7 +99,7 @@ import {
 import { transferWorkspacePath } from "./workspace-path-transfers.ts";
 import { WorkspaceUploads } from "./workspace-uploads.ts";
 
-export const PIER_HOST_VERSION = "0.2.45";
+export const PIER_HOST_VERSION = "0.2.56";
 
 /** How Pier introduces itself to NewAPI sites (their login sessions list shows the system). */
 function pierUserAgent(): string {
@@ -152,6 +154,7 @@ export interface PierHostOptions {
 	/** Installer dependencies for tests; production always downloads official native releases. */
 	agentInstaller?: Pick<AgentInstallerOptions, "fetch" | "probe" | "homeDirectory" | "configurePath">;
 	browser?: BrowserOptions;
+	remoteBrowser?: RemoteBrowserOptions;
 }
 
 /** Remote methods recorded in the audit log. */
@@ -166,6 +169,9 @@ const AUDITED_METHODS = new Set<MethodName>([
 	"mcp.delete",
 	"mcp.test",
 	"tunnel.open",
+	"browser.remoteOpen",
+	"browser.remoteClose",
+	"browser.remoteTransport",
 	"browser.attach",
 	"browser.action",
 	"task.create",
@@ -225,6 +231,7 @@ const AUDITED_METHODS = new Set<MethodName>([
 	"extension.delete",
 	"update.install",
 	"runtime.install",
+	"speech.configure",
 	"settings.update",
 	"settings.write",
 	"agentConfig.update",
@@ -260,6 +267,9 @@ function auditDetail(method: MethodName, params: Record<string, unknown>): Recor
 			return { runtime: params.runtime, scope: params.scope, name: params.name, workspaceId: params.workspaceId };
 		case "tunnel.open":
 			return { host: params.host, port: params.port };
+		case "browser.remoteOpen":
+		case "browser.remoteClose":
+		case "browser.remoteTransport":
 		case "browser.attach":
 			return { workspaceId: params.workspaceId, browserId: params.browserId };
 		case "browser.action":
@@ -450,6 +460,7 @@ function toProtocolError(error: unknown): PierProtocolError {
  * to any number of connections, independent of the transport.
  */
 export class PierHost implements RequestHandler {
+	readonly speech: SpeechService;
 	readonly pierDir: string;
 	readonly config: ConfigStore;
 	readonly env: PiEnvironment;
@@ -463,6 +474,7 @@ export class PierHost implements RequestHandler {
 	readonly browserControllers = new BrowserControllers();
 	readonly tunnels = new HostTunnels();
 	readonly browsers: LocalBrowsers;
+	readonly remoteBrowsers: RemoteBrowsers;
 	readonly portForwards: LocalPortForwards;
 	readonly ports = new HostPortSampler();
 	readonly processes = new HostProcessManager();
@@ -493,6 +505,7 @@ export class PierHost implements RequestHandler {
 		this.pierDir = options.pierDir ?? defaultPierDir();
 		mkdirSync(this.pierDir, { recursive: true, mode: 0o700 });
 		this.config = new ConfigStore(configPath(this.pierDir));
+		this.speech = new SpeechService(join(this.pierDir, "speech.json"));
 		this.env = env;
 		this.localToken = options.localToken;
 		const log = options.log ?? (() => {});
@@ -637,6 +650,12 @@ export class PierHost implements RequestHandler {
 			this.browserControllers,
 			options.browser,
 		);
+		this.remoteBrowsers = new RemoteBrowsers(
+			this.pierDir,
+			this.browserControllers,
+			() => this.remote.browserIceServers(),
+			options.remoteBrowser,
+		);
 		this.terminals = new HostTerminals(this.shell, { log });
 		this.uploads = new WorkspaceUploads({ log });
 		this.offShellStatus = this.shell?.onUpdateStatus((status) => this.broadcast({ type: "update.status", status }));
@@ -722,8 +741,10 @@ export class PierHost implements RequestHandler {
 	}
 
 	disconnected(connection: Connection): void {
+		this.speech.cancel(connection.connectionId);
 		this.portForwards.connectionClosed(connection);
 		this.browsers.connectionClosed(connection);
+		this.remoteBrowsers.connectionClosed(connection);
 		this.browserControllers.connectionClosed(connection);
 		this.tunnels.connectionClosed(connection);
 		this.connections.delete(connection);
@@ -1015,7 +1036,21 @@ export class PierHost implements RequestHandler {
 				if (!params.peerId) this.requireWorkspace(params.workspaceId);
 				return this.browsers.open(ctx.connection, params);
 			},
-			"browser.list": (ctx) => ({ browsers: this.browsers.list(ctx.connection) }),
+			"browser.remoteOpen": (ctx, params) => {
+				this.requireWorkspace(params.workspaceId);
+				return this.remoteBrowsers.open(ctx.connection, params);
+			},
+			"browser.remoteClose": async (ctx, params) => ({
+				closed: await this.remoteBrowsers.close(ctx.connection, params.browserId),
+			}),
+			"browser.remoteTransport": (ctx, params) =>
+				this.remoteBrowsers.setTransport(ctx.connection, params.browserId, params.transport),
+			"browser.setTransport": (ctx, params) =>
+				this.browsers.setTransport(ctx.connection, params.browserId, params.transport),
+			"browser.list": (ctx) => ({
+				browsers: this.browsers.list(ctx.connection),
+				preparations: this.browsers.preparations(ctx.connection),
+			}),
 			"browser.close": async (ctx, params) => ({ closed: await this.browsers.close(ctx.connection, params.browserId) }),
 			"browser.attach": (ctx, params) => {
 				this.requireWorkspace(params.workspaceId);
@@ -1366,6 +1401,10 @@ export class PierHost implements RequestHandler {
 				defaultModel: await this.providers.setDefault(params.provider, params.modelId),
 			}),
 
+			"speech.status": () => this.speech.status(),
+			"speech.configure": (_ctx, params) => this.speech.configure(params),
+			"speech.transcribe": (ctx, params) => this.speech.transcribe(ctx.connection.connectionId, params),
+			"speech.cancel": (ctx, params) => ({ cancelled: this.speech.cancel(ctx.connection.connectionId, params.id) }),
 			"provider.list": () => this.providers.list(),
 			"provider.login": (ctx, params) => {
 				const { flowId, start } = this.providers.login(ctx.connection, params.providerId, params.method);
@@ -1591,8 +1630,10 @@ export class PierHost implements RequestHandler {
 	async shutdown(): Promise<void> {
 		if (this.shuttingDown) return;
 		this.shuttingDown = true;
+		this.speech.shutdown();
 		this.portForwards.shutdown();
 		await this.browsers.shutdown();
+		await this.remoteBrowsers.shutdown();
 		this.browserControllers.shutdown();
 		this.tunnels.shutdown();
 		this.offShellStatus?.();

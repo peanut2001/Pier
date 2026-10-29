@@ -30,9 +30,14 @@ export function updatePending(update: UpdateStatus | AppUpdateStatus): boolean {
 }
 
 /** Download progress in percent, when the size is known. */
-function downloadPercent(update: UpdateStatus): number | undefined {
+function downloadPercent(update: UpdateStatus | AppUpdateStatus): number | undefined {
 	const total = update.total ?? 0;
 	return total ? Math.min(100, Math.round((update.downloaded / total) * 100)) : undefined;
+}
+
+/** Part of the pending update is downloaded already; installing continues from there. */
+function downloadPaused(update: UpdateStatus | AppUpdateStatus): boolean {
+	return (update.state === "available" || update.state === "error") && !!update.version && update.downloaded > 0;
 }
 
 /**
@@ -71,12 +76,13 @@ export function SidebarUpdate() {
 	};
 
 	const percent = downloadPercent(update);
+	const paused = downloadPaused(update);
 	let title: string;
 	let detail: string;
 	let tone = "";
 	if (update.state === "downloading") {
 		title = percent === undefined ? "正在下载更新…" : `正在下载 ${percent}%`;
-		detail = `Pier v${update.version}`;
+		detail = update.error ?? `Pier v${update.version}`;
 	} else if (update.state === "installing") {
 		title = "正在安装更新…";
 		detail = "完成后 Pier 会自动重启";
@@ -88,6 +94,14 @@ export function SidebarUpdate() {
 		title = `${busySessions} 个会话正在运行`;
 		detail = "更新会中断它们，重启后可继续";
 		tone = " warning";
+	} else if (paused) {
+		title = `新版本 v${update.version}`;
+		detail =
+			percent === undefined
+				? "下载已暂停，可继续下载"
+				: update.downloaded >= (update.total ?? 0)
+					? "更新包已下载"
+					: `已下载 ${percent}%，可继续下载`;
 	} else {
 		title = `新版本 v${update.version}`;
 		detail = `当前 v${update.currentVersion}`;
@@ -115,16 +129,31 @@ export function SidebarUpdate() {
 					<span className="sidebar-update-detail">{detail}</span>
 				</span>
 			</button>
-			{working ? null : (
+			{update.state === "downloading" ? (
+				<button
+					type="button"
+					className="sidebar-update-action"
+					title="暂停下载，之后可以从中断处继续"
+					onClick={() => void store.pauseUpdate()}
+				>
+					暂停
+				</button>
+			) : working ? null : (
 				<button
 					type="button"
 					className={`sidebar-update-action ${confirm ? "danger" : "primary"}`}
 					disabled={checking}
-					title={confirm ? "中断正在运行的会话并更新" : "下载并安装更新，完成后自动重启"}
+					title={
+						confirm
+							? "中断正在运行的会话并更新"
+							: paused
+								? "从中断处继续下载并安装更新，完成后自动重启"
+								: "下载并安装更新，完成后自动重启"
+					}
 					onClick={() => void install()}
 					onBlur={() => setBusySessions(undefined)}
 				>
-					{confirm ? "仍然更新" : update.state === "error" ? "重试" : "更新"}
+					{confirm ? "仍然更新" : update.state === "error" ? "重试" : paused ? "继续" : "更新"}
 				</button>
 			)}
 			{update.state === "downloading" ? (
@@ -139,24 +168,33 @@ export function SidebarUpdate() {
 	);
 }
 
+/** Download / install progress, or how much of a paused download is already there. */
 function Progress({ update }: { update: UpdateStatus }) {
 	const total = update.total ?? 0;
-	const percent = total ? Math.min(100, Math.round((update.downloaded / total) * 100)) : undefined;
+	const percent = downloadPercent(update);
+	const working = update.state === "downloading" || update.state === "installing";
+	const amount = total
+		? `${formatBytes(update.downloaded)} / ${formatBytes(total)}（${percent}%）`
+		: formatBytes(update.downloaded);
+	let text: string;
+	if (update.state === "installing") text = "正在安装，完成后 Pier 会自动重启…";
+	else if (update.state === "downloading") text = total ? `正在下载 ${amount}` : `正在下载 ${amount}…`;
+	else if (total && update.downloaded >= total) text = `更新包已下载（${formatBytes(total)}），重试时直接安装`;
+	else text = `已下载 ${amount}，继续更新时从中断处接着下载`;
 	return (
 		<div className="update-progress">
-			<div className="update-progress-track">
-				<div
-					className={`update-progress-bar${percent === undefined ? " indeterminate" : ""}`}
-					style={percent === undefined ? undefined : { width: `${percent}%` }}
-				/>
-			</div>
-			<div className="muted small">
-				{update.state === "installing"
-					? "正在安装，完成后 Pier 会自动重启…"
-					: total
-						? `正在下载 ${formatBytes(update.downloaded)} / ${formatBytes(total)}（${percent}%）`
-						: `正在下载 ${formatBytes(update.downloaded)}…`}
-			</div>
+			{working || percent !== undefined ? (
+				<div className="update-progress-track">
+					<div
+						className={`update-progress-bar${percent === undefined ? " indeterminate" : ""}`}
+						style={percent === undefined ? undefined : { width: `${percent}%` }}
+					/>
+				</div>
+			) : null}
+			<div className="muted small">{text}</div>
+			{update.state === "downloading" && update.error ? (
+				<div className="small update-warning">{update.error}</div>
+			) : null}
 		</div>
 	);
 }
@@ -194,9 +232,12 @@ function peerUpdateText(
 		case "downloading": {
 			const total = status.total ?? 0;
 			const progress = total
-				? `${formatBytes(status.downloaded)} / ${formatBytes(total)}（${Math.min(100, Math.round((status.downloaded / total) * 100))}%）`
+				? `${formatBytes(status.downloaded)} / ${formatBytes(total)}（${downloadPercent(status)}%）`
 				: formatBytes(status.downloaded);
-			return { text: `正在下载 ${pendingVersion}：${progress}` };
+			return {
+				text: `正在下载 ${pendingVersion}：${progress}${status.error ? `；${status.error}` : ""}`,
+				...(status.error ? { tone: "warning" as const } : {}),
+			};
 		}
 		case "installing":
 			return { text: `正在安装 ${pendingVersion}，完成后那台电脑上的 Pier 会自动重启` };
@@ -206,6 +247,10 @@ function peerUpdateText(
 	const notes: string[] = [];
 	if (status.state === "available") notes.push(`可以从 v${status.currentVersion} 更新到 ${pendingVersion}`);
 	else notes.push(status.error ?? "检查更新失败");
+	if (downloadPaused(status)) {
+		const percent = downloadPercent(status);
+		notes.push(percent === undefined ? "已下载一部分，更新时接着下载" : `已下载 ${percent}%，更新时接着下载`);
+	}
 	if (status.version && busySessions) {
 		notes.push(`那台电脑上有 ${busySessions} 个会话正在运行或等待审批，更新会中断它们`);
 	}
@@ -255,22 +300,28 @@ function PeerUpdateRow({ peer }: { peer: PeerInfo }) {
 		action = <IconLoader size={16} className="spin" />;
 	} else if (pending) {
 		action = (
-			<button
-				type="button"
-				className={confirm ? "danger" : "primary"}
-				onClick={() => {
-					if (busySessions && !confirm) {
-						setConfirm(true);
-						return;
-					}
-					setConfirm(false);
-					void store.installPeerUpdate(peer.id);
-				}}
-				onBlur={() => setConfirm(false)}
-			>
-				<IconDownload size={14} />
-				{confirm ? "仍然更新" : status?.state === "error" ? "重试安装" : `更新到 v${status?.version ?? ""}`}
-			</button>
+			<>
+				<button type="button" onClick={() => void store.checkPeerUpdate(peer.id)}>
+					<IconRefresh size={14} />
+					重新检查
+				</button>
+				<button
+					type="button"
+					className={confirm ? "danger" : "primary"}
+					onClick={() => {
+						if (busySessions && !confirm) {
+							setConfirm(true);
+							return;
+						}
+						setConfirm(false);
+						void store.installPeerUpdate(peer.id);
+					}}
+					onBlur={() => setConfirm(false)}
+				>
+					<IconDownload size={14} />
+					{confirm ? "仍然更新" : status?.state === "error" ? "重试安装" : `更新到 v${status?.version ?? ""}`}
+				</button>
+			</>
 		);
 	} else if (status && !entry?.tooOld && status.state !== "unsupported") {
 		action = (
@@ -398,11 +449,12 @@ export function UpdateSettings() {
 	const [confirm, setConfirm] = useState(false);
 	const pending = updatePending(update);
 	const working = update.state === "downloading" || update.state === "installing";
+	const paused = downloadPaused(update);
 
-	// Opening the page checks for updates unless one is already known or in progress.
+	// Refresh cached releases when opening the page, including an already pending update.
 	// biome-ignore lint/correctness/useExhaustiveDependencies: only when the page opens.
 	useEffect(() => {
-		if (update.state === "idle" || update.state === "upToDate" || (update.state === "error" && !update.version)) {
+		if (!working && update.state !== "unsupported" && update.state !== "checking") {
 			void store.checkForUpdates();
 		}
 	}, []);
@@ -462,7 +514,7 @@ export function UpdateSettings() {
 						<Markdown text={update.notes} />
 					</div>
 				) : null}
-				{working ? <Progress update={update} /> : null}
+				{working || paused ? <Progress update={update} /> : null}
 				{update.state === "error" && update.error ? <div className="banner error inline">{update.error}</div> : null}
 				{!working ? (
 					<p className={`muted small${confirm ? " update-warning" : ""}`}>
@@ -486,9 +538,19 @@ export function UpdateSettings() {
 
 	const action =
 		pending && !working ? (
-			<button type="button" className={confirm ? "danger" : "primary"} onClick={install}>
-				<IconDownload size={14} />
-				{confirm ? "仍然更新" : update.state === "error" ? "重试安装" : "更新并重启"}
+			<>
+				<button type="button" onClick={() => void store.checkForUpdates()}>
+					<IconRefresh size={14} />
+					重新检查
+				</button>
+				<button type="button" className={confirm ? "danger" : "primary"} onClick={install}>
+					<IconDownload size={14} />
+					{confirm ? "仍然更新" : update.state === "error" ? "重试安装" : paused ? "继续更新" : "更新并重启"}
+				</button>
+			</>
+		) : update.state === "downloading" ? (
+			<button type="button" onClick={() => void store.pauseUpdate()}>
+				暂停下载
 			</button>
 		) : working || update.state === "unsupported" ? null : update.state === "checking" ? (
 			<button type="button" onClick={() => void store.cancelUpdateCheck()}>

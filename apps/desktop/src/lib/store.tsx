@@ -58,7 +58,7 @@ import type {
 	WorkspacePathDeleteResult,
 	WorkspacePathTransferResult,
 } from "@pier/protocol";
-import { PierProtocolError, parseProtocolVersion } from "@pier/protocol";
+import { BROWSER_OPEN_TIMEOUT_MS, PierProtocolError, parseProtocolVersion } from "@pier/protocol";
 import { createContext, useContext, useMemo, useSyncExternalStore } from "react";
 import type { Bridge, HostStatus, LocalFileSink, UpdateStatus } from "./bridge.ts";
 import { remoteServiceUrl } from "./browser-url.ts";
@@ -69,7 +69,7 @@ import { remotePageBlocker } from "./settings-target.ts";
 import { beginWorkspacePaste, finishWorkspacePaste, renameWorkspaceClipboardPath } from "./workspace-clipboard.ts";
 import { isYunlianProvider, movedToLine, YUNLIAN_SITE, yunlianGroupOf, yunlianProvider } from "./yunlian.ts";
 
-export const APP_VERSION = "0.2.45";
+export const APP_VERSION = "0.2.56";
 
 /** Node id of this computer; any other node is a paired computer's host id. */
 export const LOCAL_NODE = "local";
@@ -225,10 +225,11 @@ export interface Draft {
 	images: Array<{ data: string; mimeType: string; name: string }>;
 }
 
-/** A model / thinking level picked for new chats (see `AppState.newChatModel`). */
+/** Model, thinking level and Fast mode picked for new chats (see `AppState.newChatModel`). */
 export interface NewChatModelChoice {
 	model?: ModelInfo | undefined;
 	thinkingLevel?: ThinkingLevel | undefined;
+	fastMode?: boolean | undefined;
 }
 
 /** An interactive provider sign-in shown in the login dialog. */
@@ -325,7 +326,7 @@ export interface AppState {
 	 */
 	newChat?: { workspaceId?: string };
 	/**
-	 * The model and thinking level picked on the new-chat screen, per computer (`LOCAL_NODE` or a
+	 * The model, thinking level and Fast mode picked on the new-chat screen, per computer (`LOCAL_NODE` or a
 	 * paired computer's id). Unset fields use what the host would pick for a new session. Kept
 	 * for later new chats until the app restarts.
 	 */
@@ -2580,7 +2581,7 @@ export class PierStore {
 		if (this.state.newChat) this.set({ newChat: { workspaceId } });
 	}
 
-	/** Remember the model / thinking level for new chats on the computer of `workspaceId`. */
+	/** Remember model, thinking level and Fast mode for new chats on the computer of `workspaceId`. */
 	setNewChatModel(workspaceId: string, choice: NewChatModelChoice): void {
 		const node = this.nodeOf(workspaceId);
 		this.set((s) => ({ newChatModel: { ...s.newChatModel, [node]: { ...s.newChatModel[node], ...choice } } }));
@@ -2639,24 +2640,26 @@ export class PierStore {
 		}
 		const client = this.clientFor(workspaceId);
 		const runtime = this.newChatRuntime(workspaceId);
+		const choice = this.state.newChatModel[this.nodeOf(workspaceId)];
+		const fastMode = runtime === "codex" ? choice?.fastMode : undefined;
 		const result = await this.callWith(client, "新建会话", (c) =>
 			c.request("session.create", { workspaceId, ...(runtime !== "pi" ? { runtime } : {}) }),
 		);
 		if (!result) return false;
 		const session = result.session;
-		const choice = this.state.newChatModel[this.nodeOf(workspaceId)];
-		if (client && choice && (choice.model || choice.thinkingLevel)) {
-			// Apply the model picked on the new-chat screen before the first message is sent.
+		if (client && choice && (choice.model || choice.thinkingLevel || fastMode !== undefined)) {
+			// Apply the new-chat choices before the first message is sent.
 			const sessionId = session.id;
-			const applied = await this.callWith(client, "设置模型", async (c) => {
+			const applied = await this.callWith(client, "设置会话选项", async (c) => {
 				if (choice.model) {
 					await c.request("model.set", { sessionId, provider: choice.model.provider, modelId: choice.model.id });
 				}
 				if (choice.thinkingLevel) await c.request("thinking.set", { sessionId, level: choice.thinkingLevel });
+				if (fastMode !== undefined) await c.request("fast.set", { sessionId, enabled: fastMode });
 				return true;
 			});
 			// The session exists either way; open it but keep the draft unsent so nothing runs
-			// with a model the user did not pick.
+			// with settings the user did not pick.
 			if (!applied) {
 				this.drafts.delete(NEW_CHAT_DRAFT);
 				this.saveDraft(session.id, draft);
@@ -3070,6 +3073,17 @@ export class PierStore {
 		}
 	}
 
+	/** Pause the running download; installing again continues where it stopped. */
+	async pauseUpdate(): Promise<void> {
+		const request = ++this.updateRequest;
+		try {
+			const status = await this.bridge.updates.cancelInstall();
+			if (request === this.updateRequest) this.set({ update: status });
+		} catch (error) {
+			this.toast("error", `暂停下载失败：${errorText(error)}`);
+		}
+	}
+
 	async setUpdateAutoCheck(enabled: boolean): Promise<void> {
 		const request = ++this.updateRequest;
 		try {
@@ -3238,6 +3252,40 @@ export class PierStore {
 	/** Ask where to save a download named `name` on this computer; null when cancelled. */
 	saveLocalFile(name: string): Promise<LocalFileSink | null> {
 		return this.bridge.saveFile(name);
+	}
+
+	/** Browser location follows the workspace host. Default local browsing needs no managed session. */
+	async openBrowser(
+		workspaceId: string,
+		url: string,
+		controlled = false,
+		transport: "webrtc" | "websockets" = "webrtc",
+	) {
+		const parsed = new URL(url);
+		if (!["http:", "https:"].includes(parsed.protocol) || parsed.username || parsed.password)
+			throw new Error("请输入不带用户名和密码的 HTTP 或 HTTPS 地址");
+		const node = this.nodeOf(workspaceId);
+		if (node === LOCAL_NODE && !controlled) {
+			await this.bridge.openExternal(parsed.href);
+			return undefined;
+		}
+		const local = this.nodeClient(LOCAL_NODE);
+		if (!local) throw new Error("尚未连接到本机 Pier Host");
+		if (node !== LOCAL_NODE) {
+			const version = local.host?.protocolVersion?.split(".").map(Number);
+			if (version?.[0] !== 1 || (version[1] ?? 0) < 48)
+				throw new Error("请先更新本机 Pier（自动准备远程浏览器需要协议 1.48）");
+		}
+		return local.request(
+			"browser.open",
+			{
+				workspaceId,
+				url: parsed.href,
+				controlled,
+				...(node === LOCAL_NODE ? { mode: "service" as const } : { mode: "remote" as const, peerId: node, transport }),
+			},
+			{ timeoutMs: node === LOCAL_NODE ? 60_000 : BROWSER_OPEN_TIMEOUT_MS },
+		);
 	}
 
 	/** Resolve localhost against the conversation/terminal's host before opening it locally. */

@@ -4,18 +4,23 @@ import type { ReactNode } from "react";
 
 export function SettingsGroup({
 	title,
+	description,
 	actions,
 	children,
 }: {
 	title?: ReactNode;
+	description?: ReactNode;
 	actions?: ReactNode;
 	children: ReactNode;
 }) {
 	return (
 		<section className="settings-group">
-			{title || actions ? (
+			{title || description || actions ? (
 				<div className="settings-group-head">
-					{title ? <h2>{title}</h2> : <span />}
+					<div className="settings-group-copy">
+						{title ? <h2>{title}</h2> : null}
+						{description ? <p>{description}</p> : null}
+					</div>
 					{actions ? <div className="settings-group-actions">{actions}</div> : null}
 				</div>
 			) : null}

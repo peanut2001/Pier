@@ -15,6 +15,7 @@ import {
 	PierProtocolError,
 	type QueueState,
 	type SessionCommandInfo,
+	type SessionContextInfo,
 	type SessionSummary,
 	type StreamingBehavior,
 	type ThinkingLevel,
@@ -704,6 +705,13 @@ export class ClaudeCodeSession extends ManagedSession {
 		);
 	}
 
+	private contextInfo(model = this.modelInfo()): SessionContextInfo {
+		return {
+			autoCompaction: "runtime",
+			...(model.contextWindow ? { contextWindow: model.contextWindow } : {}),
+		};
+	}
+
 	protected content(): SessionContent {
 		const t = this.transcript;
 		return {
@@ -711,6 +719,7 @@ export class ClaudeCodeSession extends ManagedSession {
 			...(t.streaming ? { streamingMessage: structuredClone(t.streaming) } : {}),
 			pendingToolCalls: t.pendingToolCalls,
 			model: this.modelInfo(),
+			contextInfo: this.contextInfo(),
 			thinkingLevel: this.thinkingLevel,
 			...(t.errorMessage ? { errorMessage: t.errorMessage } : {}),
 		};
@@ -824,7 +833,12 @@ export class ClaudeCodeSession extends ManagedSession {
 		if (info.thinkingLevels && !info.thinkingLevels.includes(this.thinkingLevel)) {
 			this.thinkingLevel = info.thinkingLevels.includes("high") ? "high" : (info.thinkingLevels.at(-1) ?? "off");
 		}
-		this.emit({ type: "session.model", model: info, thinkingLevel: this.thinkingLevel });
+		this.emit({
+			type: "session.model",
+			model: info,
+			contextInfo: this.contextInfo(info),
+			thinkingLevel: this.thinkingLevel,
+		});
 		return info;
 	}
 

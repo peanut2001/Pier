@@ -195,6 +195,11 @@ export class RemoteAccess {
 		return this.p2pOverride ?? this.config.remote.p2p ?? true;
 	}
 
+	/** ICE servers already supplied by the configured relay; no implicit third-party TURN. */
+	browserIceServers() {
+		return this.relayClient?.iceServers ?? [];
+	}
+
 	/** Whether devices can reach the host at all right now (LAN listener or relay). */
 	private get reachable(): boolean {
 		return this.running || this.relayClient?.state === "online";

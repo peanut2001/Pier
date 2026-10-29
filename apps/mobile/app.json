@@ -3,7 +3,7 @@
 		"name": "Pier",
 		"slug": "pier",
 		"scheme": "pier",
-		"version": "0.2.45",
+		"version": "0.2.56",
 		"orientation": "portrait",
 		"icon": "./assets/icon.png",
 		"userInterfaceStyle": "automatic",
@@ -76,6 +76,14 @@
 					"dark": {
 						"backgroundColor": "#0a0c0f"
 					}
+				}
+			],
+			[
+				"expo-audio",
+				{
+					"microphonePermission": "Pier 需要使用麦克风，将你的语音转换为可编辑的消息文字。",
+					"enableBackgroundRecording": false,
+					"enableBackgroundPlayback": false
 				}
 			]
 		],

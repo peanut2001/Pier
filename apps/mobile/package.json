@@ -1,6 +1,6 @@
 {
 	"name": "@pier/mobile",
-	"version": "0.2.45",
+	"version": "0.2.56",
 	"private": true,
 	"main": "index.ts",
 	"scripts": {
@@ -20,6 +20,7 @@
 		"@pier/protocol": "workspace:*",
 		"@xterm/headless": "^6.0.0",
 		"expo": "~57.0.27",
+		"expo-audio": "~57.0.5",
 		"expo-build-properties": "~57.0.22",
 		"expo-camera": "~57.0.6",
 		"expo-clipboard": "~57.0.2",
