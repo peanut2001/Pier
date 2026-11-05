@@ -1,11 +1,18 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { PierClient } from "@pier/client";
 import { PierProtocolError, type WorkspaceInfo } from "@pier/protocol";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { GitService, parseBranches, parseLog, parsePorcelainStatus } from "../src/git.ts";
+import {
+	canonicalPath,
+	GitService,
+	parseBranches,
+	parseLog,
+	parsePorcelainStatus,
+	parseWorktrees,
+} from "../src/git.ts";
 import { startTestHost, type TestHost } from "./helpers.ts";
 
 function git(cwd: string, ...args: string[]): string {
@@ -114,6 +121,53 @@ describe("git output parsing", () => {
 				date: "2025",
 			},
 			{ name: "origin/main", remote: true, shortHash: "abc", subject: "Tip", date: "2026" },
+		]);
+	});
+});
+
+describe("git worktree parsing", () => {
+	it("parses porcelain work tree lists", () => {
+		const output = [
+			"worktree /src/repo",
+			"HEAD 0123456789abcdef0123456789abcdef01234567",
+			"branch refs/heads/main",
+			"",
+			"worktree /src/repo-feature",
+			"HEAD 0123456789abcdef0123456789abcdef01234567",
+			"branch refs/heads/feature/x",
+			"locked keep it",
+			"",
+			"worktree /src/gone",
+			"HEAD 0123456789abcdef0123456789abcdef01234567",
+			"detached",
+			"prunable gitdir file points to non-existent location",
+			"",
+			"worktree /src/empty",
+			"HEAD 0000000000000000000000000000000000000000",
+			"branch refs/heads/unborn",
+			"locked",
+			"",
+		].join("\n");
+		expect(parseWorktrees(output)).toEqual([
+			{ path: "/src/repo", head: "0123456789abcdef0123456789abcdef01234567", branch: "main", main: true },
+			{
+				path: "/src/repo-feature",
+				head: "0123456789abcdef0123456789abcdef01234567",
+				branch: "feature/x",
+				locked: true,
+				lockReason: "keep it",
+			},
+			{
+				path: "/src/gone",
+				head: "0123456789abcdef0123456789abcdef01234567",
+				detached: true,
+				prunable: true,
+				prunableReason: "gitdir file points to non-existent location",
+			},
+			{ path: "/src/empty", branch: "unborn", locked: true },
+		]);
+		expect(parseWorktrees("worktree /src/bare.git\nbare\n")).toEqual([
+			{ path: "/src/bare.git", bare: true, main: true },
 		]);
 	});
 });
@@ -294,6 +348,88 @@ describe("GitService", () => {
 		expect((await service.status(repo)).upstream).toBe("origin/topic");
 	});
 
+	it("adds, lists and removes work trees", async () => {
+		initRepo(repo);
+		writeFileSync(join(repo, "a.txt"), "a\n");
+		git(repo, "add", ".");
+		git(repo, "commit", "-q", "-m", "init");
+		// Git prints real paths (`/private/var` on macOS, long names and `/` on Windows).
+		const base = canonicalPath(root);
+		const feature = join(base, "wt", "feature");
+		const added = await service.addWorktree(repo, feature, { branch: "feature/x", create: true });
+		expect(added).toMatchObject({ path: feature, branch: "feature/x" });
+		expect(readFileSync(join(feature, "a.txt"), "utf8")).toBe("a\n");
+
+		// An existing branch, a detached HEAD and a remote-tracking branch.
+		git(repo, "branch", "topic");
+		const topic = join(base, "wt", "topic");
+		expect(await service.addWorktree(repo, topic, { branch: "topic" })).toMatchObject({ branch: "topic" });
+		const detached = join(base, "wt", "detached");
+		const result = await service.addWorktree(repo, detached);
+		expect(result.branch).toBeUndefined();
+		await expectCode(service.addWorktree(repo, join(base, "wt", "again"), { branch: "topic" }), "CONFLICT");
+		await expectCode(service.addWorktree(repo, join(base, "wt", "none"), { branch: "nope" }), "NOT_FOUND");
+		await expectCode(service.addWorktree(repo, "relative/path", { branch: "x", create: true }), "BAD_REQUEST");
+		await expectCode(service.addWorktree(repo, join(base, "wt", "bad"), { create: true }), "BAD_REQUEST");
+
+		const { worktrees: listed } = await service.worktrees(repo);
+		const worktrees = [listed[0], ...listed.slice(1)]
+			.filter((w) => w !== undefined)
+			.map((w) => ({ ...w, path: canonicalPath(w.path) }));
+		worktrees.splice(1, worktrees.length, ...worktrees.slice(1).sort((x, y) => x.path.localeCompare(y.path)));
+		expect(worktrees.map((w) => [w.path, w.branch ?? null, !!w.main, !!w.current])).toEqual([
+			[canonicalPath(repo), "main", true, true],
+			[detached, null, false, false],
+			[feature, "feature/x", false, false],
+			[topic, "topic", false, false],
+		]);
+		expect(worktrees[1]?.detached).toBe(true);
+		// From inside a linked work tree, it is the current one.
+		const inside = (await service.worktrees(feature)).worktrees;
+		expect(canonicalPath(inside.find((w) => w.current)?.path ?? "")).toBe(feature);
+
+		await expectCode(service.removeWorktree(repo, repo), "CONFLICT");
+		await expectCode(service.removeWorktree(feature, feature), "CONFLICT");
+		await expectCode(service.removeWorktree(repo, join(base, "elsewhere")), "NOT_FOUND");
+
+		// Changes keep a work tree unless forced; a locked one needs force.
+		writeFileSync(join(topic, "new.txt"), "x\n");
+		await expectCode(service.removeWorktree(repo, topic), "CONFLICT");
+		await service.removeWorktree(repo, topic, true);
+		expect(existsSync(topic)).toBe(false);
+		git(repo, "worktree", "lock", detached);
+		await expectCode(service.removeWorktree(repo, detached), "CONFLICT");
+		await service.removeWorktree(repo, detached, true);
+		// A path through a link names the same work tree (a junction needs no privilege on Windows).
+		const link = join(base, "link");
+		symlinkSync(join(base, "wt"), link, "junction");
+		await service.removeWorktree(repo, join(link, "feature"));
+		expect(existsSync(feature)).toBe(false);
+
+		// A work tree whose directory went away is pruned.
+		const gone = join(base, "wt", "gone");
+		await service.addWorktree(repo, gone, { branch: "gone", create: true });
+		rmSync(gone, { recursive: true, force: true });
+		const before = (await service.worktrees(repo)).worktrees;
+		expect(before.find((w) => canonicalPath(w.path) === gone)?.prunable).toBe(true);
+		await service.pruneWorktrees(repo);
+		const after = (await service.worktrees(repo)).worktrees;
+		expect(after.map((w) => canonicalPath(w.path))).toEqual([canonicalPath(repo)]);
+	});
+
+	it("checks out a remote-tracking branch in a new work tree", async () => {
+		const remote = join(root, "remote.git");
+		git(root, "init", "-q", "--bare", "-b", "main", remote);
+		initRepo(repo);
+		git(repo, "commit", "-q", "--allow-empty", "-m", "init");
+		git(repo, "remote", "add", "origin", remote);
+		git(repo, "push", "-q", "origin", "main:main", "main:topic");
+		git(repo, "fetch", "-q", "origin");
+		const dir = join(canonicalPath(root), "topic");
+		expect(await service.addWorktree(repo, dir, { branch: "origin/topic" })).toMatchObject({ branch: "topic" });
+		expect((await service.status(dir)).upstream).toBe("origin/topic");
+	});
+
 	it("uses the enclosing repository for a workspace in a subdirectory", async () => {
 		initRepo(repo);
 		mkdirSync(join(repo, "pkg"));
@@ -334,5 +470,33 @@ describe("git.* methods", () => {
 		);
 		await expectCode(client.request("git.checkout", { workspaceId: workspace.id, branch: "--orphan" }), "BAD_REQUEST");
 		await expectCode(client.request("git.status", { workspaceId: "nope" }), "NOT_FOUND");
+	});
+
+	it("manages work trees and names their workspaces", async () => {
+		initRepo(t.workspaceDir);
+		git(t.workspaceDir, "commit", "-q", "--allow-empty", "-m", "init");
+		const dir = join(canonicalPath(mkdtempSync(join(tmpdir(), "pier-wt-"))), "feature");
+		try {
+			const added = await client.request("git.addWorktree", {
+				workspaceId: workspace.id,
+				path: dir,
+				branch: "feature",
+				create: true,
+			});
+			expect(added).toMatchObject({ path: dir, branch: "feature" });
+			const other = (await client.request("workspace.add", { path: dir })).workspace;
+			const { worktrees } = await client.request("git.worktrees", { workspaceId: workspace.id });
+			expect(worktrees.map((w) => w.workspaceId)).toEqual([workspace.id, other.id]);
+			await expectCode(
+				client.request("git.addWorktree", { workspaceId: workspace.id, path: `${dir}-2`, create: true }),
+				"BAD_REQUEST",
+			);
+			await expectCode(client.request("git.removeWorktree", { workspaceId: other.id, path: dir }), "CONFLICT");
+			await client.request("git.removeWorktree", { workspaceId: workspace.id, path: dir });
+			expect(existsSync(dir)).toBe(false);
+			await client.request("git.pruneWorktrees", { workspaceId: workspace.id });
+		} finally {
+			rmSync(dirname(dir), { recursive: true, force: true });
+		}
 	});
 });

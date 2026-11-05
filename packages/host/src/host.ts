@@ -2,6 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { existsSync, mkdirSync, realpathSync, statSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { basename, isAbsolute, join, resolve } from "node:path";
+import { keyFingerprint } from "@pier/crypto";
 import {
 	type AccountLine,
 	type AgentConfigRuntime,
@@ -44,7 +45,7 @@ import {
 	type RequestHandler,
 	type Transport,
 } from "./connection.ts";
-import { GitService } from "./git.ts";
+import { GitService, samePath } from "./git.ts";
 import { listHostDirectories } from "./host-directories.ts";
 import { HostProcessManager } from "./host-processes.ts";
 import { HostStatsSampler } from "./host-stats.ts";
@@ -62,6 +63,7 @@ import {
 	sessionTrashDir,
 } from "./paths.ts";
 import { PeerManager, type PeerManagerOptions } from "./peers/peers.ts";
+import { addPeerOverSsh, type SshAddHooks } from "./peers/ssh/add.ts";
 import { AccountManager } from "./pi/account.ts";
 import { PI_VERSION, PiEnvironment, type PiEnvironmentOptions } from "./pi/environment.ts";
 import { ExtensionManager, type ExtensionTarget } from "./pi/extensions.ts";
@@ -99,7 +101,7 @@ import {
 import { transferWorkspacePath } from "./workspace-path-transfers.ts";
 import { WorkspaceUploads } from "./workspace-uploads.ts";
 
-export const PIER_HOST_VERSION = "0.2.56";
+export const PIER_HOST_VERSION = "0.2.59";
 
 /** How Pier introduces itself to NewAPI sites (their login sessions list shows the system). */
 function pierUserAgent(): string {
@@ -124,6 +126,8 @@ export interface PierHostOptions {
 	remote?: RemoteAccessOptions;
 	/** Outgoing connections to paired computers (tests). */
 	peers?: PeerManagerOptions;
+	/** Adding computers over SSH (tests). */
+	sshAdd?: Pick<SshAddHooks, "knownHostsFiles" | "sshDir" | "executable" | "fetch">;
 	/** Diagnostic log sink (stderr in the sidecar). */
 	log?: (message: string) => void;
 	/** Site of the personal center (tests). Defaults to 云链API and its lines. */
@@ -248,6 +252,9 @@ const AUDITED_METHODS = new Set<MethodName>([
 	"git.push",
 	"git.stash",
 	"git.init",
+	"git.addWorktree",
+	"git.removeWorktree",
+	"git.pruneWorktrees",
 	// Opening a shell on this computer (1.18); what is typed into it is not recorded.
 	"terminal.open",
 ]);
@@ -285,7 +292,7 @@ function auditDetail(method: MethodName, params: Record<string, unknown>): Recor
 		case "task.readRun":
 			return { runId: params.runId };
 		case "runtime.install":
-			return { runtime: params.runtime };
+			return { runtime: params.runtime, ...(params.source ? { source: params.source } : {}) };
 		case "session.prompt":
 		case "session.steer":
 		case "session.followUp":
@@ -410,7 +417,17 @@ function auditDetail(method: MethodName, params: Record<string, unknown>): Recor
 		case "git.push":
 		case "git.stash":
 		case "git.init":
+		case "git.pruneWorktrees":
 			return { workspaceId: params.workspaceId, ...(params.action ? { action: params.action } : {}) };
+		case "git.addWorktree":
+			return {
+				workspaceId: params.workspaceId,
+				path: params.path,
+				...(params.branch ? { branch: params.branch } : {}),
+				...(params.create ? { create: true } : {}),
+			};
+		case "git.removeWorktree":
+			return { workspaceId: params.workspaceId, path: params.path, ...(params.force ? { force: true } : {}) };
 		case "terminal.open":
 			return params.cwd ? { cwd: params.cwd } : undefined;
 		case "agentConfig.update":
@@ -496,6 +513,9 @@ export class PierHost implements RequestHandler {
 	private readonly uploads: WorkspaceUploads;
 	private readonly git = new GitService();
 	private readonly offShellStatus: (() => void) | undefined;
+	/** Running `peer.sshAdd` operations by `<connectionId>:<operationId>`. */
+	private readonly sshOperations = new Map<string, AbortController>();
+	private readonly sshAddOptions: PierHostOptions["sshAdd"];
 	private shuttingDown = false;
 
 	private constructor(options: PierHostOptions, env: PiEnvironment) {
@@ -643,6 +663,7 @@ export class PierHost implements RequestHandler {
 			options.peers,
 		);
 		this.shell = options.shell;
+		this.sshAddOptions = options.sshAdd;
 		this.portForwards = new LocalPortForwards((peerId) => this.peers.openClient(peerId));
 		this.browsers = new LocalBrowsers(
 			this.pierDir,
@@ -753,6 +774,9 @@ export class PierHost implements RequestHandler {
 		this.loopback.connectionClosed(connection.connectionId);
 		this.terminals.connectionClosed(connection);
 		this.uploads.connectionClosed(connection.connectionId);
+		for (const [key, controller] of this.sshOperations) {
+			if (key.startsWith(`${connection.connectionId}:`)) controller.abort();
+		}
 		for (const session of connection.subscriptions) session.unsubscribe(connection.connectionId);
 		connection.subscriptions.clear();
 	}
@@ -1253,6 +1277,24 @@ export class PierHost implements RequestHandler {
 			"git.stash": (_ctx, params) =>
 				this.git.stash(this.requireWorkspace(params.workspaceId).path, params.action, params.message),
 			"git.init": (_ctx, params) => this.git.init(this.requireWorkspace(params.workspaceId).path),
+			"git.worktrees": async (_ctx, params) => {
+				const { worktrees } = await this.git.worktrees(this.requireWorkspace(params.workspaceId).path);
+				const workspaces = this.config.listWorkspaces();
+				for (const worktree of worktrees) {
+					const workspace = workspaces.find((w) => samePath(w.path, worktree.path));
+					if (workspace) worktree.workspaceId = workspace.id;
+				}
+				return { worktrees };
+			},
+			"git.addWorktree": (_ctx, params) =>
+				this.git.addWorktree(this.requireWorkspace(params.workspaceId).path, params.path, {
+					branch: params.branch,
+					create: params.create,
+					startPoint: params.startPoint,
+				}),
+			"git.removeWorktree": (_ctx, params) =>
+				this.git.removeWorktree(this.requireWorkspace(params.workspaceId).path, params.path, params.force ?? false),
+			"git.pruneWorktrees": (_ctx, params) => this.git.pruneWorktrees(this.requireWorkspace(params.workspaceId).path),
 
 			"session.list": async (_ctx, params) => ({
 				sessions: await this.pool.list(this.requireWorkspace(params.workspaceId)),
@@ -1271,7 +1313,7 @@ export class PierHost implements RequestHandler {
 						`当前使用 ${override} 指定的程序，请先移除此环境变量再使用 Pier 安装`,
 					);
 				// Publication retains the old command if Windows prevents replacing an executable in use.
-				const installation = this.agentInstaller.start(params.runtime);
+				const installation = this.agentInstaller.start(params.runtime, params.source);
 				const device = ctx.connection.device;
 				if (device)
 					this.broadcastLocal({
@@ -1305,13 +1347,30 @@ export class PierHost implements RequestHandler {
 				this.broadcast({ type: "session.listChanged", workspaceId: workspace.id });
 				return { session };
 			},
-			"session.cleanup": async (_ctx, params) => {
+			"session.cleanup": async (ctx, params) => {
 				const workspace = this.requireWorkspace(params.workspaceId);
+				const { operationId } = params;
 				const result = await this.pool.cleanup(workspace, {
 					action: params.action,
 					...(params.modifiedBefore ? { modifiedBefore: new Date(params.modifiedBefore) } : {}),
 					...(params.scope ? { scope: params.scope } : {}),
 					...(params.dryRun ? { dryRun: true } : {}),
+					...(operationId
+						? {
+								onProgress: (done: number, total: number) =>
+									ctx.connection.send({
+										type: "evt",
+										event: {
+											type: "session.cleanupProgress",
+											operationId,
+											workspaceId: workspace.id,
+											action: params.action,
+											done,
+											total,
+										},
+									}),
+							}
+						: {}),
 				});
 				if (!params.dryRun && result.sessionIds.length) {
 					this.broadcast({ type: "session.listChanged", workspaceId: workspace.id });
@@ -1624,6 +1683,39 @@ export class PierHost implements RequestHandler {
 			"peer.pair": async (_ctx, params) => ({ peer: await this.peers.pair(params.uri) }),
 			"peer.update": (_ctx, params) => ({ peer: this.peers.update(params.peerId, params.addresses, params.relays) }),
 			"peer.remove": (_ctx, params) => ({ removed: this.peers.remove(params.peerId) }),
+			"peer.sshAdd": async (ctx, params) => {
+				const key = `${ctx.connection.connectionId}:${params.operationId}`;
+				if (this.sshOperations.has(key)) throw new PierProtocolError("CONFLICT", "This operation is already running");
+				const controller = new AbortController();
+				this.sshOperations.set(key, controller);
+				try {
+					return await addPeerOverSsh(
+						params,
+						{
+							...this.sshAddOptions,
+							pierDir: this.pierDir,
+							version: PIER_HOST_VERSION,
+							deviceFingerprint: () => keyFingerprint(this.remote.identity.publicKey),
+							relay: () => this.remote.relaySettings(),
+							pair: (uri, extraAddresses) => this.peers.pair(uri, extraAddresses),
+							log: this.log,
+						},
+						(update) =>
+							ctx.connection.send({
+								type: "evt",
+								event: { type: "peer.sshProgress", operationId: params.operationId, ...update },
+							}),
+						controller.signal,
+					);
+				} finally {
+					this.sshOperations.delete(key);
+				}
+			},
+			"peer.sshCancel": (ctx, params) => {
+				const controller = this.sshOperations.get(`${ctx.connection.connectionId}:${params.operationId}`);
+				controller?.abort();
+				return { cancelled: controller !== undefined };
+			},
 		};
 	}
 

@@ -1,4 +1,4 @@
-# Pier 协议 v1.46
+# Pier 协议 v1.52
 
 > 实现：`packages/protocol`（zod schema + TS 类型，Host 与所有客户端共享）。
 > 本文档描述线上格式与语义；字段的权威定义以 `packages/protocol/src` 为准。
@@ -146,7 +146,7 @@ sidecar 的 stdio 协议：桌面端用 `--shell-terminals` 启动 Host，声明
 
 ### Git 源代码管理（1.28）
 
-Host 用它所在电脑上的 `git` 命令行（`PATH` 中的，或环境变量 `PIER_GIT` 指定的绝对路径）管理工作区所在的 Git 仓库，供桌面端右侧面板的「源代码管理」使用。仓库是工作区所在的工作树（工作区可以是仓库的子目录，此时操作整个仓库）；以下 `path` / `paths` 都是相对**仓库根目录**的路径（`/` 分隔，绝对路径或含 `..` 时 `BAD_REQUEST`），按字面匹配（`GIT_LITERAL_PATHSPECS`），不作为通配符。Git 以参数数组直接运行（不经过 shell），在仓库根目录中执行，不继承 `GIT_DIR` 等指向其他仓库的环境变量，并且没有终端：`GIT_TERMINAL_PROMPT=0`，类 Unix 系统上在新会话中运行，凭据或主机密钥需要交互输入时直接失败而不是等待（凭据助手、SSH agent 照常可用）。改变仓库的命令在同一仓库上依次执行。Git 返回非零退出码时为 `CONFLICT`，`message` 为 Git 的输出（去掉 `hint:` 行），`data.exitCode` 为退出码；运行超时（本地命令 60 秒，`commit` 与网络命令 5 分钟）时 `CONFLICT`。工作区不在仓库中时除 `git.status` / `git.init` 外返回 `NOT_FOUND`，没有安装 Git 时返回 `UNSUPPORTED`。对已配对设备开放，远程调用改变仓库的方法写入审计日志（只记录路径数量、分支名，不记录提交信息）。
+Host 用它所在电脑上的 `git` 命令行（`PATH` 中的，或环境变量 `PIER_GIT` 指定的绝对路径）管理工作区所在的 Git 仓库，供桌面端右侧面板的「源代码管理」使用。仓库是工作区所在的工作树（工作区可以是仓库的子目录，此时操作整个仓库）；以下 `path` / `paths` 都是相对**仓库根目录**的路径（`/` 分隔，绝对路径或含 `..` 时 `BAD_REQUEST`），按字面匹配（`GIT_LITERAL_PATHSPECS`），不作为通配符。Git 以参数数组直接运行（不经过 shell），在仓库根目录中执行，不继承 `GIT_DIR` 等指向其他仓库的环境变量，并且没有终端：`GIT_TERMINAL_PROMPT=0`，类 Unix 系统上在新会话中运行，凭据或主机密钥需要交互输入时直接失败而不是等待（凭据助手、SSH agent 照常可用）。改变仓库的命令在同一仓库上依次执行（新建、删除、清理工作树在共享同一 Git 目录的所有工作树之间依次执行）。Git 返回非零退出码时为 `CONFLICT`，`message` 为 Git 的输出（去掉 `hint:` 行），`data.exitCode` 为退出码；运行超时（本地命令 60 秒，`commit` 与网络命令 5 分钟）时 `CONFLICT`。工作区不在仓库中时除 `git.status` / `git.init` 外返回 `NOT_FOUND`，没有安装 Git 时返回 `UNSUPPORTED`。对已配对设备开放，远程调用改变仓库的方法写入审计日志（只记录路径数量、分支名与工作树路径，不记录提交信息）。
 
 | 方法 | 参数 | 结果 |
 |---|---|---|
@@ -166,6 +166,10 @@ Host 用它所在电脑上的 `git` 命令行（`PATH` 中的，或环境变量 
 | `git.push` | `{ workspaceId, force? }` | `{ output }`；推送当前分支（`force` 时 `--force-with-lease`）。还没有上游时推送到 `origin`（没有时用第一个远程仓库）的同名分支并设为上游；HEAD 游离或没有远程仓库时 `CONFLICT` |
 | `git.stash` | `{ workspaceId, action: "push"\|"pop", message? }` | `{ output }`；储藏所有更改（包括未跟踪的文件），或应用并删除最近的储藏 |
 | `git.init` | `{ workspaceId }` | `{ output }`；在工作区目录中新建仓库。工作区已在仓库中时 `CONFLICT` |
+| `git.worktrees`（1.51） | `{ workspaceId }` | `{ worktrees: GitWorktreeInfo[] }`，`GitWorktreeInfo = { path, head?, branch?, detached?, bare?, main?, current?, locked?, lockReason?, prunable?, prunableReason?, workspaceId? }`；仓库的所有工作树（`git worktree list --porcelain`），主工作树在最前（`main: true`，不能删除）。`path` 为绝对路径，`branch` 为检出分支的短名称（HEAD 游离时省略并带 `detached: true`），`head` 为 HEAD 的完整哈希（还没有提交时省略），`current` 为工作区所在的工作树，`prunable` 表示目录已不存在，`workspaceId` 为这台电脑上目录正是该工作树的工作区 |
+| `git.addWorktree`（1.51） | `{ workspaceId, path, branch?, create?, startPoint? }` | `GitWorktreeAddResult = { path, branch?, output }`；在绝对路径 `path` 新建工作树（`git worktree add`，缺少的上级目录自动创建，目录须不存在或为空）。`create` 时新建分支 `branch`（从 `startPoint`，默认 HEAD）；否则 `branch` 为已有本地分支，或远程跟踪分支（如 `origin/x`，使用本地分支 `x`，没有时新建并跟踪它）；省略 `branch` 时新工作树停在 `startPoint`（默认 HEAD），HEAD 游离。`path` 不是绝对路径、`create` 而没有 `branch` 时 `BAD_REQUEST`；分支不存在时 `NOT_FOUND`；分支已在其他工作树中检出时 Git 拒绝（`CONFLICT`）。结果的 `path` 为解析符号链接后的路径，`branch` 为检出的本地分支。不会自动添加工作区，客户端可随后调用 `workspace.add`。会运行仓库的 `post-checkout` 钩子，超时为 5 分钟 |
+| `git.removeWorktree`（1.51） | `{ workspaceId, path, force? }` | `{ output }`；删除一个链接工作树及其目录（`git worktree remove`）。有未提交的更改或未跟踪的文件、或已锁定时 Git 拒绝（`CONFLICT`），`force` 时仍删除（已锁定的工作树使用两次 `--force`）。`path` 不是该仓库的工作树时 `NOT_FOUND`；主工作树或工作区所在的工作树 `CONFLICT`。目录已不存在时只删除 Git 的记录。不会移除指向该目录的工作区，客户端应随后调用 `workspace.remove` |
+| `git.pruneWorktrees`（1.51） | `{ workspaceId }` | `{ output }`；清理目录已不存在的工作树记录（`git worktree prune --verbose`） |
 
 ### Agent 运行时（1.22）
 
@@ -175,7 +179,7 @@ Host 用它所在电脑上的 `git` 命令行（`PATH` 中的，或环境变量 
 |---|---|---|
 | `runtime.list` | `{}` | `{ runtimes: AgentRuntimeInfo[] }`；`AgentRuntimeInfo = { id, name, available, reason?, version?, executable?, capabilities }`。`available` 表示能新建会话（CLI 已安装；登录状态在使用时才检查），不可用时 `reason` 说明原因。CLI 依次从 `PIER_CLAUDE_PATH` / `PIER_CODEX_PATH`、用户级公共安装（旧版 Pier 独立安装作为兼容回退）、`PATH` 与常见安装目录中查找 |
 | `runtime.installStatus`（1.32） | `{ runtime: "claude-code" \| "codex", refresh?: boolean }` | `{ installation: AgentInstallationStatus, agent: AgentRuntimeInfo }`；`refresh: true` 重新运行版本探测，其余请求使用缓存 |
-| `runtime.install`（1.32） | `{ runtime: "claude-code" \| "codex" }` | 同上；异步启动官方最新原生 CLI 的安装或更新，立即返回。不能指定下载地址、路径或命令；同一运行时已有安装任务时返回 `CONFLICT`，显式路径覆盖存在时也返回 `CONFLICT` |
+| `runtime.install`（1.32） | `{ runtime: "claude-code" \| "codex", source?: AgentInstallSource }` | 同上；异步启动官方最新原生 CLI 的安装或更新，立即返回。`source`（1.50）选择下载线路，默认 `official`：Claude Code 可选 `official`（downloads.claude.ai）或 `npmmirror`（registry.npmmirror.com 上同一原生程序的 npm 平台包），Codex 可选 `official`（GitHub 直连）、`ghfast`、`gh-proxy` 或 `ghproxy`（GitHub 加速前缀）；运行时不支持的线路返回 `BAD_REQUEST`。版本与 SHA-256 校验值始终取自官方服务，不能指定下载地址、路径或命令。同一运行时已有安装任务时返回 `CONFLICT`；若该任务仍在获取版本或下载且所选线路不同，则中止原任务并按新线路重新开始。显式路径覆盖存在时也返回 `CONFLICT`。`AgentInstallationStatus.source`（1.50）为当前或上一次任务的线路 |
 
 `AgentInstallationStatus = { runtime, state: "idle" | "checking" | "downloading" | "verifying" | "installing" | "ready" | "error", version?, downloadedBytes?, totalBytes?, error? }`。客户端通过 `runtime.installStatus` 轮询进度，连接断开不影响任务；Host 退出会取消安装并清理暂存文件。仅支持 x64 / arm64 的 Windows、macOS、Linux。Claude Code 使用官方原生二进制和平台清单，Codex 使用官方完整原生发行包（含辅助程序），两者都校验 SHA-256 并运行 `--version` 验证后才更新用户级公共命令（`~/.local/bin`），并配置用户 `PATH`；外部终端重新打开后与 Pier 共用安装。程序按版本保存在 `~/.local/share/claude/versions` / `~/.local/share/codex/versions`。失败时恢复旧命令，配置、凭据与会话目录保留；Windows 程序被占用时提示关闭相关会话后重试。旧版 Pier 独立安装在下次更新时迁移，已经是最新版也会迁移；公共安装已经是最新版时检查 `PATH` 后返回 `ready`。成功安装广播 `{ type: "runtime.changed", runtime }`，客户端应刷新 Agent 列表；该事件不含凭据。已打开的 Codex 会话保留原来的 app-server 进程，全部关闭后才切换到新版。这两个方法向已配对设备开放，远程 `runtime.install` 记录运行时名称到审计日志。
 
@@ -201,7 +205,7 @@ Host 用它所在电脑上的 `git` 命令行（`PATH` 中的，或环境变量 
 | `session.close` | `{ sessionId, force? }` | `{ closed }`；运行中且未 `force` → `CONFLICT` |
 | `session.delete` | `{ workspaceId, sessionId, force? }` | `{ deleted }`；关闭会话（`session.closed { reason: "deleted" }`）并把会话文件移到 `~/.pier/trash/sessions/<时间戳>-<文件名>`（可手动移回恢复）。活跃会话属于其他工作区 → `NOT_FOUND`；工作区中没有该会话 → `{ deleted: false }`；运行中且未 `force`，或会话正被其他 Pier Host 打开 → `CONFLICT`。从未写入磁盘的新会话只会被关闭；分叉出的子会话不受影响（1.6） |
 | `session.archive` | `{ workspaceId, sessionId, archived }` | `{ session }`；归档（`archived: true`）或取消归档会话（1.14）。归档只是 Host 记录在 `~/.pier/archived-sessions.json` 中的标记，不修改会话文件，也不关闭会话，归档后的会话照常可以打开和继续对话；分叉出的新会话不继承归档状态，`session.delete` 会同时清除标记。会话既不在活跃池中也不在该工作区的会话列表中 → `NOT_FOUND`（属于其他工作区的活跃会话同样）。成功后广播 `session.listChanged` |
-| `session.cleanup` | `{ workspaceId, action: "archive"\|"delete", modifiedBefore?, scope?: "all"\|"archived"\|"unarchived", dryRun? }` | `{ sessionIds, skipped: { sessionId, reason: "running"\|"locked"\|"error", message? }[] }`；批量归档或删除工作区中的会话（1.14）。选中 `modifiedAt` 早于 `modifiedBefore`（带时区的 ISO 8601 时间，省略时不限时间）且符合 `scope`（默认 `all`）的会话；`archive` 时已归档的会话不计入。`delete` 与 `session.delete` 相同（移到 `~/.pier/trash/sessions`），但运行中或有待回答请求的会话一律跳过（`running`），被其他 Pier Host 打开的会话跳过（`locked`）；`archive` 不跳过运行中的会话。`sessionIds` 为已处理的会话，`dryRun: true` 时只返回将要处理和将被跳过的会话而不做修改（`locked` 只有实际执行时才能发现）。有会话被处理时广播 `session.listChanged` |
+| `session.cleanup` | `{ workspaceId, action: "archive"\|"delete", modifiedBefore?, scope?: "all"\|"archived"\|"unarchived", dryRun?, operationId? }` | `{ sessionIds, skipped: { sessionId, reason: "running"\|"locked"\|"error", message? }[] }`；批量归档或删除工作区中的会话（1.14）。选中 `modifiedAt` 早于 `modifiedBefore`（带时区的 ISO 8601 时间，省略时不限时间）且符合 `scope`（默认 `all`）的会话；`archive` 时已归档的会话不计入。`delete` 与 `session.delete` 相同（移到 `~/.pier/trash/sessions`），但运行中或有待回答请求的会话一律跳过（`running`），被其他 Pier Host 打开的会话跳过（`locked`）；`archive` 不跳过运行中的会话。`sessionIds` 为已处理的会话，`dryRun: true` 时只返回将要处理和将被跳过的会话而不做修改（`locked` 只有实际执行时才能发现）。有会话被处理时广播 `session.listChanged`。带 `operationId`（1.52，由客户端生成）且不是 `dryRun` 时，Host 把进度以 `session.cleanupProgress` 事件发给调用的连接：开始时 `done: 0`，之后每处理完一个会话一次；删除大量会话可能较慢，客户端请放宽超时 |
 | `session.forkPoints` | `{ sessionId }` | `{ points: { entryId, text }[] }`（可 fork 的用户消息） |
 | `session.fork` | `{ sessionId, entryId, position?: "before"\|"at" }` | `{ session, selectedText? }`；生成**新**会话，原会话不变 |
 | `session.rename` | `{ sessionId, name }` | `{ session }` |
@@ -421,6 +425,8 @@ Host 由桌面端启动时（`--watch-stdin`，macOS / Linux），启动过程�
 | `peer.pair` 🔒 | `{ uri }`（那台电脑显示的 `pier://pair?...` 链接） | `{ peer }`；在那台电脑的用户确认后返回。失败时 `data.reason` 为 `INVALID_LINK`（`BAD_REQUEST`）、`SELF`（本机自己的链接）、`UNREACHABLE`、`PAIRING_INVALID`、`PAIRING_REJECTED`、`PAIRING_TIMEOUT`、`BAD_HANDSHAKE` 等（`CONFLICT`）。可能耗时数分钟，客户端请放宽超时 |
 | `peer.update` 🔒 | `{ peerId, addresses, relays? }`（`host:port` 列表，0–16 个，IPv6 加方括号；`relays` 为中继地址，0–4 个，省略时不变；两者至少一项非空） | `{ peer }`；修改连接那台电脑使用的地址（例如它的 IP 变了），去重后按顺序尝试，地址都连不上时再经中继；有变化时以 1012 断开经本机到它的连接以便用新地址重连。固定的公钥不变，新地址上若是另一台电脑会握手失败。未配对时 `NOT_FOUND`，地址无效时 `BAD_REQUEST`（1.24；`relays` 1.26） |
 | `peer.remove` 🔒 | `{ peerId }` | `{ removed }`；只在本机忘记那台电脑，并断开经本机到它的连接（4404）；那台电脑的设备列表不变 |
+| `peer.sshAdd` 🔒 | `{ operationId, host, port?(默认 22), username, auth, hostKeyFingerprint?, relay?, mirrorPrefix? }` | `SshAddResult = { peer, action: "installed" \| "updated" \| "started" \| "existing", version?, warnings }`（1.49）。Host 通过 SSH 登录那台 Linux 电脑（x86_64 / arm64），按需安装（`pier install`）、升级或启动与本机相同版本的 Pier，已在运行的 Pier 保持不变；再在那里运行 `pier cli --ssh-pair` 开启远程访问、生成配对链接并只接受本机的密钥，本机随即按 `peer.pair` 配对（先尝试 `host` 上的 Pier 端口）。`auth` 为 `{ type: "password", password }`（也回答 keyboard-interactive）或 `{ type: "key", privateKeyPath?, privateKey?, passphrase? }`（都省略时依次尝试 SSH agent 与 `~/.ssh/id_ed25519` / `id_ecdsa` / `id_rsa`）；凭据不保存、不记录。服务器密钥按 `~/.ssh/known_hosts` 与 `~/.pier/ssh_known_hosts` 校验：未知时 `CONFLICT`，`data = { reason: "HOST_KEY_UNKNOWN", fingerprint: "SHA256:…", keyType }`，用户核对后带上 `hostKeyFingerprint` 重试，Host 把它记入 `~/.pier/ssh_known_hosts`；与记录不一致或被吊销时 `HOST_KEY_MISMATCH`（`data.knownHostsFile`）。`relay`（默认 `true`）：那台电脑没有中继时配置本机的中继（含令牌）。`mirrorPrefix` 为下载 GitHub Release 的 HTTPS 加速前缀。执行文件依次取本机的 Linux 单文件（同架构同版本）、本机缓存（`~/.pier/cache/releases`）、那台电脑用 curl / wget 下载、本机下载后经 SSH 上传，均按 `SHA256SUMS.txt` 校验。进度以 `peer.sshProgress` 事件发给调用的连接，该连接断开或调用 `peer.sshCancel` 时停止（包括那台电脑上的下载）。其他失败的 `data.reason`：`CANCELLED`、`SSH_UNREACHABLE`、`SSH_AUTH_FAILED`、`SSH_KEY_INVALID`、`UNSUPPORTED_SYSTEM`、`DOWNLOAD_FAILED`、`INSTALL_FAILED`、`START_FAILED`、`PAIRING_FAILED`，以及 `peer.pair` 的原因。可能耗时数分钟，客户端请放宽超时 |
+| `peer.sshCancel` 🔒 | `{ operationId }` | `{ cancelled }`；停止本连接上正在运行的 `peer.sshAdd`（1.49） |
 
 Host 保存已配对的电脑于 `~/.pier/peers.json`（0600），每次经代理连接成功后更新名称、系统、版本、最近连接时间，并把成功的地址排到最前。
 
@@ -513,6 +519,12 @@ Claude Code 与 Codex 会话（1.22）发出同样形态的事件与 `AgentMessa
 | `terminal.output` | `terminalId, data` | 终端输出，`data` 为原始字节的 base64 |
 | `terminal.exit` | `terminalId, code, error?` | 终端结束；`error` 表示终端丢失（桌面端退出等） |
 
+会话清理进度（1.52），只发给带 `operationId` 调用 `session.cleanup` 的连接：
+
+| 事件 | 字段 | 说明 |
+|---|---|---|
+| `session.cleanupProgress` | `operationId, workspaceId, action: archive\|delete, done, total` | 已处理 `done` 个、共 `total` 个会话（含失败而跳过的）；`done === total` 时即将返回结果 |
+
 仅发给本地（桌面）连接（`LOCAL_ONLY_EVENTS`）：
 
 | 事件 | 字段 | 说明 |
@@ -522,6 +534,7 @@ Claude Code 与 Codex 会话（1.22）发出同样形态的事件与 `AgentMessa
 | `pairing.request` | `request: { id, device, fingerprint, address?, createdAt, expiresAt }` | 设备出示了正确的配对码，等待用户用 `pairing.respond` 确认 |
 | `pairing.resolved` | `requestId, resolution: accepted\|rejected\|expired\|cancelled, deviceId?` | 配对请求结束（`cancelled`：设备在等待中断开） |
 | `peer.changed` | – | 已配对的其他电脑增删、改名，或经本机的连接建立 / 断开（1.9）；重新调用 `peer.list` |
+| `peer.sshProgress` | `operationId, step: connect\|detect\|download\|upload\|install\|start\|pair, message, transferred?, total?` | `peer.sshAdd` 的进度（1.49），只发给调用它的连接；`transferred` / `total` 为下载、上传的字节数 |
 
 发给所有连接（1.9 及以前仅发给本地连接）：
 

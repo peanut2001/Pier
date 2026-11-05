@@ -20,6 +20,7 @@ import type {
 	UiResponse,
 } from "./domain.ts";
 import type { ResourceRuntime } from "./resources.ts";
+import type { SshAddStep } from "./ssh.ts";
 
 /**
  * Pi session events forwarded verbatim (after pi's JSON wire transformation, which
@@ -109,6 +110,18 @@ export type PierHostEvent =
 			state: SessionRunState;
 			pendingUi: number;
 	  }
+	/**
+	 * Progress of a `session.cleanup` called with `operationId` (1.52), sent only to the
+	 * connection that called it: `done` of `total` sessions handled so far.
+	 */
+	| {
+			type: "session.cleanupProgress";
+			operationId: string;
+			workspaceId: string;
+			action: "archive" | "delete";
+			done: number;
+			total: number;
+	  }
 	// The following are only sent to local (desktop) connections.
 	| { type: "remote.changed"; status: RemoteAccessStatus }
 	| { type: "device.changed" }
@@ -116,6 +129,15 @@ export type PierHostEvent =
 	| { type: "pairing.resolved"; requestId: string; resolution: PairingResolution; deviceId?: string }
 	/** Paired peer computers were added, removed, renamed or (dis)connected (1.9). Local only. */
 	| { type: "peer.changed" }
+	/** Progress of `peer.sshAdd` (1.49), sent only to the connection that called it. */
+	| {
+			type: "peer.sshProgress";
+			operationId: string;
+			step: SshAddStep;
+			message: string;
+			transferred?: number;
+			total?: number;
+	  }
 	/** Providers, credentials, models.json or the default model changed (1.2). Sent to every connection. */
 	| { type: "provider.changed" }
 	/**

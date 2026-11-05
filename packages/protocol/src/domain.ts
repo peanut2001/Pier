@@ -357,6 +357,38 @@ export interface GitBranchInfo {
 	date: string;
 }
 
+/** A work tree of a repository (`git.worktrees`, 1.51), as `git worktree list` reports it. */
+export interface GitWorktreeInfo {
+	/** Absolute path of the work tree. */
+	path: string;
+	/** Full hash of its HEAD; omitted before the first commit and for a bare repository. */
+	head?: string;
+	/** Short name of the checked-out branch; omitted when HEAD is detached. */
+	branch?: string;
+	detached?: true;
+	/** The repository is bare: this entry has no files. */
+	bare?: true;
+	/** The main work tree (the first one); it cannot be removed. */
+	main?: true;
+	/** The work tree the workspace is in. */
+	current?: true;
+	locked?: true;
+	lockReason?: string;
+	/** Its directory is gone; `git.pruneWorktrees` drops it. */
+	prunable?: true;
+	prunableReason?: string;
+	/** The workspace of this computer whose directory is this work tree. */
+	workspaceId?: string;
+}
+
+/** Result of `git.addWorktree` (1.51). */
+export interface GitWorktreeAddResult extends GitCommandResult {
+	/** Absolute path of the new work tree. */
+	path: string;
+	/** Branch checked out in it; omitted when HEAD is detached. */
+	branch?: string;
+}
+
 /** Result of a Git command that changes the repository (1.28). */
 export interface GitCommandResult {
 	/** What Git printed (stdout and stderr), trimmed and possibly shortened. */
@@ -1215,10 +1247,26 @@ export interface PiSettingsChangeResult {
 export const AgentConfigRuntimeSchema = z.enum(["claude-code", "codex"]);
 export type AgentConfigRuntime = z.infer<typeof AgentConfigRuntimeSchema>;
 
+/**
+ * Download routes of the native CLI installer (1.50). `official` downloads from Anthropic or GitHub;
+ * `npmmirror` fetches Claude Code's npm package and the others relay Codex's GitHub release. Every
+ * route is verified against the official SHA-256.
+ */
+export const AgentInstallSourceSchema = z.enum(["official", "npmmirror", "ghfast", "gh-proxy", "ghproxy"]);
+export type AgentInstallSource = z.infer<typeof AgentInstallSourceSchema>;
+
+/** Routes each runtime accepts, the default first. */
+export const AGENT_INSTALL_SOURCES: Record<AgentConfigRuntime, readonly AgentInstallSource[]> = {
+	"claude-code": ["official", "npmmirror"],
+	codex: ["official", "ghfast", "gh-proxy", "ghproxy"],
+};
+
 /** A native CLI installation on the Host computer (1.32). Jobs survive client disconnects. */
 export interface AgentInstallationStatus {
 	runtime: AgentConfigRuntime;
 	state: "idle" | "checking" | "downloading" | "verifying" | "installing" | "ready" | "error";
+	/** The route of the current or last job (1.50). */
+	source?: AgentInstallSource;
 	version?: string;
 	downloadedBytes?: number;
 	totalBytes?: number;

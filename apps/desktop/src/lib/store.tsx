@@ -5,6 +5,7 @@ import type {
 	AgentConfigResult,
 	AgentConfigRuntime,
 	AgentConfigScope,
+	AgentInstallSource,
 	AgentRuntimeId,
 	AgentRuntimeInfo,
 	ApprovalPolicy,
@@ -50,6 +51,8 @@ import type {
 	SessionCleanupResult,
 	SessionRunState,
 	SessionSummary,
+	SshAddProgress,
+	SshAddResult,
 	ThinkingLevel,
 	WorkspaceFileContent,
 	WorkspaceFilesResult,
@@ -69,7 +72,7 @@ import { remotePageBlocker } from "./settings-target.ts";
 import { beginWorkspacePaste, finishWorkspacePaste, renameWorkspaceClipboardPath } from "./workspace-clipboard.ts";
 import { isYunlianProvider, movedToLine, YUNLIAN_SITE, yunlianGroupOf, yunlianProvider } from "./yunlian.ts";
 
-export const APP_VERSION = "0.2.56";
+export const APP_VERSION = "0.2.59";
 
 /** Node id of this computer; any other node is a paired computer's host id. */
 export const LOCAL_NODE = "local";
@@ -139,6 +142,11 @@ export function hostSupportsGit(info: HostInfo | undefined): boolean {
 	return hostSpeaks(info, 28);
 }
 
+/** Whether a host manages Git work trees (`git.worktrees` / `addWorktree` / `removeWorktree`, 1.51). */
+export function hostSupportsWorktrees(info: HostInfo | undefined): boolean {
+	return hostSpeaks(info, 51);
+}
+
 /** Whether a host can download a file opened through Markdown preview (1.44). */
 export function hostSupportsPreviewDownloads(info: HostInfo | undefined, remote = false): boolean {
 	return hostSpeaks(info, 44) && hostAuthorizesFilePreviews(info, remote);
@@ -190,12 +198,26 @@ export function hostCanArchiveSessions(info: HostInfo | undefined): boolean {
 	return hostSpeaks(info, 14);
 }
 
+/** Whether a host reports the progress of `session.cleanup` (`session.cleanupProgress`, 1.52). */
+export function hostReportsCleanupProgress(info: HostInfo | undefined): boolean {
+	return hostSpeaks(info, 52);
+}
+
+/** How far a bulk archive or delete has got: `done` of `total` sessions handled. */
+export interface SessionCleanupProgress {
+	done: number;
+	total: number;
+}
+
 /** Parameters of `session.cleanup` the desktop chooses. */
 export interface SessionCleanupRequest {
 	action: "archive" | "delete";
 	modifiedBefore?: string;
 	scope?: "all" | "archived" | "unarchived";
 }
+
+/** How long a bulk archive or delete (`session.cleanup`) may take. */
+const CLEANUP_TIMEOUT_MS = 10 * 60_000;
 
 /** How often the status bar samples host usage while the window is visible. */
 const HOST_STATS_INTERVAL_MS = 2000;
@@ -1371,14 +1393,57 @@ export class PierStore {
 		} catch (error) {
 			throw new Error(peerPairingErrorText(error));
 		}
+		this.peerAdded(peer, `已与 ${peer.name} 配对，它的工作区会出现在左侧列表中`);
+		return peer;
+	}
+
+	private peerAdded(peer: PeerInfo, message: string): void {
 		this.set((s) => ({ peers: [...s.peers.filter((p) => p.id !== peer.id), peer] }));
-		this.toast("info", `已与 ${peer.name} 配对，它的工作区会出现在左侧列表中`);
+		this.toast("info", message);
 		// Paired again after being removed there: connect afresh.
 		this.closeNode(peer.id);
 		this.patchNode(peer.id, { revoked: false, connectError: undefined });
 		void this.connectPeer(peer.id);
 		void this.loadPeers();
-		return peer;
+	}
+
+	/**
+	 * Add a Linux computer over SSH: this computer's Pier signs in, installs or starts Pier
+	 * there when needed and pairs with it. Rejects with the host's `PierProtocolError` (its
+	 * `data.reason`, e.g. `HOST_KEY_UNKNOWN`, tells the dialog what to ask).
+	 */
+	async sshAddPeer(
+		params: Omit<MethodParams<"peer.sshAdd">, "operationId" | "mirrorPrefix">,
+		operationId: string,
+		onProgress: (progress: SshAddProgress) => void,
+	): Promise<SshAddResult> {
+		const client = this.localClient;
+		if (!client) throw new Error("尚未连接到本机的 Pier Host");
+		const off = client.onEvent((frame) => {
+			const event = frame.event;
+			if (event.type === "peer.sshProgress" && event.operationId === operationId)
+				onProgress(event as unknown as SshAddProgress);
+		});
+		const mirrorPrefix = this.state.update.mirrorPrefix;
+		let result: SshAddResult;
+		try {
+			result = await client.request(
+				"peer.sshAdd",
+				{ ...params, operationId, ...(mirrorPrefix ? { mirrorPrefix } : {}) },
+				{ timeoutMs: 60 * 60_000 },
+			);
+		} finally {
+			off();
+		}
+		const done = { installed: "已安装并添加", updated: "已更新并添加", started: "已启动并添加", existing: "已添加" }[
+			result.action
+		];
+		this.peerAdded(result.peer, `${done} ${result.peer.name}，它的工作区会出现在左侧列表中`);
+		return result;
+	}
+
+	cancelSshAddPeer(operationId: string): void {
+		void this.localClient?.request("peer.sshCancel", { operationId }).catch(() => undefined);
 	}
 
 	openAddPeer(): void {
@@ -1962,10 +2027,14 @@ export class PierStore {
 		return client.request("runtime.installStatus", { runtime, ...(refresh ? { refresh } : {}) });
 	}
 
-	async installAgent(runtime: AgentConfigRuntime): Promise<MethodResult<"runtime.install">> {
+	/** `source` needs protocol 1.50; older Hosts always download from the official route. */
+	async installAgent(
+		runtime: AgentConfigRuntime,
+		source?: AgentInstallSource,
+	): Promise<MethodResult<"runtime.install">> {
 		const client = this.settingsClient;
 		if (!client) throw this.settingsOffline();
-		return client.request("runtime.install", { runtime });
+		return client.request("runtime.install", { runtime, ...(source ? { source } : {}) });
 	}
 
 	/** Models offered by an agent on the computer the settings screen manages. */
@@ -2223,10 +2292,16 @@ export class PierStore {
 		if (!hostSupportsGit(this.state.nodes[this.nodeOf(workspaceId)]?.hostInfo)) {
 			throw new Error("那台电脑的 Pier 版本过旧，不支持 Git，请先更新它");
 		}
+		if (
+			/^git\.(worktrees|addWorktree|removeWorktree|pruneWorktrees)$/.test(method) &&
+			!hostSupportsWorktrees(this.state.nodes[this.nodeOf(workspaceId)]?.hostInfo)
+		) {
+			throw new Error("那台电脑的 Pier 版本过旧，不支持工作树，请先更新它");
+		}
 		const result = await (
 			client.request as (m: M, p: MethodParams<M>, o: { timeoutMs: number }) => Promise<MethodResult<M>>
 		)(method, params, { timeoutMs });
-		const readOnly = ["git.status", "git.diff", "git.log", "git.show", "git.branches"];
+		const readOnly = ["git.status", "git.diff", "git.log", "git.show", "git.branches", "git.worktrees"];
 		if (!readOnly.includes(method)) this.bumpFiles(workspaceId);
 		return result;
 	}
@@ -2834,12 +2909,13 @@ export class PierStore {
 	/**
 	 * Archive or delete many sessions of a workspace (`session.cleanup`). With `dryRun` only
 	 * reports what would happen and rejects with the host's error; otherwise errors are toasted
-	 * and resolve to undefined.
+	 * and resolve to undefined. `onProgress` follows the host's progress when it reports it (1.52).
 	 */
 	async cleanupSessions(
 		workspaceId: string,
 		request: SessionCleanupRequest,
 		dryRun = false,
+		onProgress?: (progress: SessionCleanupProgress) => void,
 	): Promise<SessionCleanupResult | undefined> {
 		const client = this.clientFor(workspaceId);
 		const params = { workspaceId, ...request, ...(dryRun ? { dryRun: true } : {}) };
@@ -2848,7 +2924,26 @@ export class PierStore {
 			return client.request("session.cleanup", params);
 		}
 		const label = request.action === "archive" ? "归档会话" : "删除会话";
-		const result = await this.callWith(client, label, (c) => c.request("session.cleanup", params));
+		const reports = onProgress && hostReportsCleanupProgress(this.state.nodes[this.nodeOf(workspaceId)]?.hostInfo);
+		const operationId = reports ? crypto.randomUUID() : undefined;
+		const result = await this.callWith(client, label, async (c) => {
+			const off = operationId
+				? c.onEvent((frame) => {
+						const event = frame.event;
+						if (event.type === "session.cleanupProgress" && event.operationId === operationId) {
+							onProgress?.({ done: Number(event.done) || 0, total: Number(event.total) || 0 });
+						}
+					})
+				: undefined;
+			try {
+				// Deleting many sessions can take a while; progress shows it is still going.
+				return await c.request("session.cleanup", operationId ? { ...params, operationId } : params, {
+					timeoutMs: CLEANUP_TIMEOUT_MS,
+				});
+			} finally {
+				off?.();
+			}
+		});
 		if (!result) return undefined;
 		if (request.action === "delete") {
 			const deleted = new Set(result.sessionIds);
