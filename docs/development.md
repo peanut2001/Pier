@@ -80,6 +80,8 @@ bun run --cwd apps/mobile ios                 # 本地构建 iOS 开发版（需
 cd apps/mobile && eas build --profile development   # 或用 EAS 云构建开发版
 ```
 
+iOS 模拟器需要 macOS 和 Xcode；真机还需要在 Xcode 中选择自己的签名团队、连接设备并按系统提示开启开发者模式，然后运行 `cd apps/mobile && bunx expo run:ios --device`。也可用 `bunx eas-cli build --platform ios --profile preview` 云构建，首次使用需登录 Expo、关联自己的 EAS 项目并配置 Apple 签名和测试设备。免费个人签名有有效期与功能限制；Ad Hoc 分发、TestFlight 和 App Store 需要 Apple Developer 账号及相应证书 / 描述文件。仓库不提供 Apple 私钥或可通用安装的 IPA，构建成功也不代表已经上架。不要提交签名凭据。
+
 App 用到相机、安全存储等原生模块，推荐使用开发构建（development build），而不是 Expo Go。每个 GitHub Release 都附带签好名的 Android 安装包 `pier-v<版本>-android.apk`，可以直接安装到手机上试用。iOS 暂时没有打包，需要自行构建。没有设备时可以用 Web 版调界面（安全存储回退为 localStorage，仅供开发）：
 
 ```bash
@@ -87,7 +89,7 @@ bun run faux-host --remote                    # 假模型 Host，并在 7433 端
 bun run --cwd apps/mobile web                 # 在浏览器中“添加电脑 → 粘贴配对链接”
 ```
 
-配对链接可以从桌面「设置 → 设备与远程 → 显示配对二维码 → 复制配对链接」获得；只运行 faux-host 时，也可以用 `bun run pier-cli --url <url> --token <token>` 输入 `/pair` 生成链接，再用 `/pair yes` 确认（`/remote`、`/devices`、`/revoke` 管理远程访问与设备）。Android 模拟器访问宿主机时，用 `bun run faux-host --remote --remote-address 10.0.2.2:7433` 让二维码里带上模拟器可达的地址。
+配对链接可以从桌面「设置 → 设备与远程 → 显示配对二维码 → 复制配对链接」获得；只运行 faux-host 时，也可以用 `bun run pier-cli --url <url> --token <token>` 输入 `/pair` 显示终端二维码及链接，手机扫码后再用 `/pair yes` 确认（`/remote`、`/devices`、`/revoke` 管理远程访问与设备）。Android 模拟器访问宿主机时，用 `bun run faux-host --remote --remote-address 10.0.2.2:7433` 让二维码里带上模拟器可达的地址。
 
 ## Sidecar
 

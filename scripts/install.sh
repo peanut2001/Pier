@@ -1,14 +1,20 @@
 #!/usr/bin/env bash
-# Install or update Pier on Linux with one command:
+# Install or update Pier on Linux or macOS with one command:
 #
 #   curl -fsSL https://raw.githubusercontent.com/yiranxiaohui/Pier/main/scripts/install.sh | bash
 #
-# Downloads the single-file pier of a GitHub release, verifies it against the release's
-# SHA256SUMS.txt and its own --version, then installs it as a systemd service plus the pier
-# command (`pier install`), or with --portable as the pier command only. Rerun it to update.
+# Where raw.githubusercontent.com is unreachable, fetch this script through a mirror instead:
+#
+#   curl -fsSL https://ghfast.top/https://raw.githubusercontent.com/yiranxiaohui/Pier/main/scripts/install.sh | bash
+#
+# Linux: downloads the single-file pier, verifies SHA256SUMS.txt and --version, then
+# installs a systemd service plus the pier command, or only the command with --portable.
+# macOS: downloads the DMG, verifies SHA256SUMS.txt, bundle identity/version and ad-hoc
+# signature, then installs Pier.app. Rerun to update; quit the desktop app first.
 # Pier state (~/.pier), pairing, Agent data and project files are never modified or removed.
-# Downloads pick the fastest route (GitHub or a mirror) and switch routes, keeping the part
-# already downloaded, when one fails, is too slow, or s is pressed.
+# In a terminal, the download route (GitHub or a mirror) is chosen from a menu, and pressing
+# s during the download picks another one, keeping the part already downloaded. Without a
+# terminal, or with --mirror auto, the fastest route is measured and routes switch by themselves.
 # Everything runs inside main, so a partially downloaded script does nothing.
 set -euo pipefail
 
@@ -20,6 +26,10 @@ stage=''
 download_pid=''
 probe_pids=()
 keys=false
+mac_mount=''
+mac_work=''
+mac_app=''
+mac_committed=false
 
 say() { printf '%s\n' "$*"; }
 warn() { printf 'pier-install: %s\n' "$*" >&2; }
@@ -27,27 +37,37 @@ fail() { warn "$*"; exit 1; }
 
 usage() {
   cat <<'HELP'
-Install or update Pier on Linux (x86_64 / arm64) from GitHub Releases.
+Install or update Pier on Linux or macOS (x86_64 / arm64) from GitHub Releases.
+macOS installs the desktop app; Linux installs the single-file command / service.
 
   curl -fsSL https://raw.githubusercontent.com/yiranxiaohui/Pier/main/scripts/install.sh | bash
   curl -fsSL https://raw.githubusercontent.com/yiranxiaohui/Pier/main/scripts/install.sh | bash -s -- [options]
 
+Where raw.githubusercontent.com is unreachable, fetch the script through a mirror, e.g.
+
+  curl -fsSL https://ghfast.top/https://raw.githubusercontent.com/yiranxiaohui/Pier/main/scripts/install.sh | bash
+
+(gh-proxy.com and ghproxy.net work the same way.)
+
 Options:
   --version vX.Y.Z   Install this release instead of the latest one
-  --service          Install the background service and the pier command
+  --app-dir DIR      macOS: application directory (existing /Applications/Pier.app,
+                     otherwise ~/Applications; also PIER_APP_DIR). No automatic sudo.
+  --service          Linux: install the background service and the pier command
                      (the default, except on a graphical desktop)
   --portable         Install only the pier command, without a service
                      (the default on a graphical desktop)
   --user | --system  Service scope (default: user for ordinary accounts, system for root)
   --no-start         Install the service without starting it
-  --mirror ROUTE     Download route. auto (the default) measures GitHub and the mirrors,
-                     uses the fastest and switches when one fails or is too slow; github,
-                     ghfast, gh-proxy, ghproxy or another https:// mirror prefix starts
-                     with that route and stays on it
+  --mirror ROUTE     Download route: github, ghfast, gh-proxy, ghproxy or another https://
+                     mirror prefix stays on that route; auto measures GitHub and the
+                     mirrors, uses the fastest and switches when one fails or is too slow.
+                     Without --mirror a terminal shows a menu to choose the route, and
+                     anything else uses auto
   --force            Reinstall even when this version is already installed
   -h, --help         Show this help
 
-While downloading in a terminal, press s to switch to the next route; the part already
+While downloading in a terminal, press s to choose another route; the part already
 downloaded is kept. Checksums always come from GitHub when it answers.
 Rerunning the installer updates Pier. An installed service also updates with: pier update
 Environment: PIER_VERSION and PIER_MIRROR preset --version and --mirror; PIER_PREFIX and
@@ -58,6 +78,18 @@ HELP
 cleanup() {
   local pid
   for pid in ${download_pid:+"$download_pid"} ${probe_pids[@]+"${probe_pids[@]}"}; do kill "$pid" 2>/dev/null || true; done
+  if [[ -n "$mac_mount" ]]; then hdiutil detach "$mac_mount" -quiet >/dev/null 2>&1 || true; fi
+  if [[ -n "$mac_work" ]]; then
+    if [[ -d "$mac_work/previous.app" ]] && ! "$mac_committed"; then
+      if [[ ! -e "$mac_app" ]] && mv "$mac_work/previous.app" "$mac_app"; then
+        warn 'Restored the previous Pier.app.'
+      else
+        warn "Previous app kept at $mac_work/previous.app; restore it manually."
+        mac_work=''
+      fi
+    fi
+    [[ -z "$mac_work" ]] || rm -rf -- "$mac_work"
+  fi
   if [[ -n "$stage" ]]; then rm -rf -- "$stage"; fi
 }
 
@@ -95,6 +127,66 @@ route_name() {
     ghproxy) printf 'GHProxy' ;;
     *) printf '%s' "$1" ;;
   esac
+}
+
+route_host() {
+  case "$1" in
+    github) printf 'github.com' ;;
+    ghfast|gh-proxy|ghproxy) route_url "$1" '' | awk '{ sub(/^https:\/\//, ""); sub(/\/$/, ""); print }' ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
+# route_choice <value>: the route for --mirror or a menu answer, normalised; fails when invalid.
+route_choice() {
+  case "$1" in
+    github|ghfast|gh-proxy|ghproxy) printf '%s' "$1" ;;
+    *://*)
+      [[ "$1" =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?(/[A-Za-z0-9._~/-]*)?$ ]] || return 1
+      printf '%s/' "${1%"${1##*[!/]}"}" ;;
+    *) return 2 ;;
+  esac
+}
+
+# use_route <route>: download through <route> first; the others stay for retries in auto mode.
+use_route() {
+  local candidate
+  routes=("$1")
+  for candidate in "${BUILTIN_ROUTES[@]}"; do
+    [[ "$candidate" == "$1" ]] || routes+=("$candidate")
+  done
+}
+
+# choose_route <default route> <whether auto is offered>: ask on the terminal (fd 3) and set
+# choice to a route, or to auto. Fails when the terminal gives no answer.
+choose_route() {
+  local default=$1 offer_auto=$2 n=0 answer mark candidate result
+  local -a menu=("${BUILTIN_ROUTES[@]}")
+  [[ " ${BUILTIN_ROUTES[*]} " == *" $default "* ]] || menu+=("$default")
+  {
+    printf 'Choose the download route:\n'
+    for candidate in "${menu[@]}"; do
+      n=$(( n + 1 ))
+      mark=''
+      [[ "$candidate" != "$default" ]] || mark='  (default)'
+      printf '  %d) %-9s %s%s\n' "$n" "$(route_name "$candidate")" "$(route_host "$candidate")" "$mark"
+    done
+    if "$offer_auto"; then printf '  a) Automatic: measure the routes and use the fastest\n'; fi
+    printf '  Or paste another https:// mirror prefix.\n'
+  } >&2
+  while :; do
+    printf 'Route [Enter = %s]: ' "$(route_name "$default")" >&2
+    IFS= read -r answer <&3 || { printf '\n' >&2; return 1; }
+    answer=${answer//[[:space:]]/}
+    if [[ -z "$answer" ]]; then choice=$default; return 0; fi
+    if [[ "$answer" =~ ^[0-9]+$ ]] && (( 10#$answer >= 1 && 10#$answer <= ${#menu[@]} )); then
+      choice=${menu[10#$answer - 1]}; return 0
+    fi
+    if "$offer_auto" && [[ "$answer" == [aA] || "$answer" == auto ]]; then choice=auto; return 0; fi
+    if result=$(route_choice "$answer"); then choice=$result; return 0; fi
+    printf 'Enter 1-%d%s, or an https:// prefix without credentials, query or fragment.\n' \
+      "${#menu[@]}" "$("$offer_auto" && printf ', a')" >&2
+  done
 }
 
 route_where() {
@@ -251,13 +343,45 @@ path_hint() {
   fi
 }
 
+# A same-filesystem staging directory keeps an interrupted copy away from the installed app.
+# Do not strip quarantine or change Gatekeeper settings; the user approves first launch.
+install_macos() {
+  local payload=$1 target=$2 app_dir=$3 source
+  mkdir -p "$stage/mount"
+  mac_mount=$stage/mount
+  hdiutil attach "$payload" -readonly -nobrowse -mountpoint "$mac_mount" -quiet </dev/null \
+    || fail 'Could not mount the verified DMG'
+  source=$mac_mount/Pier.app
+  [[ -d "$source" && ! -L "$source" ]] || fail 'The DMG does not contain Pier.app'
+  [[ "$(plutil -extract CFBundleIdentifier raw -o - "$source/Contents/Info.plist")" == dev.pier.desktop ]] \
+    || fail 'Unexpected macOS bundle identifier'
+  [[ "$(plutil -extract CFBundleShortVersionString raw -o - "$source/Contents/Info.plist")" == "$target" ]] \
+    || fail 'The macOS bundle version does not match the release'
+  codesign --verify --deep --strict "$source" || fail 'The macOS app signature is invalid'
+  mkdir -p "$app_dir" || fail "Cannot create $app_dir"
+  mac_work=$(mktemp -d "$app_dir/.pier-install.XXXXXX") || fail "Cannot write to $app_dir; choose --app-dir \"\$HOME/Applications\""
+  ditto "$source" "$mac_work/Pier.app" || fail 'Could not copy Pier.app; the previous app was not changed'
+  codesign --verify --deep --strict "$mac_work/Pier.app" || fail 'The copied macOS app signature is invalid'
+  mac_app=$app_dir/Pier.app
+  if pgrep -f '/Pier[.]app/Contents/' >/dev/null 2>&1; then fail 'Quit Pier from its tray menu before replacing the app'; fi
+  if [[ -e "$mac_app" ]]; then mv "$mac_app" "$mac_work/previous.app" || fail 'Cannot replace the existing Pier.app'; fi
+  mv "$mac_work/Pier.app" "$mac_app" || fail 'Cannot install Pier.app'
+  mac_committed=true
+  say "Installed Pier v$target: $mac_app"
+  say "  Open it in Finder, or run: open \"$mac_app\""
+  say '  If macOS blocks first launch, use System Settings > Privacy & Security > Open Anyway.'
+  say '  Update in Settings > About & Updates, or rerun this installer after quitting Pier.'
+}
+
 main() {
   local version=${PIER_VERSION:-latest} mirror_option=${PIER_MIRROR:-} mode='' scope='' start=true force=false
-  local service_option=false auto_portable=false
+  local service_option=false auto_portable=false app_dir=${PIER_APP_DIR:-} platform
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --version) [[ $# -ge 2 ]] || fail '--version requires a release, for example v0.2.57'; version=$2; shift ;;
       --version=*) version=${1#*=} ;;
+      --app-dir) [[ $# -ge 2 ]] || fail '--app-dir requires an absolute directory'; app_dir=$2; shift ;;
+      --app-dir=*) app_dir=${1#*=} ;;
       --mirror) [[ $# -ge 2 ]] || fail '--mirror requires auto, github, ghfast, gh-proxy, ghproxy or an https:// prefix'; mirror_option=$2; shift ;;
       --mirror=*) mirror_option=${1#*=} ;;
       --service|--portable)
@@ -278,12 +402,18 @@ main() {
   fi
 
   case "$(uname -s)" in
-    Linux) ;;
-    Darwin) fail "This installer is for Linux. On macOS, install the .dmg from $PIER_RELEASES/latest" ;;
-    *) fail "This installer is for Linux. Download Pier for this system from $PIER_RELEASES/latest" ;;
+    Linux) platform=linux; [[ -z "$app_dir" ]] || fail '--app-dir is only supported on macOS' ;;
+    Darwin)
+      platform=darwin
+      [[ -z "$mode" ]] && ! "$service_option" || fail 'On macOS this script installs Pier.app; Linux service/portable options are not supported'
+      [[ -z "${PIER_PREFIX:-}${PIER_HOST_PREFIX:-}" ]] || fail 'On macOS use --app-dir or PIER_APP_DIR, not PIER_PREFIX'
+      ;;
+    *) fail "Use scripts/install.ps1 in Windows PowerShell, or download Pier from $PIER_RELEASES/latest" ;;
   esac
   local machine arch
   machine=$(uname -m)
+  # An Intel shell under Rosetta must still get the native Apple Silicon application.
+  if [[ "$platform" == darwin && "$(sysctl -in sysctl.proc_translated 2>/dev/null || true)" == 1 ]]; then machine=arm64; fi
   case "$machine" in
     x86_64|amd64) arch=x64 ;;
     aarch64|arm64) arch=arm64 ;;
@@ -302,87 +432,107 @@ main() {
     [[ "$version" == v* ]] || version=v$version
     [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || fail "Invalid version: $version (expected vX.Y.Z)"
   fi
-  # auto ranks every route; a chosen route comes first and the others stay for pressing s.
-  local pinned=''
+  # auto ranks every route; a chosen route stays first. Without --mirror a terminal asks.
+  local pinned='' ask=false choice=''
   local -a routes=()
   case "$mirror_option" in
-    ''|auto) ;;
-    github|ghfast|gh-proxy|ghproxy) pinned=$mirror_option ;;
-    *://*)
-      [[ "$mirror_option" =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?(/[A-Za-z0-9._~/-]*)?$ ]] \
-        || fail "Invalid mirror: $mirror_option (an https:// prefix without credentials, query or fragment)"
-      pinned=${mirror_option%"${mirror_option##*[!/]}"}/ ;;
-    *) fail "Unknown mirror: $mirror_option (use auto, github, ghfast, gh-proxy, ghproxy or an https:// prefix)" ;;
+    '') ask=true ;;
+    auto) ;;
+    *)
+      if pinned=$(route_choice "$mirror_option"); then :
+      elif [[ "$mirror_option" == *://* ]]; then
+        fail "Invalid mirror: $mirror_option (an https:// prefix without credentials, query or fragment)"
+      else
+        fail "Unknown mirror: $mirror_option (use auto, github, ghfast, gh-proxy, ghproxy or an https:// prefix)"
+      fi ;;
   esac
-  [[ -z "$pinned" ]] || routes=("$pinned")
-  for candidate in "${BUILTIN_ROUTES[@]}"; do
-    [[ "$candidate" == "$pinned" ]] || routes+=("$candidate")
-  done
+  use_route "${pinned:-github}"
 
-  # The same layout and precedence as `pier install`, to find what is already installed.
-  local uid prefix=${PIER_PREFIX:-${PIER_HOST_PREFIX:-}} install_dir legacy_dir service_bin portable_bin
-  uid=$(id -u)
-  if [[ -z "$scope" ]]; then
-    if [[ "$uid" == 0 ]]; then scope=system; else scope=user; fi
-  fi
-  [[ "$scope" != system || "$uid" == 0 ]] || fail '--system requires root; pipe the installer to sudo bash'
-  [[ -z "$prefix" || "$prefix" == /* ]] || fail 'PIER_PREFIX must be an absolute path'
-  if [[ "$scope" == user ]]; then
-    install_dir=${prefix:-$HOME/.local}/share/pier
-    legacy_dir=${prefix:-$HOME/.local}/share/pier-host
-    service_bin=${prefix:-$HOME/.local}/bin/pier
+  local installed_version=''
+  if [[ "$platform" == darwin ]]; then
+    for tool in hdiutil ditto codesign plutil; do command -v "$tool" >/dev/null 2>&1 || fail "Missing command: $tool"; done
+    if [[ -z "$app_dir" ]]; then
+      if [[ -d /Applications/Pier.app ]]; then app_dir=/Applications; else app_dir=$HOME/Applications; fi
+    fi
+    [[ "$app_dir" == /* && "$app_dir" != *$'\n'* ]] || fail '--app-dir must be an absolute directory'
+    app_dir=${app_dir%/}
+    [[ -n "$app_dir" ]] || fail 'Do not install in the filesystem root'
+    if [[ -e "$app_dir/Pier.app" || -L "$app_dir/Pier.app" ]]; then
+      [[ -d "$app_dir/Pier.app" && ! -L "$app_dir/Pier.app" ]] || fail 'Will not replace a non-directory or symlink Pier.app'
+      [[ "$(plutil -extract CFBundleIdentifier raw -o - "$app_dir/Pier.app/Contents/Info.plist" 2>/dev/null)" == dev.pier.desktop ]] \
+        || fail 'Will not overwrite an unrelated Pier.app'
+      installed_version=$(plutil -extract CFBundleShortVersionString raw -o - "$app_dir/Pier.app/Contents/Info.plist")
+    fi
+    # Refuse to replace any running copy, including its embedded Host.
+    if pgrep -f '/Pier[.]app/Contents/' >/dev/null 2>&1; then fail 'Quit Pier from its tray menu before installing or updating'; fi
   else
-    install_dir=${prefix:-/opt/pier}
-    legacy_dir=${prefix:-/opt/pier-host}
-    service_bin=/usr/local/bin/pier
-  fi
-  if [[ -n "$prefix" ]]; then portable_bin=$prefix/bin/pier
-  elif [[ "$uid" == 0 ]]; then portable_bin=/usr/local/bin/pier
-  else portable_bin=$HOME/.local/bin/pier; fi
-  local metadata='' installed_version='' graphical=false
-  for candidate in "$install_dir/installation.json" "$legacy_dir/installation.json"; do
-    if [[ -f "$candidate" ]]; then metadata=$candidate; break; fi
-  done
-  [[ -z "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]] || graphical=true
-  # Keep what is installed; otherwise a desktop gets only the command, since its window
-  # and a background service cannot share the Pier state directory at the same time.
-  if [[ -z "$mode" ]]; then
-    if "$service_option" || [[ -n "$metadata" || -f "$legacy_dir/install.env" ]]; then mode=service
-    elif [[ -f "$portable_bin" && ! -L "$portable_bin" ]]; then mode=portable
-    elif "$graphical"; then mode=portable; auto_portable=true
-    else mode=service; fi
-  fi
+    # The same layout and precedence as `pier install`, to find what is already installed.
+    local uid prefix=${PIER_PREFIX:-${PIER_HOST_PREFIX:-}} install_dir legacy_dir service_bin portable_bin
+    uid=$(id -u)
+    if [[ -z "$scope" ]]; then
+      if [[ "$uid" == 0 ]]; then scope=system; else scope=user; fi
+    fi
+    [[ "$scope" != system || "$uid" == 0 ]] || fail '--system requires root; pipe the installer to sudo bash'
+    [[ -z "$prefix" || "$prefix" == /* ]] || fail 'PIER_PREFIX must be an absolute path'
+    if [[ "$scope" == user ]]; then
+      install_dir=${prefix:-$HOME/.local}/share/pier
+      legacy_dir=${prefix:-$HOME/.local}/share/pier-host
+      service_bin=${prefix:-$HOME/.local}/bin/pier
+    else
+      install_dir=${prefix:-/opt/pier}
+      legacy_dir=${prefix:-/opt/pier-host}
+      service_bin=/usr/local/bin/pier
+    fi
+    if [[ -n "$prefix" ]]; then portable_bin=$prefix/bin/pier
+    elif [[ "$uid" == 0 ]]; then portable_bin=/usr/local/bin/pier
+    else portable_bin=$HOME/.local/bin/pier; fi
+    local metadata='' graphical=false
+    for candidate in "$install_dir/installation.json" "$legacy_dir/installation.json"; do
+      if [[ -f "$candidate" ]]; then metadata=$candidate; break; fi
+    done
+    [[ -z "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]] || graphical=true
+    # Keep what is installed; otherwise a desktop gets only the command, since its window
+    # and a background service cannot share the Pier state directory at the same time.
+    if [[ -z "$mode" ]]; then
+      if "$service_option" || [[ -n "$metadata" || -f "$legacy_dir/install.env" ]]; then mode=service
+      elif [[ -f "$portable_bin" && ! -L "$portable_bin" ]]; then mode=portable
+      elif "$graphical"; then mode=portable; auto_portable=true
+      else mode=service; fi
+    fi
 
-  local state=${PIER_HOST_STATE_DIR:-${PIER_DIR:-$HOME/.pier}} pid reported
-  if [[ "$mode" == service ]]; then
-    if [[ -f "$legacy_dir/install.env" ]]; then
-      fail "$(printf '%s\n' \
-        "Found a Pier Host installed by the old install-host.sh in $legacy_dir." \
-        'Remove it first (Pier data and pairing are kept), then rerun this installer:' \
-        '  pier-host uninstall')"
-    fi
-    [[ -z "$metadata" ]] || installed_version=$(json_value "$metadata" version)
-    if [[ -z "$metadata" ]]; then
-      if [[ -e "$service_bin" && ! -L "$service_bin" ]]; then
-        fail "$service_bin already exists and was not installed by pier install. Remove it (rm $service_bin), or keep it with --portable"
+    local state=${PIER_HOST_STATE_DIR:-${PIER_DIR:-$HOME/.pier}} pid reported
+    if [[ "$mode" == service ]]; then
+      if [[ -f "$legacy_dir/install.env" ]]; then
+        fail "$(printf '%s\n' \
+          "Found a Pier Host installed by the old install-host.sh in $legacy_dir." \
+          'Remove it first (Pier data and pairing are kept), then rerun this installer:' \
+          '  pier-host uninstall')"
       fi
-      pid=$(json_value "$state/run/host.json" pid)
-      if [[ "$pid" =~ ^[1-9][0-9]*$ ]] && kill -0 "$pid" 2>/dev/null; then
-        fail "A Pier Host is already running with $state (the Pier desktop app or pier run). Quit it first, or install only the command with --portable"
+      [[ -z "$metadata" ]] || installed_version=$(json_value "$metadata" version)
+      if [[ -z "$metadata" ]]; then
+        if [[ -e "$service_bin" && ! -L "$service_bin" ]]; then
+          fail "$service_bin already exists and was not installed by pier install. Remove it (rm $service_bin), or keep it with --portable"
+        fi
+        pid=$(json_value "$state/run/host.json" pid)
+        if [[ "$pid" =~ ^[1-9][0-9]*$ ]] && kill -0 "$pid" 2>/dev/null; then
+          fail "A Pier Host is already running with $state (the Pier desktop app or pier run). Quit it first, or install only the command with --portable"
+        fi
       fi
+    elif [[ -L "$portable_bin" ]]; then
+      fail "$portable_bin belongs to an installed Pier service; rerun without --portable to update it"
+    elif [[ -e "$portable_bin" ]]; then
+      reported=$("$portable_bin" --version </dev/null 2>/dev/null || true)
+      reported=${reported%%$'\n'*}
+      [[ "$reported" =~ ^pier(-host)?\ [0-9] ]] || fail "Will not overwrite $portable_bin: it is not a Pier executable"
+      installed_version=${reported#* }
     fi
-  elif [[ -L "$portable_bin" ]]; then
-    fail "$portable_bin belongs to an installed Pier service; rerun without --portable to update it"
-  elif [[ -e "$portable_bin" ]]; then
-    reported=$("$portable_bin" --version </dev/null 2>/dev/null || true)
-    reported=${reported%%$'\n'*}
-    [[ "$reported" =~ ^pier(-host)?\ [0-9] ]] || fail "Will not overwrite $portable_bin: it is not a Pier executable"
-    installed_version=${reported#* }
-  fi
+  fi # Linux installation layout
 
   # Stage in the user's cache rather than /tmp, which is often a small tmpfs or noexec.
   local cache=${XDG_CACHE_HOME:-}
-  [[ "$cache" == /* ]] || cache=$HOME/.cache
+  if [[ "$cache" != /* ]]; then
+    if [[ "$platform" == darwin ]]; then cache=$HOME/Library/Caches; else cache=$HOME/.cache; fi
+  fi
   mkdir -p -- "$cache" || fail "Cannot create $cache"
   stage=$(mktemp -d "$cache/pier-install.XXXXXX") || fail "Cannot create a temporary directory in $cache"
   trap cleanup EXIT
@@ -414,21 +564,22 @@ main() {
   fi
   if [[ "$sums_from" != github ]]; then warn "GitHub did not answer, so the checksums came through $(route_name "$sums_from")"; fi
 
-  local asset='' tag checksum
+  local asset='' tag checksum suffix="-$platform-$arch"
+  [[ "$platform" != darwin ]] || suffix+=.dmg
   if [[ "$version" == latest ]]; then
-    asset=$(awk -v suffix="-linux-$arch" '{
+    asset=$(awk -v suffix="$suffix" '{
       f = $2; sub(/^\*/, "", f); n = length(f) - length(suffix)
       if (f ~ /^pier-v[0-9]+\.[0-9]+\.[0-9]+/ && n > 0 && substr(f, n + 1) == suffix) print f
     }' "$sums")
-    [[ -n "$asset" && "$asset" != *$'\n'* ]] || fail "The latest release has no single-file Pier for linux-$arch"
+    [[ -n "$asset" && "$asset" != *$'\n'* ]] || fail "The latest release has no Pier asset for $platform-$arch"
     tag=${asset#pier-}
-    tag=${tag%-linux-"$arch"}
+    tag=${tag%"$suffix"}
   else
     tag=$version
-    for name in "pier-$tag-linux-$arch" "pier-host-$tag-linux-$arch"; do
+    for name in "pier-$tag$suffix" "pier-host-$tag$suffix"; do
       if [[ -n "$(sum_of "$sums" "$name")" ]]; then asset=$name; break; fi
     done
-    [[ -n "$asset" ]] || fail "Pier $tag has no single file for linux-$arch; choose another version"
+    [[ -n "$asset" ]] || fail "Pier $tag has no single file for $platform-$arch (or macOS DMG); choose another version"
   fi
   [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || fail "Unexpected release asset: $asset"
   checksum=$(sum_of "$sums" "$asset")
@@ -436,7 +587,9 @@ main() {
 
   local target=${tag#v}
   if ! "$force" && [[ "$installed_version" == "$target" ]]; then
-    if [[ "$mode" == service ]]; then
+    if [[ "$platform" == darwin ]]; then
+      say "Pier $tag is already installed: $app_dir/Pier.app (--force reinstalls)"
+    elif [[ "$mode" == service ]]; then
       say "Pier $tag is already installed ($scope service). Check it with: pier status (--force reinstalls)"
     else
       say "Pier $tag is already installed: $portable_bin (--force reinstalls)"
@@ -446,26 +599,37 @@ main() {
 
   local asset_url=$PIER_RELEASES/download/$tag/$asset github_ok=false
   [[ "$sums_from" != github ]] || github_ok=true
+  # A key press or the route menu needs the terminal, which is not stdin under curl | bash.
+  if [[ -t 2 ]] && { exec 3</dev/tty; } 2>/dev/null; then keys=true; fi
+  if "$ask" && "$keys"; then
+    local suggested=github
+    "$github_ok" || suggested=ghfast
+    if ! choose_route "$suggested" true; then keys=false; choice=auto; fi
+    if [[ "$choice" != auto ]]; then pinned=$choice; use_route "$pinned"; fi
+  fi
   if [[ -z "$pinned" ]]; then
     if [[ "$fetcher" == curl ]]; then rank_routes "$asset_url" "$github_ok"
     elif ! "$github_ok"; then routes=(ghfast gh-proxy ghproxy github); fi
   fi
-  # A key press switches routes; it needs the terminal, which is not stdin under curl | bash.
-  if [[ -t 2 ]] && { exec 3</dev/tty; } 2>/dev/null; then keys=true; fi
-
   local count=${#routes[@]} i=0 failures=0 limit=3 status reason floor current
   # auto tries each route quickly once, then again waiting out slow ones; a chosen route retries.
   [[ -n "$pinned" ]] || limit=$(( 2 * count ))
-  if [[ -n "$installed_version" ]]; then say "Updating Pier $installed_version to $target (linux-$arch) $(route_where "${routes[0]}")..."
-  else say "Downloading Pier $tag (linux-$arch) $(route_where "${routes[0]}")..."; fi
-  if "$keys"; then say '  Press s to switch to another route; the part already downloaded is kept.'; fi
+  if [[ -n "$installed_version" ]]; then say "Updating Pier $installed_version to $target ($platform-$arch) $(route_where "${routes[0]}")..."
+  else say "Downloading Pier $tag ($platform-$arch) $(route_where "${routes[0]}")..."; fi
+  if "$keys"; then say '  Press s to choose another route; the part already downloaded is kept.'; fi
   while :; do
     current=${routes[i]}
     floor=stall
     if [[ -z "$pinned" ]] && (( failures < count - 1 )); then floor=slow; fi
     if download "$(route_url "$current" "$asset_url")" "$stage/pier" "$floor"; then break; else status=$?; fi
     if (( status == 2 )); then
-      i=$(( (i + 1) % count ))
+      # The chosen route is then kept, with the retries of a route chosen by --mirror.
+      if choose_route "${routes[(i + 1) % count]}" false; then
+        pinned=$choice; use_route "$pinned"
+        count=${#routes[@]} i=0 failures=0 limit=3
+      else
+        keys=false i=$(( (i + 1) % count ))
+      fi
       say "Switching to $(route_name "${routes[i]}")$(kept_text "$stage/pier")..."
       continue
     fi
@@ -477,7 +641,7 @@ main() {
     failures=$(( failures + 1 ))
     if (( failures >= limit )); then
       if [[ -z "$pinned" ]]; then fail "Downloading $asset failed on every route; nothing was changed. Check the network and retry"; fi
-      fail "Downloading $asset $(route_where "$current") failed; nothing was changed. Retry, or leave out --mirror to try every route"
+      fail "Downloading $asset $(route_where "$current") failed; nothing was changed. Retry and choose another route, or use --mirror auto to try every route"
     fi
     [[ -n "$pinned" ]] || i=$(( (i + 1) % count ))
     if (( status == 28 )); then reason='was too slow'; else reason="failed (exit $status)"; fi
@@ -489,6 +653,10 @@ main() {
   done
   if "$keys"; then exec 3<&-; keys=false; fi
   [[ "$(sha256_of "$stage/pier")" == "$checksum" ]] || fail "Checksum mismatch for $asset; nothing was changed"
+  if [[ "$platform" == darwin ]]; then
+    install_macos "$stage/pier" "$target" "$app_dir"
+    return 0
+  fi
   chmod 755 "$stage/pier"
   if ! reported=$("$stage/pier" --version </dev/null 2>"$stage/version.log"); then
     fail "The downloaded Pier does not start here ($(head -c 300 "$stage/version.log")). If $cache is mounted noexec, set XDG_CACHE_HOME to another directory"
@@ -507,7 +675,7 @@ main() {
     fi
     if [[ "$scope" == user ]] && "$start"; then enable_linger; fi
     say "Pier $tag is ready."
-    say '  Pair a device: run pier, then /remote on and /pair; paste the link into the Pier app, then /pair yes'
+    say '  Pair a device: run pier, then /remote on and /pair; scan the QR code or paste the link in the Pier app, then /pair yes'
     say '  Manage it:     pier status | logs | update | stop | uninstall'
     if "$graphical"; then
       say '  Before opening the Pier window here (pier desktop), run pier stop: both use the same Pier state.'

@@ -1,4 +1,4 @@
-# Pier 协议 v1.52
+# Pier 协议 v1.53
 
 > 实现：`packages/protocol`（zod schema + TS 类型，Host 与所有客户端共享）。
 > 本文档描述线上格式与语义；字段的权威定义以 `packages/protocol/src` 为准。
@@ -90,9 +90,11 @@
 
 Host 在桌面端中运行时（Tauri 以 `--watch-stdin` 启动 sidecar），通过 sidecar 的 stdio 驱动桌面端的更新器，让已配对的电脑和手机可以远程更新这台电脑上的 Pier。只会安装 GitHub 最新正式版中、用桌面端内置公钥校验过签名的更新包，更新地址不能由客户端指定。这些方法对已配对设备开放，远程调用 `update.install` 写入审计日志。
 
+已安装且由 systemd 托管的 Linux 单文件服务也实现同一组 `update.*` 方法，无需更改协议：从固定 GitHub 仓库获取最新正式版，按 Release 的 SHA-256 和程序版本校验完整单文件，通过相同用户 / 系统 scope 的独立 systemd 临时服务安装、重启和失败回滚。这个路径不依赖 Tauri，不使用桌面更新包签名或桌面更新线路，不支持续传；`autoCheck` 为 `false`。远程请求不能指定 URL、版本、路径或命令。便携运行、手动启动、无 systemd 及单文件内置桌面模式返回 `unsupported` 和说明性的 `error`。安装结果写入本地记录，重启或回滚后的 Host 会继续发送最终状态。
+
 | 方法 | 参数 | 结果 |
 |---|---|---|
-| `update.status` | – | `AppUpdateStatus`：`{ state, currentVersion, autoCheck, version?, notes?, date?, downloaded, total?, error?, lastChecked?, installNeedsAuth? }`。`state` 为 `unsupported`（开发版本、未打包的构建、独立运行的 `pier-host`，或桌面端没有上报更新器）\|`idle`\|`checking`\|`upToDate`\|`available`\|`downloading`\|`installing`\|`error`；`version` / `notes` / `date` 为可安装的新版本（安装失败后仍保留，可重试）；`downloaded` / `total` 为已下载字节数与更新包大小，`available` / `error` 时非 0 表示该版本已下载了一部分（暂停或中断后的下载，安装时从断点继续；旧版桌面端此时为 0）；`downloading` 时的 `error` 是正在自动重试的原因；`installNeedsAuth` 表示安装时需要有人在那台电脑上输入管理员密码（Linux `.deb` / `.rpm`） |
+| `update.status` | – | `AppUpdateStatus`：`{ state, currentVersion, autoCheck, version?, notes?, date?, downloaded, total?, error?, lastChecked?, installNeedsAuth? }`。`state` 为 `unsupported`（开发版本、未打包的构建、未由 systemd 托管的单文件、单文件内置桌面模式，或桌面端没有上报更新器）\|`idle`\|`checking`\|`upToDate`\|`available`\|`downloading`\|`installing`\|`error`；`version` / `notes` / `date` 为可安装的新版本（安装失败后仍保留，可重试）；`downloaded` / `total` 为已下载字节数与更新包大小，`available` / `error` 时非 0 表示该版本已下载了一部分（暂停或中断后的下载，安装时从断点继续；旧版桌面端此时为 0）；`downloading` 时的 `error` 是正在自动重试的原因；`installNeedsAuth` 表示安装时需要有人在那台电脑上输入管理员密码（Linux `.deb` / `.rpm`） |
 | `update.check` | – | `AppUpdateStatus`：立即检查一次（最长约 30 秒，客户端请放宽超时）。检查失败时返回 `state: "error"` 而不是错误响应 |
 | `update.install` | – | `AppUpdateStatus`：还没有已知的新版本时先检查；有新版本时在后台开始下载（已下载过一部分时从断点继续），返回 `downloading`，之后 Host 与所有连接会随安装断开，桌面端安装完成后自动重启，客户端重连后在 `host.hello` 中看到新版本。已是最新版本时返回 `upToDate`，检查失败时返回 `error`，已在更新时返回当前状态。由远程设备发起时，Host 同时向本地连接发出 `host.notice`，告知谁在更新 |
 
@@ -677,6 +679,14 @@ Linux 读取 `/proc`，macOS 执行固定 `ps` 查询，Windows 使用 PowerShel
 
 映射属于创建它的本地协议连接；关闭 UI 面板不会关闭该连接。管理连接断开、目标配对连接断开、设备吊销、移除配对或 Host 退出均清理监听器与流。不持久化映射或自动恢复。只有本地认证客户端可以管理映射；远程已配对设备可以查询 `host.ports`，但不能在此主机创建监听器。TCP 流继续由 `tunnel.open` 审计目标/端口，不记录流量或进程列表。
 
+## 远程浏览器准备进度（1.48，日志 1.53）
+
+`browser.preparing` 事件带 `{ browserId, workspaceId, peerId?, progress }`，只发送给打开浏览器的连接，不广播、不写 EventLog。本机 Host 转发远程进度，并通过 `browser.list.preparations` 返回当前快照，方便面板重新打开后恢复。
+
+`progress` 包含 `stage: checking | downloading | verifying | installing | starting`、`message`、可选的 `component: system | selkies | chromium`、`downloadedBytes` / `totalBytes`。1.53 新增可选 `logs`：最近最多 16,000 字符的纯文本日志快照（不是增量）；安装器捕获 stdout / stderr，过滤终端控制序列、软件源 URL 认证信息 / 查询参数及常见凭据，命令输出最多每 250 ms 推送一次，阶段切换和命令退出时立即刷新。日志仅在内存中保留。旧 Host 省略此字段，空字符串表示支持日志但尚无输出。
+
+系统依赖安装不提供估算百分比；下载时仅在已知总大小时显示百分比。取消不会强制终止正在执行的软件包操作；多个工作区等待同一次安装时，取消其中一个不会中止其他等待者。失败后桌面当前面板保留最近日志，重新开始准备时清空；关闭失败面板或重启后不恢复已结束任务的日志。
+
 ## 本地渲染的浏览器（1.37）
 
 本机 Host 负责本地浏览器进程和回环监听器，通过 `PeerManager` 为浏览器建立独立的配对加密连接（现有 Relay / P2P 可用）。远程 Host 仅连接目标 TCP 服务，运行独立 Host 的无桌面 Linux 同样可提供转发。配对仍表示完全信任；这里只对已认证连接开放。旧版目标 Host 在打开时提示更新。
@@ -688,21 +698,21 @@ Linux 读取 `/proc`，macOS 执行固定 `ps` 查询，Windows 使用 PowerShel
 | `tunnel.write` | `{ tunnelId, data, end? }` | `{ written }`；单块最多 64 KiB，`end` 半关闭写方向 |
 | `tunnel.close` | `{ tunnelId }` | `{ closed }`；释放 TCP 套接字和缓冲 |
 | `browser.open` 🔒 | `{ workspaceId, peerId?, url, mode, controlled? }` | `LocalBrowserInfo`；`mode:service` 转发一个端口，返回本地 URL，由 UI 打开默认浏览器；`mode:network` 启动本地 Chromium 独立窗口和远程 HTTP / CONNECT 代理；`controlled:true` 也使用独立窗口并注册工作区控制器 |
-| `browser.list` 🔒 | — | `{ browsers: LocalBrowserInfo[] }`；只列出调用连接创建的实例 |
+| `browser.list` 🔒 | — | `{ browsers: LocalBrowserInfo[], preparations?: BrowserPreparation[] }`；只列出调用连接创建的实例和正在准备的远程浏览器 |
 | `browser.close` 🔒 | `{ browserId }` | `{ closed }`；关闭代理、转发和项目启动的独立浏览器 |
 | `browser.attach` | `{ workspaceId, browserId }` | `{ attached:true }`；调用连接声明可在本地执行此工作区的浏览器命令 |
 | `browser.detach` | `{ browserId }` | `{ detached }`；只有注册连接可以移除 |
-| `browser.action` | `{ workspaceId, browserId?, command }` | `BrowserResult`；多个控制器时必须指定 ID；没有控制器时提示先在客户端打开并允许 Agent 操作 |
+| `browser.action` | `{ workspaceId, browserId?, command }` | `BrowserResult`；多个控制器时必须指定 ID；没有控制器时提示先在客户端打开并允许外部集成通过协议操作 |
 | `browser.result` | `{ requestId, result?, error? }` | `{ accepted }`；只有接收命令的注册连接能回复；命令超时或被取消后回复被忽略 |
 
 `LocalBrowserInfo = { browserId, workspaceId, peerId?, url, localUrl, mode, controllable }`。
 `BrowserCommand = { action, tabId?, url?, selector?, text?, key?, expression? }`；`action` 支持 `tabs` / `navigate` / `snapshot` / `click` / `fill` / `press` / `evaluate` / `screenshot`，选择器是 CSS。导航仅接受不带 userinfo 的 HTTP(S) 地址。`BrowserResult = { text?, image?: { data, mimeType:"image/png" } }`。
 
-`browser.command` 事件 `{ browserId, requestId, command }` 只发给注册此控制器的连接，不广播、不写 EventLog。注册连接在本地私有 CDP 进程管道执行后调用 `browser.result`，远程等待上限 30 秒。断线、移除控制器或取消会话请求时结束等待。内置 pi 工具 `pier_browser` 使用相同路由和工作区审批策略；协议调用者按现有完全信任模型自行控制审批。
+`browser.command` 事件 `{ browserId, requestId, command }` 只发给注册此控制器的连接，不广播、不写 EventLog。注册连接在本地私有 CDP 进程管道执行后调用 `browser.result`，远程等待上限 30 秒。断线、移除控制器或取消会话请求时结束等待。内置 pi 不再注册 `pier_browser` 工具；浏览器协议仍供外部集成使用，协议调用者按现有完全信任模型自行控制审批。
 
 所有 TCP 流属于创建它的连接，其他连接访问时为 `NOT_FOUND`，关闭返回 `false`。每台 Host 最多 128 流，每条连接最多 64 流；每流读缓冲达到 512 KiB 后暂停套接字读取，低于 256 KiB 后继续。写入等待 Node 流回调后确认。客户端通过流背压按需读取，保持 HTTP(S)、WebSocket 和半关闭语义。连接断开 / Host 关闭时销毁所有所属套接字；目标连接断开或设备吊销时，本地回环监听器和独立浏览器也被清理。
 
-浏览器仅由本地客户端显式启动，`controlled` 默认关闭；网络方式启动独立浏览器本身不授予 Agent 操作权限。独立浏览器配置按主机保存在本机 `browser-profiles`，配置目录由主机 ID 的 SHA-256 派生，浏览器控制不监听 TCP 调试端口。代理保持目标 origin，由远程 Host 解析域名与连接目标；关闭 QUIC 并限制 WebRTC 的非代理 UDP，覆盖 HTTP(S) / WebSocket 流量，不承诺系统级 VPN 语义。审计只记录连接目标 / 端口、工作区和动作名，不记录网页数据、输入、脚本或截图。
+浏览器仅由本地客户端显式启动，`controlled` 默认关闭；网络方式启动独立浏览器本身不授予协议控制权限。独立浏览器配置按主机保存在本机 `browser-profiles`，配置目录由主机 ID 的 SHA-256 派生，浏览器控制不监听 TCP 调试端口。代理保持目标 origin，由远程 Host 解析域名与连接目标；关闭 QUIC 并限制 WebRTC 的非代理 UDP，覆盖 HTTP(S) / WebSocket 流量，不承诺系统级 VPN 语义。审计只记录连接目标 / 端口、工作区和动作名，不记录网页数据、输入、脚本或截图。
 
 ### 语音输入（1.46）
 

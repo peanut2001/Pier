@@ -72,7 +72,7 @@ import { remotePageBlocker } from "./settings-target.ts";
 import { beginWorkspacePaste, finishWorkspacePaste, renameWorkspaceClipboardPath } from "./workspace-clipboard.ts";
 import { isYunlianProvider, movedToLine, YUNLIAN_SITE, yunlianGroupOf, yunlianProvider } from "./yunlian.ts";
 
-export const APP_VERSION = "0.2.59";
+export const APP_VERSION = "0.2.61";
 
 /** Node id of this computer; any other node is a paired computer's host id. */
 export const LOCAL_NODE = "local";
@@ -1746,6 +1746,15 @@ export class PierStore {
 			this.toast("info", `已删除 ${provider.name}`);
 			void this.loadProviders(node);
 		}
+	}
+
+	/** Remove a personal-center provider, rejecting so its group row can remain on failure. */
+	async removeAccountGroupProvider(provider: ProviderInfo): Promise<void> {
+		const node = this.state.settingsNode;
+		const client = this.openClient(node);
+		if (!client) throw new Error(this.settingsOffline().message);
+		await client.request("provider.removeCustom", { providerId: provider.id });
+		await this.loadProviders(node);
 	}
 
 	/** Models offered by an endpoint. Throws with the host's message. */

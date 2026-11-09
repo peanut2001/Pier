@@ -14,6 +14,8 @@ Pier 各项功能的详细说明。安装与快速上手见 [README](../README.m
 
 桌面安装包支持 Linux x64 / ARM64（`.deb`、`.AppImage`）、macOS Intel / Apple Silicon（`.dmg`）和 Windows x64（`.setup.exe`）。Linux ARM64 包名为 `pier-v<版本>-linux-arm64.deb` / `.AppImage`，与 x64 一样以 Ubuntu 22.04（glibc 2.35）为构建基线。安装包与签名更新包随 [GitHub Release](https://github.com/yiranxiaohui/Pier/releases/latest) 发布，ARM64 同样支持应用内自动更新。
 
+按平台的安装步骤及一键命令见 README：[Windows](../README.md#windows)、[macOS](../README.md#macos)、[Linux 桌面](../README.md#linux-桌面)、[Linux 服务器](../README.md#linux-一键安装)。Windows PowerShell 脚本调用官方 NSIS 安装器；macOS 脚本安装经过校验的 `Pier.app`，默认位于 `~/Applications`（已有 `/Applications/Pier.app` 时沿用原位置）。两者都不安装独立后台服务，打开应用后自动启动 Host，可在「设置 → 常规 → 开机自启」设置登录后启动。Linux 的 `pier install/status/update/uninstall` 服务管理命令不适用于 Windows / macOS 桌面安装。
+
 桌面端启动时会拉起内置的 Pier Host（`--watch-stdin`），关闭窗口只会隐藏到托盘，Agent 继续运行；从托盘或“设置 → 常规 → 退出 Pier”才会停止 Host。可用 `PIER_DIR` 隔离 Pier 状态目录，用 `PIER_HOST_BIN` 指定其他 Host 可执行文件。
 
 ### 自动更新
@@ -23,6 +25,8 @@ Pier 各项功能的详细说明。安装与快速上手见 [README](../README.m
 ### 远程更新其他电脑
 
 已添加的其他电脑同样可以在本机更新。“设置 → 关于与更新”底部的“其他电脑”列出每台电脑的 Pier 版本，可以检查更新并“更新到 vX”：那台电脑上的 Pier 通过它的 Host 收到请求，按上面的流程下载、校验签名、安装并自动重启，本机随后自动重新连接并提示更新结果；那台电脑上正在运行的会话会被中断（有的话会先提醒）。Linux `.deb` / `.rpm` 安装需要有人在那台电脑上输入管理员密码。那台电脑需要先升级到支持远程更新的版本（协议 1.13）；开发版本或未打包的构建无法远程更新。调试界面时可用 `bun run faux-host --remote --demo-updates` 起一个带模拟更新器的 Host，与另一个 faux Host 配对后在“其他电脑”中演示整个流程。
+
+**Linux 单文件后台服务**也可以通过这里检查并更新：目标电脑需要先安装包含此功能的版本，并以 `pier install` 安装、由 systemd 托管运行（用户服务或 root 系统服务）。Host 从 GitHub 获取最新正式版，下载对应架构的完整单文件，校验 Release 的 SHA-256 与程序版本，再由独立 systemd 临时任务停止旧服务、替换、重启；新服务启动失败会恢复旧程序。下载进度与失败原因会显示在“其他电脑”中，更新或回滚后自动重连。配置、配对和会话数据保留，但正在运行的会话会中断。此远程更新路径目前使用 GitHub 直连，暂不使用桌面更新线路或命令行 `--mirror` 选线、不支持断点续传；不是桌面更新包的签名校验流程。便携运行、手动 `pier run`、终端临时 Host、无 systemd 或单文件内置桌面模式仍需手动更新，界面会给出原因。旧版单文件需先通过 SSH 执行一次 `pier update` 升级到包含此功能的版本。
 
 ### Linux 单文件
 
@@ -38,9 +42,9 @@ chmod +x pier
 ./pier cli                # 只连接正在运行的服务，不会启动服务
 ```
 
-在终端中直接运行 `pier` 时，CLI 连接同一状态目录中正在运行的服务（`pier install` 安装的服务、桌面版或 `pier run`）；没有时在后台为这个终端启动一个服务，退出 CLI（`/quit`、Ctrl+C 或关闭终端）时一并停止，日志写入状态目录（默认 `~/.pier`）的 `logs/cli-host.log`。需要退出终端后继续运行时，使用 `pier install` 或 `pier run`。在 CLI 中依次输入 `/remote on`、`/pair`；客户端粘贴链接后输入 `/pair yes`。单文件包含运行时、CLI、pi 资源、Photon WASM 及桌面 AppImage，无需另外下载 Host、安装 Node、Bun 或编译工具。服务模式不加载 GTK / WebKit，不需要图形桌面；界面模式自动解包运行内置 AppImage，无需 FUSE，仍需系统具有可用的图形会话及 AppImage 所需基础运行库。资源首次使用时准备到 Pier 自己的状态目录，之后复用；服务模式不会解包界面。Release 中的 `SHA256SUMS.txt` 可用于核对下载文件。
+在终端中直接运行 `pier` 时，CLI 连接同一状态目录中正在运行的服务（`pier install` 安装的服务、桌面版或 `pier run`）；没有时在后台为这个终端启动一个服务，退出 CLI（`/quit`、Ctrl+C 或关闭终端）时一并停止，日志写入状态目录（默认 `~/.pier`）的 `logs/cli-host.log`。需要退出终端后继续运行时，使用 `pier install` 或 `pier run`。在 CLI 中依次输入 `/remote on`、`/pair`；手机 App 点「添加电脑」扫描终端中的二维码，也可粘贴配对链接，然后在 CLI 输入 `/pair yes` 确认。二维码保留完整留白边框；终端太窄时会提示所需列数，可拉宽窗口或缩小字体后重新输入 `/pair`，高度不够时可向上滚动查看。输出重定向到文件或管道时只显示链接。单文件包含运行时、CLI、pi 资源、Photon WASM 及桌面 AppImage，无需另外下载 Host、安装 Node、Bun 或编译工具。服务模式不加载 GTK / WebKit，不需要图形桌面；界面模式自动解包运行内置 AppImage，无需 FUSE，仍需系统具有可用的图形会话及 AppImage 所需基础运行库。资源首次使用时准备到 Pier 自己的状态目录，之后复用；服务模式不会解包界面。Release 中的 `SHA256SUMS.txt` 可用于核对下载文件。
 
-CLI 启动时显示连接的主机、Pier 与 pi 版本、工作区和可用的 Agent；输入行上方的分隔线标出工作区、会话、Agent、模型与思考等级和上下文占用，输入 `/` 时实时列出匹配的命令及说明，按 Tab 有多个候选时也列在输入行上方。回复以 `●` 开头，按终端宽度折行并渲染 Markdown（标题、粗体、行内代码、列表、引用、代码块、表格）；工具调用显示为 `● bash(ls -la)`，下方 `⎿` 预览输出的前几行，编辑文件时显示带颜色的增删行。Agent 运行时显示动画、耗时和排队数，按 Esc 或 Ctrl+C 中断；Ctrl+C 也会清空已输入的内容，在空行上连按两次退出。审批、提问与配对请求以带边框的卡片显示。颜色遵循 `NO_COLOR` / `FORCE_COLOR`；输出重定向到管道或文件时不使用颜色、动画和 Markdown 渲染，逐行输出结果。
+CLI 启动时显示连接的主机、Pier 与 pi 版本、工作区和可用的 Agent；输入行上方的分隔线标出工作区、会话、Agent、模型与思考等级和上下文占用，输入 `/` 时实时列出匹配的命令及说明，按 Tab 有多个候选时也列在输入行上方；列出命令或候选时可用 ↑/↓ 选择（`❯` 标出），按 Tab 或 Enter 填入输入行，选中的命令无需其他参数时 Enter 直接执行，Esc 取消选择。回复以 `●` 开头，按终端宽度折行并渲染 Markdown（标题、粗体、行内代码、列表、引用、代码块、表格）；工具调用显示为 `● bash(ls -la)`，下方 `⎿` 预览输出的前几行，编辑文件时显示带颜色的增删行。Agent 运行时显示动画、耗时和排队数，按 Esc 或 Ctrl+C 中断；Ctrl+C 也会清空已输入的内容，在空行上连按两次退出。审批、提问与配对请求以带边框的卡片显示。颜色遵循 `NO_COLOR` / `FORCE_COLOR`；输出重定向到管道或文件时不使用颜色、动画和 Markdown 渲染，逐行输出结果。
 
 需要后台服务、开机启动和命令行更新时，让二进制自己安装。`install` 安装的是无界面的服务；平时使用桌面界面无需执行：
 
@@ -56,7 +60,7 @@ CLI 启动时显示连接的主机、Pier 与 pi 版本、工作区和可用的 
 pier status                   # 服务状态
 pier logs                     # 实时日志
 pier                          # 打开 CLI：配置工作区、远程访问和配对（同 pier cli）
-# 在 CLI 中依次输入 /remote on、/pair；客户端粘贴链接后输入 /pair yes
+# 在 CLI 中依次输入 /remote on、/pair；手机扫码或客户端粘贴链接后输入 /pair yes
 pier update                   # 更新到最新正式版
 pier stop                     # 停止服务
 pier start                    # 启动服务
@@ -75,11 +79,15 @@ echo 'source <(pier completion bash)' >> ~/.bashrc
 指定版本或仅安装、不启动：
 
 ```bash
-pier update --version v0.2.59
+pier update --version v0.2.60
 pier update --no-start
+pier update --mirror ghfast    # 跳过选线菜单，固定经 GHFast 下载；也可用 github、gh-proxy、ghproxy、auto 或自定义 https:// 前缀
+pier update --force            # 已是该版本时也重新安装
 ```
 
-内置更新命令下载对应架构的单文件，并校验 Release 的 SHA-256 和版本后替换，启动失败时恢复上一版。可用 `PIER_PREFIX` 自定义安装前缀、`PIER_DIR` 自定义 Pier 状态目录；更新和卸载会沿用安装时保存的路径。`PIER_HOST_PREFIX` / `PIER_HOST_STATE_DIR` 继续兼容。直接运行时无需 systemd；不安装的便携副本停机后删除该文件即可。服务模式支持 Agent 会话、工作区、文件 / Git、定时任务和远程访问；交互终端需要桌面模式。单文件版在“关于与更新”提示通过 `pier update`（已安装）或下载新文件替换（便携运行）更新整个程序；独立的桌面安装包仍支持应用内更新。切换到桌面模式前先用 `pier stop` 停止同一状态目录的后台服务。
+`pier update` 的下载线路与安装脚本一致。在终端中运行且没有指定 `--mirror` 时，先列出 GitHub、GHFast、GH-Proxy、GHProxy 供输入编号选择（直接回车用默认项：GitHub 能连通时为 GitHub，否则为 GHFast），也可以粘贴自定义的 `https://` 加速前缀，或输入 `a` 改用自动选线；选好的线路固定使用，失败时在这条线路上重试。下载中按 `s` 重新选择线路（回车为下一条），并从已下载的位置接着下载；Ctrl+C 取消，不改动已安装的版本。`--mirror github|ghfast|gh-proxy|ghproxy|<https 前缀>`（或环境变量 `PIER_MIRROR`）跳过菜单、固定线路；`--mirror auto` 或没有终端时自动选线：GitHub 直连足够快（2 MB/s 以上）时直接使用，否则同时测速各条加速线路，从最快的开始，某条线路断开、20 秒内没有响应或连续 20 秒低于 100 KB/s 时自动换下一条并接着下载。校验和始终优先直接从 GitHub 获取，GitHub 无法访问时才经加速线路获取并给出提示；终端中显示下载进度、速度和当前线路。已是目标版本时直接退出（`--force` 重新安装）。下载暂存在 `~/.cache`（或 `XDG_CACHE_HOME`）中，完成后删除。
+
+内置更新命令下载对应架构的单文件，并校验 Release 的 SHA-256 和版本后替换，启动失败时恢复上一版。可用 `PIER_PREFIX` 自定义安装前缀、`PIER_DIR` 自定义 Pier 状态目录；更新和卸载会沿用安装时保存的路径。`PIER_HOST_PREFIX` / `PIER_HOST_STATE_DIR` 继续兼容。直接运行时无需 systemd；不安装的便携副本停机后删除该文件即可。服务模式支持 Agent 会话、工作区、文件 / Git、定时任务和远程访问；交互终端需要桌面模式。由 systemd 托管的单文件后台服务支持从已配对电脑的“关于与更新 → 其他电脑”远程更新。单文件内置桌面模式仍提示通过 `pier update`（已安装，先退出界面）或下载新文件替换（便携运行）更新整个程序；独立的桌面安装包仍支持应用内更新。切换到桌面模式前先用 `pier stop` 停止同一状态目录的后台服务。
 
 Linux 单文件统一以 `pier-v<版本>-linux-<架构>` 发布。v0.2.57 是最后一个附带旧名 `pier-host-*` 兼容单文件和 `.tar.gz` 压缩包的版本。v0.2.56 及更早的单文件安装，先运行一次 `pier-host update --version v0.2.57` 过渡，之后的 `update` 会自动下载新名称的单文件；升级时保留原安装目录、`pier-host.service` 和配置，运行新版 `install` 或再次 `update` 后补充 `pier` 命令。通过脚本安装的压缩包版本最多更新到 v0.2.57；改用单文件时，先用旧 `pier-host uninstall` 卸载（默认保留数据），再执行新单文件的 `install`，`pier-host update` 遇到新版本时会给出具体命令。
 
@@ -96,6 +104,8 @@ Linux 单文件统一以 `pier-v<版本>-linux-<架构>` 发布。v0.2.57 是最
 ## 手机与其他电脑
 
 ### 手机端
+
+安装入口：[Android APK](../README.md#android) · [iOS / iPadOS 自行签名构建](../README.md#ios--ipados)。Android 已有签名发行包；iOS 暂无公开 TestFlight / App Store 发行，不要下载来源不明的 IPA。手机是电脑上 Agent 的远程客户端，需要至少一台已运行 Pier 的电脑。
 
 手机端沿用桌面端的青绿色主题、卡片和会话样式。在首页右上角进入「设置 → 外观」，可以选择「跟随系统」「浅色」或「深色」，选择会保存在这台设备上；默认跟随系统。
 
@@ -219,16 +229,18 @@ Host 复用 pi 的配置（`~/.pi/agent`：模型、凭据、settings、会话�
 
 在工作区首页、新建会话页或会话标题栏点击「浏览器」，运行位置跟随工作区主机：
 
-- **本机工作区**：在系统默认浏览器打开网页。勾选「允许这个工作区的 pi 操作浏览器」时，启动独立的 Chrome / Chromium / Edge 窗口。
+- **本机工作区**：在系统默认浏览器打开网页。勾选「允许外部集成通过协议操作浏览器」时，启动独立的 Chrome / Chromium / Edge 窗口。
 - **远程工作区**：在远程 Linux 主机启动真实 Chromium 浏览器，画面嵌入 Pier，可以操作标签页、地址栏和网页，也可在独立窗口显示。`localhost`、网站出口 IP、登录状态和下载都属于远程主机。
 - **连接方式**：默认 WebRTC，优先使用 H.264，客户端不支持时可协商 VP8；编码支持 GPU 和 CPU。没有画面或直连受限时点击「切换兼容连接」，切换到经过 Pier 配对加密通道的 WebSocket 串流，浏览器进程和标签页保留。兼容连接也可在启动前选择。
-- **Agent 操作**：默认关闭；开启后，内置 pi 的 `pier_browser` 工具操作用户看到的同一个浏览器，可列出标签页、导航、读取页面、点击、输入、按键、执行页面脚本和截图。沿用工作区审批策略。Claude Code / Codex 尚未内置此工具，外部集成可调用 `browser.action`。
+- **外部集成**：协议控制默认关闭；开启后，外部集成可通过 `browser.action` 操作用户看到的同一个浏览器，审批由调用方负责。内置 pi 不再提供 `pier_browser` 工具，浏览器入口和手动操作不受影响；Claude Code / Codex 同样没有内置浏览器工具。
 
 远程浏览器需要两端 Host 协议 **1.48+**；远程运行端目前支持 Linux x86_64 / aarch64，本机默认浏览器支持 Windows、macOS、Linux。每个远程工作区同时运行一个浏览器，每台远程主机最多四个。登录状态按工作区保存在远程 `~/.pier/browser-profiles/remote-<workspace-hash>`（或 `PIER_DIR` 下），下载保存在其中的 `Downloads`。使用独立配置，不接管已有桌面浏览器。关闭面板可再次打开继续使用；退出 Pier、关闭会话、主机断连、设备被吊销或进程退出时清理浏览器和虚拟显示，保留登录状态及下载。
 
 #### 远程 Linux 自动准备
 
-首次点击「打开远程浏览器」时，Pier 自动检查并安装缺少的组件，显示检查、下载百分比、校验、安装和启动进度，完成后直接显示远程浏览器。可点击「取消准备」；重新打开面板也能继续查看进度。首次下载可能需要数分钟，最长等待 15 分钟；再次打开复用安装结果。多个工作区共享一次安装，取消其中一个不会中断其他工作区。
+首次点击「打开远程浏览器」时，Pier 自动检查并安装缺少的组件，显示检查、下载百分比与已下载大小、校验、安装和启动进度，完成后直接显示远程浏览器。「安装日志」默认展开，实时显示软件源更新、系统依赖安装及组件解压的最近输出，可折叠；系统软件包安装没有统一的准确百分比，以阶段和实际日志为准。日志中常见凭据会被脱敏，仅保留最近一段，失败后仍可在当前面板查看，重新尝试时清空。此功能需要同时更新本机和远程主机的 Pier，旧主机仍只显示阶段和下载进度。
+
+可点击「取消准备」；正在准备时重新打开面板也能继续查看进度和最近日志。首次下载可能需要数分钟，最长等待 15 分钟；再次打开复用安装结果。多个工作区共享一次安装，取消其中一个不会中断其他工作区；取消最后一个等待者也会先完成当前系统软件包操作，避免强行中断包管理器。
 
 Selkies 2.1.0 和 Chrome for Testing 稳定版从官方 HTTPS 地址下载，安装到远程运行 Host 用户的 `~/.pier/browser-runtime`（或 `PIER_DIR/browser-runtime`），无需 Docker、FUSE 或完整桌面。Selkies 在执行 AppImage 解包前核对固定 SHA-256；Chrome 下载核对 Google Storage 的 MD5 和文件长度，解压后校验版本。只在安装成功后记录可执行文件位置，失败或取消会清理本次临时文件。已有系统浏览器、Selkies 或显式指定的程序会优先复用，不修改浏览器登录配置。
 

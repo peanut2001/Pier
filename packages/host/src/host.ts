@@ -83,8 +83,9 @@ import { SkillManager } from "./runtimes/skills.ts";
 import { ScheduledTasks } from "./scheduled-tasks.ts";
 import { SessionArchiveStore } from "./session-archive.ts";
 import { SessionPool } from "./session-pool.ts";
-import type { AppShell, ShellMethod } from "./shell.ts";
+import type { AppShell, AppUpdater, ShellMethod } from "./shell.ts";
 import { SpeechService } from "./speech.ts";
+import { standaloneExecutable } from "./standalone/self.ts";
 import { HostTerminals } from "./terminals.ts";
 import {
 	authorizeWorkspaceFilePreview,
@@ -101,7 +102,18 @@ import {
 import { transferWorkspacePath } from "./workspace-path-transfers.ts";
 import { WorkspaceUploads } from "./workspace-uploads.ts";
 
-export const PIER_HOST_VERSION = "0.2.59";
+export const PIER_HOST_VERSION = "0.2.61";
+
+/**
+ * How the single-file Pier running without its desktop (`pier run` or the installed service)
+ * is updated, for the "unsupported" update status that paired computers show.
+ */
+export function standaloneUpdateHint(): string | undefined {
+	if (!standaloneExecutable.path) return undefined;
+	return standaloneExecutable.installed
+		? "该电脑运行的是 Pier 单文件版，但当前没有可用的远程更新器。请用 pier start 启动已安装的 systemd 服务，或在该电脑上运行 pier update；下载慢或卡住时可加 --mirror ghfast（或 gh-proxy、ghproxy）选择下载线路"
+		: "该电脑运行的是 Pier 单文件版（未安装为服务），不能在这里远程更新。请在该电脑上重新运行安装脚本，或下载新版单文件替换";
+}
 
 /** How Pier introduces itself to NewAPI sites (their login sessions list shows the system). */
 function pierUserAgent(): string {
@@ -140,6 +152,8 @@ export interface PierHostOptions {
 	authorizeCallback?: NewApiManagerOptions["authorizeCallback"];
 	/** The desktop app the host runs in (its updater and terminals), when there is one. */
 	shell?: AppShell;
+	/** Native updater for an installed standalone service. */
+	updater?: AppUpdater;
 	/**
 	 * Agent runtimes besides pi (1.22). Each is on by default and available when its CLI is
 	 * installed; `false` turns one off.
@@ -509,10 +523,11 @@ export class PierHost implements RequestHandler {
 	private readonly handlers: Handlers;
 	private readonly stats = new HostStatsSampler();
 	private readonly shell: AppShell | undefined;
+	private readonly updater: AppUpdater | undefined;
 	private readonly terminals: HostTerminals;
 	private readonly uploads: WorkspaceUploads;
 	private readonly git = new GitService();
-	private readonly offShellStatus: (() => void) | undefined;
+	private readonly offUpdaterStatus: (() => void) | undefined;
 	/** Running `peer.sshAdd` operations by `<connectionId>:<operationId>`. */
 	private readonly sshOperations = new Map<string, AbortController>();
 	private readonly sshAddOptions: PierHostOptions["sshAdd"];
@@ -535,9 +550,7 @@ export class PierHost implements RequestHandler {
 		const installationHome = options.agentInstaller?.homeDirectory;
 		this.pool = new SessionPool({
 			runtimes: [
-				new PiRuntime(env, (workspaceId, command, browserId, signal) =>
-					this.browserControllers.action(workspaceId, command, browserId, signal),
-				),
+				new PiRuntime(env),
 				...(agents.claudeCode === false
 					? []
 					: [new ClaudeCodeRuntime({ log, managedDirectory, installationHome, ...agents.claudeCode })]),
@@ -663,6 +676,7 @@ export class PierHost implements RequestHandler {
 			options.peers,
 		);
 		this.shell = options.shell;
+		this.updater = options.updater ?? options.shell;
 		this.sshAddOptions = options.sshAdd;
 		this.portForwards = new LocalPortForwards((peerId) => this.peers.openClient(peerId));
 		this.browsers = new LocalBrowsers(
@@ -679,7 +693,7 @@ export class PierHost implements RequestHandler {
 		);
 		this.terminals = new HostTerminals(this.shell, { log });
 		this.uploads = new WorkspaceUploads({ log });
-		this.offShellStatus = this.shell?.onUpdateStatus((status) => this.broadcast({ type: "update.status", status }));
+		this.offUpdaterStatus = this.updater?.onUpdateStatus((status) => this.broadcast({ type: "update.status", status }));
 		this.handlers = this.createHandlers();
 	}
 
@@ -706,28 +720,30 @@ export class PierHost implements RequestHandler {
 		};
 	}
 
-	/** The desktop app's updater status; `unsupported` without a desktop app that reports one. */
+	/** The desktop or standalone updater status; unsupported on unmanaged builds. */
 	updateStatus(): AppUpdateStatus {
-		return (
-			this.shell?.updateStatus ?? {
-				state: "unsupported",
-				currentVersion: PIER_HOST_VERSION,
-				autoCheck: false,
-				downloaded: 0,
-			}
-		);
+		if (this.updater?.updateStatus) return this.updater.updateStatus;
+		// Without any desktop app, say how this single-file Pier updates instead.
+		const error = this.shell ? undefined : standaloneUpdateHint();
+		return {
+			state: "unsupported",
+			currentVersion: PIER_HOST_VERSION,
+			autoCheck: false,
+			downloaded: 0,
+			...(error ? { error } : {}),
+		};
 	}
 
 	private async updateRequest(method: ShellMethod): Promise<AppUpdateStatus> {
-		const shell = this.shell;
-		if (!shell?.updateStatus || shell.updateStatus.state === "unsupported") {
+		const updater = this.updater;
+		if (!updater?.updateStatus || updater.updateStatus.state === "unsupported") {
 			throw new PierProtocolError(
 				"UNSUPPORTED",
-				"Pier on this computer cannot update itself: it is not an installed release of the desktop app",
+				updater?.updateStatus?.error ?? "Pier on this computer has no supported updater",
 			);
 		}
 		try {
-			return await shell.request(method);
+			return await updater.request(method);
 		} catch (error) {
 			throw new PierProtocolError("INTERNAL", error instanceof Error ? error.message : String(error));
 		}
@@ -1728,7 +1744,8 @@ export class PierHost implements RequestHandler {
 		await this.remoteBrowsers.shutdown();
 		this.browserControllers.shutdown();
 		this.tunnels.shutdown();
-		this.offShellStatus?.();
+		this.offUpdaterStatus?.();
+		if (this.updater !== this.shell) this.updater?.close();
 		await this.tasks.shutdown();
 		this.broadcast({ type: "host.notice", level: "warning", message: "Pier host is shutting down" });
 		this.providers.shutdown();
