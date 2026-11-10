@@ -102,7 +102,7 @@ import {
 import { transferWorkspacePath } from "./workspace-path-transfers.ts";
 import { WorkspaceUploads } from "./workspace-uploads.ts";
 
-export const PIER_HOST_VERSION = "0.2.62";
+export const PIER_HOST_VERSION = "0.2.63";
 
 /**
  * How the single-file Pier running without its desktop (`pier run` or the installed service)
@@ -212,6 +212,7 @@ const AUDITED_METHODS = new Set<MethodName>([
 	"session.followUp",
 	"session.abort",
 	"session.compact",
+	"session.subagentStop",
 	"session.reload",
 	"model.set",
 	"thinking.set",
@@ -323,6 +324,8 @@ function auditDetail(method: MethodName, params: Record<string, unknown>): Recor
 				...(response.cancelled ? { cancelled: true } : {}),
 			};
 		}
+		case "session.subagentStop":
+			return params.subagentId === undefined ? { all: true } : { subagentId: params.subagentId };
 		case "model.set":
 			return { provider: params.provider, modelId: params.modelId };
 		case "thinking.set":
@@ -1443,6 +1446,11 @@ export class PierHost implements RequestHandler {
 				return { aborted: true as const };
 			},
 			"session.compact": (_ctx, params) => this.pool.require(params.sessionId).compact(params.instructions),
+			"session.subagentTranscript": (_ctx, params) =>
+				this.pool.require(params.sessionId).subagentTranscript(params.subagentId, params.from ?? 0),
+			"session.subagentStop": async (_ctx, params) => ({
+				stopped: await this.pool.require(params.sessionId).stopSubagents(params.subagentId),
+			}),
 
 			"model.list": async (_ctx, params) => {
 				if (params?.sessionId) {
