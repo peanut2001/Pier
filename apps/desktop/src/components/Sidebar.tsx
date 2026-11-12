@@ -274,7 +274,7 @@ function RunningAgents() {
 								key={session.id}
 								className={`running-agent-row${session.id === selectedSessionId ? " selected" : ""}`}
 								onClick={() => store.selectSession(session)}
-								title={`${sessionTitle(session)} · ${location}${pending ? ` · ${pending} 个待处理请求` : ""}`}
+								title={`${sessionTitle(session, { full: true })} · ${location}${pending ? ` · ${pending} 个待处理请求` : ""}`}
 							>
 								<span className="running-agent-text">
 									<span className="running-agent-title">{sessionTitle(session)}</span>
